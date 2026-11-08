@@ -74,13 +74,46 @@ checks and descriptor handling are the models for DrukhalManager's, and code
 ported from it is marked at the top of the relevant source files. Thank you,
 Mario.
 
+## Built with AI assistance
+
+Most of DrukhalManager's code was written by Claude (Anthropic's AI model),
+working as a coding assistant: I chose what to build, reviewed it and tested
+it with my own mods. Commits written with it are marked
+`Co-Authored-By: Claude`. AI merging is a separate feature that uses whichever
+AI provider you pick in Preferences.
+
 ## License
 
 MIT, like Irony Mod Manager. See [LICENSE](LICENSE) and [NOTICE](NOTICE).
 
 ## Installing
 
-On Arch or CachyOS, build and install the package from the repository:
+### Flatpak (any distro)
+
+Download `DrukhalManager.flatpak` from the
+[latest release](https://github.com/Dukko/DrukhalManager/releases/latest) and
+install it:
+
+```sh
+flatpak install --user DrukhalManager.flatpak
+```
+
+It uses the GNOME runtime from Flathub, which Flatpak installs for you if
+needed. To update, download the new release and install it the same way.
+
+The sandbox can see your home folder. If Steam or a Steam library lives
+elsewhere, such as another drive, DrukhalManager shows the command that
+grants access. It looks like this:
+
+```sh
+flatpak override --user --filesystem=/path/to/Steam io.github.dukko.DrukhalManager
+```
+
+In the Flatpak, **Launch** starts the game through Steam.
+
+### Arch or CachyOS
+
+Build and install the package from the repository:
 
 ```sh
 cd packaging/arch
