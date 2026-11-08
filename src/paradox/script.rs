@@ -275,10 +275,6 @@ impl Value {
 pub trait Entries {
     fn values<'a>(&'a self, key: &'a str) -> impl Iterator<Item = &'a Value> + 'a;
 
-    fn value<'a>(&'a self, key: &'a str) -> Option<&'a Value> {
-        self.values(key).next()
-    }
-
     fn scalar<'a>(&'a self, key: &'a str) -> Option<&'a str> {
         self.values(key).find_map(Value::as_scalar)
     }
@@ -322,12 +318,12 @@ mod tests {
     fn parses_operators_and_nesting() {
         let src = "trigger = { years_passed >= 10 has_flag != foo exists?=bar }\nlist = { a b { c } }";
         let entries = parse(src).unwrap();
-        let trigger = entries.value("trigger").unwrap().as_block().unwrap();
+        let trigger = entries.values("trigger").next().unwrap().as_block().unwrap();
         assert_eq!(trigger.len(), 3);
         assert!(matches!(&trigger[0], Entry::Assign { op: Op::Ge, .. }));
         assert!(matches!(&trigger[1], Entry::Assign { op: Op::Ne, .. }));
         assert!(matches!(&trigger[2], Entry::Assign { op: Op::SafeEq, key, .. } if key == "exists"));
-        assert_eq!(entries.value("list").unwrap().as_block().unwrap().len(), 3);
+        assert_eq!(entries.values("list").next().unwrap().as_block().unwrap().len(), 3);
     }
 
     #[test]

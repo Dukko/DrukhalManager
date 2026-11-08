@@ -11,6 +11,7 @@ use gtk::{gdk, gio, glib};
 use crate::conflicts_view::{self, Analysis, MergeHooks};
 use crate::merge::conflicts::{self, ModInput};
 use crate::merge::patch::{self, Patch};
+use crate::file_merge_dialog;
 use crate::merge_dialog;
 use crate::mods::{self, Mod};
 use crate::preferences;
@@ -388,13 +389,72 @@ impl Window {
             weak.upgrade().is_some_and(|ui| ui.patch.borrow().as_ref().is_some_and(|p| p.get(category, key).is_some()))
         });
         let weak = Rc::downgrade(self);
-        let analysis = analysis.clone();
+        let objects = analysis.clone();
         let open = Box::new(move |index: usize, mark_merged: Box<dyn Fn()>| {
             if let Some(ui) = weak.upgrade() {
-                ui.open_merge(&analysis, index, mark_merged);
+                ui.open_merge(&objects, index, mark_merged);
             }
         });
-        Rc::new(MergeHooks { is_merged, open })
+        let weak = Rc::downgrade(self);
+        let is_file_merged = Box::new(move |path: &str| weak.upgrade().is_some_and(|ui| ui.patch.borrow().as_ref().is_some_and(|p| p.get_file(path).is_some())));
+        let weak = Rc::downgrade(self);
+        let analysis = analysis.clone();
+        let open_file = Box::new(move |index: usize, mark_merged: Box<dyn Fn()>| {
+            if let Some(ui) = weak.upgrade() {
+                ui.open_file_merge(&analysis, index, mark_merged);
+            }
+        });
+        Rc::new(MergeHooks { is_merged, open, is_file_merged, open_file })
+    }
+
+    fn open_file_merge(self: &Rc<Self>, analysis: &Rc<Analysis>, index: usize, mark_merged: Box<dyn Fn()>) {
+        let conflict = &analysis.report.files[index];
+        let origins = conflict.mods.iter().filter_map(|&m| Some((analysis.name(m).to_owned(), analysis.roots[m].clone()?))).collect();
+        let path = conflict.path.clone();
+        let merged_before = self.patch.borrow().as_ref().is_some_and(|p| p.get_file(&path).is_some());
+
+        let weak = Rc::downgrade(self);
+        let save = {
+            let path = path.clone();
+            Box::new(move |contents: &str, sources: Vec<String>| {
+                let ui = weak.upgrade().ok_or("The window was closed")?;
+                ui.with_patch(|patch, user_dir, version| patch.save_file(user_dir, version, &path, contents, sources))
+            })
+        };
+        let weak = Rc::downgrade(self);
+        let open_preferences = Box::new(move || {
+            if let Some(ui) = weak.upgrade() {
+                ui.open_preferences();
+            }
+        });
+        let weak = Rc::downgrade(self);
+        let on_saved = Box::new(move || {
+            mark_merged();
+            if let Some(ui) = weak.upgrade() {
+                ui.patch_saved();
+            }
+        });
+        let request = file_merge_dialog::Request {
+            path,
+            origins,
+            game_dir: self.game.as_ref().map(|g| g.dir.clone()),
+            provider: self.settings.borrow().ready_provider(),
+            merged_before,
+            save,
+            open_preferences,
+            on_saved,
+        };
+        file_merge_dialog::present(&self.window, request);
+    }
+
+    /// Runs `f` on the merged patch, opening it first if needed.
+    fn with_patch(&self, f: impl FnOnce(&mut Patch, &std::path::Path, Option<&str>) -> std::io::Result<()>) -> Result<(), String> {
+        let mut patch = self.patch.borrow_mut();
+        if patch.is_none() {
+            *patch = Some(Patch::open(&self.paths.user_dir).map_err(|e| format!("Could not read the merged patch: {e}"))?);
+        }
+        let version = self.game.as_ref().and_then(|g| g.version.as_deref());
+        f(patch.as_mut().unwrap(), &self.paths.user_dir, version).map_err(|e| format!("Could not save the merged patch: {e}"))
     }
 
     fn open_merge(self: &Rc<Self>, analysis: &Rc<Analysis>, index: usize, mark_merged: Box<dyn Fn()>) {
@@ -447,12 +507,7 @@ impl Window {
     }
 
     fn save_merge(&self, category: &str, key: &str, script: &str, sources: Vec<String>) -> Result<(), String> {
-        let mut patch = self.patch.borrow_mut();
-        if patch.is_none() {
-            *patch = Some(Patch::open(&self.paths.user_dir).map_err(|e| format!("Could not read the merged patch: {e}"))?);
-        }
-        let version = self.game.as_ref().and_then(|g| g.version.as_deref());
-        patch.as_mut().unwrap().save(&self.paths.user_dir, version, category, key, script, sources).map_err(|e| format!("Could not save the merged patch: {e}"))
+        self.with_patch(|patch, user_dir, version| patch.save(user_dir, version, category, key, script, sources))
     }
 
     /// Makes sure the merged patch is in the load order once it has content.
@@ -477,16 +532,34 @@ impl Window {
             let was_enabled = state.enabled.contains(&index);
             if !was_enabled {
                 state.set_enabled(index, true);
+            }
+            // Merged files only replace the mods' copies if the patch loads
+            // after them.
+            let needs_last = self.patch.borrow().as_ref().is_some_and(Patch::has_files);
+            let position = state.enabled.iter().position(|&i| i == index).unwrap();
+            let moved = needs_last && position + 1 != state.enabled.len();
+            if moved {
+                let len = state.enabled.len();
+                state.move_enabled(position, len);
+            }
+            if !was_enabled || moved {
                 // The patch isn't scanned, so the current report still holds.
                 if let Some(a) = self.analysis.borrow().as_ref() {
                     a.revision.set(state.revision);
                 }
             }
-            !was_enabled
+            match (!was_enabled, moved) {
+                (true, _) => Some("added to the end of the load order"),
+                (false, true) => Some("moved to the end of the load order so its files win"),
+                _ => None,
+            }
         };
         self.refresh();
         let toast = adw::Toast::builder().title(format!("Saved to {}", patch::NAME));
-        let toast = if added { toast.title(format!("Saved to {}, which was added to the load order", patch::NAME)).button_label("Save Load Order").action_name("win.save") } else { toast };
+        let toast = match added {
+            Some(change) => toast.title(format!("Saved to {}, which was {change}", patch::NAME)).button_label("Save Load Order").action_name("win.save"),
+            None => toast,
+        };
         self.toasts.add_toast(toast.build());
     }
 
@@ -583,6 +656,13 @@ impl Window {
                 .css_classes(["dim-label", "caption"])
                 .build();
             row.add_suffix(&badge);
+        }
+        let patch_misplaced = m.id == patch::ID
+            && position.is_some_and(|p| p + 1 != self.state.try_borrow().map_or(0, |s| s.enabled.len()))
+            && self.patch.borrow().as_ref().is_some_and(Patch::has_files);
+        if patch_misplaced {
+            let icon = gtk::Image::builder().icon_name("dialog-warning-symbolic").tooltip_text("Move this to the end: its merged files only apply when it loads last").css_classes(["warning"]).build();
+            row.add_suffix(&icon);
         }
         if let Some(error) = &m.error {
             let icon = gtk::Image::builder().icon_name("dialog-warning-symbolic").tooltip_text(error).css_classes(["warning"]).build();

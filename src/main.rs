@@ -1,4 +1,5 @@
 mod conflicts_view;
+mod file_merge_dialog;
 mod merge;
 mod merge_dialog;
 mod mods;

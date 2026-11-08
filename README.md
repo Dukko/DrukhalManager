@@ -11,9 +11,16 @@ changes. For an object conflict, **Merge…** sends each mod's version, plus the
 base game's version when it can be found, to an AI model. You get back a
 combined definition that you can review and edit before saving it.
 
+When several mods ship the same file, the game only uses the last copy.
+**Merge…** on an overridden script or localisation file splits every copy
+into its objects. Objects the copies agree on, or that only one copy has, are
+combined automatically, and so are objects that only one mod changed from
+the base game. AI is only asked about objects the mods really disagree on.
+
 Saved merges go into a local mod, **DrukhalManager Merged Patch**, which is
-added to your load order. Its files are named to sort so the merged
-definitions win in-game.
+added to your load order. Merged objects go in files named to sort so they
+win in-game. Merged files keep their original path, so the patch is kept at
+the end of the load order, and a warning shows if it's moved.
 
 Choose the AI provider in Preferences (Ctrl+,):
 

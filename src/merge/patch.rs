@@ -39,9 +39,20 @@ pub struct Merge {
     pub file: String,
 }
 
+/// A merged copy of a file several mods ship, saved at the same path so
+/// it replaces theirs. This only works while the patch loads last.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FileMerge {
+    pub path: String,
+    /// The mods it was merged from, in load order.
+    pub sources: Vec<String>,
+}
+
 #[derive(Debug, Default, Serialize, Deserialize)]
 struct Manifest {
     merges: Vec<Merge>,
+    #[serde(default)]
+    files: Vec<FileMerge>,
 }
 
 #[derive(Debug)]
@@ -70,6 +81,34 @@ impl Patch {
         self.manifest.merges.iter().find(|m| m.category == category && m.key == key)
     }
 
+    pub fn get_file(&self, path: &str) -> Option<&FileMerge> {
+        self.manifest.files.iter().find(|f| f.path.eq_ignore_ascii_case(path))
+    }
+
+    /// Whether the patch replaces whole files, so it must load last.
+    pub fn has_files(&self) -> bool {
+        !self.manifest.files.is_empty()
+    }
+
+    /// Adds or replaces a merged copy of `path`.
+    pub fn save_file(&mut self, user_dir: &Path, game_version: Option<&str>, path: &str, contents: &str, sources: Vec<String>) -> io::Result<()> {
+        self.write_descriptors(user_dir, game_version)?;
+        let target = self.root.join(path);
+        std::fs::create_dir_all(target.parent().unwrap())?;
+        write_atomic(&target, contents.as_bytes())?;
+        let merge = FileMerge { path: path.to_owned(), sources };
+        match self.manifest.files.iter_mut().find(|f| f.path.eq_ignore_ascii_case(path)) {
+            Some(existing) => *existing = merge,
+            None => self.manifest.files.push(merge),
+        }
+        self.write_manifest()
+    }
+
+    fn write_manifest(&self) -> io::Result<()> {
+        let json = serde_json::to_vec_pretty(&self.manifest).map_err(io::Error::other)?;
+        write_atomic(&self.root.join(MANIFEST), &json)
+    }
+
     /// Adds or replaces a merged object and writes it to disk, creating the
     /// mod's descriptors if needed. `game_version` (e.g. `v4.5.3`) sets the
     /// version the launcher shows the patch as supporting.
@@ -85,8 +124,7 @@ impl Patch {
             Some(existing) => *existing = merge,
             None => self.manifest.merges.push(merge),
         }
-        let json = serde_json::to_vec_pretty(&self.manifest).map_err(io::Error::other)?;
-        write_atomic(&self.root.join(MANIFEST), &json)
+        self.write_manifest()
     }
 
     fn write_descriptors(&self, user_dir: &Path, game_version: Option<&str>) -> io::Result<()> {
@@ -170,6 +208,14 @@ mod tests {
         assert!(descriptor.contains("supported_version=\"v4.5.*\"") && descriptor.contains("path=\""));
         let parsed = crate::mods::Descriptor::parse(&descriptor).unwrap();
         assert_eq!(parsed.name, NAME);
+
+        let mut patch = Patch::open(&user).unwrap();
+        assert!(!patch.has_files());
+        patch.save_file(&user, None, "common/buildings/00_x.txt", "a = {}\n", vec!["A".into(), "B".into()]).unwrap();
+        let patch = Patch::open(&user).unwrap();
+        assert!(patch.has_files() && patch.get("events", "ns.1").is_some(), "object merges survive");
+        assert_eq!(patch.get_file("common/buildings/00_X.txt").unwrap().sources, ["A", "B"]);
+        assert_eq!(std::fs::read_to_string(Patch::root(&user).join("common/buildings/00_x.txt")).unwrap(), "a = {}\n");
 
         std::fs::remove_dir_all(user).unwrap();
     }

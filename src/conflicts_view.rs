@@ -8,6 +8,7 @@ use std::rc::Rc;
 use adw::prelude::*;
 
 use crate::merge::conflicts::Report;
+use crate::merge::file_merge;
 
 /// Rows shown per folder; the rest are summarised so huge folders (e.g.
 /// localisation) stay responsive.
@@ -35,6 +36,10 @@ pub struct MergeHooks {
     /// Opens the merge dialog for an object conflict; the callback marks the
     /// row as merged once it's saved.
     pub open: Box<dyn Fn(usize, Box<dyn Fn()>)>,
+    /// Whether the patch already holds a merged copy of a file.
+    pub is_file_merged: Box<dyn Fn(&str) -> bool>,
+    /// Opens the file merge dialog for a file override.
+    pub open_file: Box<dyn Fn(usize, Box<dyn Fn()>)>,
 }
 
 impl Analysis {
@@ -85,9 +90,10 @@ pub fn build(analysis: &Rc<Analysis>, rescan: gtk::Button, hooks: Rc<MergeHooks>
         }
         let make: Rc<dyn Fn(usize) -> adw::ActionRow> = {
             let analysis = analysis.clone();
-            Rc::new(move |i| file_row(&analysis, i))
+            let hooks = hooks.clone();
+            Rc::new(move |i| file_row(&analysis, i, &hooks))
         };
-        section(&page, "Overridden Files", "Only the copy from the mod loaded last is used", groups, make);
+        section(&page, "Overridden Files", "Only the copy from the mod loaded last is used. Merge a script or localisation file to keep every mod's objects.", groups, make);
     }
     if !report.objects.is_empty() {
         let mut groups: BTreeMap<String, Vec<usize>> = BTreeMap::new();
@@ -148,14 +154,29 @@ fn section(page: &gtk::Box, title: &str, description: &str, groups: BTreeMap<Str
     page.append(&list);
 }
 
-fn file_row(analysis: &Analysis, index: usize) -> adw::ActionRow {
+fn file_row(analysis: &Analysis, index: usize, hooks: &Rc<MergeHooks>) -> adw::ActionRow {
     let c = &analysis.report.files[index];
     let (winner, losers) = c.mods.split_last().unwrap();
     let file = c.path.rsplit_once('/').map_or(c.path.as_str(), |(_, f)| f);
     let overridden: Vec<&str> = losers.iter().map(|&m| analysis.name(m)).collect();
     let r = row(file, &format!("Used: {} · Overridden: {}", analysis.name(*winner), overridden.join(", ")));
     r.set_tooltip_text(Some(&c.path));
+    if file_merge::mergeable(&c.path) {
+        let is_merged = (hooks.is_file_merged)(&c.path);
+        let (merged, button) = merge_controls(is_merged);
+        let mark_merged = merged_marker(&merged, &button);
+        let hooks = hooks.clone();
+        button.connect_clicked(move |_| (hooks.open_file)(index, mark_merged()));
+        r.add_suffix(&merged);
+        r.add_suffix(&button);
+    }
     r
+}
+
+fn merge_controls(is_merged: bool) -> (gtk::Image, gtk::Button) {
+    let merged = gtk::Image::builder().icon_name("emblem-ok-symbolic").tooltip_text("Merged into the patch").css_classes(["success"]).visible(is_merged).build();
+    let button = gtk::Button::builder().label(if is_merged { "Edit Merge…" } else { "Merge…" }).valign(gtk::Align::Center).css_classes(["flat"]).build();
+    (merged, button)
 }
 
 fn object_row(analysis: &Analysis, index: usize, hooks: &Rc<MergeHooks>) -> adw::ActionRow {
@@ -167,14 +188,10 @@ fn object_row(analysis: &Analysis, index: usize, hooks: &Rc<MergeHooks>) -> adw:
     let files: Vec<String> = c.definitions.iter().map(|d| format!("{}: {}", analysis.name(d.mod_position), d.file)).collect();
     r.set_tooltip_text(Some(&files.join("\n")));
 
-    let merged = gtk::Image::builder().icon_name("emblem-ok-symbolic").tooltip_text("Merged into the patch").css_classes(["success"]).build();
-    let button = gtk::Button::builder().valign(gtk::Align::Center).css_classes(["flat"]).build();
+    let (merged, button) = merge_controls((hooks.is_merged)(&c.category, &c.key));
     let mark_merged = merged_marker(&merged, &button);
-    let is_merged = (hooks.is_merged)(&c.category, &c.key);
-    merged.set_visible(is_merged);
-    button.set_label(if is_merged { "Edit Merge…" } else { "Merge…" });
     let hooks = hooks.clone();
-    button.connect_clicked(move |_| (hooks.open)(index, mark_merged.clone()()));
+    button.connect_clicked(move |_| (hooks.open)(index, mark_merged()));
     r.add_suffix(&merged);
     r.add_suffix(&button);
     r
