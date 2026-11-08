@@ -47,17 +47,16 @@ fn read_install(dir: &Path) -> io::Result<GameInstall> {
 }
 
 impl GameInstall {
-    /// Starts the game and returns immediately. Steam must be running.
-    pub fn launch(&self) -> io::Result<()> {
-        let mut child = Command::new(&self.exe)
+    /// Starts the game and returns its process; wait on it to know when
+    /// the game exits (and so it doesn't linger as a zombie). Steam must be
+    /// running.
+    pub fn launch(&self) -> io::Result<std::process::Child> {
+        Command::new(&self.exe)
             .args(&self.args)
             .current_dir(&self.dir)
             .env("SteamAppId", STELLARIS_APP_ID.to_string())
             .env("SteamGameId", STELLARIS_APP_ID.to_string())
-            .spawn()?;
-        // Reap the process when it exits so it doesn't linger as a zombie.
-        std::thread::spawn(move || child.wait());
-        Ok(())
+            .spawn()
     }
 }
 

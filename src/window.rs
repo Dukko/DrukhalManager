@@ -21,6 +21,8 @@ use crate::mods::{self, Mod, checks};
 use crate::preferences;
 use crate::settings::{self, Settings};
 use crate::paradox::game::GameInstall;
+use crate::error_report_dialog;
+use crate::paradox::error_log;
 use crate::paradox::launcher_db;
 
 pub struct Paths {
@@ -245,6 +247,7 @@ pub fn build(app: &adw::Application, paths: Paths, game: Option<GameInstall>, fo
         .build();
     let save = gtk::Button::builder().label("Save").action_name("win.save").tooltip_text("Save the load order for the game and the Paradox Launcher (Ctrl+S)").build();
     let menu = gio::Menu::new();
+    menu.append(Some("Last Game's _Errors…"), Some("win.errors"));
     menu.append(Some("_Preferences"), Some("win.preferences"));
     let menu_button = gtk::MenuButton::builder().icon_name("open-menu-symbolic").menu_model(&menu).tooltip_text("Main Menu").primary(true).build();
     header.pack_end(&menu_button);
@@ -415,6 +418,14 @@ pub fn build(app: &adw::Application, paths: Paths, game: Option<GameInstall>, fo
         });
         window.add_action(&action);
     }
+    let errors = gio::SimpleAction::new("errors", None);
+    let weak = Rc::downgrade(&ui);
+    errors.connect_activate(move |_, _| {
+        if let Some(ui) = weak.upgrade() {
+            ui.show_errors();
+        }
+    });
+    window.add_action(&errors);
     let find = gio::SimpleAction::new("find", None);
     let weak = Rc::downgrade(&ui);
     find.connect_activate(move |_, _| {
@@ -1308,10 +1319,68 @@ impl Window {
         if self.state.borrow().dirty && !self.save() {
             return;
         }
-        match game.launch() {
-            Ok(()) => self.toasts.add_toast(adw::Toast::new("Starting Stellaris…")),
-            Err(e) => self.toasts.add_toast(adw::Toast::builder().title(format!("Could not start Stellaris: {e}")).timeout(0).build()),
+        let started = std::time::SystemTime::now();
+        let mut child = match game.launch() {
+            Ok(child) => child,
+            Err(e) => return self.toasts.add_toast(adw::Toast::builder().title(format!("Could not start Stellaris: {e}")).timeout(0).build()),
+        };
+        self.toasts.add_toast(adw::Toast::new("Starting Stellaris…"));
+        // When the game exits, point out errors it logged about the mods.
+        let weak = Rc::downgrade(self);
+        glib::spawn_future_local(async move {
+            let _ = gio::spawn_blocking(move || child.wait()).await;
+            let Some(ui) = weak.upgrade() else { return };
+            let log = error_log::path(&ui.paths.user_dir);
+            let fresh = std::fs::metadata(&log).and_then(|m| m.modified()).is_ok_and(|t| t >= started);
+            if !fresh {
+                return;
+            }
+            let report = ui.error_report();
+            let from_mods = report.from_mods();
+            if from_mods == 0 {
+                return;
+            }
+            let patch = report.groups.iter().find(|g| g.is_patch).map_or(0, |g| g.total());
+            let mut title = format!("Stellaris logged {} from your mods", conflicts_view::plural(from_mods, "error", "errors"));
+            if patch > 0 {
+                title.push_str(&format!(", {patch} from the merged patch"));
+            }
+            let toast = adw::Toast::builder().title(title).button_label("Show").action_name("win.errors").timeout(0).build();
+            ui.toasts.add_toast(toast);
+        });
+    }
+
+    /// The last session's error.log, credited to the enabled mods.
+    fn error_report(&self) -> error_log::Report {
+        let src = std::fs::read(error_log::path(&self.paths.user_dir)).map(|b| String::from_utf8_lossy(&b).into_owned()).unwrap_or_default();
+        let state = self.state.borrow();
+        let mods: Vec<error_log::LogMod> = state
+            .enabled
+            .iter()
+            .map(|&i| {
+                let m = &state.mods[i];
+                error_log::LogMod { id: m.id.clone(), name: display_name(m).to_owned(), root: m.content.clone(), steam_id: m.descriptor.remote_file_id, is_patch: m.id == patch::ID }
+            })
+            .collect();
+        error_log::analyze(&src, &mods)
+    }
+
+    fn show_errors(self: &Rc<Self>) {
+        let log = error_log::path(&self.paths.user_dir);
+        if !log.is_file() {
+            return self.toasts.add_toast(adw::Toast::new("No error.log yet; it's written when the game runs"));
         }
+        let modified = std::fs::metadata(&log)
+            .and_then(|m| m.modified())
+            .ok()
+            .and_then(|t| glib::DateTime::from_unix_local(t.duration_since(std::time::UNIX_EPOCH).ok()?.as_secs() as i64).ok())
+            .and_then(|d| d.format("%A %H:%M").ok())
+            .map(|s| s.to_string());
+        let roots = {
+            let state = self.state.borrow();
+            state.mods.iter().filter_map(|m| Some((m.id.clone(), m.content.clone()?))).collect()
+        };
+        error_report_dialog::present(&self.window, &self.error_report(), log, modified, roots);
     }
 
     fn confirm_close(self: &Rc<Self>) {
