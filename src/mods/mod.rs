@@ -1,5 +1,6 @@
 //! Mod discovery and parsing of Paradox `.mod` descriptor files.
 
+pub mod checks;
 mod descriptor;
 pub mod load_order;
 

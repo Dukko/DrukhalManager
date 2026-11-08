@@ -14,7 +14,7 @@ use crate::merge::patch::{self, Patch};
 use crate::file_merge_dialog;
 use crate::fix_dialog;
 use crate::merge_dialog;
-use crate::mods::{self, Mod};
+use crate::mods::{self, Mod, checks};
 use crate::preferences;
 use crate::settings::{self, Settings};
 use crate::paradox::game::GameInstall;
@@ -122,6 +122,9 @@ struct Window {
     all_toggle: gtk::CheckButton,
     /// Set while `refresh` updates `all_toggle`, so it isn't taken as a click.
     syncing: Cell<bool>,
+    /// Shown when some mods load before mods they depend on.
+    sort_button: gtk::Button,
+    search: gtk::SearchEntry,
     stack: adw::ViewStack,
     conflicts_page: adw::Bin,
     analysis: RefCell<Option<Rc<Analysis>>>,
@@ -181,11 +184,41 @@ pub fn build(app: &adw::Application, paths: Paths, game: Option<GameInstall>, fo
     let status = gtk::Label::builder().xalign(0.0).wrap(true).css_classes(["dim-label"]).build();
     let content = gtk::Box::new(gtk::Orientation::Vertical, 12);
     let all_toggle = gtk::CheckButton::builder().label("Enable All").tooltip_text("Enable or disable every mod").halign(gtk::Align::End).build();
+    let sort_button = gtk::Button::builder()
+        .label("Sort by Dependencies")
+        .tooltip_text("Move mods after the mods they depend on")
+        .css_classes(["pill", "suggested-action"])
+        .valign(gtk::Align::Center)
+        .visible(false)
+        .build();
     let top = gtk::Box::new(gtk::Orientation::Horizontal, 12);
     status.set_hexpand(true);
     top.append(&status);
+    top.append(&sort_button);
     top.append(&all_toggle);
+    let search = gtk::SearchEntry::builder().placeholder_text("Search mods by name or tag (Ctrl+F)").build();
     content.append(&top);
+    content.append(&search);
+    for list in [&enabled_list, &disabled_list] {
+        let search = search.clone();
+        list.set_filter_func(move |row| {
+            let query = search.text().to_lowercase();
+            if query.is_empty() {
+                return true;
+            }
+            row.downcast_ref::<adw::ActionRow>().is_none_or(|r| format!("{} {}", r.title(), r.subtitle().unwrap_or_default()).to_lowercase().contains(&query))
+        });
+    }
+    search.connect_search_changed(glib::clone!(
+        #[weak]
+        enabled_list,
+        #[weak]
+        disabled_list,
+        move |_| {
+            enabled_list.invalidate_filter();
+            disabled_list.invalidate_filter();
+        }
+    ));
     content.append(&heading("Load Order"));
     content.append(&enabled_list);
     content.append(&heading("Disabled"));
@@ -226,6 +259,8 @@ pub fn build(app: &adw::Application, paths: Paths, game: Option<GameInstall>, fo
         status,
         all_toggle: all_toggle.clone(),
         syncing: Cell::new(false),
+        sort_button: sort_button.clone(),
+        search: search.clone(),
         stack: stack.clone(),
         conflicts_page,
         analysis: RefCell::new(None),
@@ -255,6 +290,32 @@ pub fn build(app: &adw::Application, paths: Paths, game: Option<GameInstall>, fo
         }
         Err(e) => ui.toasts.add_toast(adw::Toast::builder().title(format!("Could not read the merged patch: {e}")).timeout(0).build()),
     }
+    let weak = Rc::downgrade(&ui);
+    sort_button.connect_clicked(move |_| {
+        if let Some(ui) = weak.upgrade() {
+            ui.sort_by_dependencies();
+        }
+    });
+    for (name, open) in [("open-folder", Window::open_folder as fn(&Window, usize)), ("open-workshop", Window::open_workshop)] {
+        let action = gio::SimpleAction::new(name, Some(glib::VariantTy::UINT32));
+        let weak = Rc::downgrade(&ui);
+        action.connect_activate(move |_, index| {
+            if let (Some(ui), Some(index)) = (weak.upgrade(), index.and_then(|i| i.get::<u32>())) {
+                open(&ui, index as usize);
+            }
+        });
+        window.add_action(&action);
+    }
+    let find = gio::SimpleAction::new("find", None);
+    let weak = Rc::downgrade(&ui);
+    find.connect_activate(move |_, _| {
+        if let Some(ui) = weak.upgrade() {
+            ui.stack.set_visible_child_name("load-order");
+            ui.search.grab_focus();
+        }
+    });
+    window.add_action(&find);
+    app.set_accels_for_action("win.find", &["<Control>f"]);
     let weak = Rc::downgrade(&ui);
     all_toggle.connect_toggled(move |_| {
         if let Some(ui) = weak.upgrade()
@@ -306,13 +367,18 @@ impl Window {
             }
             by_position
         });
+        let game_version = self.game.as_ref().and_then(|g| g.version.as_deref());
+        let issues = checks::check(&state.mods, &state.enabled, game_version);
+        let none = Vec::new();
         for (position, &index) in state.enabled.iter().enumerate() {
             let conflicts = counts.as_ref().and_then(|c| c.get(position)).copied().unwrap_or(0);
-            self.enabled_list.append(&self.row(&state.mods[index], index, Some(position), conflicts));
+            self.enabled_list.append(&self.row(&state.mods[index], index, Some(position), conflicts, issues.get(&index).unwrap_or(&none)));
         }
         for index in state.disabled() {
-            self.disabled_list.append(&self.row(&state.mods[index], index, None, 0));
+            self.disabled_list.append(&self.row(&state.mods[index], index, None, 0, issues.get(&index).unwrap_or(&none)));
         }
+        let misordered = issues.values().flatten().filter(|i| i.fixed_by_sorting).count();
+        self.sort_button.set_visible(misordered > 0);
 
         let mut subtitle = Vec::new();
         if let Some(version) = self.game.as_ref().and_then(|g| g.version.as_deref()) {
@@ -636,7 +702,28 @@ impl Window {
         let Some(previous) = previous else { return };
         let changed = if enable { previous.0.len().abs_diff(self.state.borrow().enabled.len()) } else { previous.0.len() };
         let verb = if enable { "Enabled" } else { "Disabled" };
-        let toast = adw::Toast::builder().title(format!("{verb} {}", conflicts_view::plural(changed, "mod", "mods"))).button_label("Undo").build();
+        self.offer_undo(&format!("{verb} {}", conflicts_view::plural(changed, "mod", "mods")), previous);
+    }
+
+    fn sort_by_dependencies(self: &Rc<Self>) {
+        let previous = {
+            let mut state = self.state.borrow_mut();
+            let sorted = checks::sort_by_dependencies(&state.mods, &state.enabled);
+            if sorted == state.enabled {
+                return;
+            }
+            let previous = (std::mem::replace(&mut state.enabled, sorted), state.dirty);
+            state.dirty = true;
+            state.revision += 1;
+            previous
+        };
+        self.refresh();
+        self.offer_undo("Sorted mods after their dependencies", previous);
+    }
+
+    /// Shows `title` with an Undo button that restores `previous`.
+    fn offer_undo(self: &Rc<Self>, title: &str, previous: (Vec<usize>, bool)) {
+        let toast = adw::Toast::builder().title(title).button_label("Undo").build();
         let previous = RefCell::new(Some(previous));
         let weak = Rc::downgrade(self);
         toast.connect_button_clicked(move |_| {
@@ -646,6 +733,16 @@ impl Window {
             }
         });
         self.toasts.add_toast(toast);
+    }
+
+    fn open_folder(&self, index: usize) {
+        let Some(dir) = self.state.borrow().mods.get(index).and_then(|m| m.content.clone()) else { return };
+        gtk::FileLauncher::new(Some(&gio::File::for_path(dir))).launch(Some(&self.window), None::<&gio::Cancellable>, |_| {});
+    }
+
+    fn open_workshop(&self, index: usize) {
+        let Some(id) = self.state.borrow().mods.get(index).and_then(|m| m.descriptor.remote_file_id) else { return };
+        gtk::UriLauncher::new(&format!("https://steamcommunity.com/sharedfiles/filedetails/?id={id}")).launch(Some(&self.window), None::<&gio::Cancellable>, |_| {});
     }
 
     fn rescan_button(self: &Rc<Self>) -> gtk::Button {
@@ -674,7 +771,7 @@ impl Window {
         });
     }
 
-    fn row(self: &Rc<Self>, m: &Mod, index: usize, position: Option<usize>, conflicts: usize) -> adw::ActionRow {
+    fn row(self: &Rc<Self>, m: &Mod, index: usize, position: Option<usize>, conflicts: usize, issues: &[checks::Issue]) -> adw::ActionRow {
         let d = &m.descriptor;
         let name = display_name(m);
         let source = match m.source {
@@ -706,13 +803,36 @@ impl Window {
         let patch_misplaced = m.id == patch::ID
             && position.is_some_and(|p| p + 1 != self.state.try_borrow().map_or(0, |s| s.enabled.len()))
             && self.patch.borrow().as_ref().is_some_and(Patch::has_files);
-        if patch_misplaced {
-            let icon = gtk::Image::builder().icon_name("dialog-warning-symbolic").tooltip_text("Move this to the end: its merged files only apply when it loads last").css_classes(["warning"]).build();
-            row.add_suffix(&icon);
-        }
+        // One icon for everything wrong with this mod, worst first.
+        let mut problems: Vec<(checks::Severity, String)> = Vec::new();
         if let Some(error) = &m.error {
-            let icon = gtk::Image::builder().icon_name("dialog-warning-symbolic").tooltip_text(error).css_classes(["warning"]).build();
-            row.add_suffix(&icon);
+            problems.push((checks::Severity::Warning, error.clone()));
+        }
+        if patch_misplaced {
+            problems.push((checks::Severity::Warning, "Move this to the end: its merged files only apply when it loads last".to_owned()));
+        }
+        problems.extend(issues.iter().map(|i| (i.severity, i.message.clone())));
+        problems.sort_by(|a, b| b.0.cmp(&a.0));
+        if let Some((worst, _)) = problems.first() {
+            let (icon, class) = match worst {
+                checks::Severity::Warning => ("dialog-warning-symbolic", "warning"),
+                checks::Severity::Info => ("dialog-information-symbolic", "dim-label"),
+            };
+            let tooltip = problems.iter().map(|(_, m)| m.as_str()).collect::<Vec<_>>().join("\n");
+            row.add_suffix(&gtk::Image::builder().icon_name(icon).tooltip_text(tooltip).css_classes([class]).build());
+        }
+
+        let menu = gio::Menu::new();
+        let index_variant = (index as u32).to_variant();
+        if m.content.is_some() {
+            let item = gio::MenuItem::new(Some("Open Folder"), None);
+            item.set_action_and_target_value(Some("win.open-folder"), Some(&index_variant));
+            menu.append_item(&item);
+        }
+        if m.descriptor.remote_file_id.is_some() {
+            let item = gio::MenuItem::new(Some("Open Workshop Page"), None);
+            item.set_action_and_target_value(Some("win.open-workshop"), Some(&index_variant));
+            menu.append_item(&item);
         }
 
         let toggle = gtk::Switch::builder().active(position.is_some()).valign(gtk::Align::Center).build();
@@ -725,6 +845,9 @@ impl Window {
         });
         row.add_suffix(&toggle);
         row.set_activatable_widget(Some(&toggle));
+        if menu.n_items() > 0 {
+            row.add_suffix(&gtk::MenuButton::builder().icon_name("view-more-symbolic").menu_model(&menu).valign(gtk::Align::Center).tooltip_text("More").css_classes(["flat"]).build());
+        }
 
         if let Some(position) = position {
             let handle = gtk::Image::builder().icon_name("list-drag-handle-symbolic").css_classes(["dim-label"]).build();
