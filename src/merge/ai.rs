@@ -83,14 +83,38 @@ fn agent() -> ureq::Agent {
 }
 
 pub fn merge(provider: &Provider, category: &str, key: &str, vanilla: Option<&Source>, sources: &[Source]) -> Result<Merged, String> {
-    let prompt = prompt(category, key, vanilla, sources);
+    complete(provider, SYSTEM, &prompt(category, key, vanilla, sources))
+}
+
+const FIX_SYSTEM: &str = "You are an expert Stellaris modder repairing a mod's broken script.
+
+The object below had unbalanced braces. A tool already made it parse by adding or removing `}` mechanically, which may have put braces in the wrong place and nested blocks wrongly. Using the indentation, the structure of similar Stellaris objects and the obvious intent, restore the nesting the author meant.
+
+Rules:
+- Change only what is needed to fix the structure. Don't change values, conditions or effects, and don't add or remove content, except removing a line that is clearly a duplicated or stray fragment (mention it in the notes).
+- Keep the formatting and comments.
+- `script` must be valid Paradox script containing only the repaired definition, without any `@variable` lines (those stay elsewhere in the file). For an event, output exactly one event block without a `namespace` line.
+- `notes` is a short plain-text summary for the player of what you changed. No markdown.
+- Reply with a JSON object with exactly the string fields `script` and `notes`.";
+
+/// Asks the provider to restore the intended nesting of a damaged object.
+pub fn fix(provider: &Provider, category: &str, key: &str, text: &str, problems: &[String], mod_name: &str) -> Result<Merged, String> {
+    let prompt = format!(
+        "Repair `{key}` in `{category}` from the mod \"{}\".\n\nWhat the tool changed in this file:\n{}\n\n<object>\n{text}\n</object>\n",
+        mod_name.replace('"', "'"),
+        problems.iter().map(|p| format!("- {p}")).collect::<Vec<_>>().join("\n")
+    );
+    complete(provider, FIX_SYSTEM, &prompt)
+}
+
+fn complete(provider: &Provider, system: &str, prompt: &str) -> Result<Merged, String> {
     match provider {
-        Provider::Anthropic { api_key } => merge_anthropic(api_key, &prompt),
-        Provider::OpenAiCompatible { base_url, model, api_key } => merge_openai(base_url, model, api_key, &prompt),
+        Provider::Anthropic { api_key } => merge_anthropic(api_key, system, prompt),
+        Provider::OpenAiCompatible { base_url, model, api_key } => merge_openai(base_url, model, api_key, system, prompt),
     }
 }
 
-fn merge_anthropic(api_key: &str, prompt: &str) -> Result<Merged, String> {
+fn merge_anthropic(api_key: &str, system: &str, prompt: &str) -> Result<Merged, String> {
     let body = json!({
         "model": CLAUDE_MODEL,
         "max_tokens": 16000,
@@ -99,7 +123,7 @@ fn merge_anthropic(api_key: &str, prompt: &str) -> Result<Merged, String> {
             "effort": "high",
             "format": {"type": "json_schema", "schema": schema()}
         },
-        "system": SYSTEM,
+        "system": system,
         "messages": [{"role": "user", "content": prompt}]
     });
 
@@ -115,13 +139,13 @@ fn merge_anthropic(api_key: &str, prompt: &str) -> Result<Merged, String> {
     parse_anthropic(status.as_u16(), &reply)
 }
 
-fn merge_openai(base_url: &str, model: &str, api_key: &str, prompt: &str) -> Result<Merged, String> {
+fn merge_openai(base_url: &str, model: &str, api_key: &str, system: &str, prompt: &str) -> Result<Merged, String> {
     if model.trim().is_empty() {
         return Err("Choose a model for the OpenAI-compatible provider in Preferences.".into());
     }
     let body = json!({
         "model": model,
-        "messages": [{"role": "system", "content": SYSTEM}, {"role": "user", "content": prompt}],
+        "messages": [{"role": "system", "content": system}, {"role": "user", "content": prompt}],
         // Servers that don't support structured output usually ignore this;
         // the prompt asks for JSON either way.
         "response_format": {"type": "json_schema", "json_schema": {"name": "merge", "strict": true, "schema": schema()}}

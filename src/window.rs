@@ -12,6 +12,7 @@ use crate::conflicts_view::{self, Analysis, MergeHooks};
 use crate::merge::conflicts::{self, ModInput};
 use crate::merge::patch::{self, Patch};
 use crate::file_merge_dialog;
+use crate::fix_dialog;
 use crate::merge_dialog;
 use crate::mods::{self, Mod};
 use crate::preferences;
@@ -398,13 +399,58 @@ impl Window {
         let weak = Rc::downgrade(self);
         let is_file_merged = Box::new(move |path: &str| weak.upgrade().is_some_and(|ui| ui.patch.borrow().as_ref().is_some_and(|p| p.get_file(path).is_some())));
         let weak = Rc::downgrade(self);
-        let analysis = analysis.clone();
+        let files = analysis.clone();
         let open_file = Box::new(move |index: usize, mark_merged: Box<dyn Fn()>| {
             if let Some(ui) = weak.upgrade() {
-                ui.open_file_merge(&analysis, index, mark_merged);
+                ui.open_file_merge(&files, index, mark_merged);
             }
         });
-        Rc::new(MergeHooks { is_merged, open, is_file_merged, open_file })
+        let weak = Rc::downgrade(self);
+        let errors = analysis.clone();
+        let open_fix = Box::new(move |index: usize, mark_fixed: Box<dyn Fn()>| {
+            if let Some(ui) = weak.upgrade() {
+                ui.open_fix(&errors, index, mark_fixed);
+            }
+        });
+        Rc::new(MergeHooks { is_merged, open, is_file_merged, open_file, open_fix })
+    }
+
+    fn open_fix(self: &Rc<Self>, analysis: &Rc<Analysis>, index: usize, mark_fixed: Box<dyn Fn()>) {
+        let e = &analysis.report.errors[index];
+        let Some(root) = analysis.roots[e.mod_position].clone() else { return };
+        let path = e.file.clone();
+        let weak = Rc::downgrade(self);
+        let save = {
+            let path = path.clone();
+            Box::new(move |contents: &str, sources: Vec<String>| {
+                let ui = weak.upgrade().ok_or("The window was closed")?;
+                ui.with_patch(|patch, user_dir, version| patch.save_file(user_dir, version, &path, contents, sources))
+            })
+        };
+        let weak = Rc::downgrade(self);
+        let open_preferences = Box::new(move || {
+            if let Some(ui) = weak.upgrade() {
+                ui.open_preferences();
+            }
+        });
+        let weak = Rc::downgrade(self);
+        let on_saved = Box::new(move || {
+            mark_fixed();
+            if let Some(ui) = weak.upgrade() {
+                ui.patch_saved();
+            }
+        });
+        let request = fix_dialog::Request {
+            path,
+            mod_name: analysis.name(e.mod_position).to_owned(),
+            root,
+            error: e.message.clone(),
+            provider: self.settings.borrow().ready_provider(),
+            save,
+            open_preferences,
+            on_saved,
+        };
+        fix_dialog::present(&self.window, request);
     }
 
     fn open_file_merge(self: &Rc<Self>, analysis: &Rc<Analysis>, index: usize, mark_merged: Box<dyn Fn()>) {

@@ -40,6 +40,8 @@ pub struct MergeHooks {
     pub is_file_merged: Box<dyn Fn(&str) -> bool>,
     /// Opens the file merge dialog for a file override.
     pub open_file: Box<dyn Fn(usize, Box<dyn Fn()>)>,
+    /// Opens the fix dialog for a file that failed to parse.
+    pub open_fix: Box<dyn Fn(usize, Box<dyn Fn()>)>,
 }
 
 impl Analysis {
@@ -102,20 +104,32 @@ pub fn build(analysis: &Rc<Analysis>, rescan: gtk::Button, hooks: Rc<MergeHooks>
         }
         let make: Rc<dyn Fn(usize) -> adw::ActionRow> = {
             let analysis = analysis.clone();
+            let hooks = hooks.clone();
             Rc::new(move |i| object_row(&analysis, i, &hooks))
         };
         section(&page, "Conflicting Objects", "Defined by several mods; which one the game keeps depends on the folder. Merge one to keep every mod's changes.", groups, make);
     }
 
     if !report.errors.is_empty() || !report.skipped.is_empty() {
-        page.append(&heading("Not Scanned", "These files or mods were left out of the report"));
+        page.append(&heading("Problems", "Files the game will misread, and mods that couldn't be scanned"));
         let list = boxed_list();
         for (position, reason) in &report.skipped {
             list.append(&row(analysis.name(*position), reason));
         }
-        for e in &report.errors {
+        for (index, e) in report.errors.iter().enumerate() {
             let r = row(&e.file, &format!("{} · {}", analysis.name(e.mod_position), e.message));
             r.add_prefix(&gtk::Image::builder().icon_name("dialog-warning-symbolic").css_classes(["warning"]).build());
+            // Parse errors read "line N: …"; others are read failures.
+            if e.message.starts_with("line ") && analysis.roots[e.mod_position].is_some() {
+                let (fixed, button) = merge_controls((hooks.is_file_merged)(&e.file));
+                fixed.set_tooltip_text(Some("Fixed through the merged patch"));
+                button.set_label(if fixed.is_visible() { "Edit Fix…" } else { "Fix…" });
+                let mark = merged_marker(&fixed, &button);
+                let hooks = hooks.clone();
+                button.connect_clicked(move |_| (hooks.open_fix)(index, mark()));
+                r.add_suffix(&fixed);
+                r.add_suffix(&button);
+            }
             list.append(&r);
         }
         page.append(&list);

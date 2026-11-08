@@ -22,6 +22,14 @@ added to your load order. Merged objects go in files named to sort so they
 win in-game. Merged files keep their original path, so the patch is kept at
 the end of the load order, and a warning shows if it's moved.
 
+Files with brace mistakes are listed under **Problems**. The game keeps
+reading after a missing or extra `}`, but everything after it gets nested
+inside the broken object and stops working. **Fix…** repairs the braces
+automatically, using the convention that top-level objects start at column 0,
+and flags the objects it touched. **Fix with AI** then restores the intended
+nesting of just those objects. The fixed copy is saved through the merged
+patch, so the mod itself is never modified.
+
 Choose the AI provider in Preferences (Ctrl+,):
 
 - **Claude (Anthropic API)**: uses `claude-opus-5-5`. Enter an API key, or
