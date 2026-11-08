@@ -11,6 +11,8 @@ use crate::settings::{self, Settings};
 /// Edits a copy of `settings`; `on_close` receives the result when the
 /// dialog closes.
 pub fn present(parent: &impl IsA<gtk::Widget>, settings: Settings, on_close: impl Fn(Settings) + 'static) {
+    // Preferences only edit the provider; everything else is kept.
+    let ignored = settings.ignored.clone();
     // Remember both providers' fields while the user switches between them.
     let (mut anthropic_key, mut openai) = (String::new(), settings::openrouter());
     match &settings.provider {
@@ -76,7 +78,7 @@ pub fn present(parent: &impl IsA<gtk::Widget>, settings: Settings, on_close: imp
             }
         };
         if let Some(f) = on_close.borrow_mut().take() {
-            f(Settings { provider });
+            f(Settings { provider, ignored: ignored.clone() });
         }
     });
     dialog.present(Some(parent));

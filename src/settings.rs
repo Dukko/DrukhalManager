@@ -12,6 +12,9 @@ use crate::merge::ai::{OPENROUTER_URL, Provider};
 pub struct Settings {
     #[serde(default = "default_provider")]
     pub provider: Provider,
+    /// Conflicts the user chose to ignore, as keys from `conflicts_view`.
+    #[serde(default)]
+    pub ignored: std::collections::BTreeSet<String>,
 }
 
 fn default_provider() -> Provider {
@@ -20,7 +23,7 @@ fn default_provider() -> Provider {
 
 impl Default for Settings {
     fn default() -> Self {
-        Self { provider: default_provider() }
+        Self { provider: default_provider(), ignored: Default::default() }
     }
 }
 
@@ -72,7 +75,7 @@ mod tests {
     fn saves_privately_and_loads() {
         let path = std::env::temp_dir().join(format!("drukhal-settings-{}/settings.json", std::process::id()));
         assert_eq!(Settings::load(&path), Settings::default());
-        let s = Settings { provider: Provider::OpenAiCompatible { base_url: "http://localhost:11434/v1".into(), model: "qwen".into(), api_key: String::new() } };
+        let s = Settings { provider: Provider::OpenAiCompatible { base_url: "http://localhost:11434/v1".into(), model: "qwen".into(), api_key: String::new() }, ignored: ["file:x".to_owned()].into() };
         s.save(&path).unwrap();
         assert_eq!(Settings::load(&path), s);
         assert!(s.ready_provider().is_some());
@@ -81,7 +84,7 @@ mod tests {
             use std::os::unix::fs::PermissionsExt;
             assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
         }
-        assert!(Settings { provider: openrouter() }.ready_provider().is_none(), "needs a model");
+        assert!(Settings { provider: openrouter(), ..Default::default() }.ready_provider().is_none(), "needs a model");
         std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
     }
 }

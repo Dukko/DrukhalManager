@@ -144,6 +144,32 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
                 if let Status::Conflict { sources, .. } = &item.status {
                     let label = gtk::Label::builder().label(format!("Using {}'s version", sources.last().unwrap().label)).css_classes(["dim-label", "caption"]).build();
                     row.add_suffix(&label);
+                    // Choosing a version settles the conflict without AI.
+                    let labels: Vec<&str> = sources.iter().map(|s| s.label.as_str()).collect();
+                    let choice = gtk::DropDown::from_strings(&labels);
+                    choice.set_selected(labels.len() as u32 - 1);
+                    choice.set_valign(gtk::Align::Center);
+                    choice.set_tooltip_text(Some("Whose version to keep"));
+                    let texts: Vec<(String, String)> = sources.iter().map(|s| (s.label.clone(), s.text.clone())).collect();
+                    choice.connect_selected_notify(glib::clone!(
+                        #[strong]
+                        plan,
+                        #[weak]
+                        editor,
+                        #[weak]
+                        label,
+                        move |choice| {
+                            let Some((name, text)) = texts.get(choice.selected() as usize) else { return };
+                            if let Some(p) = plan.borrow_mut().as_mut() {
+                                p.items[index].text = text.clone();
+                                p.items[index].resolved = true;
+                                editor.buffer().set_text(&p.render());
+                            }
+                            label.set_label(&format!("Using {name}'s version"));
+                            label.set_css_classes(&["success", "caption"]);
+                        }
+                    ));
+                    row.add_suffix(&choice);
                     status_labels.borrow_mut().push((index, label));
                     row.add_prefix(&gtk::Image::builder().icon_name("dialog-warning-symbolic").css_classes(["warning"]).build());
                 }

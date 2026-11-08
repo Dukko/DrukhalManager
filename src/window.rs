@@ -145,6 +145,8 @@ struct Window {
     conflicts_page: adw::Bin,
     analysis: RefCell<Option<Rc<Analysis>>>,
     scanning: Cell<bool>,
+    /// Whether the Conflicts page shows ignored conflicts (dimmed).
+    show_ignored: Cell<bool>,
     settings: RefCell<Settings>,
     /// `None` if the patch's manifest couldn't be read.
     patch: RefCell<Option<Patch>>,
@@ -284,6 +286,7 @@ pub fn build(app: &adw::Application, paths: Paths, game: Option<GameInstall>, fo
         conflicts_page,
         analysis: RefCell::new(None),
         scanning: Cell::new(false),
+        show_ignored: Cell::new(false),
         settings: RefCell::new(Settings::load(&settings::path())),
         patch: RefCell::new(None),
         enabled_list,
@@ -386,7 +389,10 @@ impl Window {
         // Conflict counts are only shown while they match the load order.
         let counts = self.analysis.borrow().as_ref().filter(|a| a.revision.get() == state.revision).map(|a| {
             let mut by_position = vec![0; state.enabled.len()];
-            for (scanned, n) in a.report.counts_by_mod(a.names.len()).into_iter().enumerate() {
+            let settings = self.settings.borrow();
+            let ignored = |k: &str| settings.ignored.contains(k);
+            let counts = a.report.counts_by_mod_where(a.names.len(), |c| !conflicts_view::file_ignored(&ignored, c), |c| !conflicts_view::object_ignored(&ignored, c));
+            for (scanned, n) in counts.into_iter().enumerate() {
                 if let Some(slot) = by_position.get_mut(a.load_positions[scanned]) {
                     *slot = n;
                 }
@@ -461,10 +467,8 @@ impl Window {
             ui.scanning.set(false);
             match result {
                 Ok(report) => {
-                    let analysis = Rc::new(Analysis { revision: Cell::new(revision), names, roots, load_positions, report });
-                    let hooks = ui.merge_hooks(&analysis);
-                    ui.conflicts_page.set_child(Some(&conflicts_view::build(&analysis, ui.rescan_button(), hooks)));
-                    ui.analysis.replace(Some(analysis));
+                    ui.analysis.replace(Some(Rc::new(Analysis { revision: Cell::new(revision), names, roots, load_positions, report })));
+                    ui.render_conflicts();
                     // Shows the per-mod counts, and rescans if the load order
                     // changed while this scan ran.
                     ui.refresh();
@@ -474,6 +478,29 @@ impl Window {
                 }
             }
         });
+    }
+
+    /// Rebuilds the Conflicts page from the current analysis.
+    fn render_conflicts(self: &Rc<Self>) {
+        let Some(analysis) = self.analysis.borrow().clone() else { return };
+        let hooks = self.merge_hooks(&analysis);
+        self.conflicts_page.set_child(Some(&conflicts_view::build(&analysis, self.rescan_button(), hooks)));
+    }
+
+    fn set_ignored(self: &Rc<Self>, key: &str, ignore: bool) {
+        {
+            let mut settings = self.settings.borrow_mut();
+            if ignore {
+                settings.ignored.insert(key.to_owned());
+            } else {
+                settings.ignored.remove(key);
+            }
+            if let Err(e) = settings.save(&settings::path()) {
+                self.toasts.add_toast(adw::Toast::builder().title(format!("Could not save ignored conflicts: {e}")).timeout(0).build());
+            }
+        }
+        // Updates the per-mod counts; the page updates itself.
+        self.refresh();
     }
 
     fn merge_hooks(self: &Rc<Self>, analysis: &Rc<Analysis>) -> Rc<MergeHooks> {
@@ -504,7 +531,23 @@ impl Window {
                 ui.open_fix(&errors, index, mark_fixed);
             }
         });
-        Rc::new(MergeHooks { is_merged, open, is_file_merged, open_file, open_fix })
+        let weak = Rc::downgrade(self);
+        let is_ignored = Box::new(move |key: &str| weak.upgrade().is_some_and(|ui| ui.settings.borrow().ignored.contains(key)));
+        let weak = Rc::downgrade(self);
+        let set_ignored = Box::new(move |key: &str, ignore: bool| {
+            if let Some(ui) = weak.upgrade() {
+                ui.set_ignored(key, ignore);
+            }
+        });
+        let weak = Rc::downgrade(self);
+        let toggle_show_ignored = Box::new(move || {
+            if let Some(ui) = weak.upgrade() {
+                ui.show_ignored.set(!ui.show_ignored.get());
+                // After the click handler returns, since this replaces the page.
+                glib::idle_add_local_once(move || ui.render_conflicts());
+            }
+        });
+        Rc::new(MergeHooks { is_merged, open, is_file_merged, open_file, open_fix, is_ignored, set_ignored, show_ignored: self.show_ignored.get(), toggle_show_ignored })
     }
 
     fn open_fix(self: &Rc<Self>, analysis: &Rc<Analysis>, index: usize, mark_fixed: Box<dyn Fn()>) {

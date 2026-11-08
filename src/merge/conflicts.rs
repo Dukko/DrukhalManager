@@ -69,12 +69,18 @@ pub struct FileError {
 
 impl Report {
     /// Number of conflicts each load position takes part in.
+    #[cfg(test)]
     pub fn counts_by_mod(&self, mod_count: usize) -> Vec<usize> {
+        self.counts_by_mod_where(mod_count, |_| true, |_| true)
+    }
+
+    /// Like `counts_by_mod`, counting only the conflicts the filters keep.
+    pub fn counts_by_mod_where(&self, mod_count: usize, keep_file: impl Fn(&FileConflict) -> bool, keep_object: impl Fn(&ObjectConflict) -> bool) -> Vec<usize> {
         let mut counts = vec![0; mod_count];
-        for c in &self.files {
+        for c in self.files.iter().filter(|c| keep_file(c)) {
             c.mods.iter().for_each(|&m| counts[m] += 1);
         }
-        for c in &self.objects {
+        for c in self.objects.iter().filter(|c| keep_object(c)) {
             let mods: BTreeSet<usize> = c.definitions.iter().map(|d| d.mod_position).collect();
             mods.into_iter().for_each(|m| counts[m] += 1);
         }

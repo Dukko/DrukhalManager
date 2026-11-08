@@ -42,6 +42,37 @@ pub struct MergeHooks {
     pub open_file: Box<dyn Fn(usize, Box<dyn Fn()>)>,
     /// Opens the fix dialog for a file that failed to parse.
     pub open_fix: Box<dyn Fn(usize, Box<dyn Fn()>)>,
+    pub is_ignored: Box<dyn Fn(&str) -> bool>,
+    pub set_ignored: Box<dyn Fn(&str, bool)>,
+    /// Whether ignored conflicts are shown (dimmed) instead of hidden.
+    pub show_ignored: bool,
+    pub toggle_show_ignored: Box<dyn Fn()>,
+}
+
+// Keys for ignored conflicts, stored in the settings.
+pub fn file_key(path: &str) -> String {
+    format!("file:{}", path.to_lowercase())
+}
+pub fn object_key(category: &str, key: &str) -> String {
+    format!("object:{category}:{key}")
+}
+pub fn files_folder_key(folder: &str) -> String {
+    format!("files-in:{}", folder.to_lowercase())
+}
+pub fn objects_folder_key(category: &str) -> String {
+    format!("objects-in:{category}")
+}
+
+fn file_folder(path: &str) -> &str {
+    path.rsplit_once('/').map_or("", |(dir, _)| dir)
+}
+
+/// Whether a conflict is ignored, directly or through its folder.
+pub fn file_ignored(is_ignored: &dyn Fn(&str) -> bool, c: &crate::merge::conflicts::FileConflict) -> bool {
+    is_ignored(&file_key(&c.path)) || is_ignored(&files_folder_key(file_folder(&c.path)))
+}
+pub fn object_ignored(is_ignored: &dyn Fn(&str) -> bool, c: &crate::merge::conflicts::ObjectConflict) -> bool {
+    is_ignored(&object_key(&c.category, &c.key)) || is_ignored(&objects_folder_key(&c.category))
 }
 
 impl Analysis {
@@ -60,54 +91,76 @@ pub fn build(analysis: &Rc<Analysis>, rescan: gtk::Button, hooks: Rc<MergeHooks>
     let report = &analysis.report;
     let page = gtk::Box::new(gtk::Orientation::Vertical, 12);
 
-    let involved: BTreeSet<usize> = report.files.iter().flat_map(|c| c.mods.iter().copied()).chain(report.objects.iter().flat_map(|c| c.definitions.iter().map(|d| d.mod_position))).collect();
-    let summary = if report.files.is_empty() && report.objects.is_empty() {
+    let ignored = |k: &str| (hooks.is_ignored)(k);
+    let files: Vec<usize> = (0..report.files.len()).filter(|&i| hooks.show_ignored || !file_ignored(&ignored, &report.files[i])).collect();
+    let objects: Vec<usize> = (0..report.objects.len()).filter(|&i| hooks.show_ignored || !object_ignored(&ignored, &report.objects[i])).collect();
+    let n_ignored = report.files.iter().filter(|c| file_ignored(&ignored, c)).count() + report.objects.iter().filter(|c| object_ignored(&ignored, c)).count();
+    let (shown_files, shown_objects) = if hooks.show_ignored {
+        (files.iter().filter(|&&i| !file_ignored(&ignored, &report.files[i])).count(), objects.iter().filter(|&&i| !object_ignored(&ignored, &report.objects[i])).count())
+    } else {
+        (files.len(), objects.len())
+    };
+
+    let involved: BTreeSet<usize> = files
+        .iter()
+        .flat_map(|&i| report.files[i].mods.iter().copied())
+        .chain(objects.iter().flat_map(|&i| report.objects[i].definitions.iter().map(|d| d.mod_position)))
+        .collect();
+    let mut summary = if shown_files == 0 && shown_objects == 0 {
         "No conflicts between enabled mods".to_owned()
     } else {
         format!(
             "{} · {} · {} of {} mods involved",
-            plural(report.files.len(), "file override", "file overrides"),
-            plural(report.objects.len(), "object conflict", "object conflicts"),
+            plural(shown_files, "file override", "file overrides"),
+            plural(shown_objects, "object conflict", "object conflicts"),
             involved.len(),
             analysis.names.len()
         )
     };
+    if n_ignored > 0 {
+        summary.push_str(&format!(" · {n_ignored} ignored"));
+    }
     let top = gtk::Box::new(gtk::Orientation::Horizontal, 12);
     top.append(&gtk::Label::builder().label(summary).xalign(0.0).hexpand(true).wrap(true).css_classes(["dim-label"]).build());
+    if n_ignored > 0 {
+        let toggle = gtk::Button::builder().label(if hooks.show_ignored { "Hide Ignored" } else { "Show Ignored" }).valign(gtk::Align::Center).css_classes(["flat"]).build();
+        let hooks = hooks.clone();
+        toggle.connect_clicked(move |_| (hooks.toggle_show_ignored)());
+        top.append(&toggle);
+    }
     rescan.set_valign(gtk::Align::Center);
     top.append(&rescan);
     page.append(&top);
 
-    if report.files.is_empty() && report.objects.is_empty() && report.errors.is_empty() && report.skipped.is_empty() {
+    if files.is_empty() && objects.is_empty() && report.errors.is_empty() && report.skipped.is_empty() {
         let empty = adw::StatusPage::builder().icon_name("emblem-ok-symbolic").title("No Conflicts").description("None of the enabled mods change the same files or objects").vexpand(true).build();
         page.append(&empty);
         return page.upcast();
     }
 
-    if !report.files.is_empty() {
+    if !files.is_empty() {
         let mut groups: BTreeMap<String, Vec<usize>> = BTreeMap::new();
-        for (i, c) in report.files.iter().enumerate() {
-            let folder = c.path.rsplit_once('/').map_or("", |(dir, _)| dir);
-            groups.entry(folder.to_owned()).or_default().push(i);
+        for &i in &files {
+            groups.entry(file_folder(&report.files[i].path).to_owned()).or_default().push(i);
         }
         let make: Rc<dyn Fn(usize) -> adw::ActionRow> = {
             let analysis = analysis.clone();
             let hooks = hooks.clone();
             Rc::new(move |i| file_row(&analysis, i, &hooks))
         };
-        section(&page, "Overridden Files", "Only the copy from the mod loaded last is used. Merge a script or localisation file to keep every mod's objects.", groups, make);
+        section(&page, "Overridden Files", "Only the copy from the mod loaded last is used. Merge a script or localisation file to keep every mod's objects.", groups, make, files_folder_key, &hooks);
     }
-    if !report.objects.is_empty() {
+    if !objects.is_empty() {
         let mut groups: BTreeMap<String, Vec<usize>> = BTreeMap::new();
-        for (i, c) in report.objects.iter().enumerate() {
-            groups.entry(c.category.clone()).or_default().push(i);
+        for &i in &objects {
+            groups.entry(report.objects[i].category.clone()).or_default().push(i);
         }
         let make: Rc<dyn Fn(usize) -> adw::ActionRow> = {
             let analysis = analysis.clone();
             let hooks = hooks.clone();
             Rc::new(move |i| object_row(&analysis, i, &hooks))
         };
-        section(&page, "Conflicting Objects", "Defined by several mods; which one the game keeps depends on the folder. Merge one to keep every mod's changes.", groups, make);
+        section(&page, "Conflicting Objects", "Defined by several mods; which one the game keeps depends on the folder. Merge one to keep every mod's changes.", groups, make, objects_folder_key, &hooks);
     }
 
     if !report.errors.is_empty() || !report.skipped.is_empty() {
@@ -139,7 +192,7 @@ pub fn build(analysis: &Rc<Analysis>, rescan: gtk::Button, hooks: Rc<MergeHooks>
 
 /// A heading plus one collapsed row per folder. Each folder's rows are only
 /// built when it is first expanded.
-fn section(page: &gtk::Box, title: &str, description: &str, groups: BTreeMap<String, Vec<usize>>, make: Rc<dyn Fn(usize) -> adw::ActionRow>) {
+fn section(page: &gtk::Box, title: &str, description: &str, groups: BTreeMap<String, Vec<usize>>, make: Rc<dyn Fn(usize) -> adw::ActionRow>, folder_key: fn(&str) -> String, hooks: &Rc<MergeHooks>) {
     page.append(&heading(title, description));
     let list = boxed_list();
     for (folder, items) in groups {
@@ -148,6 +201,7 @@ fn section(page: &gtk::Box, title: &str, description: &str, groups: BTreeMap<Str
             .subtitle(plural(items.len(), "conflict", "conflicts"))
             .use_markup(false)
             .build();
+        expander.add_suffix(&ignore_button(hooks, folder_key(&folder), expander.upcast_ref(), "Ignore every conflict in this folder"));
         let filled = Cell::new(false);
         let make = make.clone();
         expander.connect_expanded_notify(move |expander| {
@@ -175,6 +229,7 @@ fn file_row(analysis: &Analysis, index: usize, hooks: &Rc<MergeHooks>) -> adw::A
     let overridden: Vec<&str> = losers.iter().map(|&m| analysis.name(m)).collect();
     let r = row(file, &format!("Used: {} · Overridden: {}", analysis.name(*winner), overridden.join(", ")));
     r.set_tooltip_text(Some(&c.path));
+    r.add_suffix(&ignore_button(hooks, file_key(&c.path), r.upcast_ref(), "Ignore this conflict"));
     if file_merge::mergeable(&c.path) {
         let is_merged = (hooks.is_file_merged)(&c.path);
         let (merged, button) = merge_controls(is_merged);
@@ -201,6 +256,7 @@ fn object_row(analysis: &Analysis, index: usize, hooks: &Rc<MergeHooks>) -> adw:
     let r = row(&c.key, &names.join(" · "));
     let files: Vec<String> = c.definitions.iter().map(|d| format!("{}: {}", analysis.name(d.mod_position), d.file)).collect();
     r.set_tooltip_text(Some(&files.join("\n")));
+    r.add_suffix(&ignore_button(hooks, object_key(&c.category, &c.key), r.upcast_ref(), "Ignore this conflict"));
 
     let (merged, button) = merge_controls((hooks.is_merged)(&c.category, &c.key));
     let mark_merged = merged_marker(&merged, &button);
@@ -209,6 +265,33 @@ fn object_row(analysis: &Analysis, index: usize, hooks: &Rc<MergeHooks>) -> adw:
     r.add_suffix(&merged);
     r.add_suffix(&button);
     r
+}
+
+/// A button that ignores (or stops ignoring) `key`. Ignoring hides `row`
+/// right away unless ignored conflicts are being shown, where it's dimmed.
+fn ignore_button(hooks: &Rc<MergeHooks>, key: String, row: &gtk::Widget, tooltip: &str) -> gtk::Button {
+    let button = gtk::Button::builder().valign(gtk::Align::Center).css_classes(["flat"]).build();
+    let sync = |button: &gtk::Button, row: &gtk::Widget, ignored: bool, tooltip: &str| {
+        button.set_icon_name(if ignored { "view-reveal-symbolic" } else { "view-conceal-symbolic" });
+        button.set_tooltip_text(Some(if ignored { "Stop ignoring" } else { tooltip }));
+        if ignored {
+            row.add_css_class("dim-label");
+        } else {
+            row.remove_css_class("dim-label");
+        }
+    };
+    sync(&button, row, (hooks.is_ignored)(&key), tooltip);
+    let (hooks, row, tooltip) = (hooks.clone(), row.downgrade(), tooltip.to_owned());
+    button.connect_clicked(move |button| {
+        let Some(row) = row.upgrade() else { return };
+        let ignore = !(hooks.is_ignored)(&key);
+        (hooks.set_ignored)(&key, ignore);
+        if ignore && !hooks.show_ignored {
+            row.set_visible(false);
+        }
+        sync(button, &row, ignore, &tooltip);
+    });
+    button
 }
 
 /// A callback factory that flips a row to its merged state.
@@ -243,4 +326,24 @@ fn heading(title: &str, description: &str) -> gtk::Box {
 
 pub fn plural(n: usize, one: &str, many: &str) -> String {
     format!("{n} {}", if n == 1 { one } else { many })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::merge::conflicts::{Definition, FileConflict, ObjectConflict};
+
+    #[test]
+    fn ignores_directly_or_by_folder() {
+        let ignored: std::collections::BTreeSet<String> = [file_key("common/Buildings/A.txt"), objects_folder_key("common/portrait_sets")].into();
+        let is = |k: &str| ignored.contains(k);
+        let file = |p: &str| FileConflict { path: p.into(), mods: vec![0, 1] };
+        let object = |c: &str| ObjectConflict { category: c.into(), key: "x".into(), definitions: vec![Definition { mod_position: 0, file: "f".into() }] };
+        assert!(file_ignored(&is, &file("common/buildings/a.txt")), "paths match case-insensitively");
+        assert!(!file_ignored(&is, &file("common/buildings/b.txt")));
+        assert!(object_ignored(&is, &object("common/portrait_sets")));
+        assert!(!object_ignored(&is, &object("common/buildings")));
+        let folder: std::collections::BTreeSet<String> = [files_folder_key("gfx/models")].into();
+        assert!(file_ignored(&|k| folder.contains(k), &file("gfx/models/ship.mesh")));
+    }
 }

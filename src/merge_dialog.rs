@@ -102,6 +102,10 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
         versions,
         #[weak]
         merge_button,
+        #[weak]
+        buffer,
+        #[weak]
+        notes,
         #[strong]
         loaded,
         async move {
@@ -116,7 +120,7 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
                 (_, false) => format!("Could not find the definition in: {}", result.missing.join(", ")),
             }));
             for s in result.vanilla.iter().chain(&result.sources) {
-                versions.add(&version_row(s));
+                versions.add(&version_row(s, &buffer, &notes));
             }
             merge_button.set_sensitive(result.sources.len() >= 2 || (result.vanilla.is_some() && !result.sources.is_empty()));
             loaded.replace(Some(result));
@@ -244,8 +248,27 @@ pub fn validate(category: &str, key: &str, text: &str) -> Result<String, String>
     Ok(text.trim().to_owned())
 }
 
-fn version_row(s: &Source) -> adw::ExpanderRow {
+/// One version of the object, expandable to read it, with a button that
+/// takes it as the result without asking the AI.
+fn version_row(s: &Source, buffer: &gtk::TextBuffer, notes: &gtk::Label) -> adw::ExpanderRow {
     let row = adw::ExpanderRow::builder().title(&s.label).subtitle(&s.file).use_markup(false).build();
+    let use_it = gtk::Button::builder().label("Use This Version").valign(gtk::Align::Center).css_classes(["flat"]).tooltip_text("Keep this version as it is, without merging").build();
+    use_it.connect_clicked(glib::clone!(
+        #[weak]
+        buffer,
+        #[weak]
+        notes,
+        #[strong(rename_to = text)]
+        s.text,
+        #[strong(rename_to = label)]
+        s.label,
+        move |_| {
+            buffer.set_text(&text);
+            notes.set_label(&format!("Using {label}'s version as it is."));
+            notes.set_visible(true);
+        }
+    ));
+    row.add_suffix(&use_it);
     let text = gtk::Label::builder()
         .label(&s.text)
         .xalign(0.0)
