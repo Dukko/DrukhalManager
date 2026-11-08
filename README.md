@@ -2,6 +2,9 @@
 
 A native Linux mod manager for Stellaris, with AI-assisted mod merging.
 
+DrukhalManager is a fork of [Irony Mod Manager](https://github.com/bcssov/IronyModManager)
+by Mario (bcssov), rewritten in Rust with GTK 4 and libadwaita.
+
 Built with Rust, GTK4 and libadwaita.
 
 ## Managing mods
@@ -63,11 +66,17 @@ you. Merging sends the conflicting definitions to the provider you choose.
 
 ## Credits
 
-DrukhalManager stands on the shoulders of
+DrukhalManager is a fork of
 [Irony Mod Manager](https://github.com/bcssov/IronyModManager) by Mario
-(bcssov). Irony's design and behaviour are the reference for this rewrite,
-and code ported from it is marked at the top of the relevant source files.
-See [NOTICE](NOTICE) for its license.
+(bcssov), and wouldn't exist without it. Irony's design and behaviour are the
+reference for this rewrite, its conflict solver, collections, load order
+checks and descriptor handling are the models for DrukhalManager's, and code
+ported from it is marked at the top of the relevant source files. Thank you,
+Mario.
+
+## License
+
+MIT, like Irony Mod Manager. See [LICENSE](LICENSE) and [NOTICE](NOTICE).
 
 ## Installing
 

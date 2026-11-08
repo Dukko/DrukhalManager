@@ -2,6 +2,9 @@
 name = "drukhal-manager"
 version = "0.1.0"
 edition = "2024"
+license = "MIT"
+description = "Native Linux mod manager for Stellaris, a fork of Irony Mod Manager"
+repository = "https://github.com/Dukko/DrukhalManager"
 
 [dependencies]
 adw = { version = "0.9.2", package = "libadwaita", features = ["v1_6"] }

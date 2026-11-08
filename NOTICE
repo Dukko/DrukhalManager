@@ -1,8 +1,10 @@
-DrukhalManager is a ground-up Rust/GTK rewrite inspired by, and in places
-ported from, Irony Mod Manager by Mario (bcssov):
+DrukhalManager is a fork of Irony Mod Manager by Mario (bcssov):
 https://github.com/bcssov/IronyModManager
 
-Portions derived from Irony Mod Manager are used under the following license:
+It's a rewrite for native Linux in Rust and GTK. Irony's design and behaviour
+are its reference, and code ported from Irony is marked at the top of the
+source files it appears in. DrukhalManager is released under the MIT License
+(see LICENSE). Irony Mod Manager's original license:
 
 MIT License
 
