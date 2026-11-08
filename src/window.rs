@@ -76,6 +76,34 @@ impl State {
         self.revision += 1;
     }
 
+    /// Enables every mod (newly enabled ones go to the end, alphabetically)
+    /// or disables them all. Returns the previous load order for undo, or
+    /// `None` if nothing changed.
+    fn set_all(&mut self, on: bool) -> Option<(Vec<usize>, bool)> {
+        let previous = (self.enabled.clone(), self.dirty);
+        if on {
+            let disabled = self.disabled();
+            if disabled.is_empty() {
+                return None;
+            }
+            self.enabled.extend(disabled);
+        } else {
+            if self.enabled.is_empty() {
+                return None;
+            }
+            self.enabled.clear();
+        }
+        self.dirty = true;
+        self.revision += 1;
+        Some(previous)
+    }
+
+    fn restore(&mut self, (enabled, dirty): (Vec<usize>, bool)) {
+        self.enabled = enabled;
+        self.dirty = dirty;
+        self.revision += 1;
+    }
+
     fn enabled_ids(&self) -> Vec<String> {
         self.enabled.iter().map(|&i| self.mods[i].id.clone()).collect()
     }
@@ -87,6 +115,10 @@ struct Window {
     game: Option<GameInstall>,
     state: RefCell<State>,
     status: gtk::Label,
+    /// Checked when every mod is enabled, mixed when some are.
+    all_toggle: gtk::CheckButton,
+    /// Set while `refresh` updates `all_toggle`, so it isn't taken as a click.
+    syncing: Cell<bool>,
     stack: adw::ViewStack,
     conflicts_page: adw::Bin,
     analysis: RefCell<Option<Rc<Analysis>>>,
@@ -146,7 +178,12 @@ pub fn build(app: &adw::Application, paths: Paths, game: Option<GameInstall>, fo
     let disabled_list = boxed_list("Every mod is enabled");
     let status = gtk::Label::builder().xalign(0.0).wrap(true).css_classes(["dim-label"]).build();
     let content = gtk::Box::new(gtk::Orientation::Vertical, 12);
-    content.append(&status);
+    let all_toggle = gtk::CheckButton::builder().label("Enable All").tooltip_text("Enable or disable every mod").halign(gtk::Align::End).build();
+    let top = gtk::Box::new(gtk::Orientation::Horizontal, 12);
+    status.set_hexpand(true);
+    top.append(&status);
+    top.append(&all_toggle);
+    content.append(&top);
     content.append(&heading("Load Order"));
     content.append(&enabled_list);
     content.append(&heading("Disabled"));
@@ -185,6 +222,8 @@ pub fn build(app: &adw::Application, paths: Paths, game: Option<GameInstall>, fo
         game,
         state: RefCell::new(State::new(found)),
         status,
+        all_toggle: all_toggle.clone(),
+        syncing: Cell::new(false),
         stack: stack.clone(),
         conflicts_page,
         analysis: RefCell::new(None),
@@ -215,6 +254,14 @@ pub fn build(app: &adw::Application, paths: Paths, game: Option<GameInstall>, fo
         }
         Err(e) => ui.toasts.add_toast(adw::Toast::builder().title(format!("Could not read the merged patch: {e}")).timeout(0).build()),
     }
+    let weak = Rc::downgrade(&ui);
+    all_toggle.connect_toggled(move |_| {
+        if let Some(ui) = weak.upgrade()
+            && !ui.syncing.get()
+        {
+            ui.toggle_all();
+        }
+    });
     let weak = Rc::downgrade(&ui);
     preferences_action.connect_activate(move |_, _| {
         if let Some(ui) = weak.upgrade() {
@@ -275,6 +322,12 @@ impl Window {
             subtitle.push("Unsaved changes".to_owned());
         }
         self.status.set_label(&subtitle.join(" · "));
+        let (enabled, total) = (state.enabled.len(), state.mods.len());
+        self.syncing.set(true);
+        self.all_toggle.set_active(total > 0 && enabled == total);
+        self.all_toggle.set_inconsistent(enabled > 0 && enabled < total);
+        self.all_toggle.set_sensitive(total > 0);
+        self.syncing.set(false);
         self.save_action.set_enabled(state.dirty);
         drop(state);
         self.scan_if_stale();
@@ -451,6 +504,31 @@ impl Window {
             }
             ui.settings.replace(settings);
         });
+    }
+
+    /// Like a select-all checkbox: enables everything unless everything is
+    /// already enabled, in which case it disables everything. Offers undo,
+    /// since disabling all forgets the load order.
+    fn toggle_all(self: &Rc<Self>) {
+        let enable = {
+            let state = self.state.borrow();
+            state.enabled.len() < state.mods.len()
+        };
+        let previous = self.state.borrow_mut().set_all(enable);
+        self.refresh();
+        let Some(previous) = previous else { return };
+        let changed = if enable { previous.0.len().abs_diff(self.state.borrow().enabled.len()) } else { previous.0.len() };
+        let verb = if enable { "Enabled" } else { "Disabled" };
+        let toast = adw::Toast::builder().title(format!("{verb} {}", conflicts_view::plural(changed, "mod", "mods"))).button_label("Undo").build();
+        let previous = RefCell::new(Some(previous));
+        let weak = Rc::downgrade(self);
+        toast.connect_button_clicked(move |_| {
+            if let (Some(ui), Some(previous)) = (weak.upgrade(), previous.take()) {
+                ui.state.borrow_mut().restore(previous);
+                ui.refresh();
+            }
+        });
+        self.toasts.add_toast(toast);
     }
 
     fn rescan_button(self: &Rc<Self>) -> gtk::Button {
@@ -674,6 +752,20 @@ mod tests {
         s.move_enabled(0, 1);
         assert_eq!(s.enabled, [0, 1]);
         assert!(!s.dirty, "dropping a mod onto its own slot is a no-op");
+    }
+
+    #[test]
+    fn enables_and_disables_all_with_undo() {
+        let mut s = state(&[2, 0]);
+        let previous = s.set_all(true).unwrap();
+        assert_eq!(s.enabled, [2, 0, 1, 3], "new mods go to the end, keeping the existing order");
+        assert!(s.set_all(true).is_none());
+        s.restore(previous);
+        assert_eq!(s.enabled, [2, 0]);
+        assert!(!s.dirty, "undo restores the saved state");
+        s.set_all(false).unwrap();
+        assert!(s.enabled.is_empty() && s.dirty);
+        assert!(s.set_all(false).is_none());
     }
 
     #[test]
