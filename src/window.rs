@@ -197,6 +197,8 @@ struct Window {
     scanning: Cell<bool>,
     /// Whether the Conflicts page shows ignored conflicts (dimmed).
     show_ignored: Cell<bool>,
+    /// Merges and fixes in the patch whose sources changed since.
+    stale: RefCell<Vec<patch::Stale>>,
     settings: RefCell<Settings>,
     /// `None` if the patch's manifest couldn't be read.
     patch: RefCell<Option<Patch>>,
@@ -349,6 +351,7 @@ pub fn build(app: &adw::Application, paths: Paths, game: Option<GameInstall>, fo
         analysis: RefCell::new(None),
         scanning: Cell::new(false),
         show_ignored: Cell::new(false),
+        stale: RefCell::new(Vec::new()),
         settings: RefCell::new(Settings::load(&settings::path())),
         patch: RefCell::new(None),
         enabled_list,
@@ -430,6 +433,7 @@ pub fn build(app: &adw::Application, paths: Paths, game: Option<GameInstall>, fo
             ui.toggle_all();
         }
     });
+    ui.check_stale();
     let weak = Rc::downgrade(&ui);
     preferences_action.connect_activate(move |_, _| {
         if let Some(ui) = weak.upgrade() {
@@ -525,16 +529,17 @@ impl Window {
             return;
         }
         self.conflicts_page.set_child(Some(&conflicts_view::scanning()));
-        let (revision, names, roots, load_positions, inputs) = {
+        let (revision, names, ids, roots, load_positions, inputs) = {
             let state = self.state.borrow();
             // The merged patch is left out: its objects are resolutions, not
             // conflicts.
             let scanned: Vec<(usize, &Mod)> = state.enabled.iter().map(|&i| &state.mods[i]).enumerate().filter(|(_, m)| m.id != patch::ID).collect();
             let names = scanned.iter().map(|(_, m)| display_name(m).to_owned()).collect();
+            let ids = scanned.iter().map(|(_, m)| m.id.clone()).collect();
             let roots = scanned.iter().map(|(_, m)| m.content.clone()).collect();
             let positions = scanned.iter().map(|(p, _)| *p).collect();
             let inputs: Vec<ModInput> = scanned.iter().map(|(_, m)| ModInput { root: m.content.clone(), replace_path: m.descriptor.replace_path.clone() }).collect();
-            (state.revision, names, roots, positions, inputs)
+            (state.revision, names, ids, roots, positions, inputs)
         };
 
         let weak = Rc::downgrade(self);
@@ -544,7 +549,8 @@ impl Window {
             ui.scanning.set(false);
             match result {
                 Ok(report) => {
-                    ui.analysis.replace(Some(Rc::new(Analysis { revision: Cell::new(revision), names, roots, load_positions, report })));
+                    ui.check_stale();
+                    ui.analysis.replace(Some(Rc::new(Analysis { revision: Cell::new(revision), names, ids, roots, load_positions, report })));
                     ui.render_conflicts();
                     // Shows the per-mod counts, and rescans if the load order
                     // changed while this scan ran.
@@ -555,6 +561,40 @@ impl Window {
                 }
             }
         });
+    }
+
+    /// Compares the patch's fingerprints with the enabled mods' files.
+    fn check_stale(&self) {
+        let stale = {
+            let state = self.state.borrow();
+            let mut roots: std::collections::HashMap<String, std::path::PathBuf> =
+                state.enabled.iter().filter_map(|&i| Some((state.mods[i].id.clone(), state.mods[i].content.clone()?))).collect();
+            if let Some(game) = &self.game {
+                roots.insert(patch::VANILLA.to_owned(), game.dir.clone());
+            }
+            self.patch.borrow().as_ref().map(|p| p.stale(&roots)).unwrap_or_default()
+        };
+        self.stale.replace(stale);
+    }
+
+    fn remove_merge(self: &Rc<Self>, stale: &patch::Stale) {
+        let result = self.with_patch(|p, _, _| match &stale.object {
+            Some((category, key)) => p.remove(category, key),
+            None => p.remove_file(&stale.path),
+        });
+        match result {
+            Ok(()) => {
+                self.check_stale();
+                self.refresh();
+                let what = stale.object.as_ref().map_or(stale.path.as_str(), |(_, k)| k.as_str());
+                self.toasts.add_toast(adw::Toast::new(&format!("Removed {what} from the patch")));
+            }
+            Err(e) => self.toast_error_message(&e),
+        }
+    }
+
+    fn toast_error_message(&self, message: &str) {
+        self.toasts.add_toast(adw::Toast::builder().title(message).timeout(0).build());
     }
 
     /// Rebuilds the Conflicts page from the current analysis.
@@ -624,7 +664,25 @@ impl Window {
                 glib::idle_add_local_once(move || ui.render_conflicts());
             }
         });
-        Rc::new(MergeHooks { is_merged, open, is_file_merged, open_file, open_fix, is_ignored, set_ignored, show_ignored: self.show_ignored.get(), toggle_show_ignored })
+        let weak = Rc::downgrade(self);
+        let remove_merge = Box::new(move |stale: &patch::Stale| {
+            if let Some(ui) = weak.upgrade() {
+                ui.remove_merge(stale);
+            }
+        });
+        Rc::new(MergeHooks {
+            is_merged,
+            open,
+            is_file_merged,
+            open_file,
+            open_fix,
+            is_ignored,
+            set_ignored,
+            show_ignored: self.show_ignored.get(),
+            toggle_show_ignored,
+            stale: self.stale.borrow().clone(),
+            remove_merge,
+        })
     }
 
     fn open_fix(self: &Rc<Self>, analysis: &Rc<Analysis>, index: usize, mark_fixed: Box<dyn Fn()>) {
@@ -634,9 +692,9 @@ impl Window {
         let weak = Rc::downgrade(self);
         let save = {
             let path = path.clone();
-            Box::new(move |contents: &str, sources: Vec<String>| {
+            Box::new(move |contents: &str, prints: Vec<patch::Print>| {
                 let ui = weak.upgrade().ok_or("The window was closed")?;
-                ui.with_patch(|patch, user_dir, version| patch.save_file(user_dir, version, &path, contents, sources))
+                ui.with_patch(|patch, user_dir, version| patch.save_file(user_dir, version, &path, contents, prints))
             })
         };
         let weak = Rc::downgrade(self);
@@ -654,6 +712,7 @@ impl Window {
         });
         let request = fix_dialog::Request {
             path,
+            mod_id: analysis.ids[e.mod_position].clone(),
             mod_name: analysis.name(e.mod_position).to_owned(),
             root,
             error: e.message.clone(),
@@ -667,16 +726,16 @@ impl Window {
 
     fn open_file_merge(self: &Rc<Self>, analysis: &Rc<Analysis>, index: usize, mark_merged: Box<dyn Fn()>) {
         let conflict = &analysis.report.files[index];
-        let origins = conflict.mods.iter().filter_map(|&m| Some((analysis.name(m).to_owned(), analysis.roots[m].clone()?))).collect();
+        let origins = conflict.mods.iter().filter_map(|&m| Some((analysis.ids[m].clone(), analysis.name(m).to_owned(), analysis.roots[m].clone()?))).collect();
         let path = conflict.path.clone();
         let merged_before = self.patch.borrow().as_ref().is_some_and(|p| p.get_file(&path).is_some());
 
         let weak = Rc::downgrade(self);
         let save = {
             let path = path.clone();
-            Box::new(move |contents: &str, sources: Vec<String>| {
+            Box::new(move |contents: &str, prints: Vec<patch::Print>| {
                 let ui = weak.upgrade().ok_or("The window was closed")?;
-                ui.with_patch(|patch, user_dir, version| patch.save_file(user_dir, version, &path, contents, sources))
+                ui.with_patch(|patch, user_dir, version| patch.save_file(user_dir, version, &path, contents, prints))
             })
         };
         let weak = Rc::downgrade(self);
@@ -722,7 +781,7 @@ impl Window {
             .iter()
             .filter_map(|d| {
                 let root = analysis.roots[d.mod_position].clone()?;
-                Some(merge_dialog::Origin { label: analysis.name(d.mod_position).to_owned(), root, file: d.file.clone() })
+                Some(merge_dialog::Origin { mod_id: analysis.ids[d.mod_position].clone(), label: analysis.name(d.mod_position).to_owned(), root, file: d.file.clone() })
             })
             .collect();
         let (category, key) = (conflict.category.clone(), conflict.key.clone());
@@ -731,9 +790,9 @@ impl Window {
         let weak = Rc::downgrade(self);
         let save = {
             let (category, key) = (category.clone(), key.clone());
-            Box::new(move |script: &str, sources: Vec<String>| {
+            Box::new(move |script: &str, prints: Vec<patch::Print>| {
                 let ui = weak.upgrade().ok_or("The window was closed")?;
-                ui.save_merge(&category, &key, script, sources)
+                ui.save_merge(&category, &key, script, prints)
             })
         };
         let weak = Rc::downgrade(self);
@@ -764,12 +823,13 @@ impl Window {
         merge_dialog::present(&self.window, request);
     }
 
-    fn save_merge(&self, category: &str, key: &str, script: &str, sources: Vec<String>) -> Result<(), String> {
-        self.with_patch(|patch, user_dir, version| patch.save(user_dir, version, category, key, script, sources))
+    fn save_merge(&self, category: &str, key: &str, script: &str, prints: Vec<patch::Print>) -> Result<(), String> {
+        self.with_patch(|patch, user_dir, version| patch.save(user_dir, version, category, key, script, prints))
     }
 
     /// Makes sure the merged patch is in the load order once it has content.
     fn patch_saved(self: &Rc<Self>) {
+        self.check_stale();
         let added = {
             let mut state = self.state.borrow_mut();
             let index = match state.mods.iter().position(|m| m.id == patch::ID) {
@@ -1039,6 +1099,10 @@ impl Window {
         let mut problems: Vec<(checks::Severity, String)> = Vec::new();
         if let Some(error) = &m.error {
             problems.push((checks::Severity::Warning, error.clone()));
+        }
+        let outdated = if is_patch { self.stale.borrow().len() } else { 0 };
+        if outdated > 0 {
+            problems.push((checks::Severity::Warning, format!("{} out of date because mods changed; see the Conflicts page", conflicts_view::plural(outdated, "merge or fix is", "merges or fixes are"))));
         }
         problems.extend(issues.iter().map(|i| (i.severity, i.message.clone())));
         problems.sort_by(|a, b| b.0.cmp(&a.0));

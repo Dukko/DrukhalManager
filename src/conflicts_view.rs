@@ -9,6 +9,7 @@ use adw::prelude::*;
 
 use crate::merge::conflicts::Report;
 use crate::merge::file_merge;
+use crate::merge::patch::Stale;
 
 /// Rows shown per folder; the rest are summarised so huge folders (e.g.
 /// localisation) stay responsive.
@@ -21,6 +22,8 @@ pub struct Analysis {
     pub revision: Cell<u64>,
     /// Mod names by scanned position, as of the scan.
     pub names: Vec<String>,
+    /// Descriptor ids by scanned position.
+    pub ids: Vec<String>,
     /// Each scanned mod's folder.
     pub roots: Vec<Option<PathBuf>>,
     /// Each scanned mod's position in the full load order (the merged patch
@@ -47,6 +50,20 @@ pub struct MergeHooks {
     /// Whether ignored conflicts are shown (dimmed) instead of hidden.
     pub show_ignored: bool,
     pub toggle_show_ignored: Box<dyn Fn()>,
+    /// Merges and fixes whose sources changed since they were saved.
+    pub stale: Vec<Stale>,
+    /// Removes an out-of-date merge or fix from the patch.
+    pub remove_merge: Box<dyn Fn(&Stale)>,
+}
+
+impl MergeHooks {
+    fn stale_object(&self, category: &str, key: &str) -> Option<&[String]> {
+        self.stale.iter().find(|s| s.object.as_ref().is_some_and(|(c, k)| c == category && k == key)).map(|s| s.reasons.as_slice())
+    }
+
+    fn stale_file(&self, path: &str) -> Option<&[String]> {
+        self.stale.iter().find(|s| s.object.is_none() && s.path.eq_ignore_ascii_case(path)).map(|s| s.reasons.as_slice())
+    }
 }
 
 // Keys for ignored conflicts, stored in the settings.
@@ -132,6 +149,31 @@ pub fn build(analysis: &Rc<Analysis>, rescan: gtk::Button, hooks: Rc<MergeHooks>
     top.append(&rescan);
     page.append(&top);
 
+    if !hooks.stale.is_empty() {
+        page.append(&heading("Outdated Merges", "Mods changed since these were merged or fixed, so the patch may be undoing their updates. Re-merge them below, or remove them from the patch."));
+        let list = boxed_list();
+        for s in &hooks.stale {
+            let title = s.object.as_ref().map_or(s.path.as_str(), |(_, key)| key.as_str());
+            let subtitle = match &s.object {
+                Some((category, _)) => format!("{category} · {}", s.reasons.join("; ")),
+                None => format!("{} · {}", s.path, s.reasons.join("; ")),
+            };
+            let r = row(title, &subtitle);
+            r.add_prefix(&gtk::Image::builder().icon_name("dialog-warning-symbolic").css_classes(["warning"]).build());
+            let remove = gtk::Button::builder().label("Remove from Patch").valign(gtk::Align::Center).css_classes(["flat"]).build();
+            let (hooks, stale, row_ref) = (hooks.clone(), s.clone(), r.downgrade());
+            remove.connect_clicked(move |_| {
+                (hooks.remove_merge)(&stale);
+                if let Some(r) = row_ref.upgrade() {
+                    r.set_visible(false);
+                }
+            });
+            r.add_suffix(&remove);
+            list.append(&r);
+        }
+        page.append(&list);
+    }
+
     if files.is_empty() && objects.is_empty() && report.errors.is_empty() && report.skipped.is_empty() {
         let empty = adw::StatusPage::builder().icon_name("emblem-ok-symbolic").title("No Conflicts").description("None of the enabled mods change the same files or objects").vexpand(true).build();
         page.append(&empty);
@@ -174,9 +216,13 @@ pub fn build(analysis: &Rc<Analysis>, rescan: gtk::Button, hooks: Rc<MergeHooks>
             r.add_prefix(&gtk::Image::builder().icon_name("dialog-warning-symbolic").css_classes(["warning"]).build());
             // Parse errors read "line N: …"; others are read failures.
             if e.message.starts_with("line ") && analysis.roots[e.mod_position].is_some() {
-                let (fixed, button) = merge_controls((hooks.is_file_merged)(&e.file));
+                let (fixed, button) = merge_controls((hooks.is_file_merged)(&e.file), hooks.stale_file(&e.file));
                 fixed.set_tooltip_text(Some("Fixed through the merged patch"));
-                button.set_label(if fixed.is_visible() { "Edit Fix…" } else { "Fix…" });
+                button.set_label(match (hooks.stale_file(&e.file), fixed.is_visible()) {
+                    (Some(_), _) => "Fix Again…",
+                    (None, true) => "Edit Fix…",
+                    (None, false) => "Fix…",
+                });
                 let mark = merged_marker(&fixed, &button);
                 let hooks = hooks.clone();
                 button.connect_clicked(move |_| (hooks.open_fix)(index, mark()));
@@ -232,7 +278,7 @@ fn file_row(analysis: &Analysis, index: usize, hooks: &Rc<MergeHooks>) -> adw::A
     r.add_suffix(&ignore_button(hooks, file_key(&c.path), r.upcast_ref(), "Ignore this conflict"));
     if file_merge::mergeable(&c.path) {
         let is_merged = (hooks.is_file_merged)(&c.path);
-        let (merged, button) = merge_controls(is_merged);
+        let (merged, button) = merge_controls(is_merged, hooks.stale_file(&c.path));
         let mark_merged = merged_marker(&merged, &button);
         let hooks = hooks.clone();
         button.connect_clicked(move |_| (hooks.open_file)(index, mark_merged()));
@@ -242,9 +288,22 @@ fn file_row(analysis: &Analysis, index: usize, hooks: &Rc<MergeHooks>) -> adw::A
     r
 }
 
-fn merge_controls(is_merged: bool) -> (gtk::Image, gtk::Button) {
+/// The merged-state icon and the merge button for a row. An out-of-date
+/// merge shows a warning with the reasons instead of a check mark.
+fn merge_controls(is_merged: bool, stale: Option<&[String]>) -> (gtk::Image, gtk::Button) {
     let merged = gtk::Image::builder().icon_name("emblem-ok-symbolic").tooltip_text("Merged into the patch").css_classes(["success"]).visible(is_merged).build();
-    let button = gtk::Button::builder().label(if is_merged { "Edit Merge…" } else { "Merge…" }).valign(gtk::Align::Center).css_classes(["flat"]).build();
+    let label = match (stale, is_merged) {
+        (Some(reasons), _) => {
+            merged.set_icon_name(Some("dialog-warning-symbolic"));
+            merged.set_css_classes(&["warning"]);
+            merged.set_tooltip_text(Some(&format!("Out of date: {}", reasons.join("; "))));
+            merged.set_visible(true);
+            "Re-merge…"
+        }
+        (None, true) => "Edit Merge…",
+        (None, false) => "Merge…",
+    };
+    let button = gtk::Button::builder().label(label).valign(gtk::Align::Center).css_classes(["flat"]).build();
     (merged, button)
 }
 
@@ -258,7 +317,7 @@ fn object_row(analysis: &Analysis, index: usize, hooks: &Rc<MergeHooks>) -> adw:
     r.set_tooltip_text(Some(&files.join("\n")));
     r.add_suffix(&ignore_button(hooks, object_key(&c.category, &c.key), r.upcast_ref(), "Ignore this conflict"));
 
-    let (merged, button) = merge_controls((hooks.is_merged)(&c.category, &c.key));
+    let (merged, button) = merge_controls((hooks.is_merged)(&c.category, &c.key), hooks.stale_object(&c.category, &c.key));
     let mark_merged = merged_marker(&merged, &button);
     let hooks = hooks.clone();
     button.connect_clicked(move |_| (hooks.open)(index, mark_merged()));
@@ -301,8 +360,15 @@ fn merged_marker(merged: &gtk::Image, button: &gtk::Button) -> Rc<dyn Fn() -> Bo
         let (merged, button) = (merged.clone(), button.clone());
         Box::new(move || {
             if let (Some(merged), Some(button)) = (merged.upgrade(), button.upgrade()) {
+                merged.set_icon_name(Some("emblem-ok-symbolic"));
+                merged.set_css_classes(&["success"]);
+                merged.set_tooltip_text(Some("Merged into the patch"));
                 merged.set_visible(true);
-                button.set_label("Edit Merge…");
+                if button.label().is_some_and(|l| l.contains("Fix")) {
+                    button.set_label("Edit Fix…");
+                } else {
+                    button.set_label("Edit Merge…");
+                }
             }
         })
     })

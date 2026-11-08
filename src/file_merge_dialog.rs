@@ -12,18 +12,19 @@ use gtk::{gio, glib};
 use crate::conflicts_view::plural;
 use crate::merge::ai::{self, Provider};
 use crate::merge::file_merge::{self, Plan, Status, Version};
+use crate::merge::patch::{Print, VANILLA};
 use crate::merge_dialog;
 use crate::thinking_view::{self, ThinkingView};
 
 pub struct Request {
     pub path: String,
-    /// `(mod name, mod folder)` for each copy, in load order.
-    pub origins: Vec<(String, PathBuf)>,
+    /// `(descriptor id, mod name, mod folder)` for each copy, in load order.
+    pub origins: Vec<(String, String, PathBuf)>,
     pub game_dir: Option<PathBuf>,
     pub provider: Option<Provider>,
     /// Whether the patch already holds a merge of this file.
     pub merged_before: bool,
-    pub save: Box<dyn Fn(&str, Vec<String>) -> Result<(), String>>,
+    pub save: Box<dyn Fn(&str, Vec<Print>) -> Result<(), String>>,
     pub open_preferences: Box<dyn Fn()>,
     pub on_saved: Box<dyn Fn()>,
 }
@@ -73,7 +74,10 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
     let path = request.path.clone();
     let origins = request.origins.clone();
     let game_dir = request.game_dir.clone();
+    let prints: Rc<RefCell<Vec<Print>>> = Rc::default();
     glib::spawn_future_local(glib::clone!(
+        #[strong]
+        prints,
         #[weak]
         summary,
         #[weak]
@@ -94,17 +98,22 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
             let planned = gio::spawn_blocking(move || {
                 let versions: Vec<Version> = origins
                     .iter()
-                    .map(|(label, root)| {
+                    .map(|(_, label, root)| {
                         let bytes = std::fs::read(root.join(&path)).map_err(|e| format!("Could not read {label}'s copy: {e}"))?;
                         Ok(Version { label: label.clone(), text: String::from_utf8_lossy(&bytes).into_owned() })
                     })
                     .collect::<Result<_, String>>()?;
                 let vanilla = game_dir.and_then(|dir| std::fs::read(dir.join(&path)).ok()).map(|b| String::from_utf8_lossy(&b).into_owned());
-                file_merge::plan(&path, vanilla.as_deref(), &versions)
+                let mut found: Vec<Print> = vanilla.iter().map(|v| Print::new(VANILLA, "Vanilla", &path, v)).collect();
+                found.extend(origins.iter().zip(&versions).map(|((id, label, _), v)| Print::new(id, label, &path, &v.text)));
+                file_merge::plan(&path, vanilla.as_deref(), &versions).map(|plan| (plan, found))
             })
             .await;
             let p = match planned {
-                Ok(Ok(p)) => p,
+                Ok(Ok((p, found))) => {
+                    prints.replace(found);
+                    p
+                }
                 Ok(Err(message)) => {
                     summary.set_description(Some("This file can't be merged object by object."));
                     show(&banner, &message, true);
@@ -291,6 +300,8 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
         request,
         #[strong]
         plan,
+        #[strong]
+        prints,
         #[weak]
         dialog,
         #[weak]
@@ -305,8 +316,7 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
                 show(&banner, &message, true);
                 return;
             }
-            let sources = request.origins.iter().map(|(label, _)| label.clone()).collect();
-            match (request.save)(&text, sources) {
+            match (request.save)(&text, prints.borrow().clone()) {
                 Ok(()) => {
                     dialog.close();
                     (request.on_saved)();

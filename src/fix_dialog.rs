@@ -12,18 +12,20 @@ use gtk::{gio, glib};
 use crate::conflicts_view::plural;
 use crate::merge::ai::{self, Provider};
 use crate::merge::{file_merge, lint};
+use crate::merge::patch::Print;
 use crate::merge_dialog;
 use crate::thinking_view::{self, ThinkingView};
 use crate::paradox::script;
 
 pub struct Request {
     pub path: String,
+    pub mod_id: String,
     pub mod_name: String,
     pub root: PathBuf,
     /// The parse error the scan reported.
     pub error: String,
     pub provider: Option<Provider>,
-    pub save: Box<dyn Fn(&str, Vec<String>) -> Result<(), String>>,
+    pub save: Box<dyn Fn(&str, Vec<Print>) -> Result<(), String>>,
     pub open_preferences: Box<dyn Fn()>,
     pub on_saved: Box<dyn Fn()>,
 }
@@ -74,8 +76,13 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
     let dialog = adw::Dialog::builder().content_width(960).content_height(800).child(&toolbar).build();
 
     let labels: Rc<RefCell<Vec<(String, gtk::Label)>>> = Rc::default();
+    let print: Rc<RefCell<Option<Print>>> = Rc::default();
     let (path, root) = (request.path.clone(), request.root.clone());
     glib::spawn_future_local(glib::clone!(
+        #[strong]
+        print,
+        #[strong]
+        request,
         #[weak]
         repairs,
         #[weak]
@@ -102,6 +109,8 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
                 show(&banner, "Could not read the mod's file");
                 return;
             };
+            // If the mod later changes this file, the fix may be out of date.
+            print.replace(Some(Print::new(&request.mod_id, &request.mod_name, &request.path, &src)));
             save_button.set_sensitive(true);
             let Some(repair) = repair else {
                 repairs.set_description(Some("This can't be repaired automatically. Fix it by hand below; the file is checked before saving."));
@@ -223,6 +232,8 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
     save_button.connect_clicked(glib::clone!(
         #[strong]
         request,
+        #[strong]
+        print,
         #[weak]
         dialog,
         #[weak]
@@ -236,7 +247,7 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
                 show(&banner, &format!("The file still has a syntax error at {e}"));
                 return;
             }
-            match (request.save)(&text, vec![request.mod_name.clone()]) {
+            match (request.save)(&text, print.borrow().iter().cloned().collect()) {
                 Ok(()) => {
                     dialog.close();
                     (request.on_saved)();

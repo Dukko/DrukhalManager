@@ -10,13 +10,15 @@ use adw::prelude::*;
 use gtk::{gio, glib};
 
 use crate::merge::ai::{self, Provider};
-use crate::merge::patch::Merge;
+use crate::merge::patch::{Merge, Print, VANILLA};
 use crate::merge::source::{self, Source};
 use crate::paradox::script;
 use crate::thinking_view::{self, ThinkingView};
 
 /// Where one mod's version of the object lives.
 pub struct Origin {
+    /// Descriptor id, for fingerprinting.
+    pub mod_id: String,
     pub label: String,
     pub root: PathBuf,
     pub file: String,
@@ -31,7 +33,8 @@ pub struct Request {
     pub provider: Option<Provider>,
     pub existing: Option<Merge>,
     /// Writes the approved script to the patch.
-    pub save: Box<dyn Fn(&str, Vec<String>) -> Result<(), String>>,
+    /// Writes the approved script, with fingerprints of its sources.
+    pub save: Box<dyn Fn(&str, Vec<Print>) -> Result<(), String>>,
     pub open_preferences: Box<dyn Fn()>,
     pub on_saved: Box<dyn Fn()>,
 }
@@ -40,6 +43,8 @@ struct Loaded {
     vanilla: Option<Source>,
     sources: Vec<Source>,
     missing: Vec<String>,
+    /// Fingerprints of the versions found, to notice later changes.
+    prints: Vec<Print>,
 }
 
 pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
@@ -96,7 +101,7 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
     // Read every version off the main thread; vanilla lookups parse whole
     // game folders.
     let (category, key, game_dir) = (request.category.clone(), request.key.clone(), request.game_dir.clone());
-    let origins: Vec<(String, PathBuf, String)> = request.origins.iter().map(|o| (o.label.clone(), o.root.clone(), o.file.clone())).collect();
+    let origins: Vec<(String, String, PathBuf, String)> = request.origins.iter().map(|o| (o.mod_id.clone(), o.label.clone(), o.root.clone(), o.file.clone())).collect();
     glib::spawn_future_local(glib::clone!(
         #[weak]
         versions,
@@ -186,6 +191,8 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
     save_button.connect_clicked(glib::clone!(
         #[strong]
         request,
+        #[strong]
+        loaded,
         #[weak]
         dialog,
         #[weak]
@@ -201,8 +208,8 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
                     return;
                 }
             };
-            let sources = request.origins.iter().map(|o| o.label.clone()).collect();
-            match (request.save)(&text, sources) {
+            let prints = loaded.borrow().as_ref().map(|l| l.prints.clone()).unwrap_or_default();
+            match (request.save)(&text, prints) {
                 Ok(()) => {
                     dialog.close();
                     (request.on_saved)();
@@ -215,18 +222,22 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
     dialog.present(Some(parent));
 }
 
-fn load(category: &str, key: &str, game_dir: Option<&std::path::Path>, origins: Vec<(String, PathBuf, String)>) -> Loaded {
+fn load(category: &str, key: &str, game_dir: Option<&std::path::Path>, origins: Vec<(String, String, PathBuf, String)>) -> Loaded {
     let vanilla = game_dir.and_then(|dir| source::vanilla(dir, category, key));
+    let mut prints: Vec<Print> = vanilla.iter().map(|v| Print::new(VANILLA, "Vanilla", &v.file, &v.text)).collect();
     let mut sources = Vec::new();
     let mut missing = Vec::new();
-    for (label, root, file) in origins {
+    for (mod_id, label, root, file) in origins {
         let text = std::fs::read(root.join(&file)).ok().and_then(|bytes| source::extract(category, key, &String::from_utf8_lossy(&bytes)));
         match text {
-            Some(text) => sources.push(Source { label, file, text }),
+            Some(text) => {
+                prints.push(Print::new(&mod_id, &label, &file, &text));
+                sources.push(Source { label, file, text });
+            }
             None => missing.push(label),
         }
     }
-    Loaded { vanilla, sources, missing }
+    Loaded { vanilla, sources, missing, prints }
 }
 
 /// Checks the edited script before it goes into the patch: it must parse,
