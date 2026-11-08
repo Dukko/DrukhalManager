@@ -1319,6 +1319,13 @@ impl Window {
         if self.state.borrow().dirty && !self.save() {
             return;
         }
+        if crate::sandbox::is_flatpak() {
+            // A sandboxed app can't start the game itself; Steam can, and
+            // the launcher playset carries the load order.
+            gtk::UriLauncher::new(&format!("steam://rungameid/{}", crate::paradox::steam::STELLARIS_APP_ID)).launch(Some(&self.window), None::<&gio::Cancellable>, |_| {});
+            self.toasts.add_toast(adw::Toast::new("Starting Stellaris through Steam…"));
+            return;
+        }
         let started = std::time::SystemTime::now();
         let mut child = match game.launch() {
             Ok(child) => child,

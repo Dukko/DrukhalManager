@@ -57,13 +57,10 @@ pub fn workshop_dirs(home: &Path, app_id: u32) -> Vec<PathBuf> {
         .collect()
 }
 
-/// The Stellaris user directory (`~/.local/share/Paradox Interactive/Stellaris`).
-pub fn stellaris_user_dir(home: &Path) -> PathBuf {
-    let data = std::env::var_os("XDG_DATA_HOME")
-        .map(PathBuf::from)
-        .filter(|p| p.is_absolute())
-        .unwrap_or_else(|| home.join(".local/share"));
-    data.join("Paradox Interactive/Stellaris")
+/// The Stellaris user directory (`~/.local/share/Paradox Interactive/Stellaris`),
+/// looked up on the host when sandboxed.
+pub fn stellaris_user_dir() -> PathBuf {
+    crate::sandbox::data_dir().join("Paradox Interactive/Stellaris")
 }
 
 /// Values of every `"key" "value"` pair named `key` in a Valve KeyValues

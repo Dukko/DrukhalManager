@@ -28,7 +28,7 @@ impl Default for Settings {
 }
 
 pub fn path() -> PathBuf {
-    gtk::glib::user_config_dir().join("DrukhalManager/settings.json")
+    crate::sandbox::config_dir().join("DrukhalManager/settings.json")
 }
 
 impl Settings {

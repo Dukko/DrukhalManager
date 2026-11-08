@@ -27,7 +27,7 @@ pub struct Collections {
 }
 
 pub fn path() -> PathBuf {
-    gtk::glib::user_data_dir().join("DrukhalManager/collections.json")
+    crate::sandbox::data_dir().join("DrukhalManager/collections.json")
 }
 
 impl Collections {

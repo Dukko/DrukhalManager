@@ -1,6 +1,6 @@
 # Maintainer: Dukko <dukkokun@gmail.com>
 pkgname=drukhal-manager-git
-_app=io.github.dukkokun.DrukhalManager
+_app=io.github.dukko.DrukhalManager
 pkgver=r20.034e808
 pkgrel=1
 pkgdesc="Native Linux mod manager for Stellaris with AI-assisted merging, a fork of Irony Mod Manager"

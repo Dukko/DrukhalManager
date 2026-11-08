@@ -99,6 +99,6 @@ cargo run --release
 ```
 
 To install by hand elsewhere, copy `target/release/drukhal-manager` to your
-`PATH`, `data/io.github.dukkokun.DrukhalManager.desktop` to
+`PATH`, `data/io.github.dukko.DrukhalManager.desktop` to
 `share/applications`, and the icon from `data/icons` to
 `share/icons/hicolor/scalable/apps`.
