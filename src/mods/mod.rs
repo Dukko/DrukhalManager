@@ -1,14 +1,14 @@
 //! Mod discovery and parsing of Paradox `.mod` descriptor files.
 
 mod descriptor;
+pub mod load_order;
 
 pub use descriptor::Descriptor;
+use load_order::DlcLoad;
 
 use std::collections::HashMap;
 use std::io;
 use std::path::{Path, PathBuf};
-
-use serde::Deserialize;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Source {
@@ -28,23 +28,6 @@ pub struct Mod {
     /// Position in the load order, if enabled.
     pub load_position: Option<usize>,
     pub error: Option<String>,
-}
-
-/// The launcher's `dlc_load.json`.
-#[derive(Debug, Default, Deserialize)]
-pub struct DlcLoad {
-    #[serde(default)]
-    pub enabled_mods: Vec<String>,
-}
-
-impl DlcLoad {
-    pub fn read(user_dir: &Path) -> io::Result<Self> {
-        match std::fs::read_to_string(user_dir.join("dlc_load.json")) {
-            Ok(src) => serde_json::from_str(&src).map_err(io::Error::other),
-            Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(Self::default()),
-            Err(e) => Err(e),
-        }
-    }
 }
 
 /// Reads every descriptor in `<user_dir>/mod`, resolves where its files live,
@@ -73,6 +56,17 @@ pub fn discover(user_dir: &Path, workshop_dirs: &[PathBuf]) -> io::Result<Vec<Mo
         let source = if descriptor.remote_file_id.is_some() { Source::Workshop } else { Source::Local };
         let load_position = positions.get(id.as_str()).copied();
         mods.push(Mod { id, descriptor, content, source, load_position, error });
+    }
+
+    // Keep enabled entries whose descriptor is gone, so saving doesn't
+    // silently drop them and the user can see why they won't load.
+    let known: std::collections::HashSet<String> = mods.iter().map(|m| m.id.clone()).collect();
+    for (position, id) in load.enabled_mods.iter().enumerate() {
+        if !known.contains(id) {
+            let descriptor = Descriptor { name: id.clone(), ..Descriptor::default() };
+            let error = Some("Descriptor file not found".to_owned());
+            mods.push(Mod { id: id.clone(), descriptor, content: None, source: Source::Local, load_position: Some(position), error });
+        }
     }
 
     mods.sort_by(|a, b| match (a.load_position, b.load_position) {
@@ -114,15 +108,16 @@ mod tests {
         std::fs::write(user.join("mod/local.mod"), "name=\"Zed Local\" path=\"mod/local\"").unwrap();
         std::fs::write(user.join("mod/ugc_42.mod"), "name=\"Moved\" path=\"/gone/42\" remote_file_id=\"42\"").unwrap();
         std::fs::write(user.join("mod/broken.mod"), "name=\"Alpha Broken\" path=\"/nowhere\"").unwrap();
-        std::fs::write(user.join("dlc_load.json"), r#"{"enabled_mods":["mod/ugc_42.mod"],"disabled_dlcs":[]}"#).unwrap();
+        std::fs::write(user.join("dlc_load.json"), r#"{"enabled_mods":["mod/ugc_42.mod","mod/deleted.mod"],"disabled_dlcs":[]}"#).unwrap();
 
         let mods = discover(&user, &[workshop.clone()]).unwrap();
         let names: Vec<_> = mods.iter().map(|m| m.descriptor.name.as_str()).collect();
-        assert_eq!(names, ["Moved", "Alpha Broken", "Zed Local"]);
+        assert_eq!(names, ["Moved", "mod/deleted.mod", "Alpha Broken", "Zed Local"]);
         assert_eq!(mods[0].content.as_deref(), Some(workshop.join("42").as_path()));
         assert_eq!(mods[0].load_position, Some(0));
-        assert_eq!(mods[1].error.as_deref(), Some("Mod files not found"));
-        assert_eq!(mods[2].source, Source::Local);
+        assert_eq!(mods[1].error.as_deref(), Some("Descriptor file not found"));
+        assert_eq!(mods[2].error.as_deref(), Some("Mod files not found"));
+        assert_eq!(mods[3].source, Source::Local);
 
         std::fs::remove_dir_all(root).unwrap();
     }
