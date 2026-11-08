@@ -5,6 +5,7 @@
 //! `/chat/completions` endpoint such as OpenRouter, Ollama or LM Studio.
 //! Calls are blocking; run them off the main thread.
 
+use std::io::BufRead;
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
@@ -37,6 +38,15 @@ impl Provider {
             Provider::OpenAiCompatible { model, .. } => model,
         }
     }
+}
+
+/// What the model is doing, reported while a request streams.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Progress {
+    /// A piece of the model's reasoning (summarized, for Claude).
+    Thinking(String),
+    /// A piece of the final answer.
+    Output(String),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -82,8 +92,8 @@ fn agent() -> ureq::Agent {
     ureq::Agent::config_builder().http_status_as_error(false).timeout_global(Some(Duration::from_secs(600))).build().into()
 }
 
-pub fn merge(provider: &Provider, category: &str, key: &str, vanilla: Option<&Source>, sources: &[Source]) -> Result<Merged, String> {
-    complete(provider, SYSTEM, &prompt(category, key, vanilla, sources))
+pub fn merge(provider: &Provider, category: &str, key: &str, vanilla: Option<&Source>, sources: &[Source], on: &mut dyn FnMut(Progress)) -> Result<Merged, String> {
+    complete(provider, SYSTEM, &prompt(category, key, vanilla, sources), on)
 }
 
 const FIX_SYSTEM: &str = "You are an expert Stellaris modder repairing a mod's broken script.
@@ -98,27 +108,30 @@ Rules:
 - Reply with a JSON object with exactly the string fields `script` and `notes`.";
 
 /// Asks the provider to restore the intended nesting of a damaged object.
-pub fn fix(provider: &Provider, category: &str, key: &str, text: &str, problems: &[String], mod_name: &str) -> Result<Merged, String> {
+pub fn fix(provider: &Provider, category: &str, key: &str, text: &str, problems: &[String], mod_name: &str, on: &mut dyn FnMut(Progress)) -> Result<Merged, String> {
     let prompt = format!(
         "Repair `{key}` in `{category}` from the mod \"{}\".\n\nWhat the tool changed in this file:\n{}\n\n<object>\n{text}\n</object>\n",
         mod_name.replace('"', "'"),
         problems.iter().map(|p| format!("- {p}")).collect::<Vec<_>>().join("\n")
     );
-    complete(provider, FIX_SYSTEM, &prompt)
+    complete(provider, FIX_SYSTEM, &prompt, on)
 }
 
-fn complete(provider: &Provider, system: &str, prompt: &str) -> Result<Merged, String> {
+fn complete(provider: &Provider, system: &str, prompt: &str, on: &mut dyn FnMut(Progress)) -> Result<Merged, String> {
     match provider {
-        Provider::Anthropic { api_key } => merge_anthropic(api_key, system, prompt),
-        Provider::OpenAiCompatible { base_url, model, api_key } => merge_openai(base_url, model, api_key, system, prompt),
+        Provider::Anthropic { api_key } => merge_anthropic(api_key, system, prompt, on),
+        Provider::OpenAiCompatible { base_url, model, api_key } => merge_openai(base_url, model, api_key, system, prompt, on),
     }
 }
 
-fn merge_anthropic(api_key: &str, system: &str, prompt: &str) -> Result<Merged, String> {
+fn merge_anthropic(api_key: &str, system: &str, prompt: &str, on: &mut dyn FnMut(Progress)) -> Result<Merged, String> {
     let body = json!({
         "model": CLAUDE_MODEL,
-        "max_tokens": 16000,
+        "max_tokens": 64000,
+        "stream": true,
         "fallbacks": "default",
+        // Claude Opus 5.5 always thinks; ask for readable summaries of it.
+        "thinking": {"type": "adaptive", "display": "summarized"},
         "output_config": {
             "effort": "high",
             "format": {"type": "json_schema", "schema": schema()}
@@ -135,17 +148,72 @@ fn merge_anthropic(api_key: &str, system: &str, prompt: &str) -> Result<Merged, 
         .send_json(&body)
         .map_err(|e| format!("Could not reach the Claude API: {e}"))?;
     let status = response.status();
-    let reply: Value = response.body_mut().read_json().map_err(|e| format!("Unreadable reply from the Claude API ({status}): {e}"))?;
-    parse_anthropic(status.as_u16(), &reply)
+    if status != 200 {
+        let reply: Value = response.body_mut().read_json().unwrap_or(Value::Null);
+        return Err(http_error("The Claude API", status.as_u16(), &reply));
+    }
+    anthropic_stream(std::io::BufReader::new(response.into_body().into_reader()), on)
 }
 
-fn merge_openai(base_url: &str, model: &str, api_key: &str, system: &str, prompt: &str) -> Result<Merged, String> {
+/// Reads Server-Sent Events, calling `f` with each event's data.
+fn read_sse(reader: impl BufRead, mut f: impl FnMut(&str) -> Result<(), String>) -> Result<(), String> {
+    let mut data = String::new();
+    for line in reader.lines() {
+        let line = line.map_err(|e| format!("The connection broke off: {e}"))?;
+        if line.is_empty() {
+            if !data.is_empty() {
+                f(&data)?;
+                data.clear();
+            }
+        } else if let Some(rest) = line.strip_prefix("data:") {
+            if !data.is_empty() {
+                data.push('\n');
+            }
+            data.push_str(rest.strip_prefix(' ').unwrap_or(rest));
+        }
+    }
+    if !data.is_empty() {
+        f(&data)?;
+    }
+    Ok(())
+}
+
+fn anthropic_stream(reader: impl BufRead, on: &mut dyn FnMut(Progress)) -> Result<Merged, String> {
+    let mut text = String::new();
+    let mut stop_reason = None;
+    read_sse(reader, |data| {
+        let event: Value = serde_json::from_str(data).map_err(|e| format!("Unreadable event from the Claude API: {e}"))?;
+        match event["type"].as_str() {
+            Some("content_block_delta") => match event["delta"]["type"].as_str() {
+                Some("thinking_delta") => on(Progress::Thinking(event["delta"]["thinking"].as_str().unwrap_or_default().to_owned())),
+                Some("text_delta") => {
+                    let delta = event["delta"]["text"].as_str().unwrap_or_default();
+                    text.push_str(delta);
+                    on(Progress::Output(delta.to_owned()));
+                }
+                _ => {}
+            },
+            Some("message_delta") => stop_reason = event["delta"]["stop_reason"].as_str().map(str::to_owned),
+            Some("error") => return Err(format!("The Claude API reported an error: {}", event["error"]["message"].as_str().unwrap_or("unknown"))),
+            _ => {}
+        }
+        Ok(())
+    })?;
+    match stop_reason.as_deref() {
+        Some("refusal") => Err("Claude declined to merge this object.".into()),
+        Some("max_tokens") => Err("The merged result was too long and got cut off.".into()),
+        _ => parse_merged(&text),
+    }
+}
+
+fn merge_openai(base_url: &str, model: &str, api_key: &str, system: &str, prompt: &str, on: &mut dyn FnMut(Progress)) -> Result<Merged, String> {
     if model.trim().is_empty() {
         return Err("Choose a model for the OpenAI-compatible provider in Preferences.".into());
     }
     let body = json!({
         "model": model,
         "messages": [{"role": "system", "content": system}, {"role": "user", "content": prompt}],
+        "stream": true,
         // Servers that don't support structured output usually ignore this;
         // the prompt asks for JSON either way.
         "response_format": {"type": "json_schema", "json_schema": {"name": "merge", "strict": true, "schema": schema()}}
@@ -157,8 +225,79 @@ fn merge_openai(base_url: &str, model: &str, api_key: &str, system: &str, prompt
     }
     let mut response = request.send_json(&body).map_err(|e| format!("Could not reach {url}: {e}"))?;
     let status = response.status();
-    let reply: Value = response.body_mut().read_json().map_err(|e| format!("Unreadable reply from {url} ({status}): {e}"))?;
-    parse_openai(status.as_u16(), &reply)
+    if status != 200 {
+        let reply: Value = response.body_mut().read_json().unwrap_or(Value::Null);
+        return Err(http_error("The AI provider", status.as_u16(), &reply));
+    }
+    openai_stream(std::io::BufReader::new(response.into_body().into_reader()), on)
+}
+
+/// Splits a reply into reasoning and answer when the model writes its
+/// reasoning inline as `<think>…</think>`, as many local models do. While
+/// the opening tag may still be arriving, nothing counts as answer yet.
+fn split_think(raw: &str) -> (&str, &str) {
+    let trimmed = raw.trim_start();
+    if let Some(rest) = trimmed.strip_prefix("<think>") {
+        return match rest.split_once("</think>") {
+            Some((thinking, answer)) => (thinking, answer),
+            None => (rest, ""),
+        };
+    }
+    if "<think>".starts_with(trimmed) { ("", "") } else { ("", raw) }
+}
+
+fn openai_stream(mut reader: impl BufRead, on: &mut dyn FnMut(Progress)) -> Result<Merged, String> {
+    // Some servers ignore `stream` and send a single JSON reply.
+    let first = reader.fill_buf().map_err(|e| format!("The connection broke off: {e}"))?.iter().copied().find(|b| !b.is_ascii_whitespace());
+    if first == Some(b'{') {
+        let mut body = String::new();
+        reader.read_to_string(&mut body).map_err(|e| e.to_string())?;
+        let reply: Value = serde_json::from_str(&body).map_err(|e| format!("Unreadable reply from the AI provider: {e}"))?;
+        let message = &reply["choices"][0]["message"];
+        if let Some(reasoning) = message["reasoning"].as_str().or(message["reasoning_content"].as_str()) {
+            on(Progress::Thinking(reasoning.to_owned()));
+        }
+        return parse_openai(200, &reply);
+    }
+
+    let (mut raw, mut thinking_sent, mut answer_sent) = (String::new(), 0, 0);
+    let mut finish = None;
+    read_sse(reader, |data| {
+        if data.trim() == "[DONE]" {
+            return Ok(());
+        }
+        let chunk: Value = serde_json::from_str(data).map_err(|e| format!("Unreadable event from the AI provider: {e}"))?;
+        if let Some(message) = chunk.pointer("/error/message").and_then(Value::as_str) {
+            return Err(format!("The AI provider reported an error: {message}"));
+        }
+        let choice = &chunk["choices"][0];
+        if let Some(reason) = choice["finish_reason"].as_str() {
+            finish = Some(reason.to_owned());
+        }
+        let delta = &choice["delta"];
+        // OpenRouter sends `reasoning`; DeepSeek-style servers `reasoning_content`.
+        if let Some(reasoning) = delta["reasoning"].as_str().or(delta["reasoning_content"].as_str()).filter(|r| !r.is_empty()) {
+            on(Progress::Thinking(reasoning.to_owned()));
+        }
+        if let Some(content) = delta["content"].as_str() {
+            raw.push_str(content);
+            let (thinking, answer) = split_think(&raw);
+            if thinking.len() > thinking_sent {
+                on(Progress::Thinking(thinking[thinking_sent..].to_owned()));
+                thinking_sent = thinking.len();
+            }
+            if answer.len() > answer_sent {
+                on(Progress::Output(answer[answer_sent..].to_owned()));
+                answer_sent = answer.len();
+            }
+        }
+        Ok(())
+    })?;
+    match finish.as_deref() {
+        Some("length") => Err("The merged result was too long and got cut off.".into()),
+        Some("content_filter") => Err("The model declined to merge this object.".into()),
+        _ => parse_merged(split_think(&raw).1),
+    }
 }
 
 fn prompt(category: &str, key: &str, vanilla: Option<&Source>, sources: &[Source]) -> String {
@@ -187,25 +326,6 @@ fn http_error(service: &str, status: u16, reply: &Value) -> String {
         429 => format!("Rate limited by {service}, try again shortly ({message})"),
         _ => format!("{service} error {status}: {message}"),
     }
-}
-
-fn parse_anthropic(status: u16, reply: &Value) -> Result<Merged, String> {
-    if status != 200 {
-        return Err(http_error("The Claude API", status, reply));
-    }
-    match reply["stop_reason"].as_str() {
-        Some("refusal") => return Err("Claude declined to merge this object.".into()),
-        Some("max_tokens") => return Err("The merged result was too long and got cut off.".into()),
-        _ => {}
-    }
-    let text = reply["content"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .filter(|block| block["type"] == "text")
-        .filter_map(|block| block["text"].as_str())
-        .collect::<String>();
-    parse_merged(&text)
 }
 
 fn parse_openai(status: u16, reply: &Value) -> Result<Merged, String> {
@@ -251,13 +371,46 @@ mod tests {
         assert!(p.find("priority=\"1\" name=\"Mod 'A'\"").unwrap() < p.find("priority=\"2\" name=\"B\"").unwrap());
     }
 
+    fn collect(f: impl FnOnce(&mut dyn FnMut(Progress)) -> Result<Merged, String>) -> (Result<Merged, String>, String, String) {
+        let (mut thinking, mut output) = (String::new(), String::new());
+        let result = f(&mut |p| match p {
+            Progress::Thinking(t) => thinking.push_str(&t),
+            Progress::Output(o) => output.push_str(&o),
+        });
+        (result, thinking, output)
+    }
+
     #[test]
-    fn parses_anthropic_replies() {
-        let ok = json!({"stop_reason": "end_turn", "content": [{"type": "thinking", "thinking": ""}, {"type": "text", "text": "{\"script\":\"x = {}\",\"notes\":\"n\"}"}]});
-        assert_eq!(parse_anthropic(200, &ok).unwrap(), Merged { script: "x = {}".into(), notes: "n".into() });
-        assert!(parse_anthropic(200, &json!({"stop_reason": "refusal", "content": []})).unwrap_err().contains("declined"));
-        assert!(parse_anthropic(401, &json!({"error": {"message": "invalid x-api-key"}})).unwrap_err().contains("rejected"));
-        assert!(parse_anthropic(500, &json!({"error": {"message": "overloaded"}})).unwrap_err().contains("overloaded"));
+    fn streams_anthropic_thinking_and_answer() {
+        let sse = "event: message_start\ndata: {\"type\":\"message_start\"}\n\nevent: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"thinking_delta\",\"thinking\":\"Comparing the \"}}\n\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"thinking_delta\",\"thinking\":\"two versions.\"}}\n\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"signature_delta\",\"signature\":\"x\"}}\n\ndata: {\"type\":\"content_block_delta\",\"index\":1,\"delta\":{\"type\":\"text_delta\",\"text\":\"{\\\"script\\\":\\\"x = {}\\\",\"}}\n\ndata: {\"type\":\"content_block_delta\",\"index\":1,\"delta\":{\"type\":\"text_delta\",\"text\":\"\\\"notes\\\":\\\"n\\\"}\"}}\n\nevent: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"}}\n\n";
+        let (result, thinking, output) = collect(|on| anthropic_stream(sse.as_bytes(), on));
+        assert_eq!(result.unwrap(), Merged { script: "x = {}".into(), notes: "n".into() });
+        assert_eq!(thinking, "Comparing the two versions.");
+        assert!(output.starts_with("{\"script\""));
+
+        let refusal = "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"refusal\"}}\n\n";
+        assert!(collect(|on| anthropic_stream(refusal.as_bytes(), on)).0.unwrap_err().contains("declined"));
+        let error = "event: error\ndata: {\"type\":\"error\",\"error\":{\"type\":\"overloaded_error\",\"message\":\"Overloaded\"}}\n\n";
+        assert!(collect(|on| anthropic_stream(error.as_bytes(), on)).0.unwrap_err().contains("Overloaded"));
+    }
+
+    #[test]
+    fn streams_openai_reasoning_in_every_style() {
+        let chunk = |delta: Value| format!("data: {}\n\n", json!({"choices": [{"delta": delta}]}));
+        // OpenRouter's separate `reasoning` field.
+        let sse = [chunk(json!({"reasoning": "Hmm. "})), chunk(json!({"content": "{\"script\":\"a = {}\",\"notes\":\"\"}"})), "data: [DONE]\n\n".into()].concat();
+        let (result, thinking, _) = collect(|on| openai_stream(sse.as_bytes(), on));
+        assert_eq!((result.unwrap().script, thinking.as_str()), ("a = {}".to_owned(), "Hmm. "));
+        // Inline <think> tags, split across chunks.
+        let sse = [chunk(json!({"content": "<thi"})), chunk(json!({"content": "nk>Let me"})), chunk(json!({"content": " see</think>{\"script\":\"b = {}\","})), chunk(json!({"content": "\"notes\":\"\"}"}))].concat();
+        let (result, thinking, output) = collect(|on| openai_stream(sse.as_bytes(), on));
+        assert_eq!(result.unwrap().script, "b = {}");
+        assert_eq!(thinking, "Let me see");
+        assert!(output.starts_with('{'));
+        // A server that ignores `stream`.
+        let plain = json!({"choices": [{"finish_reason": "stop", "message": {"reasoning_content": "R", "content": "{\"script\":\"c = {}\",\"notes\":\"\"}"}}]}).to_string();
+        let (result, thinking, _) = collect(|on| openai_stream(plain.as_bytes(), on));
+        assert_eq!((result.unwrap().script, thinking.as_str()), ("c = {}".to_owned(), "R"));
     }
 
     #[test]

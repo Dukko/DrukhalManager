@@ -13,6 +13,7 @@ use crate::conflicts_view::plural;
 use crate::merge::ai::{self, Provider};
 use crate::merge::{file_merge, lint};
 use crate::merge_dialog;
+use crate::thinking_view::{self, ThinkingView};
 use crate::paradox::script;
 
 pub struct Request {
@@ -56,7 +57,11 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
     let editor = gtk::TextView::builder().monospace(true).wrap_mode(gtk::WrapMode::None).top_margin(8).bottom_margin(8).left_margin(8).right_margin(8).build();
     let editor_scroll = gtk::ScrolledWindow::builder().child(&editor).min_content_height(320).css_classes(["card"]).build();
     let result = adw::PreferencesGroup::builder().title("Fixed File").description("Review and edit before saving. It replaces the mod's copy through the merged patch.").build();
-    result.add(&editor_scroll);
+    let thinking = ThinkingView::new();
+    let result_box = gtk::Box::new(gtk::Orientation::Vertical, 8);
+    result_box.append(&thinking.widget);
+    result_box.append(&editor_scroll);
+    result.add(&result_box);
 
     let page = adw::PreferencesPage::new();
     page.add(&problem);
@@ -131,6 +136,8 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
         #[strong]
         request,
         #[strong]
+        thinking,
+        #[strong]
         state,
         #[strong]
         labels,
@@ -156,6 +163,8 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
             let mod_name = request.mod_name.clone();
             glib::spawn_future_local(glib::clone!(
                 #[strong]
+                thinking,
+                #[strong]
                 labels,
                 #[weak]
                 button,
@@ -177,11 +186,12 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
                         };
                         label.set_label("Fixing…");
                         let (provider, c, k, object, fixes, m) = (provider.clone(), category.clone(), key.clone(), text[range].to_owned(), fixes.clone(), mod_name.clone());
-                        let result = gio::spawn_blocking(move || ai::fix(&provider, &c, &k, &object, &fixes, &m)).await;
+                        let heading = key.clone();
+                        let result = thinking_view::run(&thinking, Some(&heading), move |on| ai::fix(&provider, &c, &k, &object, &fixes, &m, on)).await;
                         let fixed = match result {
-                            Ok(Ok(f)) => merge_dialog::validate(&category, &key, &f.script).map(|script| (script, f.notes)),
-                            Ok(Err(e)) => Err(e),
-                            Err(_) => Err("failed unexpectedly".to_owned()),
+                            Some(Ok(f)) => merge_dialog::validate(&category, &key, &f.script).map(|script| (script, f.notes)),
+                            Some(Err(e)) => Err(e),
+                            None => Err("failed unexpectedly".to_owned()),
                         };
                         match fixed.and_then(|(script, notes)| lint::replace_object(&category, &key, &text, &script).map(|t| (t, notes)).ok_or_else(|| "could not place the fix".to_owned())) {
                             Ok((new_text, notes)) => {

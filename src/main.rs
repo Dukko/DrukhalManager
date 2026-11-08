@@ -7,6 +7,7 @@ mod mods;
 mod paradox;
 mod preferences;
 mod settings;
+mod thinking_view;
 mod window;
 
 use adw::prelude::*;

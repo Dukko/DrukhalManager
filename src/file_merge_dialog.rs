@@ -13,6 +13,7 @@ use crate::conflicts_view::plural;
 use crate::merge::ai::{self, Provider};
 use crate::merge::file_merge::{self, Plan, Status, Version};
 use crate::merge_dialog;
+use crate::thinking_view::{self, ThinkingView};
 
 pub struct Request {
     pub path: String,
@@ -47,7 +48,11 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
         .title("Merged File")
         .description("Review and edit before saving. Merging conflicts rebuilds this from the objects above, replacing manual edits.")
         .build();
-    result.add(&editor_scroll);
+    let thinking = ThinkingView::new();
+    let result_box = gtk::Box::new(gtk::Orientation::Vertical, 8);
+    result_box.append(&thinking.widget);
+    result_box.append(&editor_scroll);
+    result.add(&result_box);
 
     let page = adw::PreferencesPage::new();
     page.add(&summary);
@@ -164,6 +169,8 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
         #[strong]
         request,
         #[strong]
+        thinking,
+        #[strong]
         plan,
         #[strong]
         status_labels,
@@ -186,6 +193,8 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
             save_button.set_sensitive(false);
             editor.set_editable(false);
             glib::spawn_future_local(glib::clone!(
+                #[strong]
+                thinking,
                 #[strong]
                 plan,
                 #[strong]
@@ -213,11 +222,12 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
                         label.set_label("Merging…");
                         let provider = provider.clone();
                         let (c, k) = (category.clone(), key.clone());
-                        let result = gio::spawn_blocking(move || ai::merge(&provider, &c, &k, vanilla.as_ref(), &sources)).await;
+                        let heading = key.clone();
+                        let result = thinking_view::run(&thinking, Some(&heading), move |on| ai::merge(&provider, &c, &k, vanilla.as_ref(), &sources, on)).await;
                         let merged = match result {
-                            Ok(Ok(m)) => merge_dialog::validate(&category, &key, &m.script),
-                            Ok(Err(e)) => Err(e),
-                            Err(_) => Err("failed unexpectedly".to_owned()),
+                            Some(Ok(m)) => merge_dialog::validate(&category, &key, &m.script),
+                            Some(Err(e)) => Err(e),
+                            None => Err("failed unexpectedly".to_owned()),
                         };
                         match merged {
                             Ok(text) => {

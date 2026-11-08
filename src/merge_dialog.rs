@@ -13,6 +13,7 @@ use crate::merge::ai::{self, Provider};
 use crate::merge::patch::Merge;
 use crate::merge::source::{self, Source};
 use crate::paradox::script;
+use crate::thinking_view::{self, ThinkingView};
 
 /// Where one mod's version of the object lives.
 pub struct Origin {
@@ -62,6 +63,8 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
     let status = adw::Banner::new("");
     let result = adw::PreferencesGroup::builder().title("Merged Result").description("Merge to get a combined version, then review and edit it before saving").build();
     let result_box = gtk::Box::new(gtk::Orientation::Vertical, 8);
+    let thinking = ThinkingView::new();
+    result_box.append(&thinking.widget);
     result_box.append(&editor_scroll);
     result_box.append(&notes);
     result.add(&result_box);
@@ -124,6 +127,8 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
         #[strong]
         request,
         #[strong]
+        thinking,
+        #[strong]
         loaded,
         #[weak]
         dialog,
@@ -146,6 +151,8 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
             button.set_child(Some(&adw::Spinner::new()));
             let (category, key) = (request.category.clone(), request.key.clone());
             glib::spawn_future_local(glib::clone!(
+                #[strong]
+                thinking,
                 #[weak]
                 button,
                 #[weak]
@@ -155,17 +162,17 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
                 #[weak]
                 status,
                 async move {
-                    let result = gio::spawn_blocking(move || ai::merge(&provider, &category, &key, vanilla.as_ref(), &sources)).await;
+                    let result = thinking_view::run(&thinking, None, move |on| ai::merge(&provider, &category, &key, vanilla.as_ref(), &sources, on)).await;
                     button.set_label("Merge Again");
                     button.set_sensitive(true);
                     match result {
-                        Ok(Ok(merged)) => {
+                        Some(Ok(merged)) => {
                             buffer.set_text(&merged.script);
                             notes.set_label(&merged.notes);
                             notes.set_visible(!merged.notes.is_empty());
                         }
-                        Ok(Err(message)) => show_error(&status, &message),
-                        Err(_) => show_error(&status, "The merge failed unexpectedly"),
+                        Some(Err(message)) => show_error(&status, &message),
+                        None => show_error(&status, "The merge failed unexpectedly"),
                     }
                 }
             ));
