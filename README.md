@@ -4,6 +4,23 @@ A native Linux mod manager for Stellaris, with AI-assisted mod merging.
 
 Built with Rust, GTK4 and libadwaita.
 
+## Managing mods
+
+- **Collections**: keep several named load orders and switch between them
+  from the header. Each one syncs to its own Paradox Launcher playset.
+  Import a launcher playset (Irony's, for example) or a shared file, and
+  export a collection to share. Shared files match mods by Steam ID.
+- **Load order checks**: warns when a mod loads before a mod it depends on
+  (**Sort by Dependencies** fixes it), and notes missing dependencies and
+  mods made for an older game version.
+- **Descriptor repair**: fixes `.mod` files that point at folders that no
+  longer exist, and removes descriptors whose mod is gone. Everything is
+  backed up first.
+- **Search** (Ctrl+F), and **Open Folder** or **Open Workshop Page** from
+  each mod's menu.
+- If something else changes the load order (the Paradox Launcher resets it
+  when opened), a banner offers to restore your collection.
+
 ## Merging conflicts
 
 The Conflicts page lists every file and object that more than one enabled mod
@@ -29,6 +46,10 @@ automatically, using the convention that top-level objects start at column 0,
 and flags the objects it touched. **Fix with AI** then restores the intended
 nesting of just those objects. The fixed copy is saved through the merged
 patch, so the mod itself is never modified.
+
+Without AI, **Use This Version** keeps one mod's version as it is, and the
+eye button ignores a conflict, or a whole folder, so it no longer shows or
+counts.
 
 Choose the AI provider in Preferences (Ctrl+,):
 

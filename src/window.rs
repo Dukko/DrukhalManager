@@ -1,5 +1,7 @@
 //! The main window: a load order editor.
 
+mod collections_ui;
+
 use std::cell::{Cell, RefCell};
 use std::io;
 use std::path::PathBuf;
@@ -14,6 +16,7 @@ use crate::merge::patch::{self, Patch};
 use crate::file_merge_dialog;
 use crate::fix_dialog;
 use crate::merge_dialog;
+use crate::mods::collections::Collections;
 use crate::mods::{self, Mod, checks};
 use crate::preferences;
 use crate::settings::{self, Settings};
@@ -121,6 +124,24 @@ impl State {
         self.revision += 1;
     }
 
+    /// Replaces the load order with `ids`; returns those not installed.
+    fn set_enabled_ids(&mut self, ids: &[String]) -> Vec<String> {
+        let index: std::collections::HashMap<&str, usize> = self.mods.iter().enumerate().map(|(i, m)| (m.id.as_str(), i)).collect();
+        let mut missing = Vec::new();
+        let mut enabled = Vec::new();
+        for id in ids {
+            match index.get(id.as_str()) {
+                Some(&i) if !enabled.contains(&i) => enabled.push(i),
+                Some(_) => {}
+                None => missing.push(id.clone()),
+            }
+        }
+        self.enabled = enabled;
+        self.dirty = true;
+        self.revision += 1;
+        missing
+    }
+
     fn enabled_ids(&self) -> Vec<String> {
         self.enabled.iter().map(|&i| self.mods[i].id.clone()).collect()
     }
@@ -153,6 +174,11 @@ struct Window {
     enabled_list: gtk::ListBox,
     disabled_list: gtk::ListBox,
     toasts: adw::ToastOverlay,
+    collections: RefCell<Collections>,
+    collection_button: gtk::MenuButton,
+    /// Offers to restore the active collection when the game's load order
+    /// was changed elsewhere.
+    restore_banner: adw::Banner,
 }
 
 pub fn build(app: &adw::Application, paths: Paths, game: Option<GameInstall>, found: io::Result<Vec<Mod>>) {
@@ -193,6 +219,8 @@ pub fn build(app: &adw::Application, paths: Paths, game: Option<GameInstall>, fo
     header.pack_end(&menu_button);
     header.pack_end(&launch);
     header.pack_end(&save);
+    let collection_button = gtk::MenuButton::builder().tooltip_text("Collections: switch between saved load orders").build();
+    header.pack_start(&collection_button);
     if game.is_none() {
         launch.set_tooltip_text(Some("Stellaris was not found in any Steam library"));
     }
@@ -217,6 +245,8 @@ pub fn build(app: &adw::Application, paths: Paths, game: Option<GameInstall>, fo
     let search = gtk::SearchEntry::builder().placeholder_text("Search mods by name or tag (Ctrl+F)").build();
     let repair_banner = adw::Banner::builder().button_label("Repair…").build();
     toolbar.add_top_bar(&repair_banner);
+    let restore_banner = adw::Banner::builder().button_label("Restore").build();
+    toolbar.add_top_bar(&restore_banner);
     content.append(&top);
     content.append(&search);
     for list in [&enabled_list, &disabled_list] {
@@ -275,6 +305,9 @@ pub fn build(app: &adw::Application, paths: Paths, game: Option<GameInstall>, fo
         window: window.clone(),
         paths,
         game,
+        collections: RefCell::new(Collections::starting_with(Vec::new())),
+        collection_button,
+        restore_banner,
         state: RefCell::new(State::new(found)),
         status,
         all_toggle: all_toggle.clone(),
@@ -319,6 +352,7 @@ pub fn build(app: &adw::Application, paths: Paths, game: Option<GameInstall>, fo
         }
     });
     ui.update_repair_banner();
+    ui.setup_collections();
     let weak = Rc::downgrade(&ui);
     sort_button.connect_clicked(move |_| {
         if let Some(ui) = weak.upgrade() {
@@ -1066,6 +1100,15 @@ impl Window {
         match mods::load_order::save(&self.paths.user_dir, &self.paths.backup_dir, &ids) {
             Ok(_) => {
                 self.state.borrow_mut().dirty = false;
+                {
+                    let mut collections = self.collections.borrow_mut();
+                    let active = collections.active.clone();
+                    collections.set_mods(&active, ids);
+                    if let Err(e) = collections.save(&mods::collections::path()) {
+                        self.toasts.add_toast(adw::Toast::builder().title(format!("Could not save collections: {e}")).timeout(0).build());
+                    }
+                }
+                self.restore_banner.set_revealed(false);
                 self.refresh();
                 self.toasts.add_toast(self.sync_launcher());
                 true
@@ -1098,9 +1141,10 @@ impl Window {
                 })
                 .collect()
         };
-        match launcher_db::sync(&self.paths.user_dir, &self.paths.backup_dir, &playset) {
+        let playset_name = mods::collections::playset_name(&self.collections.borrow().active);
+        match launcher_db::sync(&self.paths.user_dir, &self.paths.backup_dir, &playset_name, &playset) {
             Ok(None) => adw::Toast::new("Load order saved"),
-            Ok(Some(synced)) if synced.missing.is_empty() => adw::Toast::new(&format!("Load order saved and set as the “{}” playset in the Paradox Launcher", launcher_db::PLAYSET_NAME)),
+            Ok(Some(synced)) if synced.missing.is_empty() => adw::Toast::new(&format!("Load order saved and set as the “{playset_name}” playset in the Paradox Launcher")),
             Ok(Some(synced)) => adw::Toast::builder()
                 .title(format!(
                     "Load order saved. The Paradox Launcher doesn't know {} yet, so its playset leaves {} out",
