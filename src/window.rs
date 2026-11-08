@@ -16,6 +16,7 @@ use crate::mods::{self, Mod};
 use crate::preferences;
 use crate::settings::{self, Settings};
 use crate::paradox::game::GameInstall;
+use crate::paradox::launcher_db;
 
 pub struct Paths {
     pub user_dir: PathBuf,
@@ -129,7 +130,6 @@ struct Window {
     enabled_list: gtk::ListBox,
     disabled_list: gtk::ListBox,
     toasts: adw::ToastOverlay,
-    save_action: gio::SimpleAction,
 }
 
 pub fn build(app: &adw::Application, paths: Paths, game: Option<GameInstall>, found: io::Result<Vec<Mod>>) {
@@ -163,7 +163,7 @@ pub fn build(app: &adw::Application, paths: Paths, game: Option<GameInstall>, fo
         .action_name("win.launch")
         .css_classes(["suggested-action"])
         .build();
-    let save = gtk::Button::builder().label("Save").action_name("win.save").tooltip_text("Save load order (Ctrl+S)").build();
+    let save = gtk::Button::builder().label("Save").action_name("win.save").tooltip_text("Save the load order for the game and the Paradox Launcher (Ctrl+S)").build();
     let menu = gio::Menu::new();
     menu.append(Some("_Preferences"), Some("win.preferences"));
     let menu_button = gtk::MenuButton::builder().icon_name("open-menu-symbolic").menu_model(&menu).tooltip_text("Main Menu").primary(true).build();
@@ -233,7 +233,6 @@ pub fn build(app: &adw::Application, paths: Paths, game: Option<GameInstall>, fo
         enabled_list,
         disabled_list,
         toasts,
-        save_action: save_action.clone(),
     });
 
     let weak = Rc::downgrade(&ui);
@@ -328,7 +327,6 @@ impl Window {
         self.all_toggle.set_inconsistent(enabled > 0 && enabled < total);
         self.all_toggle.set_sensitive(total > 0);
         self.syncing.set(false);
-        self.save_action.set_enabled(state.dirty);
         drop(state);
         self.scan_if_stale();
     }
@@ -650,13 +648,49 @@ impl Window {
             Ok(_) => {
                 self.state.borrow_mut().dirty = false;
                 self.refresh();
-                self.toasts.add_toast(adw::Toast::new("Load order saved"));
+                self.toasts.add_toast(self.sync_launcher());
                 true
             }
             Err(e) => {
                 self.toasts.add_toast(adw::Toast::builder().title(format!("Could not save load order: {e}")).timeout(0).build());
                 false
             }
+        }
+    }
+
+    /// Mirrors the saved load order into the Paradox Launcher's playsets and
+    /// returns a toast describing the outcome.
+    fn sync_launcher(&self) -> adw::Toast {
+        let playset: Vec<launcher_db::PlaysetMod> = {
+            let state = self.state.borrow();
+            state
+                .enabled
+                .iter()
+                .map(|&i| {
+                    let m = &state.mods[i];
+                    launcher_db::PlaysetMod {
+                        registry_id: m.id.clone(),
+                        steam_id: m.descriptor.remote_file_id,
+                        name: display_name(m).to_owned(),
+                        dir: m.content.clone(),
+                        tags: m.descriptor.tags.clone(),
+                        supported_version: m.descriptor.game_version().to_owned(),
+                    }
+                })
+                .collect()
+        };
+        match launcher_db::sync(&self.paths.user_dir, &self.paths.backup_dir, &playset) {
+            Ok(None) => adw::Toast::new("Load order saved"),
+            Ok(Some(synced)) if synced.missing.is_empty() => adw::Toast::new(&format!("Load order saved and set as the “{}” playset in the Paradox Launcher", launcher_db::PLAYSET_NAME)),
+            Ok(Some(synced)) => adw::Toast::builder()
+                .title(format!(
+                    "Load order saved. The Paradox Launcher doesn't know {} yet, so its playset leaves {} out",
+                    synced.missing.join(", "),
+                    if synced.missing.len() == 1 { "it" } else { "them" }
+                ))
+                .timeout(0)
+                .build(),
+            Err(e) => adw::Toast::builder().title(format!("Load order saved, but the Paradox Launcher's playset wasn't updated: {e}")).timeout(0).build(),
         }
     }
 
