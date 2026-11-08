@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#3d2f7a"/>
+      <stop offset="1" stop-color="#161233"/>
+    </linearGradient>
+    <radialGradient id="planet" cx="0.38" cy="0.35" r="0.75">
+      <stop offset="0" stop-color="#c9b8ff"/>
+      <stop offset="0.55" stop-color="#7d62e0"/>
+      <stop offset="1" stop-color="#3b2a8f"/>
+    </radialGradient>
+  </defs>
+  <rect x="8" y="8" width="112" height="112" rx="26" fill="url(#bg)"/>
+  <g fill="#fff">
+    <circle cx="27" cy="30" r="1.6" opacity="0.9"/>
+    <circle cx="98" cy="24" r="1.2" opacity="0.7"/>
+    <circle cx="104" cy="92" r="1.6" opacity="0.8"/>
+    <circle cx="22" cy="96" r="1.1" opacity="0.6"/>
+  </g>
+  <!-- Back half of the ring, behind the planet -->
+  <path d="M22 70 A44 14 -18 0 1 106 46" fill="none" stroke="#f4c86a" stroke-width="5" stroke-linecap="round" opacity="0.55"/>
+  <circle cx="64" cy="60" r="28" fill="url(#planet)"/>
+  <!-- Two load-order bars across the planet -->
+  <rect x="46" y="51" width="36" height="5" rx="2.5" fill="#fff" opacity="0.85"/>
+  <rect x="46" y="61" width="26" height="5" rx="2.5" fill="#fff" opacity="0.6"/>
+  <!-- Front half of the ring -->
+  <path d="M106 46 A44 14 -18 0 1 22 70" fill="none" stroke="#f4c86a" stroke-width="5" stroke-linecap="round"/>
+  <!-- A spark: merging -->
+  <path d="M96 84 l3 8 8 3 -8 3 -3 8 -3 -8 -8 -3 8 -3z" fill="#f4c86a"/>
+</svg>

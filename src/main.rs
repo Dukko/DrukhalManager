@@ -24,6 +24,8 @@ fn main() -> gtk::glib::ExitCode {
 }
 
 fn build_ui(app: &adw::Application) {
+    // Picks up the installed icon for the window.
+    gtk::Window::set_default_icon_name(APP_ID);
     let home = gtk::glib::home_dir();
     let user_dir = steam::stellaris_user_dir(&home);
     let libraries = steam::library_folders(&home);

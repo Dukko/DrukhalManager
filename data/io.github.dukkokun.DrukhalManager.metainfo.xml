@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.dukkokun.DrukhalManager</id>
+  <name>DrukhalManager</name>
+  <summary>Manage Stellaris mods and merge their conflicts</summary>
+  <metadata_license>CC0-1.0</metadata_license>
+  <developer id="io.github.dukkokun">
+    <name>Dukko</name>
+  </developer>
+  <description>
+    <p>A native Linux mod manager for Stellaris that edits your load order, finds where mods conflict, and merges them into a patch so every mod's changes survive.</p>
+    <ul>
+      <li>Edit the load order and keep several collections, synced to the Paradox Launcher</li>
+      <li>Find files and objects that several mods change</li>
+      <li>Merge conflicts with AI, or pick a version, into a patch mod</li>
+      <li>Repair files with brace mistakes and broken mod descriptors</li>
+      <li>See which mods caused the errors the game logged</li>
+    </ul>
+  </description>
+  <launchable type="desktop-id">io.github.dukkokun.DrukhalManager.desktop</launchable>
+  <url type="homepage">https://github.com/Dukko/DrukhalManager</url>
+  <url type="bugtracker">https://github.com/Dukko/DrukhalManager/issues</url>
+  <content_rating type="oars-1.1"/>
+  <categories>
+    <category>Game</category>
+  </categories>
+</component>

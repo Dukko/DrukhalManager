@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=DrukhalManager
+GenericName=Mod Manager
+Comment=Manage Stellaris mods, find conflicts and merge them
+Exec=drukhal-manager
+Icon=io.github.dukkokun.DrukhalManager
+Terminal=false
+Categories=Game;GTK;
+Keywords=Stellaris;Paradox;mods;mod manager;load order;Irony;
+StartupNotify=true
+SingleMainWindow=true

@@ -69,10 +69,27 @@ DrukhalManager stands on the shoulders of
 and code ported from it is marked at the top of the relevant source files.
 See [NOTICE](NOTICE) for its license.
 
+## Installing
+
+On Arch or CachyOS, build and install the package from the repository:
+
+```sh
+cd packaging/arch
+makepkg -si
+```
+
+This installs `drukhal-manager` with a desktop entry and icon, so it shows up
+in your app launcher.
+
 ## Building
 
 Requires Rust, GTK 4.14+ and libadwaita 1.6+ development files.
 
 ```sh
-cargo run
+cargo run --release
 ```
+
+To install by hand elsewhere, copy `target/release/drukhal-manager` to your
+`PATH`, `data/io.github.dukkokun.DrukhalManager.desktop` to
+`share/applications`, and the icon from `data/icons` to
+`share/icons/hicolor/scalable/apps`.
