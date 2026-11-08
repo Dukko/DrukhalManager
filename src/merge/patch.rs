@@ -85,11 +85,6 @@ impl Patch {
         self.manifest.files.iter().find(|f| f.path.eq_ignore_ascii_case(path))
     }
 
-    /// Whether the patch replaces whole files, so it must load last.
-    pub fn has_files(&self) -> bool {
-        !self.manifest.files.is_empty()
-    }
-
     /// Adds or replaces a merged copy of `path`.
     pub fn save_file(&mut self, user_dir: &Path, game_version: Option<&str>, path: &str, contents: &str, sources: Vec<String>) -> io::Result<()> {
         self.write_descriptors(user_dir, game_version)?;
@@ -210,10 +205,9 @@ mod tests {
         assert_eq!(parsed.name, NAME);
 
         let mut patch = Patch::open(&user).unwrap();
-        assert!(!patch.has_files());
         patch.save_file(&user, None, "common/buildings/00_x.txt", "a = {}\n", vec!["A".into(), "B".into()]).unwrap();
         let patch = Patch::open(&user).unwrap();
-        assert!(patch.has_files() && patch.get("events", "ns.1").is_some(), "object merges survive");
+        assert!(patch.get("events", "ns.1").is_some(), "object merges survive");
         assert_eq!(patch.get_file("common/buildings/00_X.txt").unwrap().sources, ["A", "B"]);
         assert_eq!(std::fs::read_to_string(Patch::root(&user).join("common/buildings/00_x.txt")).unwrap(), "a = {}\n");
 

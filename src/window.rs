@@ -42,7 +42,23 @@ impl State {
     fn new(mods: Vec<Mod>) -> Self {
         let mut enabled: Vec<usize> = (0..mods.len()).filter(|&i| mods[i].load_position.is_some()).collect();
         enabled.sort_by_key(|&i| mods[i].load_position);
-        Self { mods, enabled, dirty: false, revision: 0 }
+        let mut state = Self { mods, enabled, dirty: false, revision: 0 };
+        // A saved order with the patch elsewhere gets fixed on the next save.
+        state.dirty = state.pin_patch();
+        state
+    }
+
+    /// Keeps the merged patch at the very end of the load order: its merged
+    /// files and fixes only win when it loads after every mod. Every change
+    /// to the order goes through here. Returns whether it had to move.
+    fn pin_patch(&mut self) -> bool {
+        let Some(at) = self.enabled.iter().position(|&i| self.mods[i].id == patch::ID) else { return false };
+        if at + 1 == self.enabled.len() {
+            return false;
+        }
+        let patch = self.enabled.remove(at);
+        self.enabled.push(patch);
+        true
     }
 
     fn disabled(&self) -> Vec<usize> {
@@ -60,6 +76,7 @@ impl State {
             }
             _ => return,
         }
+        self.pin_patch();
         self.dirty = true;
         self.revision += 1;
     }
@@ -85,6 +102,7 @@ impl State {
         }
         let item = self.enabled.remove(from);
         self.enabled.insert(before.min(self.enabled.len()), item);
+        self.pin_patch();
         self.dirty = true;
         self.revision += 1;
     }
@@ -106,6 +124,7 @@ impl State {
             }
             self.enabled.clear();
         }
+        self.pin_patch();
         self.dirty = true;
         self.revision += 1;
         Some(previous)
@@ -114,6 +133,7 @@ impl State {
     fn restore(&mut self, (enabled, dirty): (Vec<usize>, bool)) {
         self.enabled = enabled;
         self.dirty = dirty;
+        self.pin_patch();
         self.revision += 1;
     }
 
@@ -125,6 +145,7 @@ impl State {
         self.mods.retain(|m| !ids.contains(&m.id));
         let index: std::collections::HashMap<&str, usize> = self.mods.iter().enumerate().map(|(i, m)| (m.id.as_str(), i)).collect();
         self.enabled = enabled_ids.iter().filter_map(|id| index.get(id.as_str()).copied()).collect();
+        self.pin_patch();
         if self.enabled.len() != before {
             self.dirty = true;
         }
@@ -144,6 +165,7 @@ impl State {
             }
         }
         self.enabled = enabled;
+        self.pin_patch();
         self.dirty = true;
         self.revision += 1;
         missing
@@ -767,28 +789,14 @@ impl Window {
             };
             let was_enabled = state.enabled.contains(&index);
             if !was_enabled {
+                // Pinned to the end, like every change.
                 state.set_enabled(index, true);
-            }
-            // Merged files only replace the mods' copies if the patch loads
-            // after them.
-            let needs_last = self.patch.borrow().as_ref().is_some_and(Patch::has_files);
-            let position = state.enabled.iter().position(|&i| i == index).unwrap();
-            let moved = needs_last && position + 1 != state.enabled.len();
-            if moved {
-                let len = state.enabled.len();
-                state.move_enabled(position, len);
-            }
-            if !was_enabled || moved {
                 // The patch isn't scanned, so the current report still holds.
                 if let Some(a) = self.analysis.borrow().as_ref() {
                     a.revision.set(state.revision);
                 }
             }
-            match (!was_enabled, moved) {
-                (true, _) => Some("added to the end of the load order"),
-                (false, true) => Some("moved to the end of the load order so its files win"),
-                _ => None,
-            }
+            (!was_enabled).then_some("added to the end of the load order")
         };
         self.refresh();
         let toast = adw::Toast::builder().title(format!("Saved to {}", patch::NAME));
@@ -837,6 +845,7 @@ impl Window {
                 return;
             }
             let previous = (std::mem::replace(&mut state.enabled, sorted), state.dirty);
+            state.pin_patch();
             state.dirty = true;
             state.revision += 1;
             previous
@@ -1025,16 +1034,11 @@ impl Window {
                 .build();
             row.add_suffix(&badge);
         }
-        let patch_misplaced = m.id == patch::ID
-            && position.is_some_and(|p| p + 1 != self.state.try_borrow().map_or(0, |s| s.enabled.len()))
-            && self.patch.borrow().as_ref().is_some_and(Patch::has_files);
+        let is_patch = m.id == patch::ID;
         // One icon for everything wrong with this mod, worst first.
         let mut problems: Vec<(checks::Severity, String)> = Vec::new();
         if let Some(error) = &m.error {
             problems.push((checks::Severity::Warning, error.clone()));
-        }
-        if patch_misplaced {
-            problems.push((checks::Severity::Warning, "Move this to the end: its merged files only apply when it loads last".to_owned()));
         }
         problems.extend(issues.iter().map(|i| (i.severity, i.message.clone())));
         problems.sort_by(|a, b| b.0.cmp(&a.0));
@@ -1049,7 +1053,7 @@ impl Window {
 
         let menu = gio::Menu::new();
         let index_variant = (index as u32).to_variant();
-        if position.is_some() {
+        if position.is_some() && !is_patch {
             let moves = gio::Menu::new();
             for (label, action) in [("Move to _Top", "win.move-top"), ("Move to _Bottom", "win.move-bottom")] {
                 let item = gio::MenuItem::new(Some(label), None);
@@ -1083,7 +1087,14 @@ impl Window {
             row.add_suffix(&gtk::MenuButton::builder().icon_name("view-more-symbolic").menu_model(&menu).valign(gtk::Align::Center).tooltip_text("More").css_classes(["flat"]).build());
         }
 
-        if let Some(position) = position {
+        if let (Some(position), true) = (position, is_patch) {
+            // Pinned: no handle, no editable position.
+            let lock = gtk::Image::builder().icon_name("changes-prevent-symbolic").tooltip_text("Always loads last, so its merges and fixes win").css_classes(["dim-label"]).build();
+            let number = gtk::Label::builder().label((position + 1).to_string()).width_chars(3).xalign(1.0).css_classes(["dim-label", "numeric"]).build();
+            row.add_prefix(&lock);
+            row.add_prefix(&number);
+            row.set_subtitle(&format!("{} · Always loads last", row.subtitle().unwrap_or_default()));
+        } else if let Some(position) = position {
             let handle = gtk::Image::builder().icon_name("list-drag-handle-symbolic").css_classes(["dim-label"]).build();
             row.add_prefix(&handle);
             row.add_prefix(&self.position_entry(position));
@@ -1346,6 +1357,33 @@ mod tests {
         s.remove_mods(&["mod/2.mod".into()]);
         assert_eq!(s.enabled_ids(), ["mod/0.mod"]);
         assert!(!s.dirty, "removing a disabled mod doesn't change the load order");
+    }
+
+    #[test]
+    fn patch_always_loads_last() {
+        let mut s = state(&[0, 1]);
+        s.mods.push(Mod { id: patch::ID.into(), descriptor: Default::default(), content: None, source: mods::Source::Local, load_position: None, error: None });
+        s.set_enabled(4, true);
+        s.set_enabled(2, true);
+        assert_eq!(s.enabled, [0, 1, 2, 4], "enabling another mod still puts it before the patch");
+        s.move_to(3, 0);
+        assert_eq!(s.enabled, [0, 1, 2, 4], "the patch can't be moved up");
+        s.move_to(0, 99);
+        assert_eq!(s.enabled, [1, 2, 0, 4], "moving to the bottom stops above the patch");
+        s.set_enabled_ids(&[patch::ID.into(), "mod/3.mod".into()]);
+        assert_eq!(s.enabled, [3, 4], "collections and imports can't put it first");
+        s.restore((vec![4, 0], false));
+        assert_eq!(s.enabled, [0, 4]);
+        s.set_all(true);
+        assert_eq!(*s.enabled.last().unwrap(), 4);
+
+        let mods = vec![
+            Mod { id: patch::ID.into(), descriptor: Default::default(), content: None, source: mods::Source::Local, load_position: Some(0), error: None },
+            Mod { id: "mod/a.mod".into(), descriptor: Default::default(), content: None, source: mods::Source::Local, load_position: Some(1), error: None },
+        ];
+        let s = State::new(mods);
+        assert_eq!(s.enabled, [1, 0], "a saved order with the patch first is fixed on load");
+        assert!(s.dirty);
     }
 
     #[test]
