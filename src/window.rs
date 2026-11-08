@@ -1,6 +1,6 @@
 //! The main window: a load order editor.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::io;
 use std::path::PathBuf;
 use std::rc::Rc;
@@ -8,6 +8,8 @@ use std::rc::Rc;
 use adw::prelude::*;
 use gtk::{gdk, gio, glib};
 
+use crate::conflicts_view::{self, Analysis};
+use crate::merge::conflicts::{self, ModInput};
 use crate::mods::{self, Mod};
 use crate::paradox::game::GameInstall;
 
@@ -21,13 +23,16 @@ struct State {
     /// Indices into `mods`, in load order.
     enabled: Vec<usize>,
     dirty: bool,
+    /// Bumped on every load order change, so conflict reports can tell
+    /// whether they still describe it.
+    revision: u64,
 }
 
 impl State {
     fn new(mods: Vec<Mod>) -> Self {
         let mut enabled: Vec<usize> = (0..mods.len()).filter(|&i| mods[i].load_position.is_some()).collect();
         enabled.sort_by_key(|&i| mods[i].load_position);
-        Self { mods, enabled, dirty: false }
+        Self { mods, enabled, dirty: false, revision: 0 }
     }
 
     fn disabled(&self) -> Vec<usize> {
@@ -46,6 +51,7 @@ impl State {
             _ => return,
         }
         self.dirty = true;
+        self.revision += 1;
     }
 
     /// Moves the mod at load position `from` in front of the mod currently at
@@ -63,6 +69,7 @@ impl State {
         let item = self.enabled.remove(from);
         self.enabled.insert(before.min(self.enabled.len()), item);
         self.dirty = true;
+        self.revision += 1;
     }
 
     fn enabled_ids(&self) -> Vec<String> {
@@ -75,7 +82,11 @@ struct Window {
     paths: Paths,
     game: Option<GameInstall>,
     state: RefCell<State>,
-    title: adw::WindowTitle,
+    status: gtk::Label,
+    stack: adw::ViewStack,
+    conflicts_page: adw::Bin,
+    analysis: RefCell<Option<Rc<Analysis>>>,
+    scanning: Cell<bool>,
     enabled_list: gtk::ListBox,
     disabled_list: gtk::ListBox,
     toasts: adw::ToastOverlay,
@@ -83,8 +94,9 @@ struct Window {
 }
 
 pub fn build(app: &adw::Application, paths: Paths, game: Option<GameInstall>, found: io::Result<Vec<Mod>>) {
-    let title = adw::WindowTitle::new("DrukhalManager", "");
-    let header = adw::HeaderBar::builder().title_widget(&title).build();
+    let stack = adw::ViewStack::new();
+    let switcher = adw::ViewSwitcher::builder().stack(&stack).policy(adw::ViewSwitcherPolicy::Wide).build();
+    let header = adw::HeaderBar::builder().title_widget(&switcher).build();
     let toolbar = adw::ToolbarView::new();
     toolbar.add_top_bar(&header);
     let toasts = adw::ToastOverlay::new();
@@ -121,13 +133,17 @@ pub fn build(app: &adw::Application, paths: Paths, game: Option<GameInstall>, fo
 
     let enabled_list = boxed_list("No mods enabled");
     let disabled_list = boxed_list("Every mod is enabled");
+    let status = gtk::Label::builder().xalign(0.0).wrap(true).css_classes(["dim-label"]).build();
     let content = gtk::Box::new(gtk::Orientation::Vertical, 12);
+    content.append(&status);
     content.append(&heading("Load Order"));
     content.append(&enabled_list);
     content.append(&heading("Disabled"));
     content.append(&disabled_list);
-    let clamp = adw::Clamp::builder().maximum_size(900).child(&content).margin_top(12).margin_bottom(24).margin_start(12).margin_end(12).build();
-    toolbar.set_content(Some(&gtk::ScrolledWindow::builder().hscrollbar_policy(gtk::PolicyType::Never).child(&clamp).vexpand(true).build()));
+    stack.add_titled_with_icon(&scrolled_page(&content), Some("load-order"), "Load Order", "view-list-symbolic");
+    let conflicts_page = adw::Bin::new();
+    stack.add_titled_with_icon(&scrolled_page(&conflicts_page), Some("conflicts"), "Conflicts", "dialog-warning-symbolic");
+    toolbar.set_content(Some(&stack));
 
     let save_action = gio::SimpleAction::new("save", None);
     let launch_action = gio::SimpleAction::new("launch", None);
@@ -135,13 +151,30 @@ pub fn build(app: &adw::Application, paths: Paths, game: Option<GameInstall>, fo
     window.add_action(&save_action);
     window.add_action(&launch_action);
     app.set_accels_for_action("win.save", &["<Control>s"]);
+    let page_action = gio::SimpleAction::new("page", Some(glib::VariantTy::STRING));
+    page_action.connect_activate(glib::clone!(
+        #[weak]
+        stack,
+        move |_, page| {
+            if let Some(page) = page.and_then(|p| p.str()) {
+                stack.set_visible_child_name(page);
+            }
+        }
+    ));
+    window.add_action(&page_action);
+    app.set_accels_for_action("win.page::load-order", &["<Alt>1"]);
+    app.set_accels_for_action("win.page::conflicts", &["<Alt>2"]);
 
     let ui = Rc::new(Window {
         window: window.clone(),
         paths,
         game,
         state: RefCell::new(State::new(found)),
-        title,
+        status,
+        stack: stack.clone(),
+        conflicts_page,
+        analysis: RefCell::new(None),
+        scanning: Cell::new(false),
         enabled_list,
         disabled_list,
         toasts,
@@ -158,6 +191,12 @@ pub fn build(app: &adw::Application, paths: Paths, game: Option<GameInstall>, fo
     launch_action.connect_activate(move |_, _| {
         if let Some(ui) = weak.upgrade() {
             ui.launch();
+        }
+    });
+    let weak = Rc::downgrade(&ui);
+    stack.connect_visible_child_name_notify(move |_| {
+        if let Some(ui) = weak.upgrade() {
+            ui.scan_if_stale();
         }
     });
     ui.refresh();
@@ -181,11 +220,14 @@ impl Window {
         let state = self.state.borrow();
         self.enabled_list.remove_all();
         self.disabled_list.remove_all();
+        // Conflict counts are only shown while they match the load order.
+        let counts = self.analysis.borrow().as_ref().filter(|a| a.revision == state.revision).map(|a| a.report.counts_by_mod(a.names.len()));
         for (position, &index) in state.enabled.iter().enumerate() {
-            self.enabled_list.append(&self.row(&state.mods[index], index, Some(position)));
+            let conflicts = counts.as_ref().and_then(|c| c.get(position)).copied().unwrap_or(0);
+            self.enabled_list.append(&self.row(&state.mods[index], index, Some(position), conflicts));
         }
         for index in state.disabled() {
-            self.disabled_list.append(&self.row(&state.mods[index], index, None));
+            self.disabled_list.append(&self.row(&state.mods[index], index, None, 0));
         }
 
         let mut subtitle = Vec::new();
@@ -196,8 +238,70 @@ impl Window {
         if state.dirty {
             subtitle.push("Unsaved changes".to_owned());
         }
-        self.title.set_subtitle(&subtitle.join(" · "));
+        self.status.set_label(&subtitle.join(" · "));
         self.save_action.set_enabled(state.dirty);
+        drop(state);
+        self.scan_if_stale();
+    }
+
+    /// Rescans when the Conflicts page is showing a different load order.
+    fn scan_if_stale(self: &Rc<Self>) {
+        if self.stack.visible_child_name().as_deref() != Some("conflicts") {
+            return;
+        }
+        let revision = self.state.borrow().revision;
+        if self.analysis.borrow().as_ref().is_none_or(|a| a.revision != revision) {
+            self.scan();
+        }
+    }
+
+    /// Scans the enabled mods' files in the background.
+    fn scan(self: &Rc<Self>) {
+        if self.scanning.replace(true) {
+            return;
+        }
+        self.conflicts_page.set_child(Some(&conflicts_view::scanning()));
+        let (revision, names, inputs) = {
+            let state = self.state.borrow();
+            let enabled = state.enabled.iter().map(|&i| &state.mods[i]);
+            let names = enabled.clone().map(|m| if m.descriptor.name.is_empty() { m.id.clone() } else { m.descriptor.name.clone() }).collect();
+            let inputs: Vec<ModInput> = enabled.map(|m| ModInput { root: m.content.clone(), replace_path: m.descriptor.replace_path.clone() }).collect();
+            (state.revision, names, inputs)
+        };
+
+        let weak = Rc::downgrade(self);
+        glib::spawn_future_local(async move {
+            let result = gio::spawn_blocking(move || conflicts::analyze(&inputs)).await;
+            let Some(ui) = weak.upgrade() else { return };
+            ui.scanning.set(false);
+            match result {
+                Ok(report) => {
+                    let analysis = Rc::new(Analysis { revision, names, report });
+                    ui.conflicts_page.set_child(Some(&conflicts_view::build(&analysis, ui.rescan_button())));
+                    ui.analysis.replace(Some(analysis));
+                    // Shows the per-mod counts, and rescans if the load order
+                    // changed while this scan ran.
+                    ui.refresh();
+                }
+                Err(_) => {
+                    ui.conflicts_page.set_child(Some(&status_page("Scan Failed", "Something went wrong while reading the mods' files")));
+                }
+            }
+        });
+    }
+
+    fn rescan_button(self: &Rc<Self>) -> gtk::Button {
+        let button = gtk::Button::builder()
+            .child(&adw::ButtonContent::builder().icon_name("view-refresh-symbolic").label("Rescan").build())
+            .tooltip_text("Scan again, e.g. after mods were updated")
+            .build();
+        let weak = Rc::downgrade(self);
+        button.connect_clicked(move |_| {
+            if let Some(ui) = weak.upgrade() {
+                ui.scan();
+            }
+        });
+        button
     }
 
     /// Applies a state change after the current signal handler returns, since
@@ -212,7 +316,7 @@ impl Window {
         });
     }
 
-    fn row(self: &Rc<Self>, m: &Mod, index: usize, position: Option<usize>) -> adw::ActionRow {
+    fn row(self: &Rc<Self>, m: &Mod, index: usize, position: Option<usize>, conflicts: usize) -> adw::ActionRow {
         let d = &m.descriptor;
         let name = if d.name.is_empty() { m.id.as_str() } else { d.name.as_str() };
         let source = match m.source {
@@ -232,6 +336,15 @@ impl Window {
             row.set_tooltip_text(Some(&content.display().to_string()));
         }
 
+        if conflicts > 0 {
+            let badge = gtk::Label::builder()
+                .label(conflicts_view::plural(conflicts, "conflict", "conflicts"))
+                .tooltip_text("See the Conflicts page (Alt+2) for details")
+                .valign(gtk::Align::Center)
+                .css_classes(["dim-label", "caption"])
+                .build();
+            row.add_suffix(&badge);
+        }
         if let Some(error) = &m.error {
             let icon = gtk::Image::builder().icon_name("dialog-warning-symbolic").tooltip_text(error).css_classes(["warning"]).build();
             row.add_suffix(&icon);
@@ -346,6 +459,11 @@ fn boxed_list(placeholder: &str) -> gtk::ListBox {
     let list = gtk::ListBox::builder().selection_mode(gtk::SelectionMode::None).css_classes(["boxed-list"]).build();
     list.set_placeholder(Some(&gtk::Label::builder().label(placeholder).margin_top(12).margin_bottom(12).css_classes(["dim-label"]).build()));
     list
+}
+
+fn scrolled_page(child: &impl IsA<gtk::Widget>) -> gtk::ScrolledWindow {
+    let clamp = adw::Clamp::builder().maximum_size(900).child(child).margin_top(12).margin_bottom(24).margin_start(12).margin_end(12).build();
+    gtk::ScrolledWindow::builder().hscrollbar_policy(gtk::PolicyType::Never).child(&clamp).vexpand(true).build()
 }
 
 fn heading(text: &str) -> gtk::Label {

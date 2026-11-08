@@ -22,7 +22,6 @@ use crate::paradox::script::{self, Entries, Entry};
 /// One enabled mod, in load order.
 #[derive(Debug, Clone)]
 pub struct ModInput {
-    pub name: String,
     /// The mod's folder, or `None` if its files could not be found.
     pub root: Option<PathBuf>,
     pub replace_path: Vec<String>,
@@ -267,7 +266,7 @@ mod tests {
     }
 
     fn input(root: &Path, name: &str, replace_path: &[&str]) -> ModInput {
-        ModInput { name: name.into(), root: Some(root.join(name)), replace_path: replace_path.iter().map(|s| s.to_string()).collect() }
+        ModInput { root: Some(root.join(name)), replace_path: replace_path.iter().map(|s| s.to_string()).collect() }
     }
 
     #[test]
@@ -313,7 +312,7 @@ mod tests {
         write(&root.join("a"), &[("common/ethics/x.txt", "ethic_a = {}"), ("events/broken.txt", "country_event = {")]);
         write(&root.join("b"), &[("common/ethics/x.txt", "ethic_a = {}")]);
 
-        let report = analyze(&[input(&root, "a", &[]), input(&root, "b", &["common/ethics"]), ModInput { name: "gone".into(), root: None, replace_path: vec![] }]);
+        let report = analyze(&[input(&root, "a", &[]), input(&root, "b", &["common/ethics"]), ModInput { root: None, replace_path: vec![] }]);
         assert!(report.files.is_empty());
         assert!(report.objects.is_empty());
         assert_eq!(report.errors.len(), 1);

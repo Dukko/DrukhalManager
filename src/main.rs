@@ -1,3 +1,4 @@
+mod conflicts_view;
 mod merge;
 mod mods;
 mod paradox;

@@ -1,0 +1,166 @@
+//! The Conflicts page: a read-only view of a conflict report.
+
+use std::cell::Cell;
+use std::collections::{BTreeMap, BTreeSet};
+use std::rc::Rc;
+
+use adw::prelude::*;
+
+use crate::merge::conflicts::Report;
+
+/// Rows shown per folder; the rest are summarised so huge folders (e.g.
+/// localisation) stay responsive.
+const ROWS_PER_GROUP: usize = 300;
+
+/// A finished scan of a particular load order.
+pub struct Analysis {
+    /// The load order revision this was computed for.
+    pub revision: u64,
+    /// Mod names by load position, as of the scan.
+    pub names: Vec<String>,
+    pub report: Report,
+}
+
+impl Analysis {
+    fn name(&self, position: usize) -> &str {
+        &self.names[position]
+    }
+}
+
+pub fn scanning() -> gtk::Widget {
+    let page = adw::StatusPage::builder().title("Scanning Mods…").description("Reading every enabled mod's files").build();
+    page.set_paintable(Some(&adw::SpinnerPaintable::new(Some(&page))));
+    page.upcast()
+}
+
+pub fn build(analysis: &Rc<Analysis>, rescan: gtk::Button) -> gtk::Widget {
+    let report = &analysis.report;
+    let page = gtk::Box::new(gtk::Orientation::Vertical, 12);
+
+    let involved: BTreeSet<usize> = report.files.iter().flat_map(|c| c.mods.iter().copied()).chain(report.objects.iter().flat_map(|c| c.definitions.iter().map(|d| d.mod_position))).collect();
+    let summary = if report.files.is_empty() && report.objects.is_empty() {
+        "No conflicts between enabled mods".to_owned()
+    } else {
+        format!(
+            "{} · {} · {} of {} mods involved",
+            plural(report.files.len(), "file override", "file overrides"),
+            plural(report.objects.len(), "object conflict", "object conflicts"),
+            involved.len(),
+            analysis.names.len()
+        )
+    };
+    let top = gtk::Box::new(gtk::Orientation::Horizontal, 12);
+    top.append(&gtk::Label::builder().label(summary).xalign(0.0).hexpand(true).wrap(true).css_classes(["dim-label"]).build());
+    rescan.set_valign(gtk::Align::Center);
+    top.append(&rescan);
+    page.append(&top);
+
+    if report.files.is_empty() && report.objects.is_empty() && report.errors.is_empty() && report.skipped.is_empty() {
+        let empty = adw::StatusPage::builder().icon_name("emblem-ok-symbolic").title("No Conflicts").description("None of the enabled mods change the same files or objects").vexpand(true).build();
+        page.append(&empty);
+        return page.upcast();
+    }
+
+    if !report.files.is_empty() {
+        let mut groups: BTreeMap<String, Vec<usize>> = BTreeMap::new();
+        for (i, c) in report.files.iter().enumerate() {
+            let folder = c.path.rsplit_once('/').map_or("", |(dir, _)| dir);
+            groups.entry(folder.to_owned()).or_default().push(i);
+        }
+        section(&page, "Overridden Files", "Only the copy from the mod loaded last is used", analysis, groups, file_row);
+    }
+    if !report.objects.is_empty() {
+        let mut groups: BTreeMap<String, Vec<usize>> = BTreeMap::new();
+        for (i, c) in report.objects.iter().enumerate() {
+            groups.entry(c.category.clone()).or_default().push(i);
+        }
+        section(&page, "Conflicting Objects", "Defined by several mods; which one the game keeps depends on the folder", analysis, groups, object_row);
+    }
+
+    if !report.errors.is_empty() || !report.skipped.is_empty() {
+        page.append(&heading("Not Scanned", "These files or mods were left out of the report"));
+        let list = boxed_list();
+        for (position, reason) in &report.skipped {
+            list.append(&row(analysis.name(*position), reason));
+        }
+        for e in &report.errors {
+            let r = row(&e.file, &format!("{} · {}", analysis.name(e.mod_position), e.message));
+            r.add_prefix(&gtk::Image::builder().icon_name("dialog-warning-symbolic").css_classes(["warning"]).build());
+            list.append(&r);
+        }
+        page.append(&list);
+    }
+    page.upcast()
+}
+
+/// A heading plus one collapsed row per folder. Each folder's rows are only
+/// built when it is first expanded.
+fn section(page: &gtk::Box, title: &str, description: &str, analysis: &Rc<Analysis>, groups: BTreeMap<String, Vec<usize>>, make: fn(&Analysis, usize) -> adw::ActionRow) {
+    page.append(&heading(title, description));
+    let list = boxed_list();
+    for (folder, items) in groups {
+        let expander = adw::ExpanderRow::builder()
+            .title(if folder.is_empty() { "(top level)" } else { folder.as_str() })
+            .subtitle(plural(items.len(), "conflict", "conflicts"))
+            .use_markup(false)
+            .build();
+        let filled = Cell::new(false);
+        let analysis = analysis.clone();
+        expander.connect_expanded_notify(move |expander| {
+            if !expander.is_expanded() || filled.replace(true) {
+                return;
+            }
+            for &i in items.iter().take(ROWS_PER_GROUP) {
+                expander.add_row(&make(&analysis, i));
+            }
+            if items.len() > ROWS_PER_GROUP {
+                let more = row(&format!("…and {} more", items.len() - ROWS_PER_GROUP), "");
+                more.add_css_class("dim-label");
+                expander.add_row(&more);
+            }
+        });
+        list.append(&expander);
+    }
+    page.append(&list);
+}
+
+fn file_row(analysis: &Analysis, index: usize) -> adw::ActionRow {
+    let c = &analysis.report.files[index];
+    let (winner, losers) = c.mods.split_last().unwrap();
+    let file = c.path.rsplit_once('/').map_or(c.path.as_str(), |(_, f)| f);
+    let overridden: Vec<&str> = losers.iter().map(|&m| analysis.name(m)).collect();
+    let r = row(file, &format!("Used: {} · Overridden: {}", analysis.name(*winner), overridden.join(", ")));
+    r.set_tooltip_text(Some(&c.path));
+    r
+}
+
+fn object_row(analysis: &Analysis, index: usize) -> adw::ActionRow {
+    let c = &analysis.report.objects[index];
+    let mut mods: Vec<usize> = c.definitions.iter().map(|d| d.mod_position).collect();
+    mods.dedup();
+    let names: Vec<&str> = mods.iter().map(|&m| analysis.name(m)).collect();
+    let r = row(&c.key, &names.join(" · "));
+    let files: Vec<String> = c.definitions.iter().map(|d| format!("{}: {}", analysis.name(d.mod_position), d.file)).collect();
+    r.set_tooltip_text(Some(&files.join("\n")));
+    r
+}
+
+fn row(title: &str, subtitle: &str) -> adw::ActionRow {
+    adw::ActionRow::builder().title(title).subtitle(subtitle).use_markup(false).subtitle_lines(2).build()
+}
+
+fn boxed_list() -> gtk::ListBox {
+    gtk::ListBox::builder().selection_mode(gtk::SelectionMode::None).css_classes(["boxed-list"]).build()
+}
+
+fn heading(title: &str, description: &str) -> gtk::Box {
+    let b = gtk::Box::new(gtk::Orientation::Vertical, 2);
+    b.set_margin_top(12);
+    b.append(&gtk::Label::builder().label(title).xalign(0.0).css_classes(["heading"]).build());
+    b.append(&gtk::Label::builder().label(description).xalign(0.0).wrap(true).css_classes(["dim-label", "caption"]).build());
+    b
+}
+
+pub fn plural(n: usize, one: &str, many: &str) -> String {
+    format!("{n} {}", if n == 1 { one } else { many })
+}
