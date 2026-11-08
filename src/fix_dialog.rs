@@ -46,7 +46,7 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
     header.set_title_widget(Some(&adw::WindowTitle::new(&format!("Fix {file_name}"), &request.mod_name)));
     header.pack_end(&save_button);
     header.pack_end(&ai_button);
-    let banner = adw::Banner::new("");
+    let banner = adw::Banner::builder().use_markup(false).build();
 
     let problem = adw::PreferencesGroup::builder()
         .title("Problem")
@@ -261,6 +261,6 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
 }
 
 fn show(banner: &adw::Banner, message: &str) {
-    banner.set_title(&glib::markup_escape_text(message));
+    banner.set_title(message);
     banner.set_revealed(true);
 }

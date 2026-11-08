@@ -277,9 +277,10 @@ pub fn build(app: &adw::Application, paths: Paths, game: Option<GameInstall>, fo
     top.append(&sort_button);
     top.append(&all_toggle);
     let search = gtk::SearchEntry::builder().placeholder_text("Search mods by name or tag (Ctrl+F)").build();
-    let repair_banner = adw::Banner::builder().button_label("Repair…").build();
+    // Banner titles are plain text: mod names can contain markup characters.
+    let repair_banner = adw::Banner::builder().button_label("Repair…").use_markup(false).build();
     toolbar.add_top_bar(&repair_banner);
-    let restore_banner = adw::Banner::builder().button_label("Restore").build();
+    let restore_banner = adw::Banner::builder().button_label("Restore").use_markup(false).build();
     toolbar.add_top_bar(&restore_banner);
     content.append(&top);
     content.append(&search);
@@ -471,9 +472,40 @@ pub fn build(app: &adw::Application, paths: Paths, game: Option<GameInstall>, fo
     });
 
     window.present();
+    if ui.game.is_none() && crate::sandbox::is_flatpak() {
+        ui.explain_sandbox_access();
+    }
 }
 
 impl Window {
+    /// In a Flatpak, Steam installed outside the home folder (reached through
+    /// a link) is invisible, so the game can't be found. Explains the
+    /// one-time permission that fixes it.
+    fn explain_sandbox_access(&self) {
+        let missing = crate::paradox::steam::unreachable_roots(&gtk::glib::home_dir());
+        if missing.is_empty() {
+            return;
+        }
+        let app_id = self.window.application().and_then(|a| a.application_id()).map(|s| s.to_string()).unwrap_or_default();
+        let paths: Vec<String> = missing.iter().map(|p| format!("--filesystem={}", p.display())).collect();
+        let command = format!("flatpak override --user {} {app_id}", paths.join(" "));
+        let dialog = adw::AlertDialog::new(
+            Some("Allow Access to Steam"),
+            Some(&format!(
+                "Steam is installed at {}, outside your home folder, so DrukhalManager can't see it from its sandbox and can't find Stellaris. Run this once in a terminal, then restart DrukhalManager:",
+                missing.iter().map(|p| p.display().to_string()).collect::<Vec<_>>().join(" and ")
+            )),
+        );
+        let label = gtk::Label::builder().label(&command).selectable(true).wrap(true).wrap_mode(gtk::pango::WrapMode::Char).css_classes(["monospace", "card"]).margin_top(6).build();
+        dialog.set_extra_child(Some(&label));
+        dialog.add_responses(&[("close", "_Close"), ("copy", "_Copy Command")]);
+        dialog.set_response_appearance("copy", adw::ResponseAppearance::Suggested);
+        dialog.set_default_response(Some("copy"));
+        dialog.set_close_response("close");
+        dialog.connect_response(Some("copy"), move |d, _| d.clipboard().set_text(&command));
+        dialog.present(Some(&self.window));
+    }
+
     fn refresh(self: &Rc<Self>) {
         let state = self.state.borrow();
         self.enabled_list.remove_all();
@@ -948,7 +980,7 @@ impl Window {
         if !findings.orphans.is_empty() {
             parts.push(format!("{} belong to mods whose files are gone", conflicts_view::plural(findings.orphans.len(), "descriptor", "descriptors")));
         }
-        self.repair_banner.set_title(&glib::markup_escape_text(&parts.join("; ")));
+        self.repair_banner.set_title(&parts.join("; "));
         self.repair_banner.set_revealed(!findings.is_empty());
     }
 

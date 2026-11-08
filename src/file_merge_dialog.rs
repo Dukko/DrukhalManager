@@ -40,7 +40,7 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
     header.set_title_widget(Some(&adw::WindowTitle::new(file_name, &request.path)));
     header.pack_end(&save_button);
     header.pack_end(&merge_button);
-    let banner = adw::Banner::new("");
+    let banner = adw::Banner::builder().use_markup(false).build();
 
     let summary = adw::PreferencesGroup::builder().title("Objects").description("Reading each mod's copy…").build();
     let editor = gtk::TextView::builder().monospace(true).wrap_mode(gtk::WrapMode::None).top_margin(8).bottom_margin(8).left_margin(8).right_margin(8).build();
@@ -330,7 +330,7 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
 }
 
 fn show(banner: &adw::Banner, message: &str, error: bool) {
-    banner.set_title(&glib::markup_escape_text(message));
+    banner.set_title(message);
     if error {
         banner.add_css_class("error");
     } else {

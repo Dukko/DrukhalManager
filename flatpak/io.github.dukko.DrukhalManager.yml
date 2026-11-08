@@ -1,0 +1,49 @@
+# Flatpak manifest. Builds the working tree, for testing:
+#
+#   flatpak run org.flatpak.Builder --user --force-clean --install-deps-from=flathub \
+#     --repo=flatpak/repo flatpak/build flatpak/io.github.dukko.DrukhalManager.yml
+#
+# For Flathub, replace the `dir` source with the git URL and a release tag.
+id: io.github.dukko.DrukhalManager
+runtime: org.gnome.Platform
+runtime-version: '51'
+sdk: org.gnome.Sdk
+sdk-extensions:
+  - org.freedesktop.Sdk.Extension.rust-stable
+command: drukhal-manager
+finish-args:
+  - --share=ipc
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --device=dri
+  # AI merging talks to the provider chosen in Preferences.
+  - --share=network
+  # Stellaris' data (~/.local/share/Paradox Interactive), Steam and its
+  # libraries (often elsewhere in the home folder), and mod folders.
+  - --filesystem=home
+  # Libraries of the Flatpak version of Steam.
+  - --filesystem=~/.var/app/com.valvesoftware.Steam:ro
+build-options:
+  append-path: /usr/lib/sdk/rust-stable/bin
+  env:
+    CARGO_HOME: /run/build/drukhal-manager/cargo
+    CARGO_NET_OFFLINE: 'true'
+modules:
+  - name: drukhal-manager
+    buildsystem: simple
+    build-commands:
+      - cargo --offline build --release --locked
+      - install -Dm755 target/release/drukhal-manager -t /app/bin/
+      - install -Dm644 data/${FLATPAK_ID}.desktop -t /app/share/applications/
+      - install -Dm644 data/${FLATPAK_ID}.metainfo.xml -t /app/share/metainfo/
+      - install -Dm644 data/icons/${FLATPAK_ID}.svg -t /app/share/icons/hicolor/scalable/apps/
+      - install -Dm644 LICENSE NOTICE -t /app/share/licenses/${FLATPAK_ID}/
+    sources:
+      - type: dir
+        path: ..
+        skip:
+          - target
+          - flatpak/build
+          - flatpak/repo
+          - flatpak/.flatpak-builder
+      - cargo-sources.json

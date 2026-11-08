@@ -74,9 +74,7 @@ impl Window {
         });
         let saved = self.collections.borrow().active().mods.clone();
         if saved != current && !saved.is_empty() {
-            self.restore_banner.set_title(&glib::markup_escape_text(&format!(
-                "The game's load order doesn't match the collection “{active}”. Something else changed it, like the Paradox Launcher."
-            )));
+            self.restore_banner.set_title(&format!("The game's load order doesn't match the collection “{active}”. Something else changed it, like the Paradox Launcher."));
             self.restore_banner.set_revealed(true);
         }
         self.rebuild_collection_menu();

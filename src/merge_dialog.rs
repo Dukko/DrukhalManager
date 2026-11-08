@@ -65,7 +65,7 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
     let editor = gtk::TextView::builder().monospace(true).wrap_mode(gtk::WrapMode::None).top_margin(8).bottom_margin(8).left_margin(8).right_margin(8).build();
     let editor_scroll = gtk::ScrolledWindow::builder().child(&editor).min_content_height(260).css_classes(["card"]).build();
     let notes = gtk::Label::builder().xalign(0.0).wrap(true).selectable(true).css_classes(["dim-label"]).visible(false).build();
-    let status = adw::Banner::new("");
+    let status = adw::Banner::builder().use_markup(false).build();
     let result = adw::PreferencesGroup::builder().title("Merged Result").description("Merge to get a combined version, then review and edit it before saving").build();
     let result_box = gtk::Box::new(gtk::Orientation::Vertical, 8);
     let thinking = ThinkingView::new();
@@ -296,7 +296,7 @@ fn version_row(s: &Source, buffer: &gtk::TextBuffer, notes: &gtk::Label) -> adw:
 }
 
 fn show_error(banner: &adw::Banner, message: &str) {
-    banner.set_title(&glib::markup_escape_text(message));
+    banner.set_title(message);
     banner.set_revealed(true);
 }
 

@@ -9,19 +9,38 @@ use std::path::{Path, PathBuf};
 
 pub const STELLARIS_APP_ID: u32 = 281990;
 
+const ROOTS: &[&str] = &[
+    ".local/share/Steam",
+    ".steam/steam",
+    ".steam/root",
+    ".var/app/com.valvesoftware.Steam/.local/share/Steam",
+    ".var/app/com.valvesoftware.Steam/data/Steam",
+];
+
 /// Candidate Steam install roots, most common first.
 fn steam_roots(home: &Path) -> Vec<PathBuf> {
-    [
-        ".local/share/Steam",
-        ".steam/steam",
-        ".steam/root",
-        ".var/app/com.valvesoftware.Steam/.local/share/Steam",
-        ".var/app/com.valvesoftware.Steam/data/Steam",
-    ]
-    .iter()
-    .map(|p| home.join(p))
-    .filter(|p| p.is_dir())
-    .collect()
+    ROOTS.iter().map(|p| home.join(p)).filter(|p| p.is_dir()).collect()
+}
+
+/// Steam roots that are links to folders this process can't see, such as
+/// a Steam install on another drive when running sandboxed. Returns where
+/// they point, resolved through any chain of links.
+pub fn unreachable_roots(home: &Path) -> Vec<PathBuf> {
+    let mut targets = BTreeSet::new();
+    for root in ROOTS.iter().map(|p| home.join(p)) {
+        let mut path = root;
+        // Follow the links by hand: the final target is what's missing.
+        for _ in 0..8 {
+            match std::fs::read_link(&path) {
+                Ok(target) => path = if target.is_absolute() { target } else { path.parent().unwrap_or(Path::new("/")).join(target) },
+                Err(_) => break,
+            }
+        }
+        if !path.exists() && path.is_absolute() && std::fs::symlink_metadata(&path).is_err() && !path.starts_with(home) {
+            targets.insert(path);
+        }
+    }
+    targets.into_iter().collect()
 }
 
 /// Every Steam library folder known on this machine, deduplicated.
@@ -108,6 +127,15 @@ fn vdf_values(src: &str, key: &str) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reports_links_to_missing_folders() {
+        let home = std::env::temp_dir().join(format!("drukhal-steam-links-{}", std::process::id()));
+        std::fs::create_dir_all(home.join(".local/share")).unwrap();
+        std::os::unix::fs::symlink("/nonexistent/drive/Steam", home.join(".local/share/Steam")).unwrap();
+        assert_eq!(unreachable_roots(&home), [PathBuf::from("/nonexistent/drive/Steam")]);
+        std::fs::remove_dir_all(home).unwrap();
+    }
 
     #[test]
     fn reads_library_paths() {
