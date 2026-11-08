@@ -1,0 +1,33 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  ci:
+    name: build, test, clippy
+    runs-on: ubuntu-latest
+    # ubuntu-24.04 ships GTK 4.14 / libadwaita 1.5, too old for the
+    # gtk4 v4_14 + libadwaita v1_6 feature gates. Fedora 42 has new
+    # enough system headers, so run the job inside that container.
+    container:
+      image: fedora:42
+    steps:
+      - name: Install system dependencies
+        run: |
+          dnf install -y --setopt=install_weak_deps=False \
+            gcc pkg-config \
+            gtk4-devel libadwaita-devel \
+            git ca-certificates
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: cargo build
+        run: cargo build --locked
+      - name: cargo test
+        run: cargo test --locked
+      - name: cargo clippy
+        run: cargo clippy --all-targets --locked
