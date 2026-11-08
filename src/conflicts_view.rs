@@ -2,6 +2,7 @@
 
 use std::cell::Cell;
 use std::collections::{BTreeMap, BTreeSet};
+use std::path::PathBuf;
 use std::rc::Rc;
 
 use adw::prelude::*;
@@ -14,15 +15,30 @@ const ROWS_PER_GROUP: usize = 300;
 
 /// A finished scan of a particular load order.
 pub struct Analysis {
-    /// The load order revision this was computed for.
-    pub revision: u64,
-    /// Mod names by load position, as of the scan.
+    /// The load order revision this describes. Bumped in place for changes
+    /// that don't affect the scan, like enabling the merged patch.
+    pub revision: Cell<u64>,
+    /// Mod names by scanned position, as of the scan.
     pub names: Vec<String>,
+    /// Each scanned mod's folder.
+    pub roots: Vec<Option<PathBuf>>,
+    /// Each scanned mod's position in the full load order (the merged patch
+    /// itself is not scanned, so these can differ).
+    pub load_positions: Vec<usize>,
     pub report: Report,
 }
 
+/// What the page needs from the window to offer merging.
+pub struct MergeHooks {
+    /// Whether the patch already holds a merge of `(category, key)`.
+    pub is_merged: Box<dyn Fn(&str, &str) -> bool>,
+    /// Opens the merge dialog for an object conflict; the callback marks the
+    /// row as merged once it's saved.
+    pub open: Box<dyn Fn(usize, Box<dyn Fn()>)>,
+}
+
 impl Analysis {
-    fn name(&self, position: usize) -> &str {
+    pub fn name(&self, position: usize) -> &str {
         &self.names[position]
     }
 }
@@ -33,7 +49,7 @@ pub fn scanning() -> gtk::Widget {
     page.upcast()
 }
 
-pub fn build(analysis: &Rc<Analysis>, rescan: gtk::Button) -> gtk::Widget {
+pub fn build(analysis: &Rc<Analysis>, rescan: gtk::Button, hooks: Rc<MergeHooks>) -> gtk::Widget {
     let report = &analysis.report;
     let page = gtk::Box::new(gtk::Orientation::Vertical, 12);
 
@@ -67,14 +83,22 @@ pub fn build(analysis: &Rc<Analysis>, rescan: gtk::Button) -> gtk::Widget {
             let folder = c.path.rsplit_once('/').map_or("", |(dir, _)| dir);
             groups.entry(folder.to_owned()).or_default().push(i);
         }
-        section(&page, "Overridden Files", "Only the copy from the mod loaded last is used", analysis, groups, file_row);
+        let make: Rc<dyn Fn(usize) -> adw::ActionRow> = {
+            let analysis = analysis.clone();
+            Rc::new(move |i| file_row(&analysis, i))
+        };
+        section(&page, "Overridden Files", "Only the copy from the mod loaded last is used", groups, make);
     }
     if !report.objects.is_empty() {
         let mut groups: BTreeMap<String, Vec<usize>> = BTreeMap::new();
         for (i, c) in report.objects.iter().enumerate() {
             groups.entry(c.category.clone()).or_default().push(i);
         }
-        section(&page, "Conflicting Objects", "Defined by several mods; which one the game keeps depends on the folder", analysis, groups, object_row);
+        let make: Rc<dyn Fn(usize) -> adw::ActionRow> = {
+            let analysis = analysis.clone();
+            Rc::new(move |i| object_row(&analysis, i, &hooks))
+        };
+        section(&page, "Conflicting Objects", "Defined by several mods; which one the game keeps depends on the folder. Merge one to keep every mod's changes.", groups, make);
     }
 
     if !report.errors.is_empty() || !report.skipped.is_empty() {
@@ -95,7 +119,7 @@ pub fn build(analysis: &Rc<Analysis>, rescan: gtk::Button) -> gtk::Widget {
 
 /// A heading plus one collapsed row per folder. Each folder's rows are only
 /// built when it is first expanded.
-fn section(page: &gtk::Box, title: &str, description: &str, analysis: &Rc<Analysis>, groups: BTreeMap<String, Vec<usize>>, make: fn(&Analysis, usize) -> adw::ActionRow) {
+fn section(page: &gtk::Box, title: &str, description: &str, groups: BTreeMap<String, Vec<usize>>, make: Rc<dyn Fn(usize) -> adw::ActionRow>) {
     page.append(&heading(title, description));
     let list = boxed_list();
     for (folder, items) in groups {
@@ -105,13 +129,13 @@ fn section(page: &gtk::Box, title: &str, description: &str, analysis: &Rc<Analys
             .use_markup(false)
             .build();
         let filled = Cell::new(false);
-        let analysis = analysis.clone();
+        let make = make.clone();
         expander.connect_expanded_notify(move |expander| {
             if !expander.is_expanded() || filled.replace(true) {
                 return;
             }
             for &i in items.iter().take(ROWS_PER_GROUP) {
-                expander.add_row(&make(&analysis, i));
+                expander.add_row(&make(i));
             }
             if items.len() > ROWS_PER_GROUP {
                 let more = row(&format!("…and {} more", items.len() - ROWS_PER_GROUP), "");
@@ -134,7 +158,7 @@ fn file_row(analysis: &Analysis, index: usize) -> adw::ActionRow {
     r
 }
 
-fn object_row(analysis: &Analysis, index: usize) -> adw::ActionRow {
+fn object_row(analysis: &Analysis, index: usize, hooks: &Rc<MergeHooks>) -> adw::ActionRow {
     let c = &analysis.report.objects[index];
     let mut mods: Vec<usize> = c.definitions.iter().map(|d| d.mod_position).collect();
     mods.dedup();
@@ -142,7 +166,32 @@ fn object_row(analysis: &Analysis, index: usize) -> adw::ActionRow {
     let r = row(&c.key, &names.join(" · "));
     let files: Vec<String> = c.definitions.iter().map(|d| format!("{}: {}", analysis.name(d.mod_position), d.file)).collect();
     r.set_tooltip_text(Some(&files.join("\n")));
+
+    let merged = gtk::Image::builder().icon_name("emblem-ok-symbolic").tooltip_text("Merged into the patch").css_classes(["success"]).build();
+    let button = gtk::Button::builder().valign(gtk::Align::Center).css_classes(["flat"]).build();
+    let mark_merged = merged_marker(&merged, &button);
+    let is_merged = (hooks.is_merged)(&c.category, &c.key);
+    merged.set_visible(is_merged);
+    button.set_label(if is_merged { "Edit Merge…" } else { "Merge…" });
+    let hooks = hooks.clone();
+    button.connect_clicked(move |_| (hooks.open)(index, mark_merged.clone()()));
+    r.add_suffix(&merged);
+    r.add_suffix(&button);
     r
+}
+
+/// A callback factory that flips a row to its merged state.
+fn merged_marker(merged: &gtk::Image, button: &gtk::Button) -> Rc<dyn Fn() -> Box<dyn Fn()>> {
+    let (merged, button) = (merged.downgrade(), button.downgrade());
+    Rc::new(move || {
+        let (merged, button) = (merged.clone(), button.clone());
+        Box::new(move || {
+            if let (Some(merged), Some(button)) = (merged.upgrade(), button.upgrade()) {
+                merged.set_visible(true);
+                button.set_label("Edit Merge…");
+            }
+        })
+    })
 }
 
 fn row(title: &str, subtitle: &str) -> adw::ActionRow {

@@ -55,30 +55,38 @@ enum Token {
 struct Lexer<'a> {
     chars: std::iter::Peekable<std::str::Chars<'a>>,
     line: usize,
+    /// Byte offset of the next character.
+    pos: usize,
 }
 
 impl<'a> Lexer<'a> {
     fn new(src: &'a str) -> Self {
-        Self { chars: src.chars().peekable(), line: 1 }
+        Self { chars: src.chars().peekable(), line: 1, pos: 0 }
     }
 
-    fn next_token(&mut self) -> Result<Option<(Token, usize)>, ParseError> {
+    fn bump(&mut self) -> Option<char> {
+        let c = self.chars.next()?;
+        self.pos += c.len_utf8();
+        Some(c)
+    }
+
+    fn next_token(&mut self) -> Result<Option<(Token, usize, usize)>, ParseError> {
         loop {
             match self.chars.peek() {
                 None => return Ok(None),
                 Some('\n') => {
                     self.line += 1;
-                    self.chars.next();
+                    self.bump();
                 }
                 Some(c) if c.is_whitespace() || *c == '\u{feff}' => {
-                    self.chars.next();
+                    self.bump();
                 }
                 Some('#') => {
                     while let Some(&c) = self.chars.peek() {
                         if c == '\n' {
                             break;
                         }
-                        self.chars.next();
+                        self.bump();
                     }
                 }
                 Some(_) => break,
@@ -86,17 +94,18 @@ impl<'a> Lexer<'a> {
         }
 
         let line = self.line;
-        let c = self.chars.next().unwrap();
+        let start = self.pos;
+        let c = self.bump().unwrap();
         let token = match c {
             '{' => Token::Open,
             '}' => Token::Close,
             '"' => {
                 let mut s = String::new();
                 loop {
-                    match self.chars.next() {
+                    match self.bump() {
                         None => return Err(ParseError { line, message: "unterminated string".into() }),
                         Some('"') => break,
-                        Some('\\') => match self.chars.next() {
+                        Some('\\') => match self.bump() {
                             Some('"') => s.push('"'),
                             Some('\\') => s.push('\\'),
                             Some(other) => {
@@ -118,7 +127,7 @@ impl<'a> Lexer<'a> {
             '<' | '>' | '!' | '?' => {
                 let followed_by_eq = self.chars.peek() == Some(&'=');
                 if followed_by_eq {
-                    self.chars.next();
+                    self.bump();
                 }
                 match (c, followed_by_eq) {
                     ('<', false) => Token::Op(Op::Lt),
@@ -140,12 +149,12 @@ impl<'a> Lexer<'a> {
                         break;
                     }
                     s.push(c);
-                    self.chars.next();
+                    self.bump();
                 }
                 Token::Word(s)
             }
         };
-        Ok(Some((token, line)))
+        Ok(Some((token, line, start)))
     }
 
     fn peek_second(&self) -> Option<char> {
@@ -157,18 +166,18 @@ impl<'a> Lexer<'a> {
 
 struct Parser<'a> {
     lexer: Lexer<'a>,
-    peeked: Option<(Token, usize)>,
+    peeked: Option<(Token, usize, usize)>,
 }
 
 impl<'a> Parser<'a> {
-    fn peek(&mut self) -> Result<Option<&(Token, usize)>, ParseError> {
+    fn peek(&mut self) -> Result<Option<&(Token, usize, usize)>, ParseError> {
         if self.peeked.is_none() {
             self.peeked = self.lexer.next_token()?;
         }
         Ok(self.peeked.as_ref())
     }
 
-    fn next(&mut self) -> Result<Option<(Token, usize)>, ParseError> {
+    fn next(&mut self) -> Result<Option<(Token, usize, usize)>, ParseError> {
         match self.peeked.take() {
             Some(t) => Ok(Some(t)),
             None => self.lexer.next_token(),
@@ -176,9 +185,15 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_entries(&mut self, nested: bool) -> Result<Vec<Entry>, ParseError> {
+        self.parse_entries_with_spans(nested, None)
+    }
+
+    /// Parses entries, recording the byte range of each one in `spans` if
+    /// given. A range covers the entry from its key through its value.
+    fn parse_entries_with_spans(&mut self, nested: bool, mut spans: Option<&mut Vec<std::ops::Range<usize>>>) -> Result<Vec<Entry>, ParseError> {
         let mut entries = Vec::new();
         loop {
-            let Some((token, line)) = self.next()? else {
+            let Some((token, line, start)) = self.next()? else {
                 if nested {
                     return Err(ParseError { line: self.lexer.line, message: "missing '}'".into() });
                 }
@@ -192,7 +207,7 @@ impl<'a> Parser<'a> {
                 Token::Word(s) | Token::Quoted(s) => Value::Scalar(s),
             };
 
-            if let Some((Token::Op(op), _)) = self.peek()? {
+            if let Some((Token::Op(op), _, _)) = self.peek()? {
                 let op = *op;
                 self.next()?;
                 let Value::Scalar(key) = first else {
@@ -200,17 +215,27 @@ impl<'a> Parser<'a> {
                 };
                 let value = self.parse_value(line)?;
                 entries.push(Entry::Assign { key, op, value });
+                if let Some(spans) = spans.as_deref_mut() {
+                    // Nothing has been peeked past the value, so the lexer
+                    // sits right after it.
+                    spans.push(start..self.lexer.pos);
+                }
             } else {
                 entries.push(Entry::Item(first));
+                if let Some(spans) = spans.as_deref_mut() {
+                    // The peek above may have read past the item; its own
+                    // extent is all that's needed for items.
+                    spans.push(start..start);
+                }
             }
         }
     }
 
     fn parse_value(&mut self, key_line: usize) -> Result<Value, ParseError> {
         match self.next()? {
-            Some((Token::Open, _)) => Ok(Value::Block(self.parse_entries(true)?)),
-            Some((Token::Word(s) | Token::Quoted(s), _)) => Ok(Value::Scalar(s)),
-            Some((_, line)) => Err(ParseError { line, message: "expected a value".into() }),
+            Some((Token::Open, _, _)) => Ok(Value::Block(self.parse_entries(true)?)),
+            Some((Token::Word(s) | Token::Quoted(s), _, _)) => Ok(Value::Scalar(s)),
+            Some((_, line, _)) => Err(ParseError { line, message: "expected a value".into() }),
             None => Err(ParseError { line: key_line, message: "expected a value".into() }),
         }
     }
@@ -218,6 +243,15 @@ impl<'a> Parser<'a> {
 
 pub fn parse(src: &str) -> Result<Vec<Entry>, ParseError> {
     Parser { lexer: Lexer::new(src), peeked: None }.parse_entries(false)
+}
+
+/// Like [`parse`], also returning the byte range in `src` of each top-level
+/// entry, so its original text can be cut out with comments and formatting
+/// intact. Items get an empty range.
+pub fn parse_with_spans(src: &str) -> Result<Vec<(Entry, std::ops::Range<usize>)>, ParseError> {
+    let mut spans = Vec::new();
+    let entries = Parser { lexer: Lexer::new(src), peeked: None }.parse_entries_with_spans(false, Some(&mut spans))?;
+    Ok(entries.into_iter().zip(spans).collect())
 }
 
 impl Value {
@@ -294,6 +328,13 @@ mod tests {
         assert!(matches!(&trigger[1], Entry::Assign { op: Op::Ne, .. }));
         assert!(matches!(&trigger[2], Entry::Assign { op: Op::SafeEq, key, .. } if key == "exists"));
         assert_eq!(entries.value("list").unwrap().as_block().unwrap().len(), 3);
+    }
+
+    #[test]
+    fn records_top_level_spans() {
+        let src = "# head\n@cost = 5\nbuilding_lab = {\n\tcost = @cost # ünïcode\n}\nlone\nb = \"x\"";
+        let spans: Vec<&str> = parse_with_spans(src).unwrap().iter().filter(|(_, r)| !r.is_empty()).map(|(_, r)| &src[r.clone()]).collect();
+        assert_eq!(spans, ["@cost = 5", "building_lab = {\n\tcost = @cost # ünïcode\n}", "b = \"x\""]);
     }
 
     #[test]

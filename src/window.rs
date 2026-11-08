@@ -8,9 +8,13 @@ use std::rc::Rc;
 use adw::prelude::*;
 use gtk::{gdk, gio, glib};
 
-use crate::conflicts_view::{self, Analysis};
+use crate::conflicts_view::{self, Analysis, MergeHooks};
 use crate::merge::conflicts::{self, ModInput};
+use crate::merge::patch::{self, Patch};
+use crate::merge_dialog;
 use crate::mods::{self, Mod};
+use crate::preferences;
+use crate::settings::{self, Settings};
 use crate::paradox::game::GameInstall;
 
 pub struct Paths {
@@ -87,6 +91,9 @@ struct Window {
     conflicts_page: adw::Bin,
     analysis: RefCell<Option<Rc<Analysis>>>,
     scanning: Cell<bool>,
+    settings: RefCell<Settings>,
+    /// `None` if the patch's manifest couldn't be read.
+    patch: RefCell<Option<Patch>>,
     enabled_list: gtk::ListBox,
     disabled_list: gtk::ListBox,
     toasts: adw::ToastOverlay,
@@ -125,6 +132,10 @@ pub fn build(app: &adw::Application, paths: Paths, game: Option<GameInstall>, fo
         .css_classes(["suggested-action"])
         .build();
     let save = gtk::Button::builder().label("Save").action_name("win.save").tooltip_text("Save load order (Ctrl+S)").build();
+    let menu = gio::Menu::new();
+    menu.append(Some("_Preferences"), Some("win.preferences"));
+    let menu_button = gtk::MenuButton::builder().icon_name("open-menu-symbolic").menu_model(&menu).tooltip_text("Main Menu").primary(true).build();
+    header.pack_end(&menu_button);
     header.pack_end(&launch);
     header.pack_end(&save);
     if game.is_none() {
@@ -151,6 +162,9 @@ pub fn build(app: &adw::Application, paths: Paths, game: Option<GameInstall>, fo
     window.add_action(&save_action);
     window.add_action(&launch_action);
     app.set_accels_for_action("win.save", &["<Control>s"]);
+    let preferences_action = gio::SimpleAction::new("preferences", None);
+    window.add_action(&preferences_action);
+    app.set_accels_for_action("win.preferences", &["<Control>comma"]);
     let page_action = gio::SimpleAction::new("page", Some(glib::VariantTy::STRING));
     page_action.connect_activate(glib::clone!(
         #[weak]
@@ -175,6 +189,8 @@ pub fn build(app: &adw::Application, paths: Paths, game: Option<GameInstall>, fo
         conflicts_page,
         analysis: RefCell::new(None),
         scanning: Cell::new(false),
+        settings: RefCell::new(Settings::load(&settings::path())),
+        patch: RefCell::new(None),
         enabled_list,
         disabled_list,
         toasts,
@@ -191,6 +207,18 @@ pub fn build(app: &adw::Application, paths: Paths, game: Option<GameInstall>, fo
     launch_action.connect_activate(move |_, _| {
         if let Some(ui) = weak.upgrade() {
             ui.launch();
+        }
+    });
+    match Patch::open(&ui.paths.user_dir) {
+        Ok(p) => {
+            ui.patch.replace(Some(p));
+        }
+        Err(e) => ui.toasts.add_toast(adw::Toast::builder().title(format!("Could not read the merged patch: {e}")).timeout(0).build()),
+    }
+    let weak = Rc::downgrade(&ui);
+    preferences_action.connect_activate(move |_, _| {
+        if let Some(ui) = weak.upgrade() {
+            ui.open_preferences();
         }
     });
     let weak = Rc::downgrade(&ui);
@@ -221,7 +249,15 @@ impl Window {
         self.enabled_list.remove_all();
         self.disabled_list.remove_all();
         // Conflict counts are only shown while they match the load order.
-        let counts = self.analysis.borrow().as_ref().filter(|a| a.revision == state.revision).map(|a| a.report.counts_by_mod(a.names.len()));
+        let counts = self.analysis.borrow().as_ref().filter(|a| a.revision.get() == state.revision).map(|a| {
+            let mut by_position = vec![0; state.enabled.len()];
+            for (scanned, n) in a.report.counts_by_mod(a.names.len()).into_iter().enumerate() {
+                if let Some(slot) = by_position.get_mut(a.load_positions[scanned]) {
+                    *slot = n;
+                }
+            }
+            by_position
+        });
         for (position, &index) in state.enabled.iter().enumerate() {
             let conflicts = counts.as_ref().and_then(|c| c.get(position)).copied().unwrap_or(0);
             self.enabled_list.append(&self.row(&state.mods[index], index, Some(position), conflicts));
@@ -250,7 +286,7 @@ impl Window {
             return;
         }
         let revision = self.state.borrow().revision;
-        if self.analysis.borrow().as_ref().is_none_or(|a| a.revision != revision) {
+        if self.analysis.borrow().as_ref().is_none_or(|a| a.revision.get() != revision) {
             self.scan();
         }
     }
@@ -261,12 +297,16 @@ impl Window {
             return;
         }
         self.conflicts_page.set_child(Some(&conflicts_view::scanning()));
-        let (revision, names, inputs) = {
+        let (revision, names, roots, load_positions, inputs) = {
             let state = self.state.borrow();
-            let enabled = state.enabled.iter().map(|&i| &state.mods[i]);
-            let names = enabled.clone().map(|m| if m.descriptor.name.is_empty() { m.id.clone() } else { m.descriptor.name.clone() }).collect();
-            let inputs: Vec<ModInput> = enabled.map(|m| ModInput { root: m.content.clone(), replace_path: m.descriptor.replace_path.clone() }).collect();
-            (state.revision, names, inputs)
+            // The merged patch is left out: its objects are resolutions, not
+            // conflicts.
+            let scanned: Vec<(usize, &Mod)> = state.enabled.iter().map(|&i| &state.mods[i]).enumerate().filter(|(_, m)| m.id != patch::ID).collect();
+            let names = scanned.iter().map(|(_, m)| display_name(m).to_owned()).collect();
+            let roots = scanned.iter().map(|(_, m)| m.content.clone()).collect();
+            let positions = scanned.iter().map(|(p, _)| *p).collect();
+            let inputs: Vec<ModInput> = scanned.iter().map(|(_, m)| ModInput { root: m.content.clone(), replace_path: m.descriptor.replace_path.clone() }).collect();
+            (state.revision, names, roots, positions, inputs)
         };
 
         let weak = Rc::downgrade(self);
@@ -276,8 +316,9 @@ impl Window {
             ui.scanning.set(false);
             match result {
                 Ok(report) => {
-                    let analysis = Rc::new(Analysis { revision, names, report });
-                    ui.conflicts_page.set_child(Some(&conflicts_view::build(&analysis, ui.rescan_button())));
+                    let analysis = Rc::new(Analysis { revision: Cell::new(revision), names, roots, load_positions, report });
+                    let hooks = ui.merge_hooks(&analysis);
+                    ui.conflicts_page.set_child(Some(&conflicts_view::build(&analysis, ui.rescan_button(), hooks)));
                     ui.analysis.replace(Some(analysis));
                     // Shows the per-mod counts, and rescans if the load order
                     // changed while this scan ran.
@@ -287,6 +328,128 @@ impl Window {
                     ui.conflicts_page.set_child(Some(&status_page("Scan Failed", "Something went wrong while reading the mods' files")));
                 }
             }
+        });
+    }
+
+    fn merge_hooks(self: &Rc<Self>, analysis: &Rc<Analysis>) -> Rc<MergeHooks> {
+        let weak = Rc::downgrade(self);
+        let is_merged = Box::new(move |category: &str, key: &str| {
+            weak.upgrade().is_some_and(|ui| ui.patch.borrow().as_ref().is_some_and(|p| p.get(category, key).is_some()))
+        });
+        let weak = Rc::downgrade(self);
+        let analysis = analysis.clone();
+        let open = Box::new(move |index: usize, mark_merged: Box<dyn Fn()>| {
+            if let Some(ui) = weak.upgrade() {
+                ui.open_merge(&analysis, index, mark_merged);
+            }
+        });
+        Rc::new(MergeHooks { is_merged, open })
+    }
+
+    fn open_merge(self: &Rc<Self>, analysis: &Rc<Analysis>, index: usize, mark_merged: Box<dyn Fn()>) {
+        let conflict = &analysis.report.objects[index];
+        let origins = conflict
+            .definitions
+            .iter()
+            .filter_map(|d| {
+                let root = analysis.roots[d.mod_position].clone()?;
+                Some(merge_dialog::Origin { label: analysis.name(d.mod_position).to_owned(), root, file: d.file.clone() })
+            })
+            .collect();
+        let (category, key) = (conflict.category.clone(), conflict.key.clone());
+        let existing = self.patch.borrow().as_ref().and_then(|p| p.get(&category, &key).cloned());
+
+        let weak = Rc::downgrade(self);
+        let save = {
+            let (category, key) = (category.clone(), key.clone());
+            Box::new(move |script: &str, sources: Vec<String>| {
+                let ui = weak.upgrade().ok_or("The window was closed")?;
+                ui.save_merge(&category, &key, script, sources)
+            })
+        };
+        let weak = Rc::downgrade(self);
+        let open_preferences = Box::new(move || {
+            if let Some(ui) = weak.upgrade() {
+                ui.open_preferences();
+            }
+        });
+        let weak = Rc::downgrade(self);
+        let on_saved = Box::new(move || {
+            mark_merged();
+            if let Some(ui) = weak.upgrade() {
+                ui.patch_saved();
+            }
+        });
+
+        let request = merge_dialog::Request {
+            category,
+            key,
+            origins,
+            game_dir: self.game.as_ref().map(|g| g.dir.clone()),
+            provider: self.settings.borrow().ready_provider(),
+            existing,
+            save,
+            open_preferences,
+            on_saved,
+        };
+        merge_dialog::present(&self.window, request);
+    }
+
+    fn save_merge(&self, category: &str, key: &str, script: &str, sources: Vec<String>) -> Result<(), String> {
+        let mut patch = self.patch.borrow_mut();
+        if patch.is_none() {
+            *patch = Some(Patch::open(&self.paths.user_dir).map_err(|e| format!("Could not read the merged patch: {e}"))?);
+        }
+        let version = self.game.as_ref().and_then(|g| g.version.as_deref());
+        patch.as_mut().unwrap().save(&self.paths.user_dir, version, category, key, script, sources).map_err(|e| format!("Could not save the merged patch: {e}"))
+    }
+
+    /// Makes sure the merged patch is in the load order once it has content.
+    fn patch_saved(self: &Rc<Self>) {
+        let added = {
+            let mut state = self.state.borrow_mut();
+            let index = match state.mods.iter().position(|m| m.id == patch::ID) {
+                Some(i) => i,
+                None => {
+                    let descriptor = std::fs::read_to_string(self.paths.user_dir.join(patch::ID)).ok().and_then(|src| mods::Descriptor::parse(&src).ok()).unwrap_or_default();
+                    state.mods.push(Mod {
+                        id: patch::ID.to_owned(),
+                        descriptor,
+                        content: Some(Patch::root(&self.paths.user_dir)),
+                        source: mods::Source::Local,
+                        load_position: None,
+                        error: None,
+                    });
+                    state.mods.len() - 1
+                }
+            };
+            let was_enabled = state.enabled.contains(&index);
+            if !was_enabled {
+                state.set_enabled(index, true);
+                // The patch isn't scanned, so the current report still holds.
+                if let Some(a) = self.analysis.borrow().as_ref() {
+                    a.revision.set(state.revision);
+                }
+            }
+            !was_enabled
+        };
+        self.refresh();
+        let toast = adw::Toast::builder().title(format!("Saved to {}", patch::NAME));
+        let toast = if added { toast.title(format!("Saved to {}, which was added to the load order", patch::NAME)).button_label("Save Load Order").action_name("win.save") } else { toast };
+        self.toasts.add_toast(toast.build());
+    }
+
+    fn open_preferences(self: &Rc<Self>) {
+        let weak = Rc::downgrade(self);
+        preferences::present(&self.window, self.settings.borrow().clone(), move |settings| {
+            let Some(ui) = weak.upgrade() else { return };
+            if *ui.settings.borrow() == settings {
+                return;
+            }
+            if let Err(e) = settings.save(&settings::path()) {
+                ui.toasts.add_toast(adw::Toast::builder().title(format!("Could not save preferences: {e}")).timeout(0).build());
+            }
+            ui.settings.replace(settings);
         });
     }
 
@@ -318,7 +481,7 @@ impl Window {
 
     fn row(self: &Rc<Self>, m: &Mod, index: usize, position: Option<usize>, conflicts: usize) -> adw::ActionRow {
         let d = &m.descriptor;
-        let name = if d.name.is_empty() { m.id.as_str() } else { d.name.as_str() };
+        let name = display_name(m);
         let source = match m.source {
             mods::Source::Workshop => "Workshop",
             mods::Source::Local => "Local",
@@ -459,6 +622,10 @@ fn boxed_list(placeholder: &str) -> gtk::ListBox {
     let list = gtk::ListBox::builder().selection_mode(gtk::SelectionMode::None).css_classes(["boxed-list"]).build();
     list.set_placeholder(Some(&gtk::Label::builder().label(placeholder).margin_top(12).margin_bottom(12).css_classes(["dim-label"]).build()));
     list
+}
+
+fn display_name(m: &Mod) -> &str {
+    if m.descriptor.name.is_empty() { &m.id } else { &m.descriptor.name }
 }
 
 fn scrolled_page(child: &impl IsA<gtk::Widget>) -> gtk::ScrolledWindow {

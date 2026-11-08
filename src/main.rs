@@ -1,7 +1,10 @@
 mod conflicts_view;
 mod merge;
+mod merge_dialog;
 mod mods;
 mod paradox;
+mod preferences;
+mod settings;
 mod window;
 
 use adw::prelude::*;
