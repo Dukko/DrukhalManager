@@ -2,6 +2,7 @@
 
 pub mod checks;
 mod descriptor;
+pub mod repair;
 pub mod load_order;
 
 pub use descriptor::Descriptor;

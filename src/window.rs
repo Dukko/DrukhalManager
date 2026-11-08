@@ -107,6 +107,20 @@ impl State {
         self.revision += 1;
     }
 
+    /// Drops mods by id, keeping the load order of the rest. Removing an
+    /// enabled mod counts as a change.
+    fn remove_mods(&mut self, ids: &[String]) {
+        let enabled_ids = self.enabled_ids();
+        let before = enabled_ids.len();
+        self.mods.retain(|m| !ids.contains(&m.id));
+        let index: std::collections::HashMap<&str, usize> = self.mods.iter().enumerate().map(|(i, m)| (m.id.as_str(), i)).collect();
+        self.enabled = enabled_ids.iter().filter_map(|id| index.get(id.as_str()).copied()).collect();
+        if self.enabled.len() != before {
+            self.dirty = true;
+        }
+        self.revision += 1;
+    }
+
     fn enabled_ids(&self) -> Vec<String> {
         self.enabled.iter().map(|&i| self.mods[i].id.clone()).collect()
     }
@@ -125,6 +139,8 @@ struct Window {
     /// Shown when some mods load before mods they depend on.
     sort_button: gtk::Button,
     search: gtk::SearchEntry,
+    /// Offers to repair descriptors with stale paths or no mod behind them.
+    repair_banner: adw::Banner,
     stack: adw::ViewStack,
     conflicts_page: adw::Bin,
     analysis: RefCell<Option<Rc<Analysis>>>,
@@ -197,6 +213,8 @@ pub fn build(app: &adw::Application, paths: Paths, game: Option<GameInstall>, fo
     top.append(&sort_button);
     top.append(&all_toggle);
     let search = gtk::SearchEntry::builder().placeholder_text("Search mods by name or tag (Ctrl+F)").build();
+    let repair_banner = adw::Banner::builder().button_label("Repair…").build();
+    toolbar.add_top_bar(&repair_banner);
     content.append(&top);
     content.append(&search);
     for list in [&enabled_list, &disabled_list] {
@@ -261,6 +279,7 @@ pub fn build(app: &adw::Application, paths: Paths, game: Option<GameInstall>, fo
         syncing: Cell::new(false),
         sort_button: sort_button.clone(),
         search: search.clone(),
+        repair_banner: repair_banner.clone(),
         stack: stack.clone(),
         conflicts_page,
         analysis: RefCell::new(None),
@@ -290,6 +309,13 @@ pub fn build(app: &adw::Application, paths: Paths, game: Option<GameInstall>, fo
         }
         Err(e) => ui.toasts.add_toast(adw::Toast::builder().title(format!("Could not read the merged patch: {e}")).timeout(0).build()),
     }
+    let weak = Rc::downgrade(&ui);
+    repair_banner.connect_button_clicked(move |_| {
+        if let Some(ui) = weak.upgrade() {
+            ui.confirm_repair();
+        }
+    });
+    ui.update_repair_banner();
     let weak = Rc::downgrade(&ui);
     sort_button.connect_clicked(move |_| {
         if let Some(ui) = weak.upgrade() {
@@ -735,6 +761,107 @@ impl Window {
         self.toasts.add_toast(toast);
     }
 
+    fn update_repair_banner(&self) {
+        let findings = mods::repair::find(&self.paths.user_dir, &self.state.borrow().mods);
+        let mut parts = Vec::new();
+        if !findings.stale.is_empty() {
+            parts.push(format!("{} point to folders that no longer exist", conflicts_view::plural(findings.stale.len(), "mod descriptor", "mod descriptors")));
+        }
+        if !findings.orphans.is_empty() {
+            parts.push(format!("{} belong to mods whose files are gone", conflicts_view::plural(findings.orphans.len(), "descriptor", "descriptors")));
+        }
+        self.repair_banner.set_title(&glib::markup_escape_text(&parts.join("; ")));
+        self.repair_banner.set_revealed(!findings.is_empty());
+    }
+
+    fn confirm_repair(self: &Rc<Self>) {
+        let findings = mods::repair::find(&self.paths.user_dir, &self.state.borrow().mods);
+        if findings.is_empty() {
+            self.update_repair_banner();
+            return;
+        }
+        let mut body = Vec::new();
+        if !findings.stale.is_empty() {
+            body.push(format!(
+                "{} will point to where the mods actually are, so the game can find them even when Steam doesn't say.",
+                conflicts_view::plural(findings.stale.len(), "descriptor", "descriptors")
+            ));
+        }
+        if !findings.orphans.is_empty() {
+            let names: Vec<&str> = findings.orphans.iter().take(8).map(|o| o.name.as_str()).collect();
+            let more = findings.orphans.len().saturating_sub(names.len());
+            body.push(format!(
+                "These descriptors have no mod files behind them and can be removed: {}{}.",
+                names.join(", "),
+                if more > 0 { format!(" and {more} more") } else { String::new() }
+            ));
+        }
+        body.push("Changed or removed descriptors are backed up first.".to_owned());
+
+        let dialog = adw::AlertDialog::new(Some("Repair Mod Descriptors?"), Some(&body.join("\n\n")));
+        dialog.add_response("cancel", "_Cancel");
+        match (findings.stale.is_empty(), findings.orphans.is_empty()) {
+            (false, false) => {
+                dialog.add_response("fix", "_Fix Paths Only");
+                dialog.add_response("all", "Fix and _Remove");
+                dialog.set_response_appearance("all", adw::ResponseAppearance::Suggested);
+                dialog.set_default_response(Some("all"));
+            }
+            (false, true) => {
+                dialog.add_response("fix", "_Fix Paths");
+                dialog.set_response_appearance("fix", adw::ResponseAppearance::Suggested);
+                dialog.set_default_response(Some("fix"));
+            }
+            (true, _) => {
+                dialog.add_response("all", "_Remove");
+                dialog.set_response_appearance("all", adw::ResponseAppearance::Destructive);
+            }
+        }
+        dialog.set_close_response("cancel");
+        let weak = Rc::downgrade(self);
+        dialog.connect_response(None, move |_, response| {
+            let Some(ui) = weak.upgrade() else { return };
+            let remove: &[mods::repair::Orphan] = match response {
+                "all" => &findings.orphans,
+                "fix" => &[],
+                _ => return,
+            };
+            ui.repair(&findings.stale, remove);
+        });
+        dialog.present(Some(&self.window));
+    }
+
+    fn repair(self: &Rc<Self>, stale: &[mods::repair::StalePath], remove: &[mods::repair::Orphan]) {
+        match mods::repair::apply(&self.paths.user_dir, &self.paths.backup_dir, stale, remove) {
+            Ok(backup) => {
+                {
+                    let mut state = self.state.borrow_mut();
+                    for s in stale {
+                        if let Some(m) = state.mods.iter_mut().find(|m| m.id == s.id) {
+                            m.descriptor.path = Some(s.new.to_string_lossy().into_owned());
+                        }
+                    }
+                    let ids: Vec<String> = remove.iter().map(|o| o.id.clone()).collect();
+                    if !ids.is_empty() {
+                        state.remove_mods(&ids);
+                    }
+                }
+                self.refresh();
+                self.update_repair_banner();
+                let mut done = Vec::new();
+                if !stale.is_empty() {
+                    done.push(format!("fixed {}", conflicts_view::plural(stale.len(), "path", "paths")));
+                }
+                if !remove.is_empty() {
+                    done.push(format!("removed {}", conflicts_view::plural(remove.len(), "descriptor", "descriptors")));
+                }
+                let toast = adw::Toast::builder().title(format!("Repaired descriptors: {}. Backup in {}", done.join(", "), backup.display())).timeout(8).build();
+                self.toasts.add_toast(toast);
+            }
+            Err(e) => self.toasts.add_toast(adw::Toast::builder().title(format!("Could not repair descriptors: {e}")).timeout(0).build()),
+        }
+    }
+
     fn open_folder(&self, index: usize) {
         let Some(dir) = self.state.borrow().mods.get(index).and_then(|m| m.content.clone()) else { return };
         gtk::FileLauncher::new(Some(&gio::File::for_path(dir))).launch(Some(&self.window), None::<&gio::Cancellable>, |_| {});
@@ -1049,6 +1176,18 @@ mod tests {
         s.set_all(false).unwrap();
         assert!(s.enabled.is_empty() && s.dirty);
         assert!(s.set_all(false).is_none());
+    }
+
+    #[test]
+    fn removing_mods_keeps_the_order() {
+        let mut s = state(&[3, 1, 0]);
+        s.remove_mods(&["mod/1.mod".into()]);
+        assert_eq!(s.enabled_ids(), ["mod/3.mod", "mod/0.mod"]);
+        assert!(s.dirty);
+        let mut s = state(&[0]);
+        s.remove_mods(&["mod/2.mod".into()]);
+        assert_eq!(s.enabled_ids(), ["mod/0.mod"]);
+        assert!(!s.dirty, "removing a disabled mod doesn't change the load order");
     }
 
     #[test]
