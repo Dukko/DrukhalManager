@@ -66,6 +66,13 @@ impl State {
 
     /// Moves the mod at load position `from` in front of the mod currently at
     /// `before` (`before == len` moves it to the end).
+    /// Moves the mod at load position `from` so it ends up at position `to`
+    /// (both 0-based; `to` is clamped to the list).
+    fn move_to(&mut self, from: usize, to: usize) {
+        let to = to.min(self.enabled.len().saturating_sub(1));
+        self.move_enabled(from, if to > from { to + 1 } else { to });
+    }
+
     fn move_enabled(&mut self, from: usize, mut before: usize) {
         if from >= self.enabled.len() {
             return;
@@ -366,6 +373,20 @@ pub fn build(app: &adw::Application, paths: Paths, game: Option<GameInstall>, fo
             if let (Some(ui), Some(index)) = (weak.upgrade(), index.and_then(|i| i.get::<u32>())) {
                 open(&ui, index as usize);
             }
+        });
+        window.add_action(&action);
+    }
+    for (name, to_top) in [("move-top", true), ("move-bottom", false)] {
+        let action = gio::SimpleAction::new(name, Some(glib::VariantTy::UINT32));
+        let weak = Rc::downgrade(&ui);
+        action.connect_activate(move |_, index| {
+            let (Some(ui), Some(index)) = (weak.upgrade(), index.and_then(|i| i.get::<u32>())) else { return };
+            ui.update(move |state| {
+                if let Some(from) = state.enabled.iter().position(|&i| i == index as usize) {
+                    let to = if to_top { 0 } else { state.enabled.len() };
+                    state.move_to(from, to);
+                }
+            });
         });
         window.add_action(&action);
     }
@@ -1028,6 +1049,15 @@ impl Window {
 
         let menu = gio::Menu::new();
         let index_variant = (index as u32).to_variant();
+        if position.is_some() {
+            let moves = gio::Menu::new();
+            for (label, action) in [("Move to _Top", "win.move-top"), ("Move to _Bottom", "win.move-bottom")] {
+                let item = gio::MenuItem::new(Some(label), None);
+                item.set_action_and_target_value(Some(action), Some(&index_variant));
+                moves.append_item(&item);
+            }
+            menu.append_section(None, &moves);
+        }
         if m.content.is_some() {
             let item = gio::MenuItem::new(Some("Open Folder"), None);
             item.set_action_and_target_value(Some("win.open-folder"), Some(&index_variant));
@@ -1055,12 +1085,53 @@ impl Window {
 
         if let Some(position) = position {
             let handle = gtk::Image::builder().icon_name("list-drag-handle-symbolic").css_classes(["dim-label"]).build();
-            let number = gtk::Label::builder().label((position + 1).to_string()).width_chars(3).xalign(1.0).css_classes(["dim-label", "numeric"]).build();
             row.add_prefix(&handle);
-            row.add_prefix(&number);
+            row.add_prefix(&self.position_entry(position));
             self.make_reorderable(&row, position);
         }
         row
+    }
+
+    /// The load position as an editable number: type a position and press
+    /// Enter, or leave the field, to move the mod there.
+    fn position_entry(self: &Rc<Self>, position: usize) -> gtk::Entry {
+        let entry = gtk::Entry::builder()
+            .text((position + 1).to_string())
+            .width_chars(3)
+            .max_width_chars(4)
+            .xalign(1.0)
+            .input_purpose(gtk::InputPurpose::Digits)
+            .valign(gtk::Align::Center)
+            .tooltip_text("Load position: type a number to move this mod there")
+            .css_classes(["numeric", "flat"])
+            .build();
+        let apply = {
+            let weak = Rc::downgrade(self);
+            move |entry: &gtk::Entry| {
+                let Some(ui) = weak.upgrade() else { return };
+                match entry.text().trim().parse::<usize>() {
+                    // Positions are shown from 1.
+                    Ok(n) if n.saturating_sub(1) != position => {
+                        // Applying rebuilds the list, which can also end
+                        // this field's focus; reset it so that's a no-op.
+                        entry.set_text(&(position + 1).to_string());
+                        ui.update(move |state| state.move_to(position, n.saturating_sub(1)));
+                    }
+                    Ok(_) => {}
+                    Err(_) => entry.set_text(&(position + 1).to_string()),
+                }
+            }
+        };
+        let on_leave = apply.clone();
+        entry.connect_activate(apply);
+        let focus = gtk::EventControllerFocus::new();
+        focus.connect_leave(glib::clone!(
+            #[weak]
+            entry,
+            move |_| on_leave(&entry)
+        ));
+        entry.add_controller(focus);
+        entry
     }
 
     fn make_reorderable(self: &Rc<Self>, row: &adw::ActionRow, position: usize) {
@@ -1275,6 +1346,20 @@ mod tests {
         s.remove_mods(&["mod/2.mod".into()]);
         assert_eq!(s.enabled_ids(), ["mod/0.mod"]);
         assert!(!s.dirty, "removing a disabled mod doesn't change the load order");
+    }
+
+    #[test]
+    fn moves_to_a_position() {
+        let mut s = state(&[0, 1, 2, 3]);
+        s.move_to(0, 2);
+        assert_eq!(s.enabled, [1, 2, 0, 3], "the mod ends up at the typed position");
+        s.move_to(3, 0);
+        assert_eq!(s.enabled, [3, 1, 2, 0]);
+        s.move_to(1, 99);
+        assert_eq!(s.enabled, [3, 2, 0, 1], "past the end moves to the bottom");
+        let before = s.revision;
+        s.move_to(2, 2);
+        assert_eq!(s.revision, before, "same position is a no-op");
     }
 
     #[test]
