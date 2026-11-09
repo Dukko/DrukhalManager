@@ -1,7 +1,14 @@
 //! The load order state: which mods are enabled and in what order.
 
 use crate::merge::patch;
-use crate::mods::Mod;
+use crate::mods::{checks, Mod};
+
+/// How many load order steps Ctrl+Z can go back.
+const MAX_HISTORY: usize = 100;
+
+/// A load order snapshot: enabled mod ids (not indices, so it still
+/// applies after mods are added or removed) plus whether it was dirty.
+type Snapshot = (Vec<String>, bool);
 
 pub(crate) struct State {
     pub(crate) mods: Vec<Mod>,
@@ -11,6 +18,8 @@ pub(crate) struct State {
     /// Bumped on every load order change, so conflict reports can tell
     /// whether they still describe it.
     pub(crate) revision: u64,
+    undo: Vec<Snapshot>,
+    redo: Vec<Snapshot>,
 }
 
 impl State {
@@ -24,10 +33,71 @@ impl State {
             enabled,
             dirty: false,
             revision: 0,
+            undo: Vec::new(),
+            redo: Vec::new(),
         };
         // A saved order with the patch elsewhere gets fixed on the next save.
         state.dirty = state.pin_patch();
         state
+    }
+
+    fn snapshot(&self) -> Snapshot {
+        (self.enabled_ids(), self.dirty)
+    }
+
+    /// Records the current load order for undo and drops the redo stack.
+    /// Called before every change.
+    fn checkpoint(&mut self) {
+        if self.undo.len() >= MAX_HISTORY {
+            self.undo.remove(0);
+        }
+        self.undo.push(self.snapshot());
+        self.redo.clear();
+    }
+
+    /// Restores `snapshot`, skipping ids that are no longer installed.
+    fn apply(&mut self, (ids, dirty): Snapshot) {
+        let index: std::collections::HashMap<&str, usize> = self
+            .mods
+            .iter()
+            .enumerate()
+            .map(|(i, m)| (m.id.as_str(), i))
+            .collect();
+        self.enabled = ids
+            .iter()
+            .filter_map(|id| index.get(id.as_str()).copied())
+            .collect();
+        self.dirty = dirty;
+        self.pin_patch();
+        self.revision += 1;
+    }
+
+    /// Undoes the last load order change. Returns whether there was one.
+    pub(crate) fn undo(&mut self) -> bool {
+        let Some(previous) = self.undo.pop() else {
+            return false;
+        };
+        self.redo.push(self.snapshot());
+        self.apply(previous);
+        true
+    }
+
+    /// Redoes an undone change. Returns whether there was one.
+    pub(crate) fn redo(&mut self) -> bool {
+        let Some(next) = self.redo.pop() else {
+            return false;
+        };
+        self.undo.push(self.snapshot());
+        self.apply(next);
+        true
+    }
+
+    pub(crate) fn can_undo(&self) -> bool {
+        !self.undo.is_empty()
+    }
+
+    pub(crate) fn can_redo(&self) -> bool {
+        !self.redo.is_empty()
     }
 
     /// Keeps the merged patch at the very end of the load order: its merged
@@ -60,8 +130,12 @@ impl State {
     /// Enabling appends to the end of the load order.
     pub(crate) fn set_enabled(&mut self, index: usize, on: bool) {
         match (on, self.enabled.iter().position(|&i| i == index)) {
-            (true, None) => self.enabled.push(index),
+            (true, None) => {
+                self.checkpoint();
+                self.enabled.push(index);
+            }
             (false, Some(p)) => {
+                self.checkpoint();
                 self.enabled.remove(p);
             }
             _ => return,
@@ -90,6 +164,7 @@ impl State {
         if before == from {
             return;
         }
+        self.checkpoint();
         let item = self.enabled.remove(from);
         self.enabled.insert(before.min(self.enabled.len()), item);
         self.pin_patch();
@@ -98,38 +173,49 @@ impl State {
     }
 
     /// Enables every mod (newly enabled ones go to the end, alphabetically)
-    /// or disables them all. Returns the previous load order for undo, or
-    /// `None` if nothing changed.
-    pub(crate) fn set_all(&mut self, on: bool) -> Option<(Vec<usize>, bool)> {
-        let previous = (self.enabled.clone(), self.dirty);
+    /// or disables them all. Returns whether anything changed.
+    pub(crate) fn set_all(&mut self, on: bool) -> bool {
         if on {
             let disabled = self.disabled();
             if disabled.is_empty() {
-                return None;
+                return false;
             }
+            self.checkpoint();
             self.enabled.extend(disabled);
         } else {
             if self.enabled.is_empty() {
-                return None;
+                return false;
             }
+            self.checkpoint();
             self.enabled.clear();
         }
         self.pin_patch();
         self.dirty = true;
         self.revision += 1;
-        Some(previous)
+        true
     }
 
-    pub(crate) fn restore(&mut self, (enabled, dirty): (Vec<usize>, bool)) {
-        self.enabled = enabled;
-        self.dirty = dirty;
+    /// Moves mods after the mods they depend on. Returns whether the
+    /// order changed.
+    pub(crate) fn sort_by_dependencies(&mut self) -> bool {
+        let sorted = checks::sort_by_dependencies(&self.mods, &self.enabled);
+        if sorted == self.enabled {
+            return false;
+        }
+        self.checkpoint();
+        self.enabled = sorted;
         self.pin_patch();
+        self.dirty = true;
         self.revision += 1;
+        true
     }
 
     /// Drops mods by id, keeping the load order of the rest. Removing an
     /// enabled mod counts as a change.
     pub(crate) fn remove_mods(&mut self, ids: &[String]) {
+        if self.mods.iter().any(|m| ids.contains(&m.id)) {
+            self.checkpoint();
+        }
         let enabled_ids = self.enabled_ids();
         let before = enabled_ids.len();
         self.mods.retain(|m| !ids.contains(&m.id));
@@ -152,6 +238,7 @@ impl State {
 
     /// Replaces the load order with `ids`; returns those not installed.
     pub(crate) fn set_enabled_ids(&mut self, ids: &[String]) -> Vec<String> {
+        self.checkpoint();
         let index: std::collections::HashMap<&str, usize> = self
             .mods
             .iter()
@@ -224,19 +311,23 @@ mod tests {
     #[test]
     fn enables_and_disables_all_with_undo() {
         let mut s = state(&[2, 0]);
-        let previous = s.set_all(true).unwrap();
+        assert!(s.set_all(true));
         assert_eq!(
             s.enabled,
             [2, 0, 1, 3],
             "new mods go to the end, keeping the existing order"
         );
-        assert!(s.set_all(true).is_none());
-        s.restore(previous);
+        assert!(!s.set_all(true));
+        assert!(s.undo());
         assert_eq!(s.enabled, [2, 0]);
         assert!(!s.dirty, "undo restores the saved state");
-        s.set_all(false).unwrap();
+        assert!(s.redo());
+        assert_eq!(s.enabled, [2, 0, 1, 3]);
+        assert!(s.undo());
+        assert!(s.set_all(false));
         assert!(s.enabled.is_empty() && s.dirty);
-        assert!(s.set_all(false).is_none());
+        assert!(!s.set_all(false));
+        assert!(!s.redo(), "a new change drops the redo stack");
     }
 
     #[test]
@@ -286,9 +377,12 @@ mod tests {
             [3, 4],
             "collections and imports can't put it first"
         );
-        s.restore((vec![4, 0], false));
-        assert_eq!(s.enabled, [0, 4]);
-        s.set_all(true);
+        assert!(s.undo(), "collection switches are undoable");
+        assert_eq!(s.enabled, [1, 2, 0, 4]);
+        assert!(s.redo());
+        assert_eq!(s.enabled, [3, 4]);
+        assert!(s.undo());
+        assert!(s.set_all(true));
         assert_eq!(*s.enabled.last().unwrap(), 4);
 
         let mods = vec![
@@ -344,5 +438,71 @@ mod tests {
         s.set_enabled(2, false);
         assert_eq!(s.enabled, [0, 3]);
         assert_eq!(s.enabled_ids(), ["mod/0.mod", "mod/3.mod"]);
+    }
+
+    #[test]
+    fn undo_redo_walks_back_through_changes() {
+        let mut s = state(&[0, 1]);
+        assert!(!s.can_undo() && !s.can_redo());
+        assert!(!s.undo(), "nothing to undo at first");
+        assert!(!s.redo(), "nothing to redo at first");
+        s.set_enabled(2, true);
+        s.move_to(0, 2);
+        assert_eq!(s.enabled, [1, 2, 0]);
+        assert!(s.can_undo() && !s.can_redo());
+        assert!(s.undo());
+        assert_eq!(s.enabled, [0, 1, 2]);
+        assert!(s.can_undo() && s.can_redo());
+        assert!(s.undo());
+        assert_eq!(s.enabled, [0, 1]);
+        assert!(!s.dirty, "undo restores the dirty flag too");
+        assert!(!s.can_undo() && s.can_redo());
+        assert!(!s.undo(), "history runs out");
+        assert!(s.redo());
+        assert_eq!(s.enabled, [0, 1, 2]);
+        assert!(s.redo());
+        assert_eq!(s.enabled, [1, 2, 0]);
+        assert!(!s.redo(), "redo runs out");
+    }
+
+    #[test]
+    fn no_op_changes_leave_no_history() {
+        let mut s = state(&[0, 1]);
+        s.set_enabled(0, true);
+        assert!(!s.can_undo(), "enabling an enabled mod is a no-op");
+        s.move_enabled(0, 1);
+        assert!(!s.can_undo(), "dropping onto its own slot is a no-op");
+        s.set_enabled(5, false);
+        assert!(!s.can_undo(), "disabling a missing index is a no-op");
+    }
+
+    #[test]
+    fn undo_survives_mods_being_removed() {
+        let mut s = state(&[0, 1, 2]);
+        s.move_to(0, 2);
+        assert_eq!(s.enabled, [1, 2, 0]);
+        s.remove_mods(&["mod/1.mod".into()]);
+        assert_eq!(s.enabled_ids(), ["mod/2.mod", "mod/0.mod"]);
+        assert!(s.undo());
+        // mod/1 is gone, so only the surviving order comes back.
+        assert_eq!(s.enabled_ids(), ["mod/2.mod", "mod/0.mod"]);
+        // The move itself is still on the stack: undo again for [0, 1, 2]
+        // minus the removed mod.
+        assert!(s.undo());
+        assert_eq!(s.enabled_ids(), ["mod/0.mod", "mod/2.mod"]);
+    }
+
+    #[test]
+    fn history_is_capped() {
+        let mut s = state(&[0]);
+        for _ in 0..(MAX_HISTORY + 10) {
+            let on = !s.enabled.contains(&1);
+            s.set_enabled(1, on);
+        }
+        let mut steps = 0;
+        while s.undo() {
+            steps += 1;
+        }
+        assert_eq!(steps, MAX_HISTORY);
     }
 }

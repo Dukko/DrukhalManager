@@ -1,6 +1,5 @@
 //! The load order list: rows, reordering, toggling and undo.
 
-use std::cell::RefCell;
 use std::rc::Rc;
 
 use adw::prelude::*;
@@ -93,61 +92,84 @@ impl Window {
             .set_inconsistent(enabled > 0 && enabled < total);
         self.all_toggle.set_sensitive(total > 0);
         self.syncing.set(false);
+        let (can_undo, can_redo) = (state.can_undo(), state.can_redo());
         drop(state);
+        self.undo_action.set_enabled(can_undo);
+        self.redo_action.set_enabled(can_redo);
         self.scan_if_stale();
+    }
+
+    /// Undoes the last load order change, unless the user is typing in a
+    /// text field (where Ctrl+Z belongs to the text).
+    pub(super) fn undo(self: &Rc<Self>) {
+        if self.entry_has_focus() {
+            return;
+        }
+        if self.state.borrow_mut().undo() {
+            self.refresh();
+        }
+    }
+
+    /// Redoes an undone change, unless the user is typing in a text field.
+    pub(super) fn redo(self: &Rc<Self>) {
+        if self.entry_has_focus() {
+            return;
+        }
+        if self.state.borrow_mut().redo() {
+            self.refresh();
+        }
+    }
+
+    fn entry_has_focus(&self) -> bool {
+        gtk::prelude::GtkWindowExt::focus(&self.window).is_some_and(|w| {
+            w.is::<gtk::Entry>() || w.is::<gtk::SearchEntry>()
+        })
     }
 
     /// Like a select-all checkbox: enables everything unless everything is
     /// already enabled, in which case it disables everything. Offers undo,
     /// since disabling all forgets the load order.
     pub(super) fn toggle_all(self: &Rc<Self>) {
-        let enable = {
+        let (enable, changed) = {
             let state = self.state.borrow();
-            state.enabled.len() < state.mods.len()
+            let enable = state.enabled.len() < state.mods.len();
+            let changed = if enable {
+                state.disabled().len()
+            } else {
+                state.enabled.len()
+            };
+            (enable, changed)
         };
-        let previous = self.state.borrow_mut().set_all(enable);
+        if changed == 0 {
+            return;
+        }
+        self.state.borrow_mut().set_all(enable);
         self.refresh();
-        let Some(previous) = previous else { return };
-        let changed = if enable {
-            previous.0.len().abs_diff(self.state.borrow().enabled.len())
-        } else {
-            previous.0.len()
-        };
         let verb = if enable { "Enabled" } else { "Disabled" };
-        self.offer_undo(
-            &format!("{verb} {}", conflicts_view::plural(changed, "mod", "mods")),
-            previous,
-        );
+        self.offer_undo(&format!(
+            "{verb} {}",
+            conflicts_view::plural(changed, "mod", "mods")
+        ));
     }
 
     pub(super) fn sort_by_dependencies(self: &Rc<Self>) {
-        let previous = {
-            let mut state = self.state.borrow_mut();
-            let sorted = checks::sort_by_dependencies(&state.mods, &state.enabled);
-            if sorted == state.enabled {
-                return;
-            }
-            let previous = (std::mem::replace(&mut state.enabled, sorted), state.dirty);
-            state.pin_patch();
-            state.dirty = true;
-            state.revision += 1;
-            previous
-        };
+        if !self.state.borrow_mut().sort_by_dependencies() {
+            return;
+        }
         self.refresh();
-        self.offer_undo("Sorted mods after their dependencies", previous);
+        self.offer_undo("Sorted mods after their dependencies");
     }
 
-    /// Shows `title` with an Undo button that restores `previous`.
-    pub(super) fn offer_undo(self: &Rc<Self>, title: &str, previous: (Vec<usize>, bool)) {
+    /// Shows `title` with an Undo button that undoes the last change.
+    pub(super) fn offer_undo(self: &Rc<Self>, title: &str) {
         let toast = adw::Toast::builder()
             .title(title)
             .button_label("Undo")
             .build();
-        let previous = RefCell::new(Some(previous));
         let weak = Rc::downgrade(self);
         toast.connect_button_clicked(move |_| {
-            if let (Some(ui), Some(previous)) = (weak.upgrade(), previous.take()) {
-                ui.state.borrow_mut().restore(previous);
+            if let Some(ui) = weak.upgrade() {
+                ui.state.borrow_mut().undo();
                 ui.refresh();
             }
         });

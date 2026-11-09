@@ -65,6 +65,10 @@ struct Window {
     /// Offers to restore the active collection when the game's load order
     /// was changed elsewhere.
     restore_banner: adw::Banner,
+    /// Disabled when there is nothing to undo or redo; kept in sync by
+    /// `refresh`.
+    undo_action: gio::SimpleAction,
+    redo_action: gio::SimpleAction,
 }
 
 pub fn build(
@@ -120,6 +124,8 @@ pub fn build(
         .tooltip_text("Save the load order for the game and the Paradox Launcher (Ctrl+S)")
         .build();
     let menu = gio::Menu::new();
+    menu.append(Some("_Undo"), Some("win.undo"));
+    menu.append(Some("_Redo"), Some("win.redo"));
     menu.append(Some("Last Game's _Errors…"), Some("win.errors"));
     menu.append(Some("_Preferences"), Some("win.preferences"));
     let menu_button = gtk::MenuButton::builder()
@@ -245,6 +251,12 @@ pub fn build(
     window.add_action(&page_action);
     app.set_accels_for_action("win.page::load-order", &["<Alt>1"]);
     app.set_accels_for_action("win.page::conflicts", &["<Alt>2"]);
+    let undo_action = gio::SimpleAction::new("undo", None);
+    let redo_action = gio::SimpleAction::new("redo", None);
+    window.add_action(&undo_action);
+    window.add_action(&redo_action);
+    app.set_accels_for_action("win.undo", &["<Control>z"]);
+    app.set_accels_for_action("win.redo", &["<Control><Shift>z", "<Control>y"]);
 
     let ui = Rc::new(Window {
         window: window.clone(),
@@ -271,6 +283,21 @@ pub fn build(
         enabled_list,
         disabled_list,
         toasts,
+        undo_action: undo_action.clone(),
+        redo_action: redo_action.clone(),
+    });
+
+    let weak = Rc::downgrade(&ui);
+    undo_action.connect_activate(move |_, _| {
+        if let Some(ui) = weak.upgrade() {
+            ui.undo();
+        }
+    });
+    let weak = Rc::downgrade(&ui);
+    redo_action.connect_activate(move |_, _| {
+        if let Some(ui) = weak.upgrade() {
+            ui.redo();
+        }
     });
 
     let weak = Rc::downgrade(&ui);
