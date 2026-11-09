@@ -10,7 +10,7 @@ use super::display_name;
 use crate::conflicts_view;
 use crate::error_report_dialog;
 use crate::merge::patch;
-use crate::paradox::error_log;
+use crate::paradox::{error_log, session};
 
 impl Window {
     /// In a Flatpak, Steam installed outside the home folder (reached through
@@ -132,6 +132,8 @@ impl Window {
                 .add_toast(adw::Toast::new("Starting Stellaris through Steam…"));
             if options.close_after_launch {
                 self.window.close();
+            } else {
+                self.follow_session(std::time::SystemTime::now());
             }
             return;
         }
@@ -158,39 +160,71 @@ impl Window {
         let weak = Rc::downgrade(self);
         glib::spawn_future_local(async move {
             let _ = gio::spawn_blocking(move || child.wait()).await;
-            let Some(ui) = weak.upgrade() else { return };
-            let log = error_log::path(&ui.paths.user_dir);
-            let fresh = std::fs::metadata(&log)
-                .and_then(|m| m.modified())
-                .is_ok_and(|t| t >= started);
-            if !fresh {
-                return;
+            if let Some(ui) = weak.upgrade() {
+                let crashed = session::ended(&ui.paths.user_dir, started) == Some(session::Ended::Crashed);
+                ui.report_session(started, crashed);
             }
-            let report = ui.error_report();
-            let from_mods = report.from_mods();
-            if from_mods == 0 {
-                return;
-            }
-            let patch = report
-                .groups
-                .iter()
-                .find(|g| g.is_patch)
-                .map_or(0, |g| g.total());
-            let mut title = format!(
-                "Stellaris logged {} from your mods",
-                conflicts_view::plural(from_mods, "error", "errors")
-            );
-            if patch > 0 {
-                title.push_str(&format!(", {patch} from the merged patch"));
-            }
-            let toast = adw::Toast::builder()
-                .title(title)
-                .button_label("Show")
-                .action_name("win.errors")
-                .timeout(0)
-                .build();
-            ui.toasts.add_toast(toast);
         });
+    }
+
+    /// Watches the game's files for a session started through Steam to end,
+    /// since the sandbox can't wait on the game. Gives up if it doesn't
+    /// start within half an hour (the launch was cancelled).
+    fn follow_session(self: &Rc<Self>, launched: std::time::SystemTime) {
+        const GIVE_UP: std::time::Duration = std::time::Duration::from_secs(30 * 60);
+        let weak = Rc::downgrade(self);
+        let mut running = false;
+        glib::timeout_add_seconds_local(5, move || {
+            let Some(ui) = weak.upgrade() else { return glib::ControlFlow::Break };
+            let user_dir = &ui.paths.user_dir;
+            if !running {
+                running = session::started(user_dir, launched);
+                if !running && launched.elapsed().unwrap_or_default() > GIVE_UP {
+                    return glib::ControlFlow::Break;
+                }
+                return glib::ControlFlow::Continue;
+            }
+            match session::ended(user_dir, launched) {
+                Some(how) => {
+                    ui.report_session(launched, how == session::Ended::Crashed);
+                    glib::ControlFlow::Break
+                }
+                None => glib::ControlFlow::Continue,
+            }
+        });
+    }
+
+    /// After a session that started at `started`, points out errors the
+    /// game logged about the mods, and that it crashed.
+    fn report_session(&self, started: std::time::SystemTime, crashed: bool) {
+        let log = error_log::path(&self.paths.user_dir);
+        let fresh = std::fs::metadata(&log)
+            .and_then(|m| m.modified())
+            .is_ok_and(|t| t >= started);
+        let report = if fresh { Some(self.error_report()) } else { None };
+        let from_mods = report.as_ref().map_or(0, |r| r.from_mods());
+        if from_mods == 0 && !crashed {
+            return;
+        }
+        let patch = report
+            .iter()
+            .flat_map(|r| &r.groups)
+            .find(|g| g.is_patch)
+            .map_or(0, |g| g.total());
+        let errors = conflicts_view::plural(from_mods, "error", "errors");
+        let mut title = match (crashed, from_mods) {
+            (true, 0) => "Stellaris crashed".to_owned(),
+            (true, _) => format!("Stellaris crashed and logged {errors} from your mods"),
+            (false, _) => format!("Stellaris logged {errors} from your mods"),
+        };
+        if patch > 0 {
+            title.push_str(&format!(", {patch} from the merged patch"));
+        }
+        let mut toast = adw::Toast::builder().title(title).timeout(0);
+        if fresh {
+            toast = toast.button_label("Show").action_name("win.errors");
+        }
+        self.toasts.add_toast(toast.build());
     }
 
     /// The last session's error.log, credited to the enabled mods.

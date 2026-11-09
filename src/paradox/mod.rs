@@ -4,4 +4,5 @@ pub mod error_log;
 pub mod game;
 pub mod launcher_db;
 pub mod script;
+pub mod session;
 pub mod steam;
