@@ -1,7 +1,7 @@
 DrukhalManager is a fork of Irony Mod Manager by Mario (bcssov):
 https://github.com/bcssov/IronyModManager
 
-It's a rewrite for native Linux in Rust and GTK. Irony's design and behaviour
+It's written in Rust with GTK for Linux. Irony already provides a native Linux build with Linux/Proton support; DrukhalManager is an independent Rust/GTK implementation focused on AI-assisted merging. Irony's design and behaviour
 are its reference, and code ported from Irony is marked at the top of the
 source files it appears in. DrukhalManager is released under the MIT License
 (see LICENSE). Irony Mod Manager's original license:
