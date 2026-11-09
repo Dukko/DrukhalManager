@@ -30,11 +30,11 @@ pub fn present(parent: &impl IsA<gtk::Widget>, settings: Settings, page: Option<
         dialog.set_visible_page_name(page);
     }
 
-    let ignored = settings.ignored.clone();
+    let (ignored, key_in_keyring) = (settings.ignored.clone(), settings.key_in_keyring);
     let on_close = Rc::new(RefCell::new(Some(on_close)));
     dialog.connect_closed(move |_| {
         if let Some(f) = on_close.borrow_mut().take() {
-            f(Settings { provider: read_provider(), ignored: ignored.clone(), game: read_game(), updates: read_updates() });
+            f(Settings { provider: read_provider(), ignored: ignored.clone(), game: read_game(), updates: read_updates(), key_in_keyring });
         }
     });
     dialog.present(Some(parent));
@@ -166,7 +166,7 @@ fn ai_page(current: &Provider) -> (adw::PreferencesPage, impl Fn() -> Provider +
 
     let anthropic = adw::PreferencesGroup::builder()
         .title("Claude")
-        .description(format!("Merges use {CLAUDE_MODEL}. Leave the key empty to use the ANTHROPIC_API_KEY environment variable."))
+        .description(format!("Merges use {CLAUDE_MODEL}. The key is kept in your system keyring. Leave it empty to use the ANTHROPIC_API_KEY environment variable."))
         .build();
     let anthropic_key_row = adw::PasswordEntryRow::builder().title("API Key").text(&anthropic_key).build();
     anthropic.add(&anthropic_key_row);

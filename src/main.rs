@@ -7,6 +7,7 @@ mod merge_dialog;
 mod mods;
 mod paradox;
 mod sandbox;
+mod secrets;
 mod preferences;
 mod settings;
 mod thinking_view;

@@ -1,5 +1,6 @@
-//! User preferences, stored as JSON in the config dir. The file holds API
-//! keys, so it is created readable by the user only.
+//! User preferences, stored as JSON in the config dir. API keys go in the
+//! system keyring (see [`crate::secrets`]); only without one are they kept
+//! in the file, which is created readable by the user only.
 
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
@@ -19,6 +20,10 @@ pub struct Settings {
     pub game: GameOptions,
     #[serde(default)]
     pub updates: UpdateOptions,
+    /// The provider's API key lives in the keyring, so the file leaves it
+    /// out.
+    #[serde(skip)]
+    pub key_in_keyring: bool,
 }
 
 /// How the game is found and launched, as in Irony Mod Manager's Game
@@ -59,7 +64,7 @@ fn default_provider() -> Provider {
 
 impl Default for Settings {
     fn default() -> Self {
-        Self { provider: default_provider(), ignored: Default::default(), game: Default::default(), updates: Default::default() }
+        Self { provider: default_provider(), ignored: Default::default(), game: Default::default(), updates: Default::default(), key_in_keyring: false }
     }
 }
 
@@ -79,10 +84,35 @@ impl Settings {
         options.write(true).create(true).truncate(true);
         #[cfg(unix)]
         std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
+        let mut on_disk = self.clone();
+        if self.key_in_keyring {
+            *api_key_mut(&mut on_disk.provider) = String::new();
+        }
         let mut file = options.open(&tmp)?;
-        file.write_all(&serde_json::to_vec_pretty(self).map_err(io::Error::other)?)?;
+        file.write_all(&serde_json::to_vec_pretty(&on_disk).map_err(io::Error::other)?)?;
         file.sync_all()?;
         std::fs::rename(&tmp, path)
+    }
+
+    /// Brings in the keyring: a key still in the file (from before the
+    /// keyring was used, or saved while there was none) moves there, and an
+    /// empty one is filled in from it. Blocks; call off the main thread.
+    pub fn with_keyring(mut self, path: &Path) -> Self {
+        let kind = crate::secrets::kind(&self.provider);
+        let key = api_key_mut(&mut self.provider);
+        if !key.is_empty() {
+            if crate::secrets::set(kind, key).is_ok() {
+                self.key_in_keyring = true;
+                let _ = self.save(path);
+            }
+        } else if let Ok(found) = crate::secrets::get(kind) {
+            // Reachable: keys saved from now on go there.
+            self.key_in_keyring = true;
+            if let Some(found) = found {
+                *key = found;
+            }
+        }
+        self
     }
 
     /// The provider to use, with an empty Anthropic key filled in from
@@ -95,6 +125,12 @@ impl Settings {
             Provider::OpenAiCompatible { base_url, model, .. } if base_url.trim().is_empty() || model.trim().is_empty() => None,
             p => Some(p.clone()),
         }
+    }
+}
+
+pub fn api_key_mut(provider: &mut Provider) -> &mut String {
+    match provider {
+        Provider::Anthropic { api_key } | Provider::OpenAiCompatible { api_key, .. } => api_key,
     }
 }
 
@@ -111,7 +147,7 @@ mod tests {
     fn saves_privately_and_loads() {
         let path = std::env::temp_dir().join(format!("drukhal-settings-{}/settings.json", std::process::id()));
         assert_eq!(Settings::load(&path), Settings::default());
-        let s = Settings { provider: Provider::OpenAiCompatible { base_url: "http://localhost:11434/v1".into(), model: "qwen".into(), api_key: String::new() }, ignored: ["file:x".to_owned()].into(), game: GameOptions { launch_args: "-debug".into(), close_after_launch: true, ..Default::default() }, updates: UpdateOptions { check_at_startup: true, skipped_version: Some("0.2.0".into()) } };
+        let s = Settings { provider: Provider::OpenAiCompatible { base_url: "http://localhost:11434/v1".into(), model: "qwen".into(), api_key: String::new() }, ignored: ["file:x".to_owned()].into(), game: GameOptions { launch_args: "-debug".into(), close_after_launch: true, ..Default::default() }, updates: UpdateOptions { check_at_startup: true, skipped_version: Some("0.2.0".into()) }, key_in_keyring: false };
         s.save(&path).unwrap();
         assert_eq!(Settings::load(&path), s);
         assert!(s.ready_provider().is_some());
@@ -121,6 +157,15 @@ mod tests {
             assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
         }
         assert!(Settings { provider: openrouter(), ..Default::default() }.ready_provider().is_none(), "needs a model");
+
+        // With the key in the keyring, the file leaves it out.
+        let mut with_key = Settings { provider: Provider::Anthropic { api_key: "sk-secret".into() }, ..Default::default() };
+        with_key.save(&path).unwrap();
+        assert!(std::fs::read_to_string(&path).unwrap().contains("sk-secret"), "no keyring: kept in the private file");
+        with_key.key_in_keyring = true;
+        with_key.save(&path).unwrap();
+        assert!(!std::fs::read_to_string(&path).unwrap().contains("sk-secret"));
+        assert_eq!(with_key.provider, Provider::Anthropic { api_key: "sk-secret".into() }, "still in memory");
         std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
     }
 

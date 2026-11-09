@@ -26,6 +26,7 @@ use crate::mods::Mod;
 use crate::mods::collections::Collections;
 use crate::paradox::game::GameInstall;
 use crate::preferences;
+use crate::secrets;
 use crate::settings::{self, Settings};
 
 pub struct Paths {
@@ -299,6 +300,7 @@ pub fn build(
         update_toast: RefCell::new(None),
         update_announced: Cell::new(false),
     });
+    ui.load_api_key();
     ui.add_update_actions();
     ui.add_shortcuts_action(app);
 
@@ -450,20 +452,72 @@ impl Window {
             page,
             move |settings| {
                 let Some(ui) = weak.upgrade() else { return };
+                let key_changed = ui.settings.borrow().provider != settings.provider;
                 if *ui.settings.borrow() == settings {
                     return;
                 }
-                if let Err(e) = settings.save(&settings::path()) {
-                    ui.toasts.add_toast(
-                        adw::Toast::builder()
-                            .title(format!("Could not save preferences: {e}"))
-                            .timeout(0)
-                            .build(),
-                    );
-                }
                 ui.settings.replace(settings);
+                if key_changed {
+                    // Saved once the keyring has (or couldn't take) the key.
+                    ui.store_api_key();
+                } else {
+                    ui.save_settings("preferences");
+                }
             },
         );
+    }
+
+    fn save_settings(&self, what: &str) {
+        if let Err(e) = self.settings.borrow().save(&settings::path()) {
+            self.toasts.add_toast(
+                adw::Toast::builder()
+                    .title(format!("Could not save {what}: {e}"))
+                    .timeout(0)
+                    .build(),
+            );
+        }
+    }
+
+    /// Fills in the API key from the keyring (moving one still in the
+    /// settings file there), off the main thread since it may prompt.
+    fn load_api_key(self: &Rc<Self>) {
+        let weak = Rc::downgrade(self);
+        glib::spawn_future_local(async move {
+            let path = settings::path();
+            let Ok(loaded) = gio::spawn_blocking(move || settings::Settings::load(&path.clone()).with_keyring(&path)).await else { return };
+            let Some(ui) = weak.upgrade() else { return };
+            let mut current = ui.settings.borrow_mut();
+            // Unless Preferences changed the provider meanwhile.
+            if secrets::kind(&current.provider) == secrets::kind(&loaded.provider) && settings::api_key_mut(&mut current.provider).is_empty() {
+                current.provider = loaded.provider;
+                current.key_in_keyring = loaded.key_in_keyring;
+            }
+        });
+    }
+
+    /// Puts the provider's key in the keyring and saves the settings without
+    /// it, or, with no keyring, keeps it in the (private) settings file.
+    fn store_api_key(self: &Rc<Self>) {
+        let mut provider = self.settings.borrow().provider.clone();
+        let kind = secrets::kind(&provider);
+        let key = std::mem::take(settings::api_key_mut(&mut provider));
+        // Until the keyring answers, other saves leave the key out.
+        self.settings.borrow_mut().key_in_keyring = true;
+        let weak = Rc::downgrade(self);
+        glib::spawn_future_local(async move {
+            let stored = gio::spawn_blocking(move || secrets::set(kind, &key)).await.unwrap_or_else(|_| Err("The keyring call failed".into()));
+            let Some(ui) = weak.upgrade() else { return };
+            ui.settings.borrow_mut().key_in_keyring = stored.is_ok();
+            ui.save_settings("preferences");
+            if let Err(e) = stored {
+                ui.toasts.add_toast(
+                    adw::Toast::builder()
+                        .title(format!("{e}. The API key is saved in settings.json, readable only by you."))
+                        .timeout(0)
+                        .build(),
+                );
+            }
+        });
     }
 }
 
