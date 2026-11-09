@@ -174,7 +174,7 @@ dependencies = [
 
 [[package]]
 name = "drukhal-manager"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "async-channel",
  "gtk4",

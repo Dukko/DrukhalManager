@@ -36,6 +36,11 @@
     <control>keyboard</control>
   </supports>
   <releases>
+    <release version="0.1.1" date="2026-11-09">
+      <description>
+        <p>Undo and redo for the load order (Ctrl+Z, Ctrl+Shift+Z). The Flatpak now updates itself through its own signed repository.</p>
+      </description>
+    </release>
     <release version="0.1.0" date="2026-11-08">
       <description>
         <p>First release: load order editing and collections, conflict detection, AI-assisted merging into a patch mod, file repair, load order checks and game error reports.</p>
