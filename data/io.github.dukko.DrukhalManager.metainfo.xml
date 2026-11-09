@@ -36,6 +36,13 @@
     <control>keyboard</control>
   </supports>
   <releases>
+    <release version="0.2.7" date="2026-11-09">
+      <description>
+        <p>Interface (.gui) and graphics (.gfx) files can now be merged object by object, as can files that repeat one kind of object, such as ambient objects or font overrides.</p>
+        <p>The Conflicts page can be filtered to one mod, and Show Conflicts in a mod's menu opens it filtered.</p>
+        <p>Inline scripts are no longer reported as conflicting objects.</p>
+      </description>
+    </release>
     <release version="0.2.6" date="2026-11-09">
       <description>
         <p>Mods that turn off achievements are marked in the load order, and the status line says whether your collection keeps them.</p>
