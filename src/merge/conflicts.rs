@@ -163,7 +163,7 @@ pub fn analyze(mods: &[ModInput]) -> Report {
 /// Collects every file below the mod's top-level folders, as `/`-separated
 /// paths relative to `root`. Files at the root (descriptor, thumbnail) are
 /// not game content.
-fn walk(root: &Path, dir: &Path, out: &mut Vec<String>) -> std::io::Result<()> {
+pub(crate) fn walk(root: &Path, dir: &Path, out: &mut Vec<String>) -> std::io::Result<()> {
     for entry in std::fs::read_dir(dir)? {
         let entry = entry?;
         let path = entry.path();

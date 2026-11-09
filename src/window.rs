@@ -139,6 +139,7 @@ pub fn build(
     menu.append(Some("_Undo"), Some("win.undo"));
     menu.append(Some("_Redo"), Some("win.redo"));
     menu.append(Some("Last Game's _Errors…"), Some("win.errors"));
+    menu.append(Some("_Multiplayer Check…"), Some("win.multiplayer"));
     menu.append(Some("_Preferences"), Some("win.preferences"));
     menu.append(Some("_Keyboard Shortcuts"), Some("win.shortcuts"));
     menu.append(Some("_About DrukhalManager"), Some("win.about"));
@@ -396,6 +397,14 @@ pub fn build(
         }
     });
     window.add_action(&errors);
+    let multiplayer = gio::SimpleAction::new("multiplayer", None);
+    let weak = Rc::downgrade(&ui);
+    multiplayer.connect_activate(move |_, _| {
+        if let Some(ui) = weak.upgrade() {
+            ui.show_multiplayer();
+        }
+    });
+    window.add_action(&multiplayer);
     let find = gio::SimpleAction::new("find", None);
     let weak = Rc::downgrade(&ui);
     find.connect_activate(move |_, _| {

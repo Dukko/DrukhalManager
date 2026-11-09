@@ -253,6 +253,27 @@ impl Window {
         error_log::analyze(&src, &mods)
     }
 
+    /// The Multiplayer Check dialog, for the enabled mods in load order.
+    /// The merged patch is left out: each player's is their own.
+    pub(super) fn show_multiplayer(self: &Rc<Self>) {
+        let mods = {
+            let state = self.state.borrow();
+            state
+                .enabled
+                .iter()
+                .map(|&i| &state.mods[i])
+                .filter(|m| m.id != patch::ID)
+                .map(|m| (display_name(m).to_owned(), m.descriptor.remote_file_id, m.content.clone()))
+                .collect()
+        };
+        let request = crate::multiplayer_dialog::Request {
+            mods,
+            game_dir: self.game.as_ref().map(|g| g.dir.clone()),
+            game_version: self.game.as_ref().and_then(|g| g.version.clone()),
+        };
+        crate::multiplayer_dialog::present(&self.window, request);
+    }
+
     pub(super) fn show_errors(self: &Rc<Self>) {
         let log = error_log::path(&self.paths.user_dir);
         if !log.is_file() {

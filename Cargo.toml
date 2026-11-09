@@ -15,5 +15,6 @@ oo7 = { version = "0.7.0", default-features = false, features = ["async-std", "n
 rusqlite = { version = "0.41.1", features = ["bundled"] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
+sha2 = "0.11.1"
 ureq = { version = "3", features = ["json"] }
 zip = { version = "9.5.0", default-features = false, features = ["deflate-flate2-zlib-rs"] }

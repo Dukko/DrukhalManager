@@ -5,6 +5,8 @@ mod fix_dialog;
 mod merge;
 mod merge_dialog;
 mod mods;
+mod multiplayer;
+mod multiplayer_dialog;
 mod paradox;
 mod sandbox;
 mod secrets;
