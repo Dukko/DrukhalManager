@@ -154,6 +154,67 @@ impl Window {
         }
     }
 
+    /// Starts tracking a merge saved before fingerprints existed, taking its
+    /// mods' current versions (from the last scan) as what it merged.
+    pub(super) fn keep_merge(self: &Rc<Self>, stale: &patch::Stale) {
+        let what = stale.object.as_ref().map_or(stale.path.clone(), |(_, k)| k.clone());
+        let Some(analysis) = self.analysis.borrow().clone() else { return };
+        let Some(sources) = self.patch.borrow().as_ref().and_then(|p| p.sources(stale.object.as_ref(), &stale.path).map(<[String]>::to_vec)) else { return };
+        let source_mod = |m: usize| -> Option<patch::SourceMod> {
+            let name = analysis.name(m);
+            sources.iter().any(|s| s == name).then(|| Some((analysis.ids[m].clone(), name.to_owned(), analysis.roots[m].clone()?)))?
+        };
+        // Which mods define it now, according to the last scan.
+        enum Found {
+            Object(String, String, Vec<(patch::SourceMod, String)>),
+            File(String, Vec<patch::SourceMod>),
+        }
+        let found = match &stale.object {
+            Some((category, key)) => analysis
+                .report
+                .objects
+                .iter()
+                .find(|c| &c.category == category && &c.key == key)
+                .map(|c| Found::Object(category.clone(), key.clone(), c.definitions.iter().filter_map(|d| Some((source_mod(d.mod_position)?, d.file.clone()))).collect())),
+            None => analysis
+                .report
+                .files
+                .iter()
+                .find(|c| c.path.eq_ignore_ascii_case(&stale.path))
+                .map(|c| Found::File(stale.path.clone(), c.mods.iter().filter_map(|&m| source_mod(m)).collect())),
+        };
+        let empty = match &found {
+            Some(Found::Object(_, _, mods)) => mods.is_empty(),
+            Some(Found::File(_, mods)) => mods.is_empty(),
+            None => true,
+        };
+        if empty {
+            return self.toast_error_message(&format!("The mods {what} was merged from no longer conflict over it. Remove it from the patch, or enable them and rescan."));
+        }
+        let game_dir = self.game.as_ref().map(|g| g.dir.clone());
+        let (object, path) = (stale.object.clone(), stale.path.clone());
+        let weak = Rc::downgrade(self);
+        glib::spawn_future_local(async move {
+            // Reading the base game's version parses whole folders.
+            let prints = gio::spawn_blocking(move || match found {
+                Some(Found::Object(category, key, mods)) => patch::object_prints(&category, &key, game_dir.as_deref(), &mods),
+                Some(Found::File(path, mods)) => patch::file_prints(&path, game_dir.as_deref(), &mods),
+                None => Vec::new(),
+            })
+            .await
+            .unwrap_or_default();
+            let Some(ui) = weak.upgrade() else { return };
+            match ui.with_patch(|p, _, _| p.track(object.as_ref(), &path, prints)) {
+                Ok(()) => {
+                    ui.check_stale();
+                    ui.render_conflicts();
+                    ui.toasts.add_toast(adw::Toast::new(&format!("Kept {what}; changes to its mods will be noticed from now on")));
+                }
+                Err(e) => ui.toast_error_message(&e),
+            }
+        });
+    }
+
     pub(super) fn toast_error_message(&self, message: &str) {
         self.toasts
             .add_toast(adw::Toast::builder().title(message).timeout(0).build());
@@ -258,6 +319,12 @@ impl Window {
                 ui.remove_merge(stale);
             }
         });
+        let weak = Rc::downgrade(self);
+        let keep_merge = Box::new(move |stale: &patch::Stale| {
+            if let Some(ui) = weak.upgrade() {
+                ui.keep_merge(stale);
+            }
+        });
         Rc::new(MergeHooks {
             is_merged,
             open,
@@ -270,6 +337,7 @@ impl Window {
             toggle_show_ignored,
             stale: self.stale.borrow().clone(),
             remove_merge,
+            keep_merge,
         })
     }
 

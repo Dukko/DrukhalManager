@@ -83,6 +83,43 @@ pub struct Stale {
     /// object merges.
     pub path: String,
     pub reasons: Vec<String>,
+    /// Saved before fingerprints existed, so changes can't be noticed;
+    /// [`Patch::track`] starts tracking it.
+    pub untracked: bool,
+}
+
+/// Why an untracked merge is listed.
+pub const UNTRACKED: &str = "Merged by an older version, so changes to its mods can't be noticed";
+
+/// A mod a merge's sources can be read from: descriptor id, name, folder.
+pub type SourceMod = (String, String, PathBuf);
+
+/// Fingerprints of an object as `mods` (with the file defining it) and the
+/// base game define it now. Mods that no longer define it are left out.
+pub fn object_prints(category: &str, key: &str, game_dir: Option<&Path>, mods: &[(SourceMod, String)]) -> Vec<Print> {
+    let vanilla = game_dir.and_then(|dir| super::source::vanilla(dir, category, key));
+    let mut prints: Vec<Print> = vanilla.iter().map(|v| Print::new(VANILLA, "Vanilla", &v.file, &v.text)).collect();
+    for ((id, name, root), file) in mods {
+        let text = std::fs::read(root.join(file)).ok().and_then(|b| super::source::extract(category, key, &String::from_utf8_lossy(&b)));
+        if let Some(text) = text {
+            prints.push(Print::new(id, name, file, &text));
+        }
+    }
+    prints
+}
+
+/// Fingerprints of the file at `path` as `mods` and the base game ship it
+/// now.
+pub fn file_prints(path: &str, game_dir: Option<&Path>, mods: &[SourceMod]) -> Vec<Print> {
+    let read = |dir: &Path| std::fs::read(dir.join(path)).ok().map(|b| String::from_utf8_lossy(&b).into_owned());
+    let vanilla = game_dir.and_then(read);
+    let mut prints: Vec<Print> = vanilla.iter().map(|v| Print::new(VANILLA, "Vanilla", path, v)).collect();
+    for (id, name, root) in mods {
+        if let Some(text) = read(root) {
+            prints.push(Print::new(id, name, path, &text));
+        }
+    }
+    prints
 }
 
 /// A merged copy of a file several mods ship, saved at the same path so
@@ -188,18 +225,47 @@ impl Patch {
         let mut stale = Vec::new();
         for m in &self.manifest.merges {
             let (category, key) = (m.category.clone(), m.key.clone());
+            if m.prints.is_empty() {
+                stale.push(Stale { object: Some((category, key)), path: m.file.clone(), reasons: vec![UNTRACKED.to_owned()], untracked: true });
+                continue;
+            }
             let reasons = check(&m.prints, &|src| super::source::extract(&category, &key, src), "no longer defines it");
             if !reasons.is_empty() {
-                stale.push(Stale { object: Some((m.category.clone(), m.key.clone())), path: m.file.clone(), reasons });
+                stale.push(Stale { object: Some((m.category.clone(), m.key.clone())), path: m.file.clone(), reasons, untracked: false });
             }
         }
         for f in &self.manifest.files {
+            if f.prints.is_empty() {
+                stale.push(Stale { object: None, path: f.path.clone(), reasons: vec![UNTRACKED.to_owned()], untracked: true });
+                continue;
+            }
             let reasons = check(&f.prints, &|src| Some(src.to_owned()), "no longer ships this file");
             if !reasons.is_empty() {
-                stale.push(Stale { object: None, path: f.path.clone(), reasons });
+                stale.push(Stale { object: None, path: f.path.clone(), reasons, untracked: false });
             }
         }
         stale
+    }
+
+    /// The mod names a merge was made from, for `object` (`(category,
+    /// key)`) or, if `None`, the merged file at `path`.
+    pub fn sources(&self, object: Option<&(String, String)>, path: &str) -> Option<&[String]> {
+        match object {
+            Some((category, key)) => self.get(category, key).map(|m| m.sources.as_slice()),
+            None => self.get_file(path).map(|f| f.sources.as_slice()),
+        }
+    }
+
+    /// Records `prints` as what a merge's sources look like, so later
+    /// changes to them are noticed. For merges saved before fingerprints.
+    pub fn track(&mut self, object: Option<&(String, String)>, path: &str, prints: Vec<Print>) -> io::Result<()> {
+        let slot = match object {
+            Some((category, key)) => self.manifest.merges.iter_mut().find(|m| &m.category == category && &m.key == key).map(|m| &mut m.prints),
+            None => self.manifest.files.iter_mut().find(|f| f.path.eq_ignore_ascii_case(path)).map(|f| &mut f.prints),
+        };
+        let Some(slot) = slot else { return Err(io::Error::new(io::ErrorKind::NotFound, "It is no longer in the patch")) };
+        *slot = prints;
+        self.write_manifest()
     }
 
     fn write_manifest(&self) -> io::Result<()> {
@@ -315,6 +381,51 @@ mod tests {
         patch.remove("common/buildings", "lab").unwrap();
         assert!(Patch::open(&user).unwrap().get("common/buildings", "lab").is_none());
         assert!(!Patch::root(&user).join(file_for("common/buildings", "lab")).exists());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn tracks_merges_saved_before_fingerprints() {
+        let root = std::env::temp_dir().join(format!("drukhal-untracked-{}", std::process::id()));
+        let (user, a, b, game) = (root.join("user"), root.join("a"), root.join("b"), root.join("game"));
+        for (dir, file, text) in [(&a, "common/buildings/a.txt", "lab = { cost = 1 }"), (&b, "common/buildings/b.txt", "lab = { cost = 2 }"), (&game, "common/buildings/00.txt", "lab = { cost = 0 }")] {
+            std::fs::create_dir_all(dir.join("common/buildings")).unwrap();
+            std::fs::write(dir.join(file), text).unwrap();
+        }
+        std::fs::write(a.join("common/buildings/shared.txt"), "farm = {}").unwrap();
+        std::fs::write(b.join("common/buildings/shared.txt"), "farm = { cost = 1 }").unwrap();
+        // As written before fingerprints existed: sources, but no prints.
+        let dir = Patch::root(&user);
+        std::fs::create_dir_all(&dir).unwrap();
+        let legacy = r#"{"merges":[{"category":"common/buildings","key":"lab","script":"lab = { cost = 3 }","sources":["A","B"],"file":"common/buildings/伞伞伞_drukhal_lab.txt"}],
+                         "files":[{"path":"common/buildings/shared.txt","sources":["A","B"]}]}"#;
+        std::fs::write(dir.join(MANIFEST), legacy).unwrap();
+        let mut patch = Patch::open(&user).unwrap();
+        let mut roots: std::collections::HashMap<String, PathBuf> = [("mod/a.mod".to_owned(), a.clone()), ("mod/b.mod".to_owned(), b.clone()), (VANILLA.to_owned(), game.clone())].into();
+
+        let stale = patch.stale(&roots);
+        assert_eq!(stale.len(), 2);
+        assert!(stale.iter().all(|s| s.untracked && s.reasons == [UNTRACKED]));
+        assert_eq!(patch.sources(stale[0].object.as_ref(), &stale[0].path).unwrap(), ["A", "B"]);
+
+        // Keeping them records the mods' (and the game's) current versions.
+        let (ma, mb) = (("mod/a.mod".to_owned(), "A".to_owned(), a.clone()), ("mod/b.mod".to_owned(), "B".to_owned(), b.clone()));
+        let prints = object_prints("common/buildings", "lab", Some(&game), &[(ma.clone(), "common/buildings/a.txt".into()), (mb.clone(), "common/buildings/b.txt".into())]);
+        assert_eq!(prints.iter().map(|p| p.mod_id.as_str()).collect::<Vec<_>>(), [VANILLA, "mod/a.mod", "mod/b.mod"]);
+        patch.track(stale[0].object.as_ref(), &stale[0].path, prints).unwrap();
+        patch.track(None, "common/buildings/shared.txt", file_prints("common/buildings/shared.txt", Some(&game), &[ma, mb])).unwrap();
+        let mut patch = Patch::open(&user).unwrap();
+        assert!(patch.stale(&roots).is_empty(), "tracked and unchanged");
+
+        // From now on, changes are noticed.
+        std::fs::write(b.join("common/buildings/b.txt"), "lab = { cost = 9 }").unwrap();
+        roots.remove("mod/a.mod");
+        let stale = patch.stale(&roots);
+        assert_eq!(stale.iter().map(|s| (s.untracked, s.reasons.clone())).collect::<Vec<_>>(), [
+            (false, vec!["A isn't enabled any more".to_owned(), "B changed it".to_owned()]),
+            (false, vec!["A isn't enabled any more".to_owned()]),
+        ]);
+        assert!(patch.track(Some(&("events".into(), "gone".into())), "", vec![]).is_err());
         std::fs::remove_dir_all(root).unwrap();
     }
 

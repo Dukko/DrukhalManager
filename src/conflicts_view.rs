@@ -54,15 +54,17 @@ pub struct MergeHooks {
     pub stale: Vec<Stale>,
     /// Removes an out-of-date merge or fix from the patch.
     pub remove_merge: Box<dyn Fn(&Stale)>,
+    /// Starts tracking an untracked merge from its mods' current files.
+    pub keep_merge: Box<dyn Fn(&Stale)>,
 }
 
 impl MergeHooks {
     fn stale_object(&self, category: &str, key: &str) -> Option<&[String]> {
-        self.stale.iter().find(|s| s.object.as_ref().is_some_and(|(c, k)| c == category && k == key)).map(|s| s.reasons.as_slice())
+        self.stale.iter().find(|s| !s.untracked && s.object.as_ref().is_some_and(|(c, k)| c == category && k == key)).map(|s| s.reasons.as_slice())
     }
 
     fn stale_file(&self, path: &str) -> Option<&[String]> {
-        self.stale.iter().find(|s| s.object.is_none() && s.path.eq_ignore_ascii_case(path)).map(|s| s.reasons.as_slice())
+        self.stale.iter().find(|s| !s.untracked && s.object.is_none() && s.path.eq_ignore_ascii_case(path)).map(|s| s.reasons.as_slice())
     }
 }
 
@@ -149,29 +151,14 @@ pub fn build(analysis: &Rc<Analysis>, rescan: gtk::Button, hooks: Rc<MergeHooks>
     top.append(&rescan);
     page.append(&top);
 
-    if !hooks.stale.is_empty() {
+    let (untracked, outdated): (Vec<&Stale>, Vec<&Stale>) = hooks.stale.iter().partition(|s| s.untracked);
+    if !outdated.is_empty() {
         page.append(&heading("Outdated Merges", "Mods changed since these were merged or fixed, so the patch may be undoing their updates. Re-merge them below, or remove them from the patch."));
-        let list = boxed_list();
-        for s in &hooks.stale {
-            let title = s.object.as_ref().map_or(s.path.as_str(), |(_, key)| key.as_str());
-            let subtitle = match &s.object {
-                Some((category, _)) => format!("{category} · {}", s.reasons.join("; ")),
-                None => format!("{} · {}", s.path, s.reasons.join("; ")),
-            };
-            let r = row(title, &subtitle);
-            r.add_prefix(&gtk::Image::builder().icon_name("dialog-warning-symbolic").css_classes(["warning"]).build());
-            let remove = gtk::Button::builder().label("Remove from Patch").valign(gtk::Align::Center).css_classes(["flat"]).build();
-            let (hooks, stale, row_ref) = (hooks.clone(), s.clone(), r.downgrade());
-            remove.connect_clicked(move |_| {
-                (hooks.remove_merge)(&stale);
-                if let Some(r) = row_ref.upgrade() {
-                    r.set_visible(false);
-                }
-            });
-            r.add_suffix(&remove);
-            list.append(&r);
-        }
-        page.append(&list);
+        page.append(&stale_list(&hooks, &outdated));
+    }
+    if !untracked.is_empty() {
+        page.append(&heading("Merges to Check", "These were merged by an older version of DrukhalManager, which didn't record what the mods looked like, so their updates can't be noticed. If one still looks right, keep it to track changes from now on; otherwise re-merge it below or remove it."));
+        page.append(&stale_list(&hooks, &untracked));
     }
 
     if files.is_empty() && objects.is_empty() && report.errors.is_empty() && report.skipped.is_empty() {
@@ -290,6 +277,47 @@ fn file_row(analysis: &Analysis, index: usize, hooks: &Rc<MergeHooks>) -> adw::A
 
 /// The merged-state icon and the merge button for a row. An out-of-date
 /// merge shows a warning with the reasons instead of a check mark.
+/// Rows for merges that need attention, each with a way to deal with it.
+fn stale_list(hooks: &Rc<MergeHooks>, stale: &[&Stale]) -> gtk::ListBox {
+    let list = boxed_list();
+    for s in stale {
+        let file_name = s.path.rsplit_once('/').map_or(s.path.as_str(), |(_, f)| f);
+        let title = s.object.as_ref().map_or(file_name, |(_, key)| key.as_str());
+        let subtitle = match (&s.object, s.untracked) {
+            // The section heading already says why.
+            (Some((category, _)), true) => category.clone(),
+            (None, true) => s.path.clone(),
+            (Some((category, _)), false) => format!("{category} · {}", s.reasons.join("; ")),
+            (None, false) => format!("{} · {}", s.path, s.reasons.join("; ")),
+        };
+        let r = row(title, &subtitle);
+        let icon = if s.untracked { "dialog-question-symbolic" } else { "dialog-warning-symbolic" };
+        r.add_prefix(&gtk::Image::builder().icon_name(icon).css_classes(["warning"]).build());
+        if s.untracked {
+            let keep = gtk::Button::builder()
+                .label("Keep As Is")
+                .tooltip_text("Track changes to its mods from their current versions")
+                .valign(gtk::Align::Center)
+                .css_classes(["flat"])
+                .build();
+            let (hooks, stale) = (hooks.clone(), (*s).clone());
+            keep.connect_clicked(move |_| (hooks.keep_merge)(&stale));
+            r.add_suffix(&keep);
+        }
+        let remove = gtk::Button::builder().label("Remove from Patch").valign(gtk::Align::Center).css_classes(["flat"]).build();
+        let (hooks, stale, row_ref) = (hooks.clone(), (*s).clone(), r.downgrade());
+        remove.connect_clicked(move |_| {
+            (hooks.remove_merge)(&stale);
+            if let Some(r) = row_ref.upgrade() {
+                r.set_visible(false);
+            }
+        });
+        r.add_suffix(&remove);
+        list.append(&r);
+    }
+    list
+}
+
 fn merge_controls(is_merged: bool, stale: Option<&[String]>) -> (gtk::Image, gtk::Button) {
     let merged = gtk::Image::builder().icon_name("emblem-ok-symbolic").tooltip_text("Merged into the patch").css_classes(["success"]).visible(is_merged).build();
     let label = match (stale, is_merged) {

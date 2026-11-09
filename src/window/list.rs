@@ -234,11 +234,23 @@ impl Window {
         if let Some(error) = &m.error {
             problems.push((checks::Severity::Warning, error.clone()));
         }
-        let outdated = if is_patch {
-            self.stale.borrow().len()
+        let (outdated, untracked) = if is_patch {
+            let stale = self.stale.borrow();
+            let untracked = stale.iter().filter(|s| s.untracked).count();
+            (stale.len() - untracked, untracked)
         } else {
-            0
+            (0, 0)
         };
+        if untracked > 0 {
+            problems.push((
+                checks::Severity::Warning,
+                format!(
+                    "{} saved by an older version {} checking; see the Conflicts page",
+                    conflicts_view::plural(untracked, "merge", "merges"),
+                    if untracked == 1 { "needs" } else { "need" }
+                ),
+            ));
+        }
         if outdated > 0 {
             problems.push((
                 checks::Severity::Warning,
