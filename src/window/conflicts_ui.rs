@@ -14,7 +14,7 @@ use crate::fix_dialog;
 use crate::merge::conflicts::{self, ModInput};
 use crate::merge::patch::{self, Patch};
 use crate::merge_dialog;
-use crate::mods::{self, Mod};
+use crate::mods::{self, archive, Mod};
 use crate::settings;
 
 impl Window {
@@ -41,7 +41,7 @@ impl Window {
         }
         self.conflicts_page
             .set_child(Some(&conflicts_view::scanning()));
-        let (revision, names, ids, roots, load_positions, inputs) = {
+        let (revision, names, ids, load_positions, inputs) = {
             let state = self.state.borrow();
             // The merged patch is left out: its objects are resolutions, not
             // conflicts.
@@ -57,7 +57,6 @@ impl Window {
                 .map(|(_, m)| display_name(m).to_owned())
                 .collect();
             let ids = scanned.iter().map(|(_, m)| m.id.clone()).collect();
-            let roots = scanned.iter().map(|(_, m)| m.content.clone()).collect();
             let positions = scanned.iter().map(|(p, _)| *p).collect();
             let inputs: Vec<ModInput> = scanned
                 .iter()
@@ -66,16 +65,30 @@ impl Window {
                     replace_path: m.descriptor.replace_path.clone(),
                 })
                 .collect();
-            (state.revision, names, ids, roots, positions, inputs)
+            (state.revision, names, ids, positions, inputs)
         };
 
         let weak = Rc::downgrade(self);
         glib::spawn_future_local(async move {
-            let result = gio::spawn_blocking(move || conflicts::analyze(&inputs)).await;
+            let result = gio::spawn_blocking(move || {
+                // Zipped mods are read from an unpacked copy; one that can't
+                // be unpacked stays a zip, which the scan reports.
+                let mut inputs = inputs;
+                for input in &mut inputs {
+                    if let Some(root) = &input.root
+                        && let Ok(files) = archive::files(root)
+                    {
+                        input.root = Some(files);
+                    }
+                }
+                let roots = inputs.iter().map(|i| i.root.clone().filter(|r| r.is_dir())).collect();
+                (conflicts::analyze(&inputs), roots)
+            })
+            .await;
             let Some(ui) = weak.upgrade() else { return };
             ui.scanning.set(false);
             match result {
-                Ok(report) => {
+                Ok((report, roots)) => {
                     ui.check_stale();
                     ui.analysis.replace(Some(Rc::new(Analysis {
                         revision: Cell::new(revision),
@@ -107,7 +120,7 @@ impl Window {
             let mut roots: std::collections::HashMap<String, std::path::PathBuf> = state
                 .enabled
                 .iter()
-                .filter_map(|&i| Some((state.mods[i].id.clone(), state.mods[i].content.clone()?)))
+                .filter_map(|&i| Some((state.mods[i].id.clone(), archive::files(state.mods[i].content.as_deref()?).ok()?)))
                 .collect();
             if let Some(game) = &self.game {
                 roots.insert(patch::VANILLA.to_owned(), game.dir.clone());

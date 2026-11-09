@@ -10,6 +10,7 @@ use super::display_name;
 use crate::conflicts_view;
 use crate::error_report_dialog;
 use crate::merge::patch;
+use crate::mods::archive;
 use crate::paradox::{error_log, session};
 
 impl Window {
@@ -70,6 +71,8 @@ impl Window {
         else {
             return;
         };
+        // A zipped mod: show the folder holding the zip.
+        let dir = if dir.is_file() { dir.parent().map_or(dir.clone(), |p| p.to_path_buf()) } else { dir };
         gtk::FileLauncher::new(Some(&gio::File::for_path(dir))).launch(
             Some(&self.window),
             None::<&gio::Cancellable>,
@@ -241,7 +244,7 @@ impl Window {
                 error_log::LogMod {
                     id: m.id.clone(),
                     name: display_name(m).to_owned(),
-                    root: m.content.clone(),
+                    root: m.content.as_deref().and_then(|c| archive::files(c).ok()),
                     steam_id: m.descriptor.remote_file_id,
                     is_patch: m.id == patch::ID,
                 }
@@ -273,7 +276,7 @@ impl Window {
             state
                 .mods
                 .iter()
-                .filter_map(|m| Some((m.id.clone(), m.content.clone()?)))
+                .filter_map(|m| Some((m.id.clone(), archive::files(m.content.as_deref()?).ok()?)))
                 .collect()
         };
         error_report_dialog::present(&self.window, &self.error_report(), log, modified, roots);

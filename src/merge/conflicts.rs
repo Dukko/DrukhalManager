@@ -22,7 +22,8 @@ use crate::paradox::script::{self, Entries, Entry};
 /// One enabled mod, in load order.
 #[derive(Debug, Clone)]
 pub struct ModInput {
-    /// The mod's folder, or `None` if its files could not be found.
+    /// The mod's folder (for a zipped mod, its unpacked copy), or `None` if
+    /// its files could not be found.
     pub root: Option<PathBuf>,
     pub replace_path: Vec<String>,
 }
@@ -103,7 +104,8 @@ pub fn analyze(mods: &[ModInput]) -> Report {
             continue;
         };
         if root.is_file() {
-            report.skipped.push((position, "Zipped mods are not scanned yet".into()));
+            // Zips are unpacked before scanning; this one couldn't be.
+            report.skipped.push((position, "Could not unpack this zipped mod".into()));
             continue;
         }
         let mut found = Vec::new();

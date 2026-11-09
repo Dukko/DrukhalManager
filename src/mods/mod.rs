@@ -1,5 +1,6 @@
 //! Mod discovery and parsing of Paradox `.mod` descriptor files.
 
+pub mod archive;
 pub mod checks;
 pub mod collections;
 mod descriptor;
@@ -93,7 +94,9 @@ fn resolve_content(d: &Descriptor, user_dir: &Path, workshop_dirs: &[PathBuf]) -
         }
     }
     let id = d.remote_file_id?.to_string();
-    workshop_dirs.iter().map(|dir| dir.join(&id)).find(|p| p.is_dir())
+    let dir = workshop_dirs.iter().map(|dir| dir.join(&id)).find(|p| p.is_dir())?;
+    // A zipped Workshop mod is the zip inside its item folder.
+    if d.is_archive { archive::find_zip(&dir) } else { Some(dir) }
 }
 
 #[cfg(test)]
@@ -121,6 +124,47 @@ mod tests {
         assert_eq!(mods[1].error.as_deref(), Some("Descriptor file not found"));
         assert_eq!(mods[2].error.as_deref(), Some("Mod files not found"));
         assert_eq!(mods[3].source, Source::Local);
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn finds_zipped_mods_and_scans_them_for_conflicts() {
+        use crate::merge::conflicts::{self, ModInput};
+        let root = std::env::temp_dir().join(format!("drukhal-zip-test-{}", std::process::id()));
+        let (user, workshop) = (root.join("user"), root.join("workshop"));
+        std::fs::create_dir_all(user.join("mod/folder/common/buildings")).unwrap();
+        std::fs::create_dir_all(workshop.join("77")).unwrap();
+        std::fs::write(user.join("mod/folder/common/buildings/a.txt"), "building_x = {}").unwrap();
+        archive::write_zip(&user.join("mod/local.zip"), &[("common/buildings/b.txt", "building_x = {}\nbuilding_y = {}")]);
+        archive::write_zip(&workshop.join("77/item.zip"), &[("common/buildings/b.txt", "building_y = {}"), ("common/buildings/c.txt", "building_x = {}")]);
+
+        std::fs::write(user.join("mod/folder.mod"), "name=\"Folder\" path=\"mod/folder\"").unwrap();
+        std::fs::write(user.join("mod/local.mod"), "name=\"Local Zip\" archive=\"mod/local.zip\"").unwrap();
+        // Stale archive path: found through the Workshop item folder.
+        std::fs::write(user.join("mod/ugc_77.mod"), "name=\"Workshop Zip\" archive=\"/gone/item.zip\" remote_file_id=\"77\"").unwrap();
+        std::fs::write(user.join("dlc_load.json"), r#"{"enabled_mods":["mod/folder.mod","mod/local.mod","mod/ugc_77.mod"],"disabled_dlcs":[]}"#).unwrap();
+
+        let mods = discover(&user, std::slice::from_ref(&workshop)).unwrap();
+        assert_eq!(mods[1].content.as_deref(), Some(user.join("mod/local.zip").as_path()));
+        assert_eq!(mods[2].content.as_deref(), Some(workshop.join("77/item.zip").as_path()));
+
+        let cache = root.join("cache");
+        let inputs: Vec<ModInput> = mods
+            .iter()
+            .map(|m| ModInput { root: Some(archive::files_in(m.content.as_ref().unwrap(), &cache).unwrap()), replace_path: vec![] })
+            .collect();
+        let report = conflicts::analyze(&inputs);
+        assert!(report.skipped.is_empty(), "{:?}", report.skipped);
+        // Both zips ship common/buildings/b.txt; the Workshop one wins.
+        assert_eq!(report.files.len(), 1);
+        assert_eq!(report.files[0].mods, [1, 2]);
+        // building_x is defined by the folder mod and inside the Workshop
+        // zip (the local zip's copy is in the b.txt that doesn't load).
+        assert_eq!(report.objects.len(), 1);
+        assert_eq!(report.objects[0].key, "building_x");
+        let defined_by: Vec<_> = report.objects[0].definitions.iter().map(|d| (d.mod_position, d.file.as_str())).collect();
+        assert_eq!(defined_by, [(0, "common/buildings/a.txt"), (2, "common/buildings/c.txt")]);
 
         std::fs::remove_dir_all(root).unwrap();
     }
