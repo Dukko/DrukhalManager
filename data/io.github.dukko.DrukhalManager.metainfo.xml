@@ -36,6 +36,11 @@
     <control>keyboard</control>
   </supports>
   <releases>
+    <release version="0.2.2" date="2026-11-09">
+      <description>
+        <p>Installing an update from inside the Flatpak works; before, clicking Update did nothing. On desktops where Flatpak can't ask whether the app may update itself, DrukhalManager now says so.</p>
+      </description>
+    </release>
     <release version="0.2.1" date="2026-11-09">
       <description>
         <p>The Flatpak now points out errors Stellaris logged about your mods after you play, as the native build does, and both say when the game crashed.</p>
