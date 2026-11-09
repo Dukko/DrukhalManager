@@ -93,16 +93,22 @@ MIT, like Irony Mod Manager. See [LICENSE](LICENSE) and [NOTICE](NOTICE).
 
 ### Flatpak (any distro)
 
-Download `DrukhalManager.flatpak` from the
-[latest release](https://github.com/Dukko/DrukhalManager/releases/latest) and
-install it:
+Install it from DrukhalManager's own Flatpak repository:
 
 ```sh
-flatpak install --user DrukhalManager.flatpak
+flatpak install --user https://dukko.github.io/DrukhalManager/io.github.dukko.DrukhalManager.flatpakref
 ```
 
-It uses the GNOME runtime from Flathub, which Flatpak installs for you if
-needed. To update, download the new release and install it the same way.
+Updates then arrive with `flatpak update`, or through your software centre,
+like any other Flatpak. It uses the GNOME runtime from Flathub, which Flatpak
+installs for you if needed. The repository is signed with the key in
+[`flatpak/drukhal-manager.gpg`](flatpak/drukhal-manager.gpg).
+
+To install offline, download `DrukhalManager.flatpak` from the
+[latest release](https://github.com/Dukko/DrukhalManager/releases/latest) and
+run `flatpak install --user DrukhalManager.flatpak`. It updates from the same
+repository. If you installed the 0.1.0 bundle, install once again by either
+method to get updates.
 
 The sandbox can see your home folder. If Steam or a Steam library lives
 elsewhere, such as another drive, DrukhalManager shows the command that
@@ -138,3 +144,13 @@ To install by hand elsewhere, copy `target/release/drukhal-manager` to your
 `PATH`, `data/io.github.dukko.DrukhalManager.desktop` to
 `share/applications`, and the icon from `data/icons` to
 `share/icons/hicolor/scalable/apps`.
+
+## Releasing
+
+1. Bump the version in `Cargo.toml` and add a `<release>` to
+   `data/io.github.dukko.DrukhalManager.metainfo.xml`.
+2. If dependencies changed, regenerate `flatpak/cargo-sources.json` (see
+   `flatpak/generate-cargo-sources.py`); the release fails if it is stale.
+3. Push a `vX.Y.Z` tag. The *Flatpak release* workflow builds the Flatpak,
+   publishes the signed repository to GitHub Pages, and attaches
+   `DrukhalManager.flatpak` to the release (creating it if needed).

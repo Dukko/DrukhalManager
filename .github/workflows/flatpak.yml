@@ -1,0 +1,89 @@
+name: Flatpak release
+
+# On a version tag: build the Flatpak, publish the signed repo to GitHub
+# Pages (https://dukko.github.io/DrukhalManager/) so installs update with
+# `flatpak update`, and attach DrukhalManager.flatpak to the release.
+# Running it by hand rebuilds and republishes the repo from the chosen ref
+# without touching releases.
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: flatpak-pages
+  cancel-in-progress: false
+
+env:
+  # Public half in flatpak/drukhal-manager.gpg; private half in the
+  # FLATPAK_GPG_PRIVATE_KEY secret.
+  GPG_KEY_ID: 0492399EAC20A144BD5706A08891FBD410D72856
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check cargo-sources.json matches Cargo.lock
+        run: |
+          python3 flatpak/generate-cargo-sources.py Cargo.lock "$RUNNER_TEMP/cargo-sources.json"
+          diff -q flatpak/cargo-sources.json "$RUNNER_TEMP/cargo-sources.json" || {
+            echo "::error::flatpak/cargo-sources.json is stale; regenerate it (see flatpak/generate-cargo-sources.py)"
+            exit 1
+          }
+
+      - name: Install flatpak and flatpak-builder
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y flatpak flatpak-builder ostree
+          # Ubuntu 24.04 blocks the unprivileged user namespaces bubblewrap needs.
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+
+      - name: Build
+        run: |
+          flatpak-builder --user --force-clean --install-deps-from=flathub \
+            --repo="$RUNNER_TEMP/repo" "$RUNNER_TEMP/build" \
+            flatpak/io.github.dukko.DrukhalManager.yml
+
+      - name: Sign and assemble the site
+        env:
+          FLATPAK_GPG_PRIVATE_KEY: ${{ secrets.FLATPAK_GPG_PRIVATE_KEY }}
+        run: |
+          export GNUPGHOME="$RUNNER_TEMP/gnupg"
+          mkdir -m 700 "$GNUPGHOME"
+          gpg --batch --import <<< "$FLATPAK_GPG_PRIVATE_KEY"
+          flatpak/publish.sh "$RUNNER_TEMP/repo" "$RUNNER_TEMP/site" DrukhalManager.flatpak "$GPG_KEY_ID"
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: ${{ runner.temp }}/site
+
+      - name: Attach the bundle to the release
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" DrukhalManager.flatpak --clobber
+          else
+            gh release create "$TAG" DrukhalManager.flatpak --verify-tag --generate-notes
+          fi
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-24.04
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
