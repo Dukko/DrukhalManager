@@ -36,6 +36,12 @@
     <control>keyboard</control>
   </supports>
   <releases>
+    <release version="0.2.6" date="2026-11-09">
+      <description>
+        <p>Mods that turn off achievements are marked in the load order, and the status line says whether your collection keeps them.</p>
+        <p>The Launch button's menu can continue your last save directly.</p>
+      </description>
+    </release>
     <release version="0.2.5" date="2026-11-09">
       <description>
         <p>Mods show their thumbnails in the load order.</p>
