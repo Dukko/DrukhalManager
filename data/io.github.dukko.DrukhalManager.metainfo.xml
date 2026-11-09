@@ -36,6 +36,12 @@
     <control>keyboard</control>
   </supports>
   <releases>
+    <release version="0.2.4" date="2026-11-09">
+      <description>
+        <p>API keys are now kept in your system keyring instead of the settings file; a key saved earlier moves there the next time you start DrukhalManager.</p>
+        <p>Press ? or Ctrl+? (or use the main menu) to see the keyboard shortcuts.</p>
+      </description>
+    </release>
     <release version="0.2.3" date="2026-11-09">
       <description>
         <p>Zipped mods are now scanned for conflicts and can be merged like any other mod.</p>
