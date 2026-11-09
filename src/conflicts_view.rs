@@ -50,6 +50,9 @@ pub struct MergeHooks {
     /// Whether ignored conflicts are shown (dimmed) instead of hidden.
     pub show_ignored: bool,
     pub toggle_show_ignored: Box<dyn Fn()>,
+    /// The scanned position of the mod whose conflicts alone are shown.
+    pub filter: Option<usize>,
+    pub set_filter: Box<dyn Fn(Option<usize>)>,
     /// Merges and fixes whose sources changed since they were saved.
     pub stale: Vec<Stale>,
     /// Removes an out-of-date merge or fix from the patch.
@@ -125,7 +128,34 @@ pub fn build(analysis: &Rc<Analysis>, rescan: gtk::Button, hooks: Rc<MergeHooks>
         .flat_map(|&i| report.files[i].mods.iter().copied())
         .chain(objects.iter().flat_map(|&i| report.objects[i].definitions.iter().map(|d| d.mod_position)))
         .collect();
-    let mut summary = if shown_files == 0 && shown_objects == 0 {
+
+    // Only one mod's conflicts, if filtered.
+    let filter = hooks.filter;
+    let keep_file = |i: &usize| filter.is_none_or(|p| report.files[*i].mods.contains(&p));
+    let keep_object = |i: &usize| filter.is_none_or(|p| report.objects[*i].definitions.iter().any(|d| d.mod_position == p));
+    let (all_files, all_objects) = (shown_files, shown_objects);
+    let files: Vec<usize> = files.into_iter().filter(keep_file).collect();
+    let objects: Vec<usize> = objects.into_iter().filter(keep_object).collect();
+    let (shown_files, shown_objects) = if filter.is_some() {
+        (files.iter().filter(|&&i| !file_ignored(&ignored, &report.files[i])).count(), objects.iter().filter(|&&i| !object_ignored(&ignored, &report.objects[i])).count())
+    } else {
+        (shown_files, shown_objects)
+    };
+    let errors: Vec<usize> = (0..report.errors.len()).filter(|&i| filter.is_none_or(|p| report.errors[i].mod_position == p)).collect();
+    let skipped: Vec<&(usize, String)> = report.skipped.iter().filter(|(p, _)| filter.is_none_or(|f| *p == f)).collect();
+
+    let mut summary = if let Some(p) = filter {
+        if shown_files == 0 && shown_objects == 0 {
+            format!("{} has no conflicts", analysis.name(p))
+        } else {
+            format!(
+                "{} of {} involve {}",
+                plural(shown_files + shown_objects, "conflict", "conflicts"),
+                all_files + all_objects,
+                analysis.name(p)
+            )
+        }
+    } else if shown_files == 0 && shown_objects == 0 {
         "No conflicts between enabled mods".to_owned()
     } else {
         format!(
@@ -136,11 +166,30 @@ pub fn build(analysis: &Rc<Analysis>, rescan: gtk::Button, hooks: Rc<MergeHooks>
             analysis.names.len()
         )
     };
-    if n_ignored > 0 {
+    if n_ignored > 0 && filter.is_none() {
         summary.push_str(&format!(" · {n_ignored} ignored"));
     }
     let top = gtk::Box::new(gtk::Orientation::Horizontal, 12);
     top.append(&gtk::Label::builder().label(summary).xalign(0.0).hexpand(true).wrap(true).css_classes(["dim-label"]).build());
+    // Mods with conflicts, in load order, plus the filtered one if it has none.
+    let choices: Vec<usize> = (0..analysis.names.len()).filter(|p| involved.contains(p) || filter == Some(*p)).collect();
+    if choices.len() > 1 || filter.is_some() {
+        let mut labels = vec!["All Mods"];
+        labels.extend(choices.iter().map(|&p| analysis.name(p)));
+        let dropdown = gtk::DropDown::from_strings(&labels);
+        dropdown.set_enable_search(true);
+        dropdown.set_valign(gtk::Align::Center);
+        dropdown.set_tooltip_text(Some("Show only the conflicts of one mod"));
+        dropdown.set_selected(filter.and_then(|f| choices.iter().position(|&p| p == f)).map_or(0, |i| i as u32 + 1));
+        // Search by the shown text.
+        dropdown.set_expression(Some(gtk::PropertyExpression::new(gtk::StringObject::static_type(), None::<gtk::Expression>, "string")));
+        let hooks = hooks.clone();
+        dropdown.connect_selected_notify(move |d| {
+            let position = (d.selected() as usize).checked_sub(1).and_then(|i| choices.get(i).copied());
+            (hooks.set_filter)(position);
+        });
+        top.append(&dropdown);
+    }
     if n_ignored > 0 {
         let toggle = gtk::Button::builder().label(if hooks.show_ignored { "Hide Ignored" } else { "Show Ignored" }).valign(gtk::Align::Center).css_classes(["flat"]).build();
         let hooks = hooks.clone();
@@ -161,6 +210,9 @@ pub fn build(analysis: &Rc<Analysis>, rescan: gtk::Button, hooks: Rc<MergeHooks>
         page.append(&stale_list(&hooks, &untracked));
     }
 
+    if filter.is_some() && files.is_empty() && objects.is_empty() && errors.is_empty() && skipped.is_empty() {
+        return page.upcast();
+    }
     if files.is_empty() && objects.is_empty() && report.errors.is_empty() && report.skipped.is_empty() {
         let empty = adw::StatusPage::builder().icon_name("emblem-ok-symbolic").title("No Conflicts").description("None of the enabled mods change the same files or objects").vexpand(true).build();
         page.append(&empty);
@@ -192,13 +244,14 @@ pub fn build(analysis: &Rc<Analysis>, rescan: gtk::Button, hooks: Rc<MergeHooks>
         section(&page, "Conflicting Objects", "Defined by several mods; which one the game keeps depends on the folder. Merge one to keep every mod's changes.", groups, make, objects_folder_key, &hooks);
     }
 
-    if !report.errors.is_empty() || !report.skipped.is_empty() {
+    if !errors.is_empty() || !skipped.is_empty() {
         page.append(&heading("Problems", "Files the game will misread, and mods that couldn't be scanned"));
         let list = boxed_list();
-        for (position, reason) in &report.skipped {
+        for (position, reason) in skipped {
             list.append(&row(analysis.name(*position), reason));
         }
-        for (index, e) in report.errors.iter().enumerate() {
+        for index in errors {
+            let e = &report.errors[index];
             let r = row(&e.file, &format!("{} · {}", analysis.name(e.mod_position), e.message));
             r.add_prefix(&gtk::Image::builder().icon_name("dialog-warning-symbolic").css_classes(["warning"]).build());
             // Parse errors read "line N: …"; others are read failures.

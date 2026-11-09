@@ -58,6 +58,8 @@ struct Window {
     scanning: Cell<bool>,
     /// Whether the Conflicts page shows ignored conflicts (dimmed).
     show_ignored: Cell<bool>,
+    /// The mod (descriptor id) the Conflicts page is filtered to.
+    conflict_filter: RefCell<Option<String>>,
     /// Merges and fixes in the patch whose sources changed since.
     stale: RefCell<Vec<patch::Stale>>,
     settings: RefCell<Settings>,
@@ -301,6 +303,7 @@ pub fn build(
         analysis: RefCell::new(None),
         scanning: Cell::new(false),
         show_ignored: Cell::new(false),
+        conflict_filter: RefCell::new(None),
         stale: RefCell::new(Vec::new()),
         settings: RefCell::new(Settings::load(&settings::path())),
         patch: RefCell::new(None),
@@ -396,6 +399,14 @@ pub fn build(
         });
         window.add_action(&action);
     }
+    let show_conflicts = gio::SimpleAction::new("show-conflicts", Some(glib::VariantTy::UINT32));
+    let weak = Rc::downgrade(&ui);
+    show_conflicts.connect_activate(move |_, index| {
+        if let (Some(ui), Some(index)) = (weak.upgrade(), index.and_then(|i| i.get::<u32>())) {
+            ui.show_conflicts_of(index as usize);
+        }
+    });
+    window.add_action(&show_conflicts);
     for (name, to_top) in [("move-top", true), ("move-bottom", false)] {
         let action = gio::SimpleAction::new(name, Some(glib::VariantTy::UINT32));
         let weak = Rc::downgrade(&ui);

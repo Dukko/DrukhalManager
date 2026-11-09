@@ -233,6 +233,15 @@ impl Window {
         )));
     }
 
+    /// Opens the Conflicts page showing only the conflicts of the mod at
+    /// `index` in the mod list.
+    pub(super) fn show_conflicts_of(self: &Rc<Self>, index: usize) {
+        let Some(id) = self.state.borrow().mods.get(index).map(|m| m.id.clone()) else { return };
+        self.conflict_filter.replace(Some(id));
+        self.stack.set_visible_child_name("conflicts");
+        self.render_conflicts();
+    }
+
     pub(super) fn set_ignored(self: &Rc<Self>, key: &str, ignore: bool) {
         {
             let mut settings = self.settings.borrow_mut();
@@ -313,6 +322,16 @@ impl Window {
                 glib::idle_add_local_once(move || ui.render_conflicts());
             }
         });
+        let filter = self.conflict_filter.borrow().as_ref().and_then(|id| analysis.ids.iter().position(|i| i == id));
+        let weak = Rc::downgrade(self);
+        let ids = analysis.ids.clone();
+        let set_filter = Box::new(move |position: Option<usize>| {
+            if let Some(ui) = weak.upgrade() {
+                ui.conflict_filter.replace(position.and_then(|p| ids.get(p).cloned()));
+                // After the handler returns, since this replaces the page.
+                glib::idle_add_local_once(move || ui.render_conflicts());
+            }
+        });
         let weak = Rc::downgrade(self);
         let remove_merge = Box::new(move |stale: &patch::Stale| {
             if let Some(ui) = weak.upgrade() {
@@ -335,6 +354,8 @@ impl Window {
             set_ignored,
             show_ignored: self.show_ignored.get(),
             toggle_show_ignored,
+            filter,
+            set_filter,
             stale: self.stale.borrow().clone(),
             remove_merge,
             keep_merge,
