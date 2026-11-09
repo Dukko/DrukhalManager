@@ -144,7 +144,7 @@ in your app launcher.
 
 ## Building
 
-Requires Rust, GTK 4.14+ and libadwaita 1.6+ development files.
+Requires Rust, GTK 4.14+ and libadwaita 1.8+ development files.
 
 ```sh
 cargo run --release

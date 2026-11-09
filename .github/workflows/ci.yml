@@ -9,10 +9,10 @@ jobs:
     name: build, test, clippy
     runs-on: ubuntu-latest
     # ubuntu-24.04 ships GTK 4.14 / libadwaita 1.5, too old for the
-    # gtk4 v4_14 + libadwaita v1_6 feature gates. Fedora 42 has new
+    # gtk4 v4_14 + libadwaita v1_8 feature gates. Fedora 43 has new
     # enough system headers, so run the job inside that container.
     container:
-      image: fedora:42
+      image: fedora:43
     steps:
       - name: Install system dependencies
         run: |

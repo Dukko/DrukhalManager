@@ -6,6 +6,7 @@ mod launch;
 mod list;
 mod persist;
 mod repair_ui;
+mod shortcuts;
 mod state;
 mod updates;
 
@@ -135,6 +136,7 @@ pub fn build(
     menu.append(Some("_Redo"), Some("win.redo"));
     menu.append(Some("Last Game's _Errors…"), Some("win.errors"));
     menu.append(Some("_Preferences"), Some("win.preferences"));
+    menu.append(Some("_Keyboard Shortcuts"), Some("win.shortcuts"));
     menu.append(Some("_About DrukhalManager"), Some("win.about"));
     let menu_button = gtk::MenuButton::builder()
         .icon_name("open-menu-symbolic")
@@ -298,6 +300,7 @@ pub fn build(
         update_announced: Cell::new(false),
     });
     ui.add_update_actions();
+    ui.add_shortcuts_action(app);
 
     let weak = Rc::downgrade(&ui);
     undo_action.connect_activate(move |_, _| {
