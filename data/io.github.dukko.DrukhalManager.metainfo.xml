@@ -36,6 +36,12 @@
     <control>keyboard</control>
   </supports>
   <releases>
+    <release version="0.2.1" date="2026-11-09">
+      <description>
+        <p>The Flatpak now points out errors Stellaris logged about your mods after you play, as the native build does, and both say when the game crashed.</p>
+        <p>Preferences explain why the game executable can't be changed in the Flatpak.</p>
+      </description>
+    </release>
     <release version="0.2.0" date="2026-11-09">
       <description>
         <p>Preferences now cover the game: choose the executable and data directory, add launch options, refresh mod descriptors before playing, and close after launching.</p>
