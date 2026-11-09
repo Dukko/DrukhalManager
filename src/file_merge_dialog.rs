@@ -13,7 +13,6 @@ use crate::conflicts_view::plural;
 use crate::merge::ai::{self, Provider};
 use crate::merge::file_merge::{self, Plan, Status, Version};
 use crate::merge::patch::{Print, VANILLA};
-use crate::merge_dialog;
 use crate::thinking_view::{self, ThinkingView};
 
 pub struct Request {
@@ -151,11 +150,15 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
                 };
                 let row = adw::ActionRow::builder().title(&item.key).subtitle(subtitle).use_markup(false).build();
                 if let Status::Conflict { sources, .. } = &item.status {
-                    let label = gtk::Label::builder().label(format!("Using {}'s version", sources.last().unwrap().label)).css_classes(["dim-label", "caption"]).build();
+                    // The version picker shows whose version is used; this
+                    // only shows while the AI works on the object.
+                    let label = gtk::Label::builder().visible(false).css_classes(["dim-label", "caption"]).build();
                     row.add_suffix(&label);
                     // Choosing a version settles the conflict without AI.
                     let labels: Vec<&str> = sources.iter().map(|s| s.label.as_str()).collect();
                     let choice = gtk::DropDown::from_strings(&labels);
+                    choice.set_factory(Some(&label_factory(Some(22))));
+                    choice.set_list_factory(Some(&label_factory(None)));
                     choice.set_selected(labels.len() as u32 - 1);
                     choice.set_valign(gtk::Align::Center);
                     choice.set_tooltip_text(Some("Whose version to keep"));
@@ -168,14 +171,14 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
                         #[weak]
                         label,
                         move |choice| {
-                            let Some((name, text)) = texts.get(choice.selected() as usize) else { return };
+                            let Some((_, text)) = texts.get(choice.selected() as usize) else { return };
                             if let Some(p) = plan.borrow_mut().as_mut() {
                                 p.items[index].text = text.clone();
                                 p.items[index].resolved = true;
                                 editor.buffer().set_text(&p.render());
                             }
-                            label.set_label(&format!("Using {name}'s version"));
-                            label.set_css_classes(&["success", "caption"]);
+                            // The picker says it all now.
+                            label.set_visible(false);
                         }
                     ));
                     row.add_suffix(&choice);
@@ -255,12 +258,15 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
                         });
                         let Some((category, key, sources, vanilla)) = job else { continue };
                         label.set_label("Merging…");
+                        label.set_tooltip_text(None);
+                        label.set_css_classes(&["dim-label", "caption"]);
+                        label.set_visible(true);
                         let provider = provider.clone();
                         let (c, k) = (category.clone(), key.clone());
                         let heading = key.clone();
                         let result = thinking_view::run(&thinking, Some(&heading), move |on| ai::merge(&provider, &c, &k, vanilla.as_ref(), &sources, on)).await;
                         let merged = match result {
-                            Some(Ok(m)) => merge_dialog::validate(&category, &key, &m.script),
+                            Some(Ok(m)) => plan.borrow().as_ref().map_or(Err("the merge was closed".to_owned()), |p| p.validate_item(index, &m.script)),
                             Some(Err(e)) => Err(e),
                             None => Err("failed unexpectedly".to_owned()),
                         };
@@ -276,7 +282,7 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
                             }
                             Err(e) => {
                                 failures += 1;
-                                label.set_label("Merge failed; using the last mod's version");
+                                label.set_label("Merge failed");
                                 label.set_tooltip_text(Some(&e));
                                 label.set_css_classes(&["error", "caption"]);
                             }
@@ -337,4 +343,31 @@ fn show(banner: &adw::Banner, message: &str, error: bool) {
         banner.remove_css_class("error");
     }
     banner.set_revealed(true);
+}
+
+/// Shows a `gtk::StringList`'s strings, wrapped at `max_chars` when given.
+fn label_factory(max_chars: Option<i32>) -> gtk::SignalListItemFactory {
+    let factory = gtk::SignalListItemFactory::new();
+    factory.connect_setup(move |_, item| {
+        let label = gtk::Label::builder().xalign(0.0).build();
+        if let Some(n) = max_chars {
+            // Long names wrap onto more lines rather than cut off.
+            label.set_wrap(true);
+            label.set_wrap_mode(gtk::pango::WrapMode::WordChar);
+            label.set_width_chars(n.min(12));
+            label.set_max_width_chars(n);
+            // The button's padding is sized for one line.
+            label.set_margin_top(6);
+            label.set_margin_bottom(6);
+        }
+        if let Some(item) = item.downcast_ref::<gtk::ListItem>() {
+            item.set_child(Some(&label));
+        }
+    });
+    factory.connect_bind(move |_, item| {
+        let Some(item) = item.downcast_ref::<gtk::ListItem>() else { return };
+        let (Some(label), Some(text)) = (item.child().and_downcast::<gtk::Label>(), item.item().and_downcast::<gtk::StringObject>()) else { return };
+        label.set_label(&text.string());
+    });
+    factory
 }
