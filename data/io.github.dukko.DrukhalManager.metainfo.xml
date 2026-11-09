@@ -36,6 +36,12 @@
     <control>keyboard</control>
   </supports>
   <releases>
+    <release version="0.2.5" date="2026-11-09">
+      <description>
+        <p>Mods show their thumbnails in the load order.</p>
+        <p>New Multiplayer Check in the main menu: save a report of your game and mods to send to the other players, or open theirs to see which mods, files, versions or load order differ.</p>
+      </description>
+    </release>
     <release version="0.2.4" date="2026-11-09">
       <description>
         <p>API keys are now kept in your system keyring instead of the settings file; a key saved earlier moves there the next time you start DrukhalManager.</p>
