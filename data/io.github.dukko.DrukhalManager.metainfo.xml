@@ -36,6 +36,12 @@
     <control>keyboard</control>
   </supports>
   <releases>
+    <release version="0.2.0" date="2026-11-09">
+      <description>
+        <p>Preferences now cover the game: choose the executable and data directory, add launch options, refresh mod descriptors before playing, and close after launching.</p>
+        <p>DrukhalManager shows its version in About and Preferences, tells you when a new version is out, and in the Flatpak installs it and restarts into it.</p>
+      </description>
+    </release>
     <release version="0.1.1" date="2026-11-09">
       <description>
         <p>Undo and redo for the load order (Ctrl+Z, Ctrl+Shift+Z). The Flatpak now updates itself through its own signed repository.</p>
