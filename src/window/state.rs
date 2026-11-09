@@ -1,0 +1,348 @@
+//! The load order state: which mods are enabled and in what order.
+
+use crate::merge::patch;
+use crate::mods::Mod;
+
+pub(crate) struct State {
+    pub(crate) mods: Vec<Mod>,
+    /// Indices into `mods`, in load order.
+    pub(crate) enabled: Vec<usize>,
+    pub(crate) dirty: bool,
+    /// Bumped on every load order change, so conflict reports can tell
+    /// whether they still describe it.
+    pub(crate) revision: u64,
+}
+
+impl State {
+    pub(crate) fn new(mods: Vec<Mod>) -> Self {
+        let mut enabled: Vec<usize> = (0..mods.len())
+            .filter(|&i| mods[i].load_position.is_some())
+            .collect();
+        enabled.sort_by_key(|&i| mods[i].load_position);
+        let mut state = Self {
+            mods,
+            enabled,
+            dirty: false,
+            revision: 0,
+        };
+        // A saved order with the patch elsewhere gets fixed on the next save.
+        state.dirty = state.pin_patch();
+        state
+    }
+
+    /// Keeps the merged patch at the very end of the load order: its merged
+    /// files and fixes only win when it loads after every mod. Every change
+    /// to the order goes through here. Returns whether it had to move.
+    pub(crate) fn pin_patch(&mut self) -> bool {
+        let Some(at) = self
+            .enabled
+            .iter()
+            .position(|&i| self.mods[i].id == patch::ID)
+        else {
+            return false;
+        };
+        if at + 1 == self.enabled.len() {
+            return false;
+        }
+        let patch = self.enabled.remove(at);
+        self.enabled.push(patch);
+        true
+    }
+
+    pub(crate) fn disabled(&self) -> Vec<usize> {
+        let mut disabled: Vec<usize> = (0..self.mods.len())
+            .filter(|i| !self.enabled.contains(i))
+            .collect();
+        disabled.sort_by_cached_key(|&i| self.mods[i].descriptor.name.to_lowercase());
+        disabled
+    }
+
+    /// Enabling appends to the end of the load order.
+    pub(crate) fn set_enabled(&mut self, index: usize, on: bool) {
+        match (on, self.enabled.iter().position(|&i| i == index)) {
+            (true, None) => self.enabled.push(index),
+            (false, Some(p)) => {
+                self.enabled.remove(p);
+            }
+            _ => return,
+        }
+        self.pin_patch();
+        self.dirty = true;
+        self.revision += 1;
+    }
+
+    /// Moves the mod at load position `from` in front of the mod currently at
+    /// `before` (`before == len` moves it to the end).
+    /// Moves the mod at load position `from` so it ends up at position `to`
+    /// (both 0-based; `to` is clamped to the list).
+    pub(crate) fn move_to(&mut self, from: usize, to: usize) {
+        let to = to.min(self.enabled.len().saturating_sub(1));
+        self.move_enabled(from, if to > from { to + 1 } else { to });
+    }
+
+    pub(crate) fn move_enabled(&mut self, from: usize, mut before: usize) {
+        if from >= self.enabled.len() {
+            return;
+        }
+        if before > from {
+            before -= 1;
+        }
+        if before == from {
+            return;
+        }
+        let item = self.enabled.remove(from);
+        self.enabled.insert(before.min(self.enabled.len()), item);
+        self.pin_patch();
+        self.dirty = true;
+        self.revision += 1;
+    }
+
+    /// Enables every mod (newly enabled ones go to the end, alphabetically)
+    /// or disables them all. Returns the previous load order for undo, or
+    /// `None` if nothing changed.
+    pub(crate) fn set_all(&mut self, on: bool) -> Option<(Vec<usize>, bool)> {
+        let previous = (self.enabled.clone(), self.dirty);
+        if on {
+            let disabled = self.disabled();
+            if disabled.is_empty() {
+                return None;
+            }
+            self.enabled.extend(disabled);
+        } else {
+            if self.enabled.is_empty() {
+                return None;
+            }
+            self.enabled.clear();
+        }
+        self.pin_patch();
+        self.dirty = true;
+        self.revision += 1;
+        Some(previous)
+    }
+
+    pub(crate) fn restore(&mut self, (enabled, dirty): (Vec<usize>, bool)) {
+        self.enabled = enabled;
+        self.dirty = dirty;
+        self.pin_patch();
+        self.revision += 1;
+    }
+
+    /// Drops mods by id, keeping the load order of the rest. Removing an
+    /// enabled mod counts as a change.
+    pub(crate) fn remove_mods(&mut self, ids: &[String]) {
+        let enabled_ids = self.enabled_ids();
+        let before = enabled_ids.len();
+        self.mods.retain(|m| !ids.contains(&m.id));
+        let index: std::collections::HashMap<&str, usize> = self
+            .mods
+            .iter()
+            .enumerate()
+            .map(|(i, m)| (m.id.as_str(), i))
+            .collect();
+        self.enabled = enabled_ids
+            .iter()
+            .filter_map(|id| index.get(id.as_str()).copied())
+            .collect();
+        self.pin_patch();
+        if self.enabled.len() != before {
+            self.dirty = true;
+        }
+        self.revision += 1;
+    }
+
+    /// Replaces the load order with `ids`; returns those not installed.
+    pub(crate) fn set_enabled_ids(&mut self, ids: &[String]) -> Vec<String> {
+        let index: std::collections::HashMap<&str, usize> = self
+            .mods
+            .iter()
+            .enumerate()
+            .map(|(i, m)| (m.id.as_str(), i))
+            .collect();
+        let mut missing = Vec::new();
+        let mut enabled = Vec::new();
+        for id in ids {
+            match index.get(id.as_str()) {
+                Some(&i) if !enabled.contains(&i) => enabled.push(i),
+                Some(_) => {}
+                None => missing.push(id.clone()),
+            }
+        }
+        self.enabled = enabled;
+        self.pin_patch();
+        self.dirty = true;
+        self.revision += 1;
+        missing
+    }
+
+    pub(crate) fn enabled_ids(&self) -> Vec<String> {
+        self.enabled
+            .iter()
+            .map(|&i| self.mods[i].id.clone())
+            .collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::mods;
+
+    fn state(enabled: &[usize]) -> State {
+        let mods = (0..4)
+            .map(|i| Mod {
+                id: format!("mod/{i}.mod"),
+                descriptor: mods::Descriptor {
+                    name: format!("{i}"),
+                    ..Default::default()
+                },
+                content: None,
+                source: mods::Source::Local,
+                load_position: enabled.iter().position(|&e| e == i),
+                error: None,
+            })
+            .collect();
+        State::new(mods)
+    }
+
+    #[test]
+    fn moves_within_load_order() {
+        let mut s = state(&[0, 1, 2]);
+        s.move_enabled(0, 2);
+        assert_eq!(s.enabled, [1, 0, 2]);
+        s.move_enabled(2, 0);
+        assert_eq!(s.enabled, [2, 1, 0]);
+        s.move_enabled(0, 3);
+        assert_eq!(s.enabled, [1, 0, 2]);
+        assert!(s.dirty);
+
+        let mut s = state(&[0, 1]);
+        s.move_enabled(0, 1);
+        assert_eq!(s.enabled, [0, 1]);
+        assert!(!s.dirty, "dropping a mod onto its own slot is a no-op");
+    }
+
+    #[test]
+    fn enables_and_disables_all_with_undo() {
+        let mut s = state(&[2, 0]);
+        let previous = s.set_all(true).unwrap();
+        assert_eq!(
+            s.enabled,
+            [2, 0, 1, 3],
+            "new mods go to the end, keeping the existing order"
+        );
+        assert!(s.set_all(true).is_none());
+        s.restore(previous);
+        assert_eq!(s.enabled, [2, 0]);
+        assert!(!s.dirty, "undo restores the saved state");
+        s.set_all(false).unwrap();
+        assert!(s.enabled.is_empty() && s.dirty);
+        assert!(s.set_all(false).is_none());
+    }
+
+    #[test]
+    fn removing_mods_keeps_the_order() {
+        let mut s = state(&[3, 1, 0]);
+        s.remove_mods(&["mod/1.mod".into()]);
+        assert_eq!(s.enabled_ids(), ["mod/3.mod", "mod/0.mod"]);
+        assert!(s.dirty);
+        let mut s = state(&[0]);
+        s.remove_mods(&["mod/2.mod".into()]);
+        assert_eq!(s.enabled_ids(), ["mod/0.mod"]);
+        assert!(
+            !s.dirty,
+            "removing a disabled mod doesn't change the load order"
+        );
+    }
+
+    #[test]
+    fn patch_always_loads_last() {
+        let mut s = state(&[0, 1]);
+        s.mods.push(Mod {
+            id: patch::ID.into(),
+            descriptor: Default::default(),
+            content: None,
+            source: mods::Source::Local,
+            load_position: None,
+            error: None,
+        });
+        s.set_enabled(4, true);
+        s.set_enabled(2, true);
+        assert_eq!(
+            s.enabled,
+            [0, 1, 2, 4],
+            "enabling another mod still puts it before the patch"
+        );
+        s.move_to(3, 0);
+        assert_eq!(s.enabled, [0, 1, 2, 4], "the patch can't be moved up");
+        s.move_to(0, 99);
+        assert_eq!(
+            s.enabled,
+            [1, 2, 0, 4],
+            "moving to the bottom stops above the patch"
+        );
+        s.set_enabled_ids(&[patch::ID.into(), "mod/3.mod".into()]);
+        assert_eq!(
+            s.enabled,
+            [3, 4],
+            "collections and imports can't put it first"
+        );
+        s.restore((vec![4, 0], false));
+        assert_eq!(s.enabled, [0, 4]);
+        s.set_all(true);
+        assert_eq!(*s.enabled.last().unwrap(), 4);
+
+        let mods = vec![
+            Mod {
+                id: patch::ID.into(),
+                descriptor: Default::default(),
+                content: None,
+                source: mods::Source::Local,
+                load_position: Some(0),
+                error: None,
+            },
+            Mod {
+                id: "mod/a.mod".into(),
+                descriptor: Default::default(),
+                content: None,
+                source: mods::Source::Local,
+                load_position: Some(1),
+                error: None,
+            },
+        ];
+        let s = State::new(mods);
+        assert_eq!(
+            s.enabled,
+            [1, 0],
+            "a saved order with the patch first is fixed on load"
+        );
+        assert!(s.dirty);
+    }
+
+    #[test]
+    fn moves_to_a_position() {
+        let mut s = state(&[0, 1, 2, 3]);
+        s.move_to(0, 2);
+        assert_eq!(
+            s.enabled,
+            [1, 2, 0, 3],
+            "the mod ends up at the typed position"
+        );
+        s.move_to(3, 0);
+        assert_eq!(s.enabled, [3, 1, 2, 0]);
+        s.move_to(1, 99);
+        assert_eq!(s.enabled, [3, 2, 0, 1], "past the end moves to the bottom");
+        let before = s.revision;
+        s.move_to(2, 2);
+        assert_eq!(s.revision, before, "same position is a no-op");
+    }
+
+    #[test]
+    fn toggling_appends_and_removes() {
+        let mut s = state(&[2, 0]);
+        assert_eq!(s.disabled(), [1, 3]);
+        s.set_enabled(3, true);
+        s.set_enabled(2, false);
+        assert_eq!(s.enabled, [0, 3]);
+        assert_eq!(s.enabled_ids(), ["mod/0.mod", "mod/3.mod"]);
+    }
+}

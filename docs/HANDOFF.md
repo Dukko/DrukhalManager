@@ -17,7 +17,7 @@ For a coding agent (or person) picking up the work. It covers where the project 
 | Paradox and Steam | `paradox/script.rs` (Clausewitz parser with byte spans), `steam.rs` (libraries, unreachable Steam roots), `game.rs` (find and launch the game), `launcher_db.rs` (Paradox Launcher playsets in SQLite), `error_log.rs` |
 | Mods | `mods/mod.rs` (discovery), `descriptor.rs`, `load_order.rs` (`dlc_load.json`), `checks.rs` (dependency and version checks), `collections.rs`, `repair.rs` (stale or orphaned descriptors) |
 | Merging | `merge/conflicts.rs` (scan), `source.rs` (cut out one object's text), `ai.rs` (Claude and OpenAI-compatible providers, streaming), `file_merge.rs` (per-object merge of a whole file), `lint.rs` (brace repair), `patch.rs` (merged patch mod, fingerprints, staleness) |
-| UI | `window.rs` (main window and `State`), `window/collections_ui.rs`, `conflicts_view.rs`, `merge_dialog.rs`, `file_merge_dialog.rs`, `fix_dialog.rs`, `error_report_dialog.rs`, `thinking_view.rs`, `preferences.rs`, `settings.rs` |
+| UI | `window.rs` (main window, `build`, helpers), `window/state.rs` (load order `State`), `window/list.rs` (load order list UI), `window/conflicts_ui.rs` (scan, patch, merge/fix dialogs), `window/repair_ui.rs`, `window/persist.rs` (save + launcher sync), `window/launch.rs` (launch, error report, close), `window/collections_ui.rs`, `conflicts_view.rs`, `merge_dialog.rs`, `file_merge_dialog.rs`, `fix_dialog.rs`, `error_report_dialog.rs`, `thinking_view.rs`, `preferences.rs`, `settings.rs` |
 | Packaging | `data/` (desktop entry, icon, metainfo), `packaging/arch/PKGBUILD` (+ `.SRCINFO`), `flatpak/` (manifest, `generate-cargo-sources.py`, `cargo-sources.json`) |
 
 Key invariants:
@@ -45,8 +45,8 @@ Key invariants:
 
 ## Next steps, in priority order
 
-1. **Confirm the Flatpak fixes.** Ask the owner to install the v0.1.0 bundle, run the override command the app shows, and confirm that Launch works through Steam and the Steam libraries are found.
-2. **Confirm a real AI stream.** With the owner's go-ahead and key, run one merge with each provider. Check that the reasoning box fills in, and that Claude's adaptive thinking with `display: "summarized"`, structured output and `fallbacks: "default"` are accepted (`merge/ai.rs`). Fix whatever the API rejects.
+1. **Confirm the Flatpak fixes.** Done, owner-tested: installed the v0.1.0 bundle, ran the override command, Launch works through Steam and libraries are found.
+2. **Confirm a real AI stream.** Done, owner-tested with both providers.
 3. **Automatic Flatpak updates.** Publish a signed Flatpak repo on GitHub Pages (`flatpak build-update-repo`, a GPG key from the owner, a `.flatpakrepo` file), plus a GitHub Actions workflow that builds the bundle on each tag. Document `flatpak remote-add`.
 4. **CI.** A GitHub Actions workflow running `cargo build`, `cargo test` and `cargo clippy` on push. It needs the GTK 4 and libadwaita dev packages; consider the GNOME SDK container.
 5. **Remaining features the owner was offered:**
@@ -61,7 +61,7 @@ Key invariants:
    - Localisation files with several languages aren't supported.
    - Merges saved before v0.1.0 have no fingerprints, so they aren't checked for staleness.
    - The after-game error toast doesn't work in the Flatpak, because the game is launched through Steam.
-7. **Split `window.rs`.** At about 1,600 lines, it would be easier to work in if the load order list, launching and the patch handling were split into `window/` submodules, as `collections_ui.rs` already is.
+7. **Split `window.rs`.** Done: `State` is now `window/state.rs`, and the `Window` impl is split into `window/list.rs`, `window/conflicts_ui.rs`, `window/repair_ui.rs`, `window/persist.rs` and `window/launch.rs`, alongside the existing `window/collections_ui.rs`. `window.rs` keeps the `Window` struct, `build`, `open_preferences` and the small helpers.
 
 ## Useful commands
 
