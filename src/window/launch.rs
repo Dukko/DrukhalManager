@@ -13,6 +13,9 @@ use crate::merge::patch;
 use crate::mods::archive;
 use crate::paradox::{error_log, session};
 
+/// Makes the game load the last save instead of the main menu.
+const CONTINUE: &str = "--continuelastsave";
+
 impl Window {
     /// In a Flatpak, Steam installed outside the home folder (reached through
     /// a link) is invisible, so the game can't be found. Explains the
@@ -96,7 +99,23 @@ impl Window {
         .launch(Some(&self.window), None::<&gio::Cancellable>, |_| {});
     }
 
-    pub(super) fn launch(self: &Rc<Self>) {
+    /// Offers to continue the last save in the Launch menu, if there is one.
+    pub(super) fn update_continue(&self) {
+        let last = self.game.as_ref().and_then(|_| session::last_save(&self.paths.user_dir));
+        if let Some(action) = self.window.lookup_action("launch-continue").and_downcast::<gio::SimpleAction>() {
+            action.set_enabled(last.is_some());
+        }
+        let label = match &last {
+            Some(save) if save.date.is_empty() => format!("_Continue {}", save.empire),
+            Some(save) => format!("_Continue {}, {}", save.empire, save.date),
+            None => "_Continue Last Save (none found)".to_owned(),
+        };
+        self.launch_menu.remove_all();
+        self.launch_menu.append(Some(&label), Some("win.launch-continue"));
+    }
+
+    /// Starts the game; `resume` loads the last save straight away.
+    pub(super) fn launch(self: &Rc<Self>, resume: bool) {
         let Some(game) = &self.game else { return };
         let options = self.settings.borrow().game.clone();
         let extra = if options.launch_args.is_empty() {
@@ -126,10 +145,10 @@ impl Window {
         if crate::sandbox::is_flatpak() {
             // A sandboxed app can't start the game itself; Steam can, and
             // the launcher playset carries the load order.
-            gtk::UriLauncher::new(&format!(
-                "steam://rungameid/{}",
-                crate::paradox::steam::STELLARIS_APP_ID
-            ))
+            let id = crate::paradox::steam::STELLARIS_APP_ID;
+            // Steam asks before passing arguments on.
+            let uri = if resume { format!("steam://run/{id}//{CONTINUE}/") } else { format!("steam://rungameid/{id}") };
+            gtk::UriLauncher::new(&uri)
             .launch(Some(&self.window), None::<&gio::Cancellable>, |_| {});
             self.toasts
                 .add_toast(adw::Toast::new("Starting Stellaris through Steam…"));
@@ -141,6 +160,10 @@ impl Window {
             return;
         }
         let started = std::time::SystemTime::now();
+        let mut extra = extra;
+        if resume {
+            extra.push(CONTINUE.to_owned());
+        }
         let mut child = match game.launch(&extra) {
             Ok(child) => child,
             Err(e) => {

@@ -42,6 +42,7 @@ struct Window {
     game: Option<GameInstall>,
     state: RefCell<State>,
     status: gtk::Label,
+    launch_menu: gio::Menu,
     /// Checked when every mod is enabled, mixed when some are.
     all_toggle: gtk::CheckButton,
     /// Set while `refresh` updates `all_toggle`, so it isn't taken as a click.
@@ -120,7 +121,11 @@ pub fn build(
         }
     };
 
-    let launch = gtk::Button::builder()
+    // The menu offers to continue the last save; see `update_continue`.
+    let launch_menu = gio::Menu::new();
+    let launch = adw::SplitButton::builder()
+        .menu_model(&launch_menu)
+        .dropdown_tooltip("More Ways to Launch")
         .child(
             &adw::ButtonContent::builder()
                 .icon_name("media-playback-start-symbolic")
@@ -249,6 +254,9 @@ pub fn build(
     launch_action.set_enabled(game.is_some());
     window.add_action(&save_action);
     window.add_action(&launch_action);
+    let continue_action = gio::SimpleAction::new("launch-continue", None);
+    continue_action.set_enabled(false);
+    window.add_action(&continue_action);
     app.set_accels_for_action("win.save", &["<Control>s"]);
     let preferences_action = gio::SimpleAction::new("preferences", None);
     window.add_action(&preferences_action);
@@ -282,6 +290,7 @@ pub fn build(
         restore_banner,
         state: RefCell::new(State::new(found)),
         status,
+        launch_menu,
         all_toggle: all_toggle.clone(),
         syncing: Cell::new(false),
         sort_button: sort_button.clone(),
@@ -331,7 +340,22 @@ pub fn build(
     let weak = Rc::downgrade(&ui);
     launch_action.connect_activate(move |_, _| {
         if let Some(ui) = weak.upgrade() {
-            ui.launch();
+            ui.launch(false);
+        }
+    });
+    let weak = Rc::downgrade(&ui);
+    continue_action.connect_activate(move |_, _| {
+        if let Some(ui) = weak.upgrade() {
+            ui.launch(true);
+        }
+    });
+    // The game writes its last save as it plays; check again on coming
+    // back to the window.
+    ui.update_continue();
+    let weak = Rc::downgrade(&ui);
+    ui.window.connect_is_active_notify(move |w| {
+        if let (true, Some(ui)) = (w.is_active(), weak.upgrade()) {
+            ui.update_continue();
         }
     });
     match Patch::open(&ui.paths.user_dir) {
