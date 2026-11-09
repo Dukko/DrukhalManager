@@ -92,6 +92,9 @@ impl Report {
 /// Folders whose objects the game merges rather than overrides.
 const MERGED_FOLDERS: &[&str] = &["common/on_actions", "common/defines"];
 
+/// Folders of script fragments pasted into other scripts, not objects.
+pub const FRAGMENT_FOLDERS: &[&str] = &["common/inline_scripts"];
+
 pub fn analyze(mods: &[ModInput]) -> Report {
     let mut report = Report::default();
 
@@ -201,7 +204,7 @@ fn object_category(path: &str) -> Option<String> {
     if dir == "events" {
         return Some("events".to_owned());
     }
-    if dir.starts_with("common/") && !MERGED_FOLDERS.iter().any(|m| dir == *m || is_under(dir, m)) {
+    if dir.starts_with("common/") && !MERGED_FOLDERS.iter().chain(FRAGMENT_FOLDERS).any(|m| dir == *m || is_under(dir, m)) {
         return Some(path[..dir.len()].to_owned());
     }
     None
@@ -335,6 +338,7 @@ mod tests {
         assert_eq!(object_category("common/governments/civics/x.txt").as_deref(), Some("common/governments/civics"));
         assert_eq!(object_category("common/on_actions/x.txt"), None);
         assert_eq!(object_category("events/x.txt").as_deref(), Some("events"));
+        assert_eq!(object_category("common/inline_scripts/x/y.txt"), None);
         assert_eq!(object_category("localisation/replace/x_l_english.yml").as_deref(), Some("localisation"));
         assert_eq!(object_category("gfx/x.dds"), None);
         assert!(is_under("Common/Ethics/x.txt", "common/ethics/"));
