@@ -153,6 +153,21 @@ pub fn in_checksum(path: &str) -> bool {
     CHECKSUM_FOLDERS.iter().any(|f| path.len() > f.len() && path.starts_with(f) && path.as_bytes()[f.len()] == b'/')
 }
 
+/// Whether a mod folder changes files the game checksums, which turns off
+/// achievements (and must match to play together).
+pub fn changes_checksum(root: &Path) -> bool {
+    CHECKSUM_FOLDERS.iter().any(|f| has_files(&root.join(f)))
+}
+
+fn has_files(dir: &Path) -> bool {
+    let Ok(entries) = std::fs::read_dir(dir) else { return false };
+    entries.flatten().any(|e| match e.file_type() {
+        Ok(t) if t.is_dir() => has_files(&e.path()),
+        Ok(_) => true,
+        Err(_) => false,
+    })
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FileDiff {
     Changed(String),
@@ -300,6 +315,10 @@ mod tests {
         assert_eq!(c.mods[0].name, "B");
         assert_eq!(c.mods[0].files, [FileDiff::OnlyTheirs("common/new.txt".into()), FileDiff::Changed("events/b.txt".into()), FileDiff::Changed("gfx/b.dds".into())]);
 
+        assert!(changes_checksum(&a) && changes_checksum(&b) && !changes_checksum(&root.join("missing")));
+        write(&root.join("gfx_only"), &[("gfx/x.dds", "x"), ("descriptor.mod", "d")]);
+        std::fs::create_dir_all(root.join("gfx_only/common/empty")).unwrap();
+        assert!(!changes_checksum(&root.join("gfx_only")), "only graphics, and an empty folder");
         assert!(in_checksum("common/new.txt") && !in_checksum("gfx/b.dds") && !in_checksum("common"));
         assert!(Report::from_json("{}").is_err());
         assert!(Report::from_json(&mine.to_json().replace("\"version\": 1", "\"version\": 99")).unwrap_err().contains("newer"));

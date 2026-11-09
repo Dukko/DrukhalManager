@@ -42,6 +42,13 @@ impl Window {
         let game_version = self.game.as_ref().and_then(|g| g.version.as_deref());
         let issues = checks::check(&state.mods, &state.enabled, game_version);
         let none = Vec::new();
+        let no_achievements: Vec<String> = state
+            .enabled
+            .iter()
+            .map(|&i| &state.mods[i])
+            .filter(|m| changes_checksum(m))
+            .map(|m| display_name(m).to_owned())
+            .collect();
         for (position, &index) in state.enabled.iter().enumerate() {
             let conflicts = counts
                 .as_ref()
@@ -81,10 +88,22 @@ impl Window {
             state.enabled.len(),
             state.mods.len()
         ));
+        if !state.enabled.is_empty() {
+            subtitle.push(if no_achievements.is_empty() { "Achievements on" } else { "Achievements off" }.to_owned());
+        }
         if state.dirty {
             subtitle.push("Unsaved changes".to_owned());
         }
         self.status.set_label(&subtitle.join(" · "));
+        self.status.set_tooltip_text(Some(&if no_achievements.is_empty() {
+            "No enabled mod changes the files the game checksums, so achievements stay on".to_owned()
+        } else {
+            format!(
+                "Achievements are off because {} the files the game checksums:\n{}",
+                if no_achievements.len() == 1 { "this mod changes" } else { "these mods change" },
+                no_achievements.join("\n")
+            )
+        }));
         let (enabled, total) = (state.enabled.len(), state.mods.len());
         self.syncing.set(true);
         self.all_toggle.set_active(total > 0 && enabled == total);
@@ -225,6 +244,15 @@ impl Window {
             let badge = gtk::Label::builder()
                 .label(conflicts_view::plural(conflicts, "conflict", "conflicts"))
                 .tooltip_text("See the Conflicts page (Alt+2) for details")
+                .valign(gtk::Align::Center)
+                .css_classes(["dim-label", "caption"])
+                .build();
+            row.add_suffix(&badge);
+        }
+        if changes_checksum(m) {
+            let badge = gtk::Label::builder()
+                .label("No achievements")
+                .tooltip_text("Changes files the game checksums, so achievements are off while it's enabled")
                 .valign(gtk::Align::Center)
                 .css_classes(["dim-label", "caption"])
                 .build();
@@ -443,4 +471,13 @@ impl Window {
         ));
         row.add_controller(target);
     }
+}
+
+/// Whether the mod changes checksummed files (zipped mods are unpacked once,
+/// and cached).
+fn changes_checksum(m: &Mod) -> bool {
+    m.content
+        .as_deref()
+        .and_then(|c| if c.is_file() { mods::archive::files(c).ok() } else { Some(c.to_path_buf()) })
+        .is_some_and(|root| crate::multiplayer::changes_checksum(&root))
 }
