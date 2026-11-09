@@ -36,10 +36,27 @@ pub fn find(libraries: &[PathBuf]) -> Option<GameInstall> {
     libraries.iter().map(|lib| lib.join("steamapps/common/Stellaris")).find_map(|dir| read_install(&dir).ok())
 }
 
+/// The game at a chosen executable. Its arguments and version still come
+/// from `launcher-settings.json` beside it, when there is one.
+pub fn from_executable(exe: &Path) -> io::Result<GameInstall> {
+    if !exe.is_file() {
+        return Err(io::Error::new(io::ErrorKind::NotFound, format!("{} not found", exe.display())));
+    }
+    let dir = exe.parent().unwrap_or(Path::new("/")).to_path_buf();
+    let settings = std::fs::read_to_string(dir.join("launcher-settings.json")).ok().and_then(|src| serde_json::from_str::<LauncherSettings>(&src).ok());
+    Ok(GameInstall {
+        exe: exe.to_path_buf(),
+        args: settings.as_ref().map(|s| s.exe_args.clone()).unwrap_or_default(),
+        version: settings.and_then(|s| s.raw_version),
+        dir,
+    })
+}
+
 fn read_install(dir: &Path) -> io::Result<GameInstall> {
     let src = std::fs::read_to_string(dir.join("launcher-settings.json"))?;
     let settings: LauncherSettings = serde_json::from_str(&src).map_err(io::Error::other)?;
-    let exe = dir.join(&settings.exe_path);
+    // Drops the `./` that `exePath` starts with.
+    let exe: PathBuf = dir.join(&settings.exe_path).components().collect();
     if !exe.is_file() {
         return Err(io::Error::new(io::ErrorKind::NotFound, format!("{} not found", exe.display())));
     }
@@ -50,9 +67,11 @@ impl GameInstall {
     /// Starts the game and returns its process; wait on it to know when
     /// the game exits (and so it doesn't linger as a zombie). Steam must be
     /// running.
-    pub fn launch(&self) -> io::Result<std::process::Child> {
+    /// `extra` arguments follow the launcher's.
+    pub fn launch(&self, extra: &[String]) -> io::Result<std::process::Child> {
         Command::new(&self.exe)
             .args(&self.args)
+            .args(extra)
             .current_dir(&self.dir)
             .env("SteamAppId", STELLARIS_APP_ID.to_string())
             .env("SteamGameId", STELLARIS_APP_ID.to_string())
@@ -81,6 +100,10 @@ mod tests {
         assert_eq!(game.exe, dir.join("./stellaris"));
         assert_eq!(game.args, ["-gdpr-compliant"]);
         assert_eq!(game.version.as_deref(), Some("v4.5.3"));
+
+        let chosen = from_executable(&dir.join("stellaris")).unwrap();
+        assert_eq!((chosen.dir, chosen.args, chosen.version.as_deref()), (dir.clone(), vec!["-gdpr-compliant".to_owned()], Some("v4.5.3")));
+        assert!(from_executable(&dir.join("missing")).is_err());
 
         std::fs::remove_dir_all(lib).unwrap();
     }

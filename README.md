@@ -100,7 +100,8 @@ flatpak install --user https://dukko.github.io/DrukhalManager/io.github.dukko.Dr
 ```
 
 Updates then arrive with `flatpak update`, or through your software centre,
-like any other Flatpak. It uses the GNOME runtime from Flathub, which Flatpak
+like any other Flatpak. DrukhalManager also tells you when a new version is
+out and installs it for you (Preferences → Updates). It uses the GNOME runtime from Flathub, which Flatpak
 installs for you if needed. The repository is signed with the key in
 [`flatpak/drukhal-manager.gpg`](flatpak/drukhal-manager.gpg).
 

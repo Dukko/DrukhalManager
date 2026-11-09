@@ -7,6 +7,7 @@ mod list;
 mod persist;
 mod repair_ui;
 mod state;
+mod updates;
 
 use std::cell::{Cell, RefCell};
 use std::io;
@@ -69,6 +70,12 @@ struct Window {
     /// `refresh`.
     undo_action: gio::SimpleAction,
     redo_action: gio::SimpleAction,
+    /// Flatpak's update monitor, once an update was looked for.
+    update_monitor: RefCell<Option<Rc<crate::update::Monitor>>>,
+    /// The toast showing an update being installed.
+    update_toast: RefCell<Option<adw::Toast>>,
+    /// Set once the user was told about an update, so it's said only once.
+    update_announced: Cell<bool>,
 }
 
 pub fn build(
@@ -128,6 +135,7 @@ pub fn build(
     menu.append(Some("_Redo"), Some("win.redo"));
     menu.append(Some("Last Game's _Errors…"), Some("win.errors"));
     menu.append(Some("_Preferences"), Some("win.preferences"));
+    menu.append(Some("_About DrukhalManager"), Some("win.about"));
     let menu_button = gtk::MenuButton::builder()
         .icon_name("open-menu-symbolic")
         .menu_model(&menu)
@@ -285,7 +293,11 @@ pub fn build(
         toasts,
         undo_action: undo_action.clone(),
         redo_action: redo_action.clone(),
+        update_monitor: RefCell::new(None),
+        update_toast: RefCell::new(None),
+        update_announced: Cell::new(false),
     });
+    ui.add_update_actions();
 
     let weak = Rc::downgrade(&ui);
     undo_action.connect_activate(move |_, _| {
@@ -397,7 +409,7 @@ pub fn build(
     let weak = Rc::downgrade(&ui);
     preferences_action.connect_activate(move |_, _| {
         if let Some(ui) = weak.upgrade() {
-            ui.open_preferences();
+            ui.open_preferences(None);
         }
     });
     let weak = Rc::downgrade(&ui);
@@ -423,14 +435,16 @@ pub fn build(
     if ui.game.is_none() && crate::sandbox::is_flatpak() {
         ui.explain_sandbox_access();
     }
+    ui.check_for_updates_at_startup();
 }
 
 impl Window {
-    fn open_preferences(self: &Rc<Self>) {
+    fn open_preferences(self: &Rc<Self>, page: Option<&str>) {
         let weak = Rc::downgrade(self);
         preferences::present(
             &self.window,
             self.settings.borrow().clone(),
+            page,
             move |settings| {
                 let Some(ui) = weak.upgrade() else { return };
                 if *ui.settings.borrow() == settings {

@@ -95,6 +95,28 @@ impl Window {
 
     pub(super) fn launch(self: &Rc<Self>) {
         let Some(game) = &self.game else { return };
+        let options = self.settings.borrow().game.clone();
+        let extra = if options.launch_args.is_empty() {
+            Vec::new()
+        } else {
+            match glib::shell_parse_argv(&options.launch_args) {
+                Ok(args) => args.into_iter().map(|a| a.to_string_lossy().into_owned()).collect(),
+                Err(e) => {
+                    return self.toasts.add_toast(
+                        adw::Toast::builder()
+                            .title(format!("Check the game launch options in Preferences: {}", e.message()))
+                            .timeout(0)
+                            .build(),
+                    );
+                }
+            }
+        };
+        if options.refresh_descriptors {
+            let stale = crate::mods::repair::find(&self.paths.user_dir, &self.state.borrow().mods).stale;
+            if !stale.is_empty() {
+                self.repair(&stale, &[]);
+            }
+        }
         if self.state.borrow().dirty && !self.save() {
             return;
         }
@@ -108,10 +130,13 @@ impl Window {
             .launch(Some(&self.window), None::<&gio::Cancellable>, |_| {});
             self.toasts
                 .add_toast(adw::Toast::new("Starting Stellaris through Steam…"));
+            if options.close_after_launch {
+                self.window.close();
+            }
             return;
         }
         let started = std::time::SystemTime::now();
-        let mut child = match game.launch() {
+        let mut child = match game.launch(&extra) {
             Ok(child) => child,
             Err(e) => {
                 return self.toasts.add_toast(
@@ -122,6 +147,11 @@ impl Window {
                 );
             }
         };
+        if options.close_after_launch {
+            // The game keeps running on its own.
+            self.window.close();
+            return;
+        }
         self.toasts
             .add_toast(adw::Toast::new("Starting Stellaris…"));
         // When the game exits, point out errors it logged about the mods.

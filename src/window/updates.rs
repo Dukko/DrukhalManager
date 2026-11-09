@@ -1,0 +1,184 @@
+//! The About dialog, and finding and installing new versions.
+
+use std::rc::Rc;
+
+use adw::prelude::*;
+use gtk::{gio, glib};
+
+use super::Window;
+use crate::preferences::UPDATES_PAGE;
+use crate::update::{self, Progress};
+
+type Action = fn(&Rc<Window>);
+
+impl Window {
+    pub(super) fn add_update_actions(self: &Rc<Self>) {
+        let actions: [(&str, Action); 4] = [
+            ("about", Self::show_about),
+            ("install-update", Self::install_update),
+            ("restart", Self::restart),
+            ("show-update", |ui| ui.open_preferences(Some(UPDATES_PAGE))),
+        ];
+        for (name, f) in actions {
+            let action = gio::SimpleAction::new(name, None);
+            let weak = Rc::downgrade(self);
+            action.connect_activate(move |_, _| {
+                if let Some(ui) = weak.upgrade() {
+                    f(&ui);
+                }
+            });
+            self.window.add_action(&action);
+        }
+    }
+
+    fn show_about(self: &Rc<Self>) {
+        let about = adw::AboutDialog::builder()
+            .application_name("DrukhalManager")
+            .application_icon(crate::APP_ID)
+            .version(update::CURRENT)
+            .comments("Manage Stellaris mods and merge their conflicts")
+            .developer_name("Dukko")
+            .license_type(gtk::License::MitX11)
+            .website("https://github.com/Dukko/DrukhalManager")
+            .issue_url("https://github.com/Dukko/DrukhalManager/issues")
+            .build();
+        about.add_acknowledgement_section(Some("A Fork Of"), &["Irony Mod Manager by Mario (bcssov) https://github.com/bcssov/IronyModManager"]);
+        about.add_legal_section("Irony Mod Manager", Some("© 2020 Mario"), gtk::License::MitX11, None);
+        about.present(Some(&self.window));
+    }
+
+    /// At startup, if enabled: tells the user about a newer release they
+    /// haven't chosen to ignore.
+    pub(super) fn check_for_updates_at_startup(self: &Rc<Self>) {
+        let options = self.settings.borrow().updates.clone();
+        if !options.check_at_startup {
+            return;
+        }
+        let weak = Rc::downgrade(self);
+        glib::spawn_future_local(async move {
+            if let Ok(Ok(latest)) = gio::spawn_blocking(update::latest).await
+                && update::is_newer(&latest.version, update::CURRENT)
+                && options.skipped_version.as_deref() != Some(latest.version.as_str())
+                && let Some(ui) = weak.upgrade()
+            {
+                ui.announce_update(Some(&latest.version));
+            }
+            // While it runs, Flatpak also reports versions published later.
+            if crate::sandbox::is_flatpak()
+                && let Some(ui) = weak.upgrade()
+                && let Some(monitor) = ui.monitor().await
+            {
+                let weak = Rc::downgrade(&ui);
+                monitor.on_available(move || {
+                    if let Some(ui) = weak.upgrade() {
+                        ui.announce_update(None);
+                    }
+                });
+            }
+        });
+    }
+
+    fn announce_update(&self, version: Option<&str>) {
+        if self.update_announced.replace(true) {
+            return;
+        }
+        let title = match version {
+            Some(v) => format!("DrukhalManager {v} is available"),
+            None => "A new version of DrukhalManager is available".to_owned(),
+        };
+        let (label, action) = if crate::sandbox::is_flatpak() { ("Update", "win.install-update") } else { ("Details", "win.show-update") };
+        self.toasts.add_toast(adw::Toast::builder().title(title).button_label(label).action_name(action).timeout(0).build());
+    }
+
+    /// Flatpak's update monitor, created on first use.
+    async fn monitor(self: &Rc<Self>) -> Option<Rc<update::Monitor>> {
+        if let Some(m) = self.update_monitor.borrow().clone() {
+            return Some(m);
+        }
+        let monitor = match update::Monitor::new().await {
+            Ok(m) => Rc::new(m),
+            Err(e) => {
+                self.toasts.add_toast(adw::Toast::builder().title(format!("Could not reach Flatpak to update: {}", e.message())).timeout(0).build());
+                return None;
+            }
+        };
+        let weak = Rc::downgrade(self);
+        monitor.on_progress(move |progress| {
+            if let Some(ui) = weak.upgrade() {
+                ui.show_update_progress(progress);
+            }
+        });
+        self.update_monitor.replace(Some(monitor.clone()));
+        Some(monitor)
+    }
+
+    fn install_update(self: &Rc<Self>) {
+        if !crate::sandbox::is_flatpak() {
+            gtk::UriLauncher::new(update::RELEASES_URL).launch(Some(&self.window), None::<&gio::Cancellable>, |_| {});
+            return;
+        }
+        let weak = Rc::downgrade(self);
+        glib::spawn_future_local(async move {
+            let Some(ui) = weak.upgrade() else { return };
+            let Some(monitor) = ui.monitor().await else { return };
+            ui.show_update_progress(Progress::Running(0));
+            if let Err(e) = monitor.update().await {
+                ui.show_update_progress(Progress::Failed(e.message().to_owned()));
+            }
+        });
+    }
+
+    fn show_update_progress(&self, progress: Progress) {
+        let toast = self.update_toast.borrow().clone().unwrap_or_else(|| {
+            let toast = adw::Toast::builder().timeout(0).build();
+            self.update_toast.replace(Some(toast.clone()));
+            self.toasts.add_toast(toast.clone());
+            toast
+        });
+        match progress {
+            Progress::Running(percent) => {
+                toast.set_title(&format!("Updating DrukhalManager… {percent}%"));
+                return;
+            }
+            Progress::Done => {
+                toast.set_title("DrukhalManager was updated. Restart to use the new version.");
+                toast.set_button_label(Some("Restart"));
+                toast.set_action_name(Some("win.restart"));
+            }
+            Progress::NothingToDo => {
+                toast.set_title("No update to install yet. A new release can take a few minutes to reach Flatpak.");
+                toast.set_timeout(8);
+            }
+            Progress::Failed(message) => toast.set_title(&format!("Could not update: {message}")),
+        }
+        // Finished: the next update starts a new toast. Re-adding shows the
+        // finished state even if the user dismissed the progress toast.
+        self.update_toast.replace(None);
+        self.toasts.add_toast(toast);
+    }
+
+    /// Starts the updated version and quits.
+    fn restart(self: &Rc<Self>) {
+        if self.state.borrow().dirty && !self.save() {
+            return;
+        }
+        let weak = Rc::downgrade(self);
+        glib::spawn_future_local(async move {
+            let result = update::relaunch().await;
+            let Some(ui) = weak.upgrade() else { return };
+            match result {
+                Ok(()) => {
+                    if let Some(app) = ui.window.application() {
+                        app.quit();
+                    }
+                }
+                Err(e) => ui.toasts.add_toast(
+                    adw::Toast::builder()
+                        .title(format!("Could not restart: {}. Close DrukhalManager and open it again.", e.message()))
+                        .timeout(0)
+                        .build(),
+                ),
+            }
+        });
+    }
+}

@@ -15,6 +15,42 @@ pub struct Settings {
     /// Conflicts the user chose to ignore, as keys from `conflicts_view`.
     #[serde(default)]
     pub ignored: std::collections::BTreeSet<String>,
+    #[serde(default)]
+    pub game: GameOptions,
+    #[serde(default)]
+    pub updates: UpdateOptions,
+}
+
+/// How the game is found and launched, as in Irony Mod Manager's Game
+/// Options.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct GameOptions {
+    /// Replaces the executable found in the Steam libraries.
+    pub executable: Option<PathBuf>,
+    /// Replaces `~/.local/share/Paradox Interactive/Stellaris`.
+    pub data_dir: Option<PathBuf>,
+    /// Added to the arguments from `launcher-settings.json`.
+    pub launch_args: String,
+    /// Fix descriptors whose paths went stale before launching.
+    pub refresh_descriptors: bool,
+    pub close_after_launch: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct UpdateOptions {
+    /// On by default only in the Flatpak, where Flatpak itself is asked;
+    /// native packages get updates from the package manager.
+    pub check_at_startup: bool,
+    /// A release the user chose not to be told about again.
+    pub skipped_version: Option<String>,
+}
+
+impl Default for UpdateOptions {
+    fn default() -> Self {
+        Self { check_at_startup: crate::sandbox::is_flatpak(), skipped_version: None }
+    }
 }
 
 fn default_provider() -> Provider {
@@ -23,7 +59,7 @@ fn default_provider() -> Provider {
 
 impl Default for Settings {
     fn default() -> Self {
-        Self { provider: default_provider(), ignored: Default::default() }
+        Self { provider: default_provider(), ignored: Default::default(), game: Default::default(), updates: Default::default() }
     }
 }
 
@@ -75,7 +111,7 @@ mod tests {
     fn saves_privately_and_loads() {
         let path = std::env::temp_dir().join(format!("drukhal-settings-{}/settings.json", std::process::id()));
         assert_eq!(Settings::load(&path), Settings::default());
-        let s = Settings { provider: Provider::OpenAiCompatible { base_url: "http://localhost:11434/v1".into(), model: "qwen".into(), api_key: String::new() }, ignored: ["file:x".to_owned()].into() };
+        let s = Settings { provider: Provider::OpenAiCompatible { base_url: "http://localhost:11434/v1".into(), model: "qwen".into(), api_key: String::new() }, ignored: ["file:x".to_owned()].into(), game: GameOptions { launch_args: "-debug".into(), close_after_launch: true, ..Default::default() }, updates: UpdateOptions { check_at_startup: true, skipped_version: Some("0.2.0".into()) } };
         s.save(&path).unwrap();
         assert_eq!(Settings::load(&path), s);
         assert!(s.ready_provider().is_some());
@@ -86,5 +122,13 @@ mod tests {
         }
         assert!(Settings { provider: openrouter(), ..Default::default() }.ready_provider().is_none(), "needs a model");
         std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
+    }
+
+    #[test]
+    fn reads_settings_from_before_game_options() {
+        let old = r#"{"provider":{"kind":"anthropic","api_key":"k"},"ignored":[]}"#;
+        let s: Settings = serde_json::from_str(old).unwrap();
+        assert_eq!(s.game, GameOptions::default());
+        assert_eq!(s.updates, UpdateOptions::default());
     }
 }

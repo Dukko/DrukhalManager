@@ -284,7 +284,7 @@ impl Window {
         let weak = Rc::downgrade(self);
         let open_preferences = Box::new(move || {
             if let Some(ui) = weak.upgrade() {
-                ui.open_preferences();
+                ui.open_preferences(Some(crate::preferences::AI_PAGE));
             }
         });
         let weak = Rc::downgrade(self);
@@ -346,7 +346,7 @@ impl Window {
         let weak = Rc::downgrade(self);
         let open_preferences = Box::new(move || {
             if let Some(ui) = weak.upgrade() {
-                ui.open_preferences();
+                ui.open_preferences(Some(crate::preferences::AI_PAGE));
             }
         });
         let weak = Rc::downgrade(self);
@@ -424,7 +424,7 @@ impl Window {
         let weak = Rc::downgrade(self);
         let open_preferences = Box::new(move || {
             if let Some(ui) = weak.upgrade() {
-                ui.open_preferences();
+                ui.open_preferences(Some(crate::preferences::AI_PAGE));
             }
         });
         let weak = Rc::downgrade(self);
