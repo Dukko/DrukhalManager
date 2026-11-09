@@ -129,8 +129,9 @@ fn game_page(options: &GameOptions) -> (adw::PreferencesPage, impl Fn() -> GameO
     if flatpak {
         // The sandbox can't run the game itself; Steam starts it.
         exe_row.set_sensitive(false);
+        exe_row.set_subtitle("Steam starts the game in the Flatpak");
         args_row.set_sensitive(false);
-        launching.set_description(Some("In the Flatpak, Steam starts the game, so set the executable and launch options in Steam: right-click Stellaris and choose Properties."));
+        launching.set_description(Some("In the Flatpak, Steam starts the game, so set launch options in Steam: right-click Stellaris, choose Properties, then Launch Options."));
     } else {
         args_row.set_tooltip_text(Some("Added after the launcher's own arguments, e.g. -debug_mode"));
     }
