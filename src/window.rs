@@ -8,6 +8,7 @@ mod persist;
 mod repair_ui;
 mod shortcuts;
 mod state;
+mod thumbnails;
 mod updates;
 
 use std::cell::{Cell, RefCell};
@@ -36,6 +37,7 @@ pub struct Paths {
 
 struct Window {
     window: adw::ApplicationWindow,
+    thumbnails: RefCell<thumbnails::Cache>,
     paths: Paths,
     game: Option<GameInstall>,
     state: RefCell<State>,
@@ -86,6 +88,7 @@ pub fn build(
     game: Option<GameInstall>,
     found: io::Result<Vec<Mod>>,
 ) {
+    thumbnails::add_css();
     let stack = adw::ViewStack::new();
     let switcher = adw::ViewSwitcher::builder()
         .stack(&stack)
@@ -299,6 +302,7 @@ pub fn build(
         update_monitor: RefCell::new(None),
         update_toast: RefCell::new(None),
         update_announced: Cell::new(false),
+        thumbnails: RefCell::default(),
     });
     ui.load_api_key();
     ui.add_update_actions();

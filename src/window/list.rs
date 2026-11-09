@@ -218,6 +218,8 @@ impl Window {
         if let Some(content) = &m.content {
             row.set_tooltip_text(Some(&content.display().to_string()));
         }
+        // First, so it ends up nearest the name: later prefixes go before it.
+        row.add_prefix(&self.thumbnail(m));
 
         if conflicts > 0 {
             let badge = gtk::Label::builder()
