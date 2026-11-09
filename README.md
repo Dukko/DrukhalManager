@@ -111,6 +111,15 @@ run `flatpak install --user DrukhalManager.flatpak`. It updates from the same
 repository. If you installed the 0.1.0 bundle, install once again by either
 method to get updates.
 
+Installing updates from inside the app works from 0.2.2 on; on 0.2.0 or 0.2.1,
+run `flatpak update` once. The first time, Flatpak asks whether
+DrukhalManager may update itself. Desktops without a portal for that question,
+such as niri or sway, can't show it, so allow it once yourself:
+
+```sh
+flatpak permission-set flatpak updates io.github.dukko.DrukhalManager yes
+```
+
 The sandbox can see your home folder. If Steam or a Steam library lives
 elsewhere, such as another drive, DrukhalManager shows the command that
 grants access. It looks like this:

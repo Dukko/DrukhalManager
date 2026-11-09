@@ -117,19 +117,34 @@ impl Window {
             gtk::UriLauncher::new(update::RELEASES_URL).launch(Some(&self.window), None::<&gio::Cancellable>, |_| {});
             return;
         }
+        // Progress shows as toasts on the window, which Preferences would
+        // cover.
+        if let Some(dialog) = self.window.visible_dialog() {
+            dialog.close();
+        }
         let weak = Rc::downgrade(self);
         glib::spawn_future_local(async move {
             let Some(ui) = weak.upgrade() else { return };
             let Some(monitor) = ui.monitor().await else { return };
             ui.show_update_progress(Progress::Running(0));
             if let Err(e) = monitor.update().await {
-                ui.show_update_progress(Progress::Failed(e.message().to_owned()));
+                // Flatpak asks once whether the app may update itself; on
+                // desktops without a portal dialog for that (niri, sway…) the
+                // question can't be shown.
+                let message = if e.matches(gio::DBusError::ServiceUnknown) || e.message().contains("ServiceUnknown") {
+                    "Flatpak could not ask whether DrukhalManager may update itself. Run “flatpak update io.github.dukko.DrukhalManager” instead".to_owned()
+                } else {
+                    e.message().to_owned()
+                };
+                ui.show_update_progress(Progress::Failed(message));
             }
         });
     }
 
     fn show_update_progress(&self, progress: Progress) {
-        let toast = self.update_toast.borrow().clone().unwrap_or_else(|| {
+        // Bound first: the borrow must end before a new toast is stored.
+        let current = self.update_toast.borrow().clone();
+        let toast = current.unwrap_or_else(|| {
             let toast = adw::Toast::builder().timeout(0).build();
             self.update_toast.replace(Some(toast.clone()));
             self.toasts.add_toast(toast.clone());
