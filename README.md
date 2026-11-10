@@ -1,148 +1,55 @@
+<div align="center">
+
+<img src="data/icons/io.github.dukko.DrukhalManager.svg" width="112" alt="">
+
 # DrukhalManager
 
-A native Linux mod manager for Stellaris, with AI-assisted mod merging.
+**A native Linux mod manager for Stellaris, with AI-assisted conflict merging.**
 
-DrukhalManager is a fork of [Irony Mod Manager](https://github.com/bcssov/IronyModManager)
-by Mario (bcssov), rewritten in Rust with GTK 4 and libadwaita. Irony already
-ships a native Linux build with Linux/Proton support; DrukhalManager is a
-Rust/GTK alternative focused on AI-assisted merging.
+[![Latest release](https://img.shields.io/github/v/release/Dukko/DrukhalManager?label=release&color=4a86cf)](https://github.com/Dukko/DrukhalManager/releases/latest)
+[![CI](https://github.com/Dukko/DrukhalManager/actions/workflows/ci.yml/badge.svg)](https://github.com/Dukko/DrukhalManager/actions/workflows/ci.yml)
+[![Flatpak](https://img.shields.io/badge/install-Flatpak-4a90d9?logo=flatpak&logoColor=white)](#installing)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
-Built with Rust, GTK4 and libadwaita.
+Built with Rust, GTK 4 and libadwaita · A fork of [Irony Mod Manager](https://github.com/bcssov/IronyModManager)
 
-## Managing mods
+<img src="docs/screenshots/mod-list.png" alt="The load order: every enabled mod with its thumbnail, game version and tags" width="820">
 
-- **Collections**: keep several named load orders and switch between them
-  from the header. Each one syncs to its own Paradox Launcher playset.
-  Import a launcher playset (Irony's, for example) or a shared file, and
-  export a collection to share. Shared files match mods by Steam ID.
-- **Workshop collections**: import one from its link or ID. Mods you don't
-  have yet are listed with links to subscribe, and join the collection once
-  Steam has downloaded them.
-- **Merge into One Mod**: copies a collection's files into a single local
-  mod, the way the game would load them, like Irony's basic merge.
-- **Reload Mods** (F5): picks up mods subscribed to or removed while the
-  app is open, keeping your unsaved load order.
-- **Load order checks**: warns when a mod loads before a mod it depends on
-  (**Sort by Dependencies** fixes it), and notes missing dependencies and
-  mods made for an older game version.
-- **Descriptor repair**: fixes `.mod` files that point at folders that no
-  longer exist, and removes descriptors whose mod is gone. Everything is
-  backed up first.
-- **Search** (Ctrl+F), and **Open Folder** or **Open Workshop Page** from
-  each mod's menu.
-- If something else changes the load order (the Paradox Launcher resets it
-  when opened), a banner offers to restore your collection.
+</div>
 
-## Merging conflicts
+## Why DrukhalManager?
 
-The Conflicts page lists every file and object that more than one enabled mod
-changes in a sidebar, grouped by folder, with a search, a filter by mod and
-each conflict's status. Selecting one shows the versions side by side, with
-the lines and words that differ highlighted and both sides scrolling
-together. The arrow buttons (Alt+Up and Alt+Down) step through the
-differences, **Base Game** marks what each version changed from the game's own
-version instead, and **Ignore Spacing** skips lines that only differ in
-indentation.
-
-An object conflict is resolved two versions at a time. Keep either one, copy
-single differences across with **Take Change**, or **Merge with AI**, which
-sends both versions, plus the base game's version when it can be found, to an
-AI model. The result so far stays on the left and the next mod's version
-slides in on the right, until one result is left. Review or edit it, compare
-it with any version, and **Save to Patch**. For an overridden file, the chips
-above the cards pick which two copies to compare.
-
-When several mods ship the same file, the game only uses the last copy.
-**Merge…** on an overridden script or localisation file splits every copy
-into its objects. Objects the copies agree on, or that only one copy has, are
-combined automatically, and so are objects that only one mod changed from
-the base game. AI is only asked about objects the mods really disagree on.
-
-Saved merges go into a local mod, **DrukhalManager Merged Patch**, which is
-added to your load order. Merged objects go in files named to sort so they
-win in-game. Merged files keep their original path, so the patch is kept at
-the end of the load order, and a warning shows if it's moved.
-
-Files with brace mistakes are listed under **Problems**. The game keeps
-reading after a missing or extra `}`, but everything after it gets nested
-inside the broken object and stops working. **Fix…** repairs the braces
-automatically, using the convention that top-level objects start at column 0,
-and flags the objects it touched. **Fix with AI** then restores the intended
-nesting of just those objects. The fixed copy is saved through the merged
-patch, so the mod itself is never modified.
-
-The eye button ignores a conflict so it no longer shows or counts, and each
-folder's menu ignores the whole folder or merges all of its objects with AI.
-Merges whose mods changed since they were saved are listed under **Outdated
-Merges**, to merge again or remove.
-
-Choose the AI provider in Preferences (Ctrl+,):
-
-- **Claude (Anthropic API)**: uses `claude-opus-5-5`. Enter an API key, or
-  leave it empty to use `ANTHROPIC_API_KEY`.
-- **OpenAI-compatible**: OpenRouter by default, or any server with a
-  `/chat/completions` endpoint, such as Ollama or LM Studio.
-
-Keys are stored in `~/.config/DrukhalManager/settings.json`, readable only by
-you. Merging sends the conflicting definitions to the provider you choose.
-
-## Credits
-
-DrukhalManager is a fork of
-[Irony Mod Manager](https://github.com/bcssov/IronyModManager) by Mario
-(bcssov), and wouldn't exist without it. Irony already provides a native Linux
-build with Linux/Proton support. Irony's design and behaviour are the
-reference for this rewrite, its conflict solver, collections, load order
-checks and descriptor handling are the models for DrukhalManager's, and code
-ported from it is marked at the top of the relevant source files. Thank you,
-Mario.
-
-## Built with AI assistance
-
-Most of DrukhalManager's code was written by Claude (Anthropic's AI model),
-working as a coding assistant: I chose what to build, reviewed it and tested
-it with my own mods. Commits written with it are marked
-`Co-Authored-By: Claude`. AI merging is a separate feature that uses whichever
-AI provider you pick in Preferences.
-
-## License
-
-MIT, like Irony Mod Manager. See [LICENSE](LICENSE) and [NOTICE](NOTICE).
+- 🐧 **Feels at home on Linux.** A native GTK 4 app that follows your desktop's theme, installed as a Flatpak that keeps itself up to date.
+- ⚔️ **Sees every conflict.** Files and objects that more than one mod changes, side by side, with the version the game actually uses marked and the reason it wins.
+- 🤖 **Merges them for you.** Send two conflicting versions, plus the base game's, to Claude or any OpenAI-compatible model, and save the result to a patch mod that loads last.
+- ⚡ **Skips the AI when it can.** Conflicts where only one mod changed anything are merged directly, at no cost.
+- 🧹 **Hides the noise.** Ignore one conflict, a whole folder, or anything matching a rule like `gfx/**`.
+- 🗂️ **Keeps your load orders.** Named collections that sync to Paradox Launcher playsets, with Workshop collection import, dependency checks and descriptor repair.
 
 ## Installing
 
 ### Flatpak (any distro)
 
-Install it from DrukhalManager's own Flatpak repository:
-
 ```sh
 flatpak install --user https://dukko.github.io/DrukhalManager/io.github.dukko.DrukhalManager.flatpakref
 ```
 
-Updates then arrive with `flatpak update`, or through your software centre,
-like any other Flatpak. DrukhalManager also tells you when a new version is
-out and installs it for you (Preferences → Updates). It uses the GNOME runtime from Flathub, which Flatpak
-installs for you if needed. The repository is signed with the key in
-[`flatpak/drukhal-manager.gpg`](flatpak/drukhal-manager.gpg).
+Updates arrive with `flatpak update` or your software centre. DrukhalManager also tells you when a new version is out and can install it for you (**Preferences → Updates**). The GNOME runtime comes from Flathub, and the repository is signed with [`flatpak/drukhal-manager.gpg`](flatpak/drukhal-manager.gpg).
 
-To install offline, download `DrukhalManager.flatpak` from the
-[latest release](https://github.com/Dukko/DrukhalManager/releases/latest) and
-run `flatpak install --user DrukhalManager.flatpak`. It updates from the same
-repository. If you installed the 0.1.0 bundle, install once again by either
-method to get updates.
+<details>
+<summary>Offline installs, self-updates, and Steam on another drive</summary>
 
-Installing updates from inside the app works from 0.2.2 on; on 0.2.0 or 0.2.1,
-run `flatpak update` once. The first time, Flatpak asks whether
-DrukhalManager may update itself. Desktops without a portal for that question,
-such as niri or sway, can't show it, so allow it once yourself:
+<br>
+
+**Offline:** download `DrukhalManager.flatpak` from the [latest release](https://github.com/Dukko/DrukhalManager/releases/latest) and run `flatpak install --user DrukhalManager.flatpak`. It updates from the same repository. If you installed the 0.1.0 bundle, install once more by either method to get updates.
+
+**Updating from inside the app** works from 0.2.2 on; on 0.2.0 or 0.2.1, run `flatpak update` once. The first time, Flatpak asks whether DrukhalManager may update itself. Desktops without a portal for that question, such as niri or sway, can't show it, so allow it yourself:
 
 ```sh
 flatpak permission-set flatpak updates io.github.dukko.DrukhalManager yes
 ```
 
-The sandbox can see your home folder. If Steam or a Steam library lives
-elsewhere, such as another drive, DrukhalManager shows the command that
-grants access. It looks like this:
+**Steam elsewhere:** the sandbox can see your home folder. If Steam or a Steam library lives somewhere else, such as another drive, DrukhalManager shows the command that grants access:
 
 ```sh
 flatpak override --user --filesystem=/path/to/Steam io.github.dukko.DrukhalManager
@@ -150,17 +57,61 @@ flatpak override --user --filesystem=/path/to/Steam io.github.dukko.DrukhalManag
 
 In the Flatpak, **Launch** starts the game through Steam.
 
-### Arch or CachyOS
+</details>
 
-Build and install the package from the repository:
+### Arch or CachyOS
 
 ```sh
 cd packaging/arch
 makepkg -si
 ```
 
-This installs `drukhal-manager` with a desktop entry and icon, so it shows up
-in your app launcher.
+This installs `drukhal-manager` with a desktop entry and icon.
+
+## A tour
+
+### 🗂️ Your load order
+
+Drag mods into order, type a position, or use **Sort by Dependencies**. Thumbnails come from each mod's folder, or from its Workshop preview. Each mod is marked when it turns off achievements, is waiting on a Steam update, or was unsubscribed in Steam.
+
+- **Collections:** several named load orders, switched from the header, each synced to its own Paradox Launcher playset. Import a launcher playset (Irony's, for example), a shared file, or a **Workshop collection** from its link. Mods you don't have yet are listed with links to subscribe.
+- **Checks:** warns when a mod loads before one it depends on, and notes missing dependencies and mods made for an older game version.
+- **Descriptor repair:** fixes `.mod` files that point at folders that no longer exist, and removes those whose mod is gone. Everything is backed up first.
+- **Reload** (F5) picks up mods subscribed or removed while the app is open, and **Merge into One Mod** copies a collection into a single local mod, the way the game would load it.
+
+### ⚔️ Conflicts, side by side
+
+<img src="docs/screenshots/conflicts.png" alt="The Conflicts page: a sidebar of conflicts by folder, and two versions of one object side by side, the in-game one marked">
+
+Every file and object that more than one enabled mod changes is listed by folder, with a search and a filter by mod. Pick one to see two versions side by side, with the changed lines and words highlighted.
+
+- The version the game uses today is marked **In game**, with the reason: its file name sorts last, the folder keeps the first definition it reads, or the load order decides.
+- ⚡ **Simple** conflicts need no AI, because only one mod changed the object from the base game, or every mod ships the same version.
+- The left card is view only and the right one is editable, so you can adjust a version by hand. **Take Change** copies single differences across, and **Base Game** compares each version with the game's own instead.
+
+### 🤖 Merging with AI
+
+**Merge with AI** sends both versions, plus the base game's when it can be found, to the model you choose. The result stays on the left while the next mod's version slides in on the right, until one result is left to review and **Save to Patch**.
+
+- **Merge All** merges a whole folder, several objects at once, with an estimate of the calls and cost first.
+- A result that comes back broken is sent back to the model once with the error, before it counts as failed.
+- **Overridden files** are split into their objects. Objects the copies agree on, or that only one mod changed, are combined directly, and the AI is only asked about real disagreements.
+- **Broken braces** are listed under **Problems**. **Fix…** repairs them automatically, and **Fix with AI** restores the intended nesting.
+
+Everything is saved to **DrukhalManager Merged Patch**, a local mod that loads last, with files named so its definitions win. Merges whose mods changed since are flagged as outdated, and your mods are never modified.
+
+<table>
+<tr>
+<td width="50%"><img src="docs/screenshots/preferences-ai.png" alt="AI Merging preferences: choose Claude or an OpenAI-compatible endpoint such as OpenRouter"></td>
+<td width="50%"><img src="docs/screenshots/ignore-rules.png" alt="The Ignore Rules editor"></td>
+</tr>
+<tr>
+<td><b>Choose a provider</b>: Claude (<code>claude-opus-5-5</code>), OpenRouter, or a local server such as Ollama or LM Studio.</td>
+<td><b>Ignore rules</b> hide conflicts by path, like <code>gfx/**</code>, optionally only for an exact set of mods, with a live count of what each rule hides.</td>
+</tr>
+</table>
+
+API keys are kept in your system keyring, or in a settings file only you can read when there's no keyring. Merging sends only the conflicting definitions to the provider you choose.
 
 ## Building
 
@@ -170,17 +121,27 @@ Requires Rust, GTK 4.14+ and libadwaita 1.8+ development files.
 cargo run --release
 ```
 
-To install by hand elsewhere, copy `target/release/drukhal-manager` to your
-`PATH`, `data/io.github.dukko.DrukhalManager.desktop` to
-`share/applications`, and the icon from `data/icons` to
-`share/icons/hicolor/scalable/apps`.
+To install by hand elsewhere, copy `target/release/drukhal-manager` to your `PATH`, `data/io.github.dukko.DrukhalManager.desktop` to `share/applications`, and the icon from `data/icons` to `share/icons/hicolor/scalable/apps`.
 
-## Releasing
+<details>
+<summary>Releasing</summary>
 
-1. Bump the version in `Cargo.toml` and add a `<release>` to
-   `data/io.github.dukko.DrukhalManager.metainfo.xml`.
-2. If dependencies changed, regenerate `flatpak/cargo-sources.json` (see
-   `flatpak/generate-cargo-sources.py`); the release fails if it is stale.
-3. Push a `vX.Y.Z` tag. The *Flatpak release* workflow builds the Flatpak,
-   publishes the signed repository to GitHub Pages, and attaches
-   `DrukhalManager.flatpak` to the release (creating it if needed).
+<br>
+
+1. Bump the version in `Cargo.toml` and add a `<release>` to `data/io.github.dukko.DrukhalManager.metainfo.xml`.
+2. If dependencies changed, regenerate `flatpak/cargo-sources.json` (see `flatpak/generate-cargo-sources.py`); the build fails if it is stale.
+3. Merge it into `master` through a pull request. The *Tag release* workflow tags `vX.Y.Z`, builds the Flatpak, publishes the signed repository to GitHub Pages and attaches `DrukhalManager.flatpak` to the release.
+
+</details>
+
+## Credits
+
+DrukhalManager is a fork of [Irony Mod Manager](https://github.com/bcssov/IronyModManager) by Mario (bcssov), and wouldn't exist without it. Irony already ships a native Linux build with Proton support; DrukhalManager is a Rust and GTK alternative focused on AI-assisted merging. Irony's design and behaviour are the reference for this rewrite: its conflict solver, override rules, collections, load order checks and descriptor handling are the models for DrukhalManager's, and code ported from it is marked at the top of the relevant source files. Thank you, Mario.
+
+### Built with AI assistance
+
+Most of DrukhalManager's code was written by Claude (Anthropic's AI model) working as a coding assistant: I chose what to build, reviewed it, and tested it with my own mods. Commits written with it are marked `Co-Authored-By: Claude`. AI merging is a separate feature that uses whichever provider you pick in Preferences.
+
+## License
+
+MIT, like Irony Mod Manager. See [LICENSE](LICENSE) and [NOTICE](NOTICE).
