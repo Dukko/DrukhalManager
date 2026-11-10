@@ -2,6 +2,7 @@
 
 mod collections_ui;
 mod conflicts_ui;
+mod ignore_rules_ui;
 mod launch;
 mod list;
 mod persist;

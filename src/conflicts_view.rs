@@ -22,6 +22,7 @@ use gtk::{gio, glib};
 use crate::diff_view::{self, Pair};
 use crate::merge::ai::Provider;
 use crate::merge::conflicts::Report;
+use crate::merge::ignore_rules::Rules;
 use crate::merge::patch::{Merge, Print, Stale};
 
 pub use object::Steps;
@@ -77,6 +78,10 @@ pub struct MergeHooks {
     pub open_fix: Box<dyn Fn(usize, Box<dyn Fn()>)>,
     pub is_ignored: Box<dyn Fn(&str) -> bool>,
     pub set_ignored: Box<dyn Fn(&str, bool)>,
+    /// The ignore rules, as of when the page was built.
+    pub rules: Rules,
+    /// Opens the ignore rules editor.
+    pub edit_rules: Box<dyn Fn()>,
     /// Whether ignored conflicts are shown (dimmed) instead of hidden.
     pub show_ignored: bool,
     pub toggle_show_ignored: Box<dyn Fn()>,
@@ -163,12 +168,20 @@ fn file_name(path: &str) -> &str {
     path.rsplit_once('/').map_or(path, |(_, f)| f)
 }
 
-/// Whether a conflict is ignored, directly or through its folder.
-pub fn file_ignored(is_ignored: &dyn Fn(&str) -> bool, c: &crate::merge::conflicts::FileConflict) -> bool {
-    is_ignored(&file_key(&c.path)) || is_ignored(&files_folder_key(file_folder(&c.path)))
+/// What hides conflicts: keys ignored one at a time or by folder, and
+/// the ignore rules, which need the mod names by scanned position.
+pub struct Ignores<'a> {
+    pub keys: &'a dyn Fn(&str) -> bool,
+    pub rules: &'a Rules,
+    pub names: &'a [String],
 }
-pub fn object_ignored(is_ignored: &dyn Fn(&str) -> bool, c: &crate::merge::conflicts::ObjectConflict) -> bool {
-    is_ignored(&object_key(&c.category, &c.key)) || is_ignored(&objects_folder_key(&c.category))
+
+/// Whether a conflict is ignored, directly, through its folder, or by a rule.
+pub fn file_ignored(ignores: &Ignores, c: &crate::merge::conflicts::FileConflict) -> bool {
+    (ignores.keys)(&file_key(&c.path)) || (ignores.keys)(&files_folder_key(file_folder(&c.path))) || ignores.rules.hiding_file(c, ignores.names).is_some()
+}
+pub fn object_ignored(ignores: &Ignores, c: &crate::merge::conflicts::ObjectConflict) -> bool {
+    (ignores.keys)(&object_key(&c.category, &c.key)) || (ignores.keys)(&objects_folder_key(&c.category)) || ignores.rules.hiding_object(c, ignores.names).is_some()
 }
 
 impl Analysis {
@@ -256,6 +269,7 @@ pub fn build(analysis: &Rc<Analysis>, rescan: gtk::Button, hooks: Rc<MergeHooks>
     diff_view::install_css();
     let report = &analysis.report;
     let ignored = |k: &str| (hooks.is_ignored)(k);
+    let ignored = Ignores { keys: &ignored, rules: &hooks.rules, names: &analysis.names };
     let filter = hooks.filter;
     let files: Vec<usize> = (0..report.files.len())
         .filter(|&i| hooks.show_ignored || !file_ignored(&ignored, &report.files[i]))
@@ -328,7 +342,13 @@ pub fn build(analysis: &Rc<Analysis>, rescan: gtk::Button, hooks: Rc<MergeHooks>
         show_ignored.connect_toggled(move |_| (hooks.toggle_show_ignored)());
     }
     rescan.add_css_class("flat");
+    let rules = gtk::Button::builder().label("Rules…").tooltip_text("Ignore conflicts by path, like gfx/** or localisation/*").css_classes(["flat"]).build();
+    {
+        let hooks = hooks.clone();
+        rules.connect_clicked(move |_| (hooks.edit_rules)());
+    }
     footer.append(&show_ignored);
+    footer.append(&rules);
     footer.append(&rescan);
 
     // A rounded card inset from the window's edges, like the code cards.
@@ -493,10 +513,33 @@ impl Page {
 
     fn is_ignored(&self, item: Item) -> bool {
         let ignored = |k: &str| (self.hooks.is_ignored)(k);
+        let ignored = Ignores { keys: &ignored, rules: &self.hooks.rules, names: &self.analysis.names };
         match item {
             Item::Object(i) => object_ignored(&ignored, &self.analysis.report.objects[i]),
             Item::File(i) => file_ignored(&ignored, &self.analysis.report.files[i]),
             _ => false,
+        }
+    }
+
+    /// The line of the ignore rule hiding `item`, if one does and it isn't
+    /// also ignored by hand.
+    fn hidden_by_rule(&self, item: Item) -> Option<usize> {
+        let keys = |k: &str| (self.hooks.is_ignored)(k);
+        let none = Rules::default();
+        let by_hand = Ignores { keys: &keys, rules: &none, names: &self.analysis.names };
+        let report = &self.analysis.report;
+        match item {
+            Item::Object(i) if !object_ignored(&by_hand, &report.objects[i]) => self.hooks.rules.hiding_object(&report.objects[i], &self.analysis.names),
+            Item::File(i) if !file_ignored(&by_hand, &report.files[i]) => self.hooks.rules.hiding_file(&report.files[i], &self.analysis.names),
+            _ => None,
+        }
+    }
+
+    /// "ignored", or "ignored by rule 3" when a rule hides it.
+    fn ignored_label(&self, item: Item) -> String {
+        match self.hidden_by_rule(item) {
+            Some(line) => format!("ignored by rule {}", line + 1),
+            None => "ignored".to_owned(),
         }
     }
 
@@ -523,7 +566,7 @@ impl Page {
                 let mods: BTreeSet<usize> = c.definitions.iter().map(|d| d.mod_position).collect();
                 let mods = plural(mods.len(), "mod", "mods");
                 if self.is_ignored(item) {
-                    return (Status::Ignored, format!("{mods} · ignored"));
+                    return (Status::Ignored, format!("{mods} · {}", self.ignored_label(item)));
                 }
                 if self.hooks.stale_object(&c.category, &c.key).is_some() {
                     return (Status::Outdated, format!("{mods} · merge out of date"));
@@ -547,7 +590,7 @@ impl Page {
                 let c = &analysis.report.files[i];
                 let mods = plural(c.mods.len(), "mod", "mods");
                 if self.is_ignored(item) {
-                    (Status::Ignored, format!("{mods} · ignored"))
+                    (Status::Ignored, format!("{mods} · {}", self.ignored_label(item)))
                 } else if self.hooks.stale_file(&c.path).is_some() {
                     (Status::Outdated, format!("{mods} · merge out of date"))
                 } else if (self.hooks.is_file_merged)(&c.path) {
@@ -784,6 +827,9 @@ impl Page {
 
     /// Ignores `item`, or stops ignoring it.
     pub fn toggle_ignored(self: &Rc<Self>, item: Item) {
+        if self.hidden_by_rule(item).is_some() {
+            return (self.hooks.edit_rules)();
+        }
         let key = self.key_of(item);
         let ignore = !self.is_ignored(item);
         (self.hooks.set_ignored)(&key, ignore);
@@ -824,9 +870,14 @@ impl Page {
     /// The eye button that ignores `item`.
     pub fn ignore_button(self: &Rc<Self>, item: Item) -> gtk::Button {
         let ignored = self.is_ignored(item);
+        let tooltip = match self.hidden_by_rule(item) {
+            Some(line) => format!("Ignored by rule {}; click to edit the ignore rules", line + 1),
+            None if ignored => "Stop ignoring this conflict".to_owned(),
+            None => "Ignore this conflict, so it no longer shows or counts".to_owned(),
+        };
         let button = gtk::Button::builder()
             .icon_name(if ignored { "view-reveal-symbolic" } else { "view-conceal-symbolic" })
-            .tooltip_text(if ignored { "Stop ignoring this conflict" } else { "Ignore this conflict, so it no longer shows or counts" })
+            .tooltip_text(tooltip)
             .valign(gtk::Align::Center)
             .css_classes(["flat"])
             .build();
@@ -1110,16 +1161,21 @@ mod tests {
     use crate::merge::conflicts::{Definition, FileConflict, ObjectConflict};
 
     #[test]
-    fn ignores_directly_or_by_folder() {
+    fn ignores_directly_by_folder_or_by_rule() {
         let ignored: std::collections::BTreeSet<String> = [file_key("common/Buildings/A.txt"), objects_folder_key("common/portrait_sets")].into();
         let is = |k: &str| ignored.contains(k);
+        let (none, names) = (Rules::default(), vec!["A".to_owned(), "B".to_owned()]);
+        let ignores = Ignores { keys: &is, rules: &none, names: &names };
         let file = |p: &str| FileConflict { path: p.into(), mods: vec![0, 1] };
         let object = |c: &str| ObjectConflict { category: c.into(), key: "x".into(), definitions: vec![Definition { mod_position: 0, file: "f".into() }] };
-        assert!(file_ignored(&is, &file("common/buildings/a.txt")), "paths match case-insensitively");
-        assert!(!file_ignored(&is, &file("common/buildings/b.txt")));
-        assert!(object_ignored(&is, &object("common/portrait_sets")));
-        assert!(!object_ignored(&is, &object("common/buildings")));
+        assert!(file_ignored(&ignores, &file("common/buildings/a.txt")), "paths match case-insensitively");
+        assert!(!file_ignored(&ignores, &file("common/buildings/b.txt")));
+        assert!(object_ignored(&ignores, &object("common/portrait_sets")));
+        assert!(!object_ignored(&ignores, &object("common/buildings")));
         let folder: std::collections::BTreeSet<String> = [files_folder_key("gfx/models")].into();
-        assert!(file_ignored(&|k| folder.contains(k), &file("gfx/models/ship.mesh")));
+        let in_folder = |k: &str| folder.contains(k);
+        assert!(file_ignored(&Ignores { keys: &in_folder, rules: &none, names: &names }, &file("gfx/models/ship.mesh")));
+        let rules = Rules::parse("common/buildings/b.txt | a | b");
+        assert!(file_ignored(&Ignores { keys: &is, rules: &rules, names: &names }, &file("common/buildings/b.txt")));
     }
 }

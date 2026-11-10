@@ -331,6 +331,13 @@ impl Window {
             }
         });
         let weak = Rc::downgrade(self);
+        let rules_analysis = analysis.clone();
+        let edit_rules = Box::new(move || {
+            if let Some(ui) = weak.upgrade() {
+                ui.edit_ignore_rules(&rules_analysis);
+            }
+        });
+        let weak = Rc::downgrade(self);
         let toggle_show_ignored = Box::new(move || {
             if let Some(ui) = weak.upgrade() {
                 ui.show_ignored.set(!ui.show_ignored.get());
@@ -392,6 +399,8 @@ impl Window {
             open_fix,
             is_ignored,
             set_ignored,
+            rules: crate::merge::ignore_rules::Rules::parse(&self.settings.borrow().ignore_rules),
+            edit_rules,
             show_ignored: self.show_ignored.get(),
             toggle_show_ignored,
             filter,
