@@ -23,6 +23,9 @@ finish-args:
   - --filesystem=home
   # Libraries of the Flatpak version of Steam.
   - --filesystem=~/.var/app/com.valvesoftware.Steam:ro
+  # The user's GTK 4 stylesheet, so custom libadwaita colour schemes
+  # (Gradience, matugen, DankMaterialShell and the like) apply.
+  - --filesystem=xdg-config/gtk-4.0:ro
 build-options:
   append-path: /usr/lib/sdk/rust-stable/bin
   env:
