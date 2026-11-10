@@ -41,7 +41,7 @@ impl Window {
         }
         self.conflicts_page
             .set_child(Some(&conflicts_view::scanning()));
-        let (revision, names, ids, load_positions, inputs) = {
+        let (revision, names, ids, load_positions, inputs, depends_on) = {
             let state = self.state.borrow();
             // The merged patch is left out: its objects are resolutions, not
             // conflicts.
@@ -57,6 +57,9 @@ impl Window {
                 .map(|(_, m)| display_name(m).to_owned())
                 .collect();
             let ids = scanned.iter().map(|(_, m)| m.id.clone()).collect();
+            let descriptor_names: Vec<String> = scanned.iter().map(|(_, m)| m.descriptor.name.clone()).collect();
+            let dependencies: Vec<Vec<String>> = scanned.iter().map(|(_, m)| m.descriptor.dependencies.clone()).collect();
+            let depends_on = conflicts::depends_on(&descriptor_names, &dependencies);
             let positions = scanned.iter().map(|(p, _)| *p).collect();
             let inputs: Vec<ModInput> = scanned
                 .iter()
@@ -65,7 +68,7 @@ impl Window {
                     replace_path: m.descriptor.replace_path.clone(),
                 })
                 .collect();
-            (state.revision, names, ids, positions, inputs)
+            (state.revision, names, ids, positions, inputs, depends_on)
         };
 
         let weak = Rc::downgrade(self);
@@ -103,6 +106,7 @@ impl Window {
                         load_positions,
                         report,
                         simple,
+                        depends_on,
                     })));
                     ui.render_conflicts();
                     // Shows the per-mod counts, and rescans if the load order
@@ -400,6 +404,7 @@ impl Window {
             is_ignored,
             set_ignored,
             rules: crate::merge::ignore_rules::Rules::parse(&self.settings.borrow().ignore_rules),
+            hide_dependencies: !self.settings.borrow().show_dependency_conflicts,
             edit_rules,
             show_ignored: self.show_ignored.get(),
             toggle_show_ignored,

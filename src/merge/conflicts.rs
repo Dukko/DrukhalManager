@@ -188,6 +188,50 @@ impl Report {
     }
 }
 
+/// For each mod, by load position, the mods it depends on, directly or
+/// through other dependencies. `dependencies` are each mod's descriptor
+/// dependencies, which name other mods; `names` are the mods' names.
+pub fn depends_on(names: &[String], dependencies: &[Vec<String>]) -> Vec<BTreeSet<usize>> {
+    let by_name: std::collections::HashMap<String, usize> = names.iter().enumerate().map(|(i, n)| (n.trim().to_lowercase(), i)).collect();
+    let direct: Vec<Vec<usize>> = dependencies
+        .iter()
+        .enumerate()
+        .map(|(i, deps)| deps.iter().filter_map(|d| by_name.get(&d.trim().to_lowercase()).copied()).filter(|&d| d != i).collect())
+        .collect();
+    (0..names.len())
+        .map(|start| {
+            let mut found = BTreeSet::new();
+            let mut stack = direct[start].clone();
+            while let Some(d) = stack.pop() {
+                if d != start && found.insert(d) {
+                    stack.extend(&direct[d]);
+                }
+            }
+            found
+        })
+        .collect()
+}
+
+/// Whether every mod among `mods` (load positions) depends on all those
+/// loading before it, as a patch or submod does: the later ones are meant
+/// to override the earlier.
+pub fn builds_on_dependencies(mods: impl IntoIterator<Item = usize>, depends: &[BTreeSet<usize>]) -> bool {
+    let mods: Vec<usize> = mods.into_iter().collect::<BTreeSet<_>>().into_iter().collect();
+    mods.len() > 1 && mods.iter().enumerate().skip(1).all(|(at, later)| mods[..at].iter().all(|earlier| depends.get(*later).is_some_and(|d| d.contains(earlier))))
+}
+
+impl FileConflict {
+    pub fn builds_on_dependencies(&self, depends: &[BTreeSet<usize>]) -> bool {
+        builds_on_dependencies(self.mods.iter().copied(), depends)
+    }
+}
+
+impl ObjectConflict {
+    pub fn builds_on_dependencies(&self, depends: &[BTreeSet<usize>]) -> bool {
+        builds_on_dependencies(self.definitions.iter().map(|d| d.mod_position), depends)
+    }
+}
+
 /// Folders whose objects the game merges rather than overrides.
 const MERGED_FOLDERS: &[&str] = &["common/on_actions", "common/defines"];
 
@@ -433,6 +477,26 @@ mod tests {
         assert_eq!(report.skipped, [(2, "Mod files not found".to_owned())]);
 
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn finds_conflicts_meant_by_dependencies() {
+        let names: Vec<String> = ["Base", "Patch", "Sub-patch", "Other"].map(String::from).into();
+        let deps = vec![vec![], vec!["base".to_owned()], vec!["Patch".to_owned(), "Missing".to_owned()], vec![]];
+        let depends = depends_on(&names, &deps);
+        assert_eq!(depends[2], BTreeSet::from([0, 1]), "through the patch, too");
+        assert!(depends[0].is_empty() && depends[3].is_empty());
+        let file = |mods: Vec<usize>| FileConflict { path: "x".into(), mods };
+        assert!(file(vec![0, 1]).builds_on_dependencies(&depends));
+        assert!(file(vec![0, 1, 2]).builds_on_dependencies(&depends));
+        assert!(!file(vec![0, 3]).builds_on_dependencies(&depends), "unrelated mods");
+        assert!(!file(vec![0, 1, 3]).builds_on_dependencies(&depends), "one doesn't build on the rest");
+        let object = ObjectConflict { category: "c".into(), key: "k".into(), definitions: vec![Definition { mod_position: 1, file: "a".into() }, Definition { mod_position: 1, file: "b".into() }] };
+        assert!(!object.builds_on_dependencies(&depends), "one mod alone");
+        // A dependency that loads later doesn't count: the patch loses then.
+        let late = depends_on(&["Patch".into(), "Base".into()], &[vec!["Base".into()], vec![]]);
+        assert!(!builds_on_dependencies([0, 1], &late));
+        assert_eq!(depends_on(&["A".into(), "B".into()], &[vec!["B".into()], vec!["A".into()]]), vec![BTreeSet::from([1]), BTreeSet::from([0])], "cycles end");
     }
 
     #[test]

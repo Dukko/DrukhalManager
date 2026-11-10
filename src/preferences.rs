@@ -30,13 +30,13 @@ pub fn present(parent: &impl IsA<gtk::Widget>, settings: Settings, page: Option<
         dialog.set_visible_page_name(page);
     }
 
-    let (ignored, ignore_rules, key_in_keyring) = (settings.ignored.clone(), settings.ignore_rules.clone(), settings.key_in_keyring);
+    let (ignored, ignore_rules, show_dependency_conflicts, key_in_keyring) = (settings.ignored.clone(), settings.ignore_rules.clone(), settings.show_dependency_conflicts, settings.key_in_keyring);
     let on_close = Rc::new(RefCell::new(Some(on_close)));
     dialog.connect_closed(move |_| {
         if let Some(f) = on_close.borrow_mut().take() {
             let provider = read_provider();
             let parallel_merges = read_parallel(&provider);
-            f(Settings { provider, ignored: ignored.clone(), ignore_rules: ignore_rules.clone(), parallel_merges, game: read_game(), updates: read_updates(), key_in_keyring });
+            f(Settings { provider, ignored: ignored.clone(), ignore_rules: ignore_rules.clone(), parallel_merges, show_dependency_conflicts, game: read_game(), updates: read_updates(), key_in_keyring });
         }
     });
     dialog.present(Some(parent));

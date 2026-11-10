@@ -51,6 +51,8 @@ pub struct Analysis {
     pub report: Report,
     /// Object conflicts that need no AI to merge, by index, with why.
     pub simple: HashMap<usize, String>,
+    /// For each scanned mod, the scanned mods it depends on.
+    pub depends_on: Vec<BTreeSet<usize>>,
 }
 
 /// What the page needs from the window.
@@ -80,6 +82,8 @@ pub struct MergeHooks {
     pub set_ignored: Box<dyn Fn(&str, bool)>,
     /// The ignore rules, as of when the page was built.
     pub rules: Rules,
+    /// Whether conflicts between mods and their dependencies are hidden.
+    pub hide_dependencies: bool,
     /// Opens the ignore rules editor.
     pub edit_rules: Box<dyn Fn()>,
     /// Whether ignored conflicts are shown (dimmed) instead of hidden.
@@ -174,14 +178,22 @@ pub struct Ignores<'a> {
     pub keys: &'a dyn Fn(&str) -> bool,
     pub rules: &'a Rules,
     pub names: &'a [String],
+    /// Each mod's dependencies, when conflicts with them are hidden.
+    pub dependencies: Option<&'a [BTreeSet<usize>]>,
 }
 
 /// Whether a conflict is ignored, directly, through its folder, or by a rule.
 pub fn file_ignored(ignores: &Ignores, c: &crate::merge::conflicts::FileConflict) -> bool {
-    (ignores.keys)(&file_key(&c.path)) || (ignores.keys)(&files_folder_key(file_folder(&c.path))) || ignores.rules.hiding_file(c, ignores.names).is_some()
+    (ignores.keys)(&file_key(&c.path))
+        || (ignores.keys)(&files_folder_key(file_folder(&c.path)))
+        || ignores.rules.hiding_file(c, ignores.names).is_some()
+        || ignores.dependencies.is_some_and(|d| c.builds_on_dependencies(d))
 }
 pub fn object_ignored(ignores: &Ignores, c: &crate::merge::conflicts::ObjectConflict) -> bool {
-    (ignores.keys)(&object_key(&c.category, &c.key)) || (ignores.keys)(&objects_folder_key(&c.category)) || ignores.rules.hiding_object(c, ignores.names).is_some()
+    (ignores.keys)(&object_key(&c.category, &c.key))
+        || (ignores.keys)(&objects_folder_key(&c.category))
+        || ignores.rules.hiding_object(c, ignores.names).is_some()
+        || ignores.dependencies.is_some_and(|d| c.builds_on_dependencies(d))
 }
 
 impl Analysis {
@@ -269,7 +281,7 @@ pub fn build(analysis: &Rc<Analysis>, rescan: gtk::Button, hooks: Rc<MergeHooks>
     diff_view::install_css();
     let report = &analysis.report;
     let ignored = |k: &str| (hooks.is_ignored)(k);
-    let ignored = Ignores { keys: &ignored, rules: &hooks.rules, names: &analysis.names };
+    let ignored = Ignores { keys: &ignored, rules: &hooks.rules, names: &analysis.names, dependencies: hooks.hide_dependencies.then_some(&analysis.depends_on[..]) };
     let filter = hooks.filter;
     let files: Vec<usize> = (0..report.files.len())
         .filter(|&i| hooks.show_ignored || !file_ignored(&ignored, &report.files[i]))
@@ -513,7 +525,7 @@ impl Page {
 
     fn is_ignored(&self, item: Item) -> bool {
         let ignored = |k: &str| (self.hooks.is_ignored)(k);
-        let ignored = Ignores { keys: &ignored, rules: &self.hooks.rules, names: &self.analysis.names };
+        let ignored = Ignores { keys: &ignored, rules: &self.hooks.rules, names: &self.analysis.names, dependencies: self.hooks.hide_dependencies.then_some(&self.analysis.depends_on[..]) };
         match item {
             Item::Object(i) => object_ignored(&ignored, &self.analysis.report.objects[i]),
             Item::File(i) => file_ignored(&ignored, &self.analysis.report.files[i]),
@@ -526,7 +538,7 @@ impl Page {
     fn hidden_by_rule(&self, item: Item) -> Option<usize> {
         let keys = |k: &str| (self.hooks.is_ignored)(k);
         let none = Rules::default();
-        let by_hand = Ignores { keys: &keys, rules: &none, names: &self.analysis.names };
+        let by_hand = Ignores { keys: &keys, rules: &none, names: &self.analysis.names, dependencies: None };
         let report = &self.analysis.report;
         match item {
             Item::Object(i) if !object_ignored(&by_hand, &report.objects[i]) => self.hooks.rules.hiding_object(&report.objects[i], &self.analysis.names),
@@ -535,12 +547,32 @@ impl Page {
         }
     }
 
-    /// "ignored", or "ignored by rule 3" when a rule hides it.
-    fn ignored_label(&self, item: Item) -> String {
-        match self.hidden_by_rule(item) {
-            Some(line) => format!("ignored by rule {}", line + 1),
-            None => "ignored".to_owned(),
+    /// Whether `item` is hidden only because its later mods depend on the
+    /// earlier ones.
+    fn hidden_by_dependencies(&self, item: Item) -> bool {
+        if !self.hooks.hide_dependencies || self.hidden_by_rule(item).is_some() {
+            return false;
         }
+        let keys = |k: &str| (self.hooks.is_ignored)(k);
+        let none = Rules::default();
+        let by_hand = Ignores { keys: &keys, rules: &none, names: &self.analysis.names, dependencies: None };
+        let (report, depends) = (&self.analysis.report, &self.analysis.depends_on);
+        match item {
+            Item::Object(i) => !object_ignored(&by_hand, &report.objects[i]) && report.objects[i].builds_on_dependencies(depends),
+            Item::File(i) => !file_ignored(&by_hand, &report.files[i]) && report.files[i].builds_on_dependencies(depends),
+            _ => false,
+        }
+    }
+
+    /// "ignored", or why it's hidden when that isn't by hand.
+    fn ignored_label(&self, item: Item) -> String {
+        if let Some(line) = self.hidden_by_rule(item) {
+            return format!("ignored by rule {}", line + 1);
+        }
+        if self.hidden_by_dependencies(item) {
+            return "a patch of its dependency".to_owned();
+        }
+        "ignored".to_owned()
     }
 
     fn is_saved(&self, item: Item) -> bool {
@@ -827,7 +859,7 @@ impl Page {
 
     /// Ignores `item`, or stops ignoring it.
     pub fn toggle_ignored(self: &Rc<Self>, item: Item) {
-        if self.hidden_by_rule(item).is_some() {
+        if self.hidden_by_rule(item).is_some() || self.hidden_by_dependencies(item) {
             return (self.hooks.edit_rules)();
         }
         let key = self.key_of(item);
@@ -872,6 +904,7 @@ impl Page {
         let ignored = self.is_ignored(item);
         let tooltip = match self.hidden_by_rule(item) {
             Some(line) => format!("Ignored by rule {}; click to edit the ignore rules", line + 1),
+            None if self.hidden_by_dependencies(item) => "Hidden because the later mods depend on the earlier ones, as patches do; click to change this".to_owned(),
             None if ignored => "Stop ignoring this conflict".to_owned(),
             None => "Ignore this conflict, so it no longer shows or counts".to_owned(),
         };
@@ -1165,7 +1198,7 @@ mod tests {
         let ignored: std::collections::BTreeSet<String> = [file_key("common/Buildings/A.txt"), objects_folder_key("common/portrait_sets")].into();
         let is = |k: &str| ignored.contains(k);
         let (none, names) = (Rules::default(), vec!["A".to_owned(), "B".to_owned()]);
-        let ignores = Ignores { keys: &is, rules: &none, names: &names };
+        let ignores = Ignores { keys: &is, rules: &none, names: &names, dependencies: None };
         let file = |p: &str| FileConflict { path: p.into(), mods: vec![0, 1] };
         let object = |c: &str| ObjectConflict { category: c.into(), key: "x".into(), definitions: vec![Definition { mod_position: 0, file: "f".into() }] };
         assert!(file_ignored(&ignores, &file("common/buildings/a.txt")), "paths match case-insensitively");
@@ -1174,8 +1207,10 @@ mod tests {
         assert!(!object_ignored(&ignores, &object("common/buildings")));
         let folder: std::collections::BTreeSet<String> = [files_folder_key("gfx/models")].into();
         let in_folder = |k: &str| folder.contains(k);
-        assert!(file_ignored(&Ignores { keys: &in_folder, rules: &none, names: &names }, &file("gfx/models/ship.mesh")));
+        assert!(file_ignored(&Ignores { keys: &in_folder, rules: &none, names: &names, dependencies: None }, &file("gfx/models/ship.mesh")));
         let rules = Rules::parse("common/buildings/b.txt | a | b");
-        assert!(file_ignored(&Ignores { keys: &is, rules: &rules, names: &names }, &file("common/buildings/b.txt")));
+        assert!(file_ignored(&Ignores { keys: &is, rules: &rules, names: &names, dependencies: None }, &file("common/buildings/b.txt")));
+        let depends = [BTreeSet::new(), BTreeSet::from([0])];
+        assert!(file_ignored(&Ignores { keys: &is, rules: &none, names: &names, dependencies: Some(&depends) }, &file("common/x.txt")), "B depends on A");
     }
 }

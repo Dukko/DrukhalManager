@@ -69,6 +69,21 @@ impl Window {
             .margin_start(18)
             .margin_end(18)
             .build();
+        // Irony's Default mode: a patch or submod is meant to override the
+        // mods it depends on.
+        let dependency_count = analysis.report.files.iter().filter(|c| c.builds_on_dependencies(&analysis.depends_on)).count()
+            + analysis.report.objects.iter().filter(|c| c.builds_on_dependencies(&analysis.depends_on)).count();
+        let hide_dependencies = adw::SwitchRow::builder()
+            .title("Hide Conflicts With Dependencies")
+            .subtitle(format!(
+                "Patches and submods are meant to override the mods they depend on. This hides {}.",
+                plural(dependency_count, "conflict", "conflicts")
+            ))
+            .active(!self.settings.borrow().show_dependency_conflicts)
+            .build();
+        let options = gtk::ListBox::builder().selection_mode(gtk::SelectionMode::None).css_classes(["boxed-list"]).build();
+        options.append(&hide_dependencies);
+        body.append(&options);
         body.append(&gtk::Label::builder().label(HELP).wrap(true).xalign(0.0).css_classes(["dim-label"]).build());
         body.append(&editor);
         body.append(&summary);
@@ -120,6 +135,7 @@ impl Window {
             {
                 let mut settings = ui.settings.borrow_mut();
                 settings.ignore_rules = rules;
+                settings.show_dependency_conflicts = !hide_dependencies.is_active();
                 if let Err(e) = settings.save(&settings::path()) {
                     ui.toasts.add_toast(adw::Toast::builder().title(format!("Could not save the ignore rules: {e}")).timeout(0).build());
                     return;
