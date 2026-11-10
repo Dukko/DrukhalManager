@@ -33,6 +33,8 @@ pub struct Steps {
     next: usize,
     /// The model's notes on its last merge.
     notes: String,
+    /// The right card's version as edited by hand, if it was.
+    right_edit: Option<String>,
     /// The text in the final editor.
     final_text: Option<String>,
     /// Whether the saved merge was opened as it is.
@@ -47,6 +49,7 @@ struct Snapshot {
     edited: bool,
     next: usize,
     notes: String,
+    right_edit: Option<String>,
     final_text: Option<String>,
     from_saved: bool,
 }
@@ -57,7 +60,7 @@ impl Steps {
         let result = first.map(|s| s.text.clone()).unwrap_or_default();
         let from = first.map(|s| vec![s.label.clone()]).unwrap_or_default();
         let n = loaded.sources.len();
-        let mut steps = Steps { loaded, positions, result, from, edited: false, next: 1, notes: String::new(), final_text: None, from_saved: false, history: Vec::new() };
+        let mut steps = Steps { loaded, positions, result, from, edited: false, next: 1, notes: String::new(), right_edit: None, final_text: None, from_saved: false, history: Vec::new() };
         if let Some(text) = saved {
             steps.next = n.max(1);
             steps.final_text = Some(text);
@@ -91,6 +94,7 @@ impl Steps {
             edited: self.edited,
             next: self.next,
             notes: self.notes.clone(),
+            right_edit: self.right_edit.clone(),
             final_text: self.final_text.clone(),
             from_saved: self.from_saved,
         });
@@ -114,20 +118,37 @@ impl Steps {
         &self.loaded.sources[self.next]
     }
 
+    /// The right card's version, with any edits.
+    fn right_source(&self) -> Source {
+        let mut source = self.right().clone();
+        if let Some(text) = &self.right_edit {
+            source.text = text.clone();
+        }
+        source
+    }
+
+    /// Records the right card's text, or drops the edit when it's back to
+    /// the mod's version.
+    fn edit_right(&mut self, text: &str) {
+        let lines = |s: &str| s.lines().map(str::trim_end).collect::<Vec<_>>().join("\n");
+        self.right_edit = (lines(text) != lines(&self.right().text)).then(|| text.to_owned());
+    }
+
     /// Keeps the left card's version and moves on.
     fn keep_left(&mut self) {
         self.snapshot();
         self.next += 1;
         self.notes.clear();
+        self.right_edit = None;
     }
 
     /// Takes the right card's version and moves on.
     fn use_right(&mut self) {
         self.snapshot();
-        let right = self.right().clone();
+        let right = self.right_source();
         self.result = right.text;
         self.from = vec![right.label];
-        self.edited = false;
+        self.edited = self.right_edit.take().is_some();
         self.next += 1;
         self.notes.clear();
     }
@@ -143,6 +164,7 @@ impl Steps {
         self.edited = false;
         self.next += 1;
         self.notes = notes;
+        self.right_edit = None;
     }
 
     /// Replaces the left card's version with one edited by hand.
@@ -163,7 +185,7 @@ impl Steps {
 
     fn undo(&mut self) {
         if let Some(s) = self.history.pop() {
-            (self.result, self.from, self.edited, self.next, self.notes, self.final_text, self.from_saved) = (s.result, s.from, s.edited, s.next, s.notes, s.final_text, s.from_saved);
+            (self.result, self.from, self.edited, self.next, self.notes, self.right_edit, self.final_text, self.from_saved) = (s.result, s.from, s.edited, s.next, s.notes, s.right_edit, s.final_text, s.from_saved);
         }
     }
 
@@ -173,6 +195,7 @@ impl Steps {
         self.from = vec![first.label.clone()];
         (self.edited, self.next, self.from_saved) = (false, 1, false);
         self.notes.clear();
+        self.right_edit = None;
         self.final_text = None;
         self.history.clear();
     }
@@ -425,7 +448,7 @@ impl ObjectView {
             let sources = (hooks.existing)(&self.category, &self.name).map(|m| m.sources.join(", ")).unwrap_or_default();
             self.notes.append(&note(&format!("This is the saved merge of {sources}. Edit and save it again, or start over to go through the versions again."), None));
         }
-        let suggestion = (!done && sources.len() > 1).then(|| trivial::resolve(vanilla, &[steps.left_source(), steps.right().clone()])).flatten();
+        let suggestion = (!done && sources.len() > 1).then(|| trivial::resolve(vanilla, &[steps.left_source(), steps.right_source()])).flatten();
         if let Some(s) = &suggestion {
             let which = if s.index == 0 { if steps.left_is_first() { sources[0].label.as_str() } else { "the result so far" } } else { steps.right().label.as_str() };
             self.notes.append(&note(&format!("{}, so {which} keeps every change. No AI needed.", s.reason), Some("accent")));
@@ -454,8 +477,9 @@ impl ObjectView {
     fn pair_body(self: &Rc<Self>, page: &Rc<Page>, steps: &Steps, suggested: Option<usize>) -> gtk::Widget {
         let analysis = &page.analysis;
         let busy = self.busy.get();
-        let pair = Pair::new();
-        let (left, right) = (steps.left_source(), steps.right().clone());
+        let pair = Pair::new(true);
+        let (left, right) = (steps.left_source(), steps.right_source());
+        let right_edited = steps.right_edit.is_some();
         let right_position = steps.positions[steps.next];
 
         let left_button = gtk::Button::builder().sensitive(!busy).build();
@@ -482,8 +506,44 @@ impl ObjectView {
         }
         pair.left.set_header(&left_header);
         pair.left.set_actions(&[left_button.clone().upcast()]);
-        pair.right.set_header(&Header { title: right.label.clone(), subtitle: analysis.origin(right_position, &right.file), color: Some(right_position), badge: Some(("Loads later".into(), None)) });
-        pair.right.set_actions(&[right_button.clone().upcast()]);
+        let (right_title, right_origin) = (right.label.clone(), analysis.origin(right_position, &right.file));
+        let right_header = move |edited: bool| Header {
+            title: right_title.clone(),
+            subtitle: right_origin.clone(),
+            color: Some(right_position),
+            badge: Some(if edited { ("Edited".into(), Some("accent")) } else { ("Loads later".into(), None) }),
+        };
+        pair.right.set_header(&right_header(right_edited));
+        let revert = gtk::Button::builder().icon_name("document-revert-symbolic").tooltip_text("Undo your edits to this version").sensitive(right_edited && !busy).css_classes(["flat"]).build();
+        {
+            let weak = Rc::downgrade(self);
+            revert.connect_clicked(move |_| {
+                if let Some(view) = weak.upgrade() {
+                    view.with_steps(|s| s.right_edit = None);
+                    view.render(gtk::StackTransitionType::None);
+                }
+            });
+        }
+        pair.right.set_actions(&[revert.clone().upcast(), right_button.clone().upcast()]);
+        pair.right.code.set_editable(!busy);
+        {
+            // Edits are kept with the step, so they survive re-rendering.
+            let (weak, card, revert) = (Rc::downgrade(self), Rc::downgrade(&pair.right), revert.downgrade());
+            pair.connect_edit(move |text| {
+                let Some(view) = weak.upgrade() else { return };
+                let edited = view.with_steps(|s| {
+                    s.edit_right(text);
+                    s.right_edit.is_some()
+                });
+                let edited = edited.unwrap_or(false);
+                if let Some(card) = card.upgrade() {
+                    card.set_header(&right_header(edited));
+                }
+                if let Some(revert) = revert.upgrade() {
+                    revert.set_sensitive(edited);
+                }
+            });
+        }
         for (button, keep_left) in [(&left_button, true), (&right_button, false)] {
             let weak = Rc::downgrade(self);
             button.connect_clicked(move |_| {
@@ -521,7 +581,7 @@ impl ObjectView {
             (Some(v), true) => Compare::Base(v.text.clone()),
             _ => Compare::Each,
         };
-        pair.show(&left.text, &right.text, &compare, session.ignore_whitespace);
+        pair.show(&left.text, &steps.right_source().text, &compare, session.ignore_whitespace);
         drop(session);
         let body = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(8).build();
         body.append(&bar.widget);
@@ -620,7 +680,7 @@ impl ObjectView {
                     Final::Source(i) => steps.loaded.sources[i].clone(),
                     Final::Edit => unreachable!(),
                 };
-                let pair = Pair::new();
+                let pair = Pair::new(false);
                 pair.left.set_header(&result_header);
                 pair.right.set_header(&match other {
                     Final::Source(i) => Header { title: theirs.label.clone(), subtitle: analysis.origin(steps.positions[i], &theirs.file), color: Some(steps.positions[i]), badge: None },
@@ -662,7 +722,7 @@ impl ObjectView {
             (hooks.open_preferences)();
             return;
         };
-        let Some((vanilla, sources)) = self.with_steps(|s| (s.loaded.vanilla.clone(), vec![s.left_source(), s.right().clone()])) else { return };
+        let Some((vanilla, sources)) = self.with_steps(|s| (s.loaded.vanilla.clone(), vec![s.left_source(), s.right_source()])) else { return };
         self.busy.set(true);
         self.error.replace(None);
         self.render(gtk::StackTransitionType::None);
@@ -761,6 +821,24 @@ mod tests {
         s.keep_left();
         assert!(s.done());
         assert_eq!(s.final_text(), "a2");
+    }
+
+    #[test]
+    fn edits_to_the_right_version_are_used_and_undone() {
+        let mut s = steps(&["a", "b\nc", "d"]);
+        s.edit_right("b\nc\n");
+        assert_eq!(s.right_edit, None, "the same text, give or take a newline, isn't an edit");
+        s.edit_right("b\nC");
+        assert_eq!(s.right_source().text, "b\nC");
+        assert_eq!(s.right_source().label, "M1");
+        s.use_right();
+        assert_eq!((s.result.as_str(), s.edited, s.right_edit.clone()), ("b\nC", true, None));
+        // The next pair starts from the mod's own version again.
+        assert_eq!(s.right_source().text, "d");
+        s.undo();
+        assert_eq!((s.next, s.right_edit.as_deref()), (1, Some("b\nC")), "undo brings the edit back");
+        s.keep_left();
+        assert_eq!((s.result.as_str(), s.right_edit.clone()), ("a", None));
     }
 
     #[test]

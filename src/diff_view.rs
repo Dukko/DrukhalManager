@@ -38,6 +38,9 @@ pub struct Card {
     pub scroll: gtk::ScrolledWindow,
     numbers: gtk::TextView,
     pub code: gtk::TextView,
+    /// Whether the card keeps its own line numbers and colours up to date
+    /// while edited. A pair refreshes its editable card itself.
+    standalone: Cell<bool>,
 }
 
 impl Card {
@@ -46,8 +49,20 @@ impl Card {
         let dot = gtk::Box::builder().css_classes(["mod-dot"]).valign(gtk::Align::Center).visible(false).build();
         let title = gtk::Label::builder().xalign(0.0).ellipsize(gtk::pango::EllipsizeMode::End).width_chars(12).css_classes(["heading"]).build();
         let subtitle = gtk::Label::builder().xalign(0.0).ellipsize(gtk::pango::EllipsizeMode::Middle).css_classes(["dim-label", "caption", "monospace"]).build();
+        // Whether the version can be changed here, next to its title.
+        let (icon, text, tooltip) = if editable {
+            ("document-edit-symbolic", "Editable", "You can change this version: type in it, paste into it or copy from it")
+        } else {
+            ("changes-prevent-symbolic", "View only", "This version can't be changed here; select text to copy it")
+        };
+        let mode = gtk::Box::builder().spacing(4).valign(gtk::Align::Center).tooltip_text(tooltip).css_classes(["card-mode", if editable { "editable" } else { "view-only" }]).build();
+        mode.append(&gtk::Image::from_icon_name(icon));
+        mode.append(&gtk::Label::new(Some(text)));
+        let title_row = gtk::Box::builder().spacing(8).build();
+        title_row.append(&title);
+        title_row.append(&mode);
         let titles = gtk::Box::builder().orientation(gtk::Orientation::Vertical).hexpand(true).valign(gtk::Align::Center).build();
-        titles.append(&title);
+        titles.append(&title_row);
         titles.append(&subtitle);
         let badge = gtk::Label::builder().css_classes(["badge"]).valign(gtk::Align::Center).visible(false).build();
         let actions = gtk::Box::builder().spacing(6).valign(gtk::Align::Center).build();
@@ -79,16 +94,21 @@ impl Card {
         body.append(&scroll);
 
         let widget = gtk::Box::builder().orientation(gtk::Orientation::Vertical).css_classes(["card", "code-card"]).hexpand(true).vexpand(true).build();
+        if editable {
+            widget.add_css_class("editable");
+        }
         widget.append(&header);
         widget.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
         widget.append(&body);
 
-        let card = Rc::new(Self { widget, dot, title, subtitle, badge, actions, numbers_scroll, scroll, numbers, code });
+        let card = Rc::new(Self { widget, dot, title, subtitle, badge, actions, numbers_scroll, scroll, numbers, code, standalone: Cell::new(true) });
         if editable {
             // Line numbers keep up with edits.
             let weak = Rc::downgrade(&card);
             card.code.buffer().connect_changed(move |buffer| {
-                if let Some(card) = weak.upgrade() {
+                if let Some(card) = weak.upgrade()
+                    && card.standalone.get()
+                {
                     let lines = buffer.line_count().max(1) as usize;
                     let current = card.numbers.buffer().line_count() as usize;
                     if lines != current || card.numbers.buffer().char_count() == 0 {
@@ -160,66 +180,133 @@ impl Card {
         buffer.text(&buffer.start_iter(), &buffer.end_iter(), false).to_string()
     }
 
-    /// Shows one side of `diff`: `text` is this side, `other` the other one.
-    fn show_side(&self, text: &str, other: &str, diff: &Diff, side: Side) {
+    /// Puts `text` in the card, unless `keep_text` says to mark what's
+    /// already there (the user's edits), then numbers and colours it and
+    /// clears the old marks.
+    fn fill(&self, text: &str, keep_text: bool) {
+        let buffer = self.code.buffer();
+        if !keep_text && set_if_changed(&buffer, &text.lines().collect::<Vec<_>>().join("\n")) {
+            buffer.place_cursor(&buffer.start_iter());
+        }
+        let lines = text.lines().count().max(buffer.line_count() as usize).max(1);
+        let numbers = numbers_text(lines);
+        if buffer_text(&self.numbers.buffer()) != numbers {
+            self.set_numbers(&numbers);
+        }
+        clear_marks(&buffer);
+        clear_marks(&self.numbers.buffer());
+        if lines <= COLOUR_LIMIT {
+            colour_lines(&buffer, 0, lines);
+        }
+    }
+
+    /// Shows one side of `diff`: `text` is this side, `other` the other
+    /// one. Rows where only the other side has a line become space above
+    /// the next line, so the buffer only ever holds this side's text.
+    fn show_side(&self, text: &str, other: &str, diff: &Diff, side: Side, keep_text: bool) {
+        self.fill(text, keep_text);
         let mine: Vec<&str> = text.lines().collect();
         let theirs: Vec<&str> = other.lines().collect();
-        let (mut code, mut numbers) = (String::new(), String::new());
-        for (i, row) in diff.rows.iter().enumerate() {
-            if i > 0 {
-                code.push('\n');
-                numbers.push('\n');
-            }
-            if let Some(line) = side.of(row) {
-                code.push_str(mine[line]);
-                numbers.push_str(&(line + 1).to_string());
-            }
-        }
         let buffer = self.code.buffer();
-        buffer.set_text(&code);
-        self.set_numbers(&numbers);
-        if diff.rows.len() <= COLOUR_LIMIT {
-            colour_lines(&buffer, 0, diff.rows.len());
-        }
-        for (i, row) in diff.rows.iter().enumerate() {
-            let tag = match (row.kind, side.of(row).is_some()) {
-                (Kind::Same, _) => continue,
-                (_, false) => "filler",
-                (Kind::Changed, true) => "changed",
-                (Kind::Removed, true) => "removed",
-                (Kind::Added, true) => "added",
+        let mut missing = 0;
+        let mut gaps = Vec::new();
+        for row in &diff.rows {
+            let Some(line) = side.of(row) else {
+                missing += 1;
+                continue;
             };
-            tag_line(&buffer, i, tag);
-            tag_line(&self.numbers.buffer(), i, tag);
+            if missing > 0 {
+                gaps.push((line, true, missing));
+                missing = 0;
+            }
+            let tag = match row.kind {
+                Kind::Same => continue,
+                Kind::Changed => "changed",
+                Kind::Removed => "removed",
+                Kind::Added => "added",
+            };
+            tag_line(&buffer, line, tag);
+            tag_line(&self.numbers.buffer(), line, tag);
             if row.kind == Kind::Changed
                 && let (Some(l), Some(r)) = (row.left, row.right)
             {
                 let (ranges_l, ranges_r) = diff::words(if side == Side::Left { mine[l] } else { theirs[l] }, if side == Side::Left { theirs[r] } else { mine[r] });
                 for range in if side == Side::Left { ranges_l } else { ranges_r } {
-                    if let (Some(start), Some(end)) = (buffer.iter_at_line_index(i as i32, range.start as i32), buffer.iter_at_line_index(i as i32, range.end as i32)) {
+                    if let (Some(start), Some(end)) = (buffer.iter_at_line_index(line as i32, range.start as i32), buffer.iter_at_line_index(line as i32, range.end as i32)) {
                         buffer.apply_tag_by_name("word", &start, &end);
                     }
                 }
             }
         }
-        buffer.place_cursor(&buffer.start_iter());
+        if missing > 0
+            && let Some(last) = mine.len().checked_sub(1)
+        {
+            gaps.push((last, false, missing));
+        }
+        for (line, above, rows) in gaps {
+            self.add_gap(line, above, rows);
+        }
     }
 
-    /// Highlights `rows` as the difference being looked at.
-    fn mark_current(&self, rows: Option<std::ops::Range<usize>>) {
-        for buffer in [self.code.buffer(), self.numbers.buffer()] {
-            buffer.remove_tag_by_name("current", &buffer.start_iter(), &buffer.end_iter());
-            if let Some(rows) = &rows {
-                for i in rows.clone() {
-                    tag_line(&buffer, i, "current");
+    /// Shows `text` with the lines that differ from `base` marked.
+    fn show_changes(&self, text: &str, base: &str, diff: &Diff, keep_text: bool) {
+        self.fill(text, keep_text);
+        let buffer = self.code.buffer();
+        let base_lines: Vec<&str> = base.lines().collect();
+        let mine: Vec<&str> = text.lines().collect();
+        for row in &diff.rows {
+            let Some(line) = row.right else { continue };
+            let tag = match row.kind {
+                Kind::Same => continue,
+                Kind::Changed => "changed",
+                _ => "added",
+            };
+            tag_line(&buffer, line, tag);
+            tag_line(&self.numbers.buffer(), line, tag);
+            if let (Kind::Changed, Some(b)) = (row.kind, row.left) {
+                for range in diff::words(base_lines[b], mine[line]).1 {
+                    if let (Some(start), Some(end)) = (buffer.iter_at_line_index(line as i32, range.start as i32), buffer.iter_at_line_index(line as i32, range.end as i32)) {
+                        buffer.apply_tag_by_name("word", &start, &end);
+                    }
                 }
             }
         }
     }
 
-    fn scroll_to_row(&self, row: usize) {
+    /// Leaves room for `rows` lines above (or below) `line`, where the other
+    /// card has lines this one doesn't.
+    fn add_gap(&self, line: usize, above: bool, rows: usize) {
+        let height = self.code.create_pango_layout(Some("X")).pixel_size().1.max(1);
+        let px = rows as i32 * height;
+        let name = format!("gap-{}-{px}", if above { "above" } else { "below" });
+        for buffer in [self.code.buffer(), self.numbers.buffer()] {
+            let table = buffer.tag_table();
+            if table.lookup(&name).is_none() {
+                let tag = gtk::TextTag::new(Some(&name));
+                if above {
+                    tag.set_pixels_above_lines(px);
+                } else {
+                    tag.set_pixels_below_lines(px);
+                }
+                table.add(&tag);
+            }
+            tag_line(&buffer, line, &name);
+        }
+    }
+
+    /// Highlights `lines` as the difference being looked at.
+    fn mark_current(&self, lines: Option<std::ops::Range<usize>>) {
+        for buffer in [self.code.buffer(), self.numbers.buffer()] {
+            buffer.remove_tag_by_name("current", &buffer.start_iter(), &buffer.end_iter());
+            for i in lines.clone().unwrap_or_default() {
+                tag_line(&buffer, i, "current");
+            }
+        }
+    }
+
+    fn scroll_to_line(&self, line: usize) {
         let buffer = self.code.buffer();
-        if let Some(mut iter) = buffer.iter_at_line(row as i32) {
+        if let Some(mut iter) = buffer.iter_at_line(line as i32) {
             self.code.scroll_to_iter(&mut iter, 0.0, true, 0.0, 0.3);
         }
     }
@@ -265,7 +352,11 @@ pub enum Compare {
     Base(String),
 }
 
-/// Two cards side by side, with the differences between them.
+/// How long typing pauses before an edited card is compared again.
+const REFRESH_DELAY: std::time::Duration = std::time::Duration::from_millis(250);
+
+/// Two cards side by side, with the differences between them. The right
+/// card can be made editable; its differences update as it's edited.
 #[allow(clippy::type_complexity)]
 pub struct Pair {
     pub widget: gtk::Box,
@@ -274,53 +365,120 @@ pub struct Pair {
     texts: RefCell<(String, String)>,
     diff: RefCell<Diff>,
     current: Cell<Option<usize>>,
-    /// Whether the cards are compared with the base game instead.
-    base: Cell<bool>,
+    compare: RefCell<Compare>,
+    ignore_whitespace: Cell<bool>,
+    /// Whether the cards share their scrolling.
+    linked: Cell<bool>,
+    /// Set while the pair fills the cards, so that isn't taken for an edit.
+    filling: Cell<bool>,
+    refresh: RefCell<Option<glib::SourceId>>,
     /// Called when the difference count or the current one changes, with
     /// whether the cards are compared with the base game.
     on_change: RefCell<Vec<Box<dyn Fn(usize, Option<usize>, bool)>>>,
+    /// Called with the right card's text as it's edited.
+    on_edit: RefCell<Vec<Box<dyn Fn(&str)>>>,
 }
 
 impl Pair {
-    pub fn new() -> Rc<Self> {
-        let (left, right) = (Card::new(false), Card::new(false));
+    pub fn new(right_editable: bool) -> Rc<Self> {
+        let (left, right) = (Card::new(false), Card::new(right_editable));
+        right.standalone.set(false);
         let widget = gtk::Box::builder().spacing(12).homogeneous(true).vexpand(true).build();
         widget.append(&left.widget);
         widget.append(&right.widget);
-        Rc::new(Self { widget, left, right, texts: RefCell::default(), diff: RefCell::default(), current: Cell::new(None), base: Cell::new(false), on_change: RefCell::default() })
+        let pair = Rc::new(Self {
+            widget,
+            left,
+            right,
+            texts: RefCell::default(),
+            diff: RefCell::default(),
+            current: Cell::new(None),
+            compare: RefCell::default(),
+            ignore_whitespace: Cell::new(false),
+            linked: Cell::new(false),
+            filling: Cell::new(false),
+            refresh: RefCell::default(),
+            on_change: RefCell::default(),
+            on_edit: RefCell::default(),
+        });
+        if right_editable {
+            let weak = Rc::downgrade(&pair);
+            pair.right.code.buffer().connect_changed(move |buffer| {
+                let Some(pair) = weak.upgrade() else { return };
+                if pair.filling.get() {
+                    return;
+                }
+                let text = buffer_text(buffer);
+                for f in &*pair.on_edit.borrow() {
+                    f(&text);
+                }
+                // Compares again once typing pauses.
+                if let Some(id) = pair.refresh.take() {
+                    id.remove();
+                }
+                let weak = Rc::downgrade(&pair);
+                let id = glib::timeout_add_local_once(REFRESH_DELAY, move || {
+                    if let Some(pair) = weak.upgrade() {
+                        pair.refresh.take();
+                        pair.texts.borrow_mut().1 = pair.right.text();
+                        pair.update(true);
+                    }
+                });
+                pair.refresh.replace(Some(id));
+            });
+        }
+        pair
     }
 
     pub fn connect_change(&self, f: impl Fn(usize, Option<usize>, bool) + 'static) {
         self.on_change.borrow_mut().push(Box::new(f));
     }
 
+    /// Calls `f` with the right card's text whenever it's edited.
+    pub fn connect_edit(&self, f: impl Fn(&str) + 'static) {
+        self.on_edit.borrow_mut().push(Box::new(f));
+    }
+
     /// Shows `left` and `right`, compared as `compare` says.
     pub fn show(&self, left: &str, right: &str, compare: &Compare, ignore_whitespace: bool) {
-        let mut diff = diff::lines(left, right, ignore_whitespace);
-        self.base.set(matches!(compare, Compare::Base(_)));
-        match compare {
+        self.texts.replace((left.to_owned(), right.to_owned()));
+        self.compare.replace(compare.clone());
+        self.ignore_whitespace.set(ignore_whitespace);
+        self.update(false);
+    }
+
+    /// Compares the texts again and marks them, keeping the right card's
+    /// text (and its cursor and undo history) when `keep_right`.
+    fn update(&self, keep_right: bool) {
+        let (left, right) = self.texts.borrow().clone();
+        let compare = self.compare.borrow().clone();
+        let whitespace = self.ignore_whitespace.get();
+        self.filling.set(true);
+        let diff = match &compare {
             Compare::Each => {
-                self.right.link_to(&self.left);
-                self.left.show_side(left, right, &diff, Side::Left);
-                self.right.show_side(right, left, &diff, Side::Right);
+                if !self.linked.replace(true) {
+                    self.right.link_to(&self.left);
+                }
+                let diff = diff::lines(&left, &right, whitespace);
+                self.left.show_side(&left, &right, &diff, Side::Left, false);
+                self.right.show_side(&right, &left, &diff, Side::Right, keep_right);
+                diff
             }
             Compare::Base(base) => {
-                self.left.unlink();
-                self.right.unlink();
-                let l = diff::lines(base, left, ignore_whitespace);
-                let r = diff::lines(base, right, ignore_whitespace);
-                self.left.show_changes(left, base, &l);
-                self.right.show_changes(right, base, &r);
+                if self.linked.replace(false) {
+                    self.left.unlink();
+                    self.right.unlink();
+                }
+                self.left.show_changes(&left, base, &diff::lines(base, &left, whitespace), false);
+                self.right.show_changes(&right, base, &diff::lines(base, &right, whitespace), keep_right);
                 // The rows shown aren't the pair's diff, so there are no
                 // differences to step through.
-                diff = Diff::default();
+                Diff::default()
             }
-        }
-        self.texts.replace((left.to_owned(), right.to_owned()));
+        };
+        self.filling.set(false);
         self.diff.replace(diff);
         self.current.set(None);
-        self.left.mark_current(None);
-        self.right.mark_current(None);
         self.notify();
     }
 
@@ -342,17 +500,17 @@ impl Pair {
             (Some(i), false) => (i + n - 1) % n,
         };
         self.current.set(Some(next));
-        let rows = self.diff.borrow().hunks[next].rows.clone();
-        self.left.mark_current(Some(rows.clone()));
-        self.right.mark_current(Some(rows.clone()));
+        let hunk = self.diff.borrow().hunks[next].clone();
+        self.left.mark_current(Some(hunk.left.clone()));
+        self.right.mark_current(Some(hunk.right.clone()));
         // Defer, so a freshly filled view is laid out first.
         let (left, right) = (Rc::downgrade(&self.left), Rc::downgrade(&self.right));
         glib::idle_add_local_once(move || {
             if let Some(l) = left.upgrade() {
-                l.scroll_to_row(rows.start);
+                l.scroll_to_line(hunk.left.start);
             }
             if let Some(r) = right.upgrade() {
-                r.scroll_to_row(rows.start);
+                r.scroll_to_line(hunk.right.start);
             }
         });
         self.notify();
@@ -371,42 +529,40 @@ impl Pair {
     }
 
     fn notify(&self) {
+        let base = matches!(*self.compare.borrow(), Compare::Base(_));
         for f in &*self.on_change.borrow() {
-            f(self.count(), self.current.get(), self.base.get());
+            f(self.count(), self.current.get(), base);
         }
     }
 }
 
-impl Card {
-    /// Shows `text` with the lines that differ from `base` marked.
-    fn show_changes(&self, text: &str, base: &str, diff: &Diff) {
-        let lines = text.lines().count().max(1);
-        self.set_numbers(&numbers_text(lines));
-        let buffer = self.code.buffer();
-        buffer.set_text(text);
-        if lines <= COLOUR_LIMIT {
-            colour_lines(&buffer, 0, lines);
+fn buffer_text(buffer: &gtk::TextBuffer) -> String {
+    buffer.text(&buffer.start_iter(), &buffer.end_iter(), false).to_string()
+}
+
+/// Replaces the buffer's text if it differs, and says whether it did.
+fn set_if_changed(buffer: &gtk::TextBuffer, text: &str) -> bool {
+    if buffer_text(buffer) == text {
+        return false;
+    }
+    buffer.set_text(text);
+    true
+}
+
+/// Removes the difference marks and gaps, keeping the syntax colours.
+fn clear_marks(buffer: &gtk::TextBuffer) {
+    let (start, end) = buffer.bounds();
+    for name in ["filler", "added", "removed", "changed", "current", "word"] {
+        buffer.remove_tag_by_name(name, &start, &end);
+    }
+    let mut gaps = Vec::new();
+    buffer.tag_table().foreach(|tag| {
+        if tag.name().is_some_and(|n| n.starts_with("gap-")) {
+            gaps.push(tag.clone());
         }
-        let base_lines: Vec<&str> = base.lines().collect();
-        let mine: Vec<&str> = text.lines().collect();
-        for row in &diff.rows {
-            let Some(line) = row.right else { continue };
-            let tag = match row.kind {
-                Kind::Same => continue,
-                Kind::Changed => "changed",
-                _ => "added",
-            };
-            tag_line(&buffer, line, tag);
-            tag_line(&self.numbers.buffer(), line, tag);
-            if let (Kind::Changed, Some(b)) = (row.kind, row.left) {
-                for range in diff::words(base_lines[b], mine[line]).1 {
-                    if let (Some(start), Some(end)) = (buffer.iter_at_line_index(line as i32, range.start as i32), buffer.iter_at_line_index(line as i32, range.end as i32)) {
-                        buffer.apply_tag_by_name("word", &start, &end);
-                    }
-                }
-            }
-        }
-        buffer.place_cursor(&buffer.start_iter());
+    });
+    for tag in gaps {
+        buffer.remove_tag(&tag, &start, &end);
     }
 }
 
@@ -574,6 +730,12 @@ button.chip { min-height: 0; }
 .conflict-list row.folder label { font-size: 0.85em; font-weight: bold; }
 .conflict-list row.conflict { padding: 6px 8px; border-radius: 8px; margin: 1px 6px; }
 .conflict-title { font-size: 1.6em; font-weight: 800; }
+.card-mode { font-size: 0.8em; font-weight: bold; border-radius: 99px; padding: 1px 8px 1px 6px; }
+.card-mode image { -gtk-icon-size: 12px; }
+.card-mode.view-only { background: alpha(currentColor, 0.08); color: alpha(currentColor, 0.65); }
+.card-mode.editable { background: alpha(@accent_bg_color, 0.2); color: @accent_color; }
+.code-card.editable { box-shadow: inset 0 0 0 1px alpha(@accent_bg_color, 0.55); }
+.code-card.editable .code-view { caret-color: @accent_color; }
 "#;
 
 #[cfg(test)]

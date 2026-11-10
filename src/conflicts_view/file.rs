@@ -183,7 +183,7 @@ impl FileView {
         let analysis = &page.analysis;
         let c = &analysis.report.files[self.index];
         let winner = *c.mods.last().unwrap();
-        let pair = Pair::new();
+        let pair = Pair::new(false);
         for (card, v) in [(&pair.left, left), (&pair.right, right)] {
             let header = match v.position {
                 None => Header { title: v.label.clone(), subtitle: "The game's own copy".into(), color: None, badge: None },

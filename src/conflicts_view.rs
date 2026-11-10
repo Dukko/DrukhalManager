@@ -30,6 +30,9 @@ pub use object::Steps;
 /// folders (e.g. localisation) stay responsive.
 const ROWS_PER_GROUP: usize = 300;
 
+/// A lightning bolt, for conflicts that merge without AI.
+const SIMPLE_ICON: &str = "io.github.dukko.DrukhalManager-simple-symbolic";
+
 /// A finished scan of a particular load order.
 pub struct Analysis {
     /// The load order revision this describes. Bumped in place for changes
@@ -683,7 +686,7 @@ impl Page {
                     Item::Object(i) => self.analysis.simple.get(&i).cloned().unwrap_or_default(),
                     _ => String::new(),
                 };
-                icon("media-flash-symbolic", "accent", &format!("Simple merge, no AI needed: {reason}"))
+                icon(SIMPLE_ICON, "accent", &format!("Simple merge, no AI needed: {reason}"))
             }
             Status::InProgress => gtk::Box::builder().css_classes(["status-dot", "progress"]).tooltip_text("Being merged").build().upcast(),
             Status::Saved => icon("emblem-ok-symbolic", "success", "Saved to the merged patch"),
