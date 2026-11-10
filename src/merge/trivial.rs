@@ -153,7 +153,15 @@ mod tests {
         let workshop = crate::paradox::steam::workshop_dirs(&home, 281990);
         let mods = crate::mods::discover(&user, &workshop).unwrap();
         let enabled: Vec<_> = mods.iter().filter(|m| m.load_position.is_some() && m.id != crate::merge::patch::ID).collect();
-        let inputs: Vec<_> = enabled.iter().map(|m| crate::merge::conflicts::ModInput { root: m.content.clone(), replace_path: m.descriptor.replace_path.clone() }).collect();
+        let mut inputs: Vec<_> = enabled.iter().map(|m| crate::merge::conflicts::ModInput { root: m.content.clone(), replace_path: m.descriptor.replace_path.clone() }).collect();
+        // As the scan does: zipped mods are read from an unpacked copy.
+        for input in &mut inputs {
+            if let Some(root) = &input.root
+                && let Ok(files) = crate::mods::archive::files(root)
+            {
+                input.root = Some(files);
+            }
+        }
         let names: Vec<String> = enabled.iter().map(|m| m.descriptor.name.clone()).collect();
         let start = std::time::Instant::now();
         let report = crate::merge::conflicts::analyze(&inputs);

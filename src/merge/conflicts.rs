@@ -187,7 +187,9 @@ pub(crate) fn walk(root: &Path, dir: &Path, out: &mut Vec<String>) -> std::io::R
 
 pub(crate) fn is_under(path: &str, folder: &str) -> bool {
     let folder = folder.trim_matches('/');
-    path.len() > folder.len() && path[..folder.len()].eq_ignore_ascii_case(folder) && path.as_bytes()[folder.len()] == b'/'
+    // By bytes: paths can hold any characters, and slicing a `str` inside one panics.
+    let (path, folder) = (path.as_bytes(), folder.as_bytes());
+    path.len() > folder.len() && path[..folder.len()].eq_ignore_ascii_case(folder) && path[folder.len()] == b'/'
 }
 
 /// The folder whose objects share a namespace, if the file defines objects
@@ -205,7 +207,8 @@ fn object_category(path: &str) -> Option<String> {
         return Some("events".to_owned());
     }
     if dir.starts_with("common/") && !MERGED_FOLDERS.iter().chain(FRAGMENT_FOLDERS).any(|m| dir == *m || is_under(dir, m)) {
-        return Some(path[..dir.len()].to_owned());
+        // The original spelling: lowercasing can change a name's length.
+        return path.rsplit_once('/').map(|(original, _)| original.to_owned());
     }
     None
 }
@@ -343,5 +346,10 @@ mod tests {
         assert_eq!(object_category("gfx/x.dds"), None);
         assert!(is_under("Common/Ethics/x.txt", "common/ethics/"));
         assert!(!is_under("common/ethics_extra/x.txt", "common/ethics"));
+        // Non-ASCII names, where byte offsets fall inside characters.
+        assert!(!is_under("common/需要的/x.txt", "common/ethics"));
+        assert!(!is_under("需要/x.txt", "common/a"));
+        assert_eq!(object_category("common/需要的/x.txt").as_deref(), Some("common/需要的"));
+        assert_eq!(object_category("common/İtems/x.txt").as_deref(), Some("common/İtems"));
     }
 }

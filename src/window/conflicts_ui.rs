@@ -109,10 +109,13 @@ impl Window {
                     // changed while this scan ran.
                     ui.refresh();
                 }
-                Err(_) => {
+                Err(panic) => {
+                    // The panic's message, to report it.
+                    let detail = panic.downcast_ref::<String>().map(String::as_str).or_else(|| panic.downcast_ref::<&str>().copied()).unwrap_or("unknown error");
+                    eprintln!("Scan failed: {detail}");
                     ui.conflicts_page.set_child(Some(&status_page(
                         "Scan Failed",
-                        "Something went wrong while reading the mods' files",
+                        &format!("Something went wrong while reading the mods' files. Please report this: {detail}"),
                     )));
                 }
             }
