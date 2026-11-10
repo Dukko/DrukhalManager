@@ -1,0 +1,49 @@
+name: Tag release
+
+# When a version bump lands on master, tags it vX.Y.Z and builds the
+# release. A release is then one PR that bumps Cargo.toml and adds its
+# <release> notes to the metainfo.
+
+on:
+  push:
+    branches: [master]
+    paths: [Cargo.toml]
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+jobs:
+  tag:
+    runs-on: ubuntu-24.04
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: tag
+        run: |
+          version=$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -1)
+          tag="v$version"
+          if git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null; then
+            echo "$tag is already tagged"
+            exit 0
+          fi
+          if ! grep -q "<release version=\"$version\"" data/io.github.dukko.DrukhalManager.metainfo.xml; then
+            echo "::error::No <release version=\"$version\"> in the metainfo; add the release notes first"
+            exit 1
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$tag" -m "DrukhalManager $version"
+          git push origin "$tag"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+  release:
+    needs: tag
+    if: needs.tag.outputs.tag != ''
+    uses: ./.github/workflows/flatpak.yml
+    with:
+      tag: ${{ needs.tag.outputs.tag }}
+    secrets: inherit
