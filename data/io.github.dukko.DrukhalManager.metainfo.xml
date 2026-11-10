@@ -36,6 +36,14 @@
     <control>keyboard</control>
   </supports>
   <releases>
+    <release version="0.2.8" date="2026-11-09">
+      <description>
+        <p>Reload Mods (F5 or Ctrl+R) picks up mods subscribed, updated or removed while the app is open, keeping the load order.</p>
+        <p>Steam Workshop collections can be imported as a collection, with links to subscribe to any mods that are missing.</p>
+        <p>A whole collection can be merged into one mod.</p>
+        <p>Localisation files that hold several languages can now be merged.</p>
+      </description>
+    </release>
     <release version="0.2.7" date="2026-11-09">
       <description>
         <p>Interface (.gui) and graphics (.gfx) files can now be merged object by object, as can files that repeat one kind of object, such as ambient objects or font overrides.</p>
