@@ -36,6 +36,12 @@
     <control>keyboard</control>
   </supports>
   <releases>
+    <release version="0.3.7" date="2026-11-10">
+      <description>
+        <p>Choose which localisation languages the conflict scan reads, in Preferences under Game. It defaults to the game's language, so translations you don't play in no longer show up as conflicts, and localisation can be left out of the scan altogether.</p>
+        <p>The Flatpak applies custom libadwaita colour schemes from your GTK 4 stylesheet.</p>
+      </description>
+    </release>
     <release version="0.3.6" date="2026-11-10">
       <description>
         <p>Conflicts between a mod and the mods it depends on, such as a compatibility patch and the mods it patches, are hidden, since the patch is meant to override them. Show them again from Rules… on the Conflicts page.</p>
