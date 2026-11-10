@@ -6,8 +6,8 @@
 //!   only the copy from the mod that comes last in the load order.
 //! - **Object conflicts**: different files define the same object, e.g. the
 //!   same building in `common/buildings`, the same event id, or the same
-//!   localisation key. Which definition wins depends on the folder's override
-//!   rules and on file names, so no winner is claimed here.
+//!   localisation key. Which definition the game uses depends on file
+//!   names and the folder's rule; see [`ObjectConflict::winner`].
 //!
 //! Only mod-vs-mod conflicts are reported; overriding vanilla is normal.
 //! The approach (per-file indexing, `replace_path` dropping earlier files,
@@ -59,6 +59,105 @@ pub struct ObjectConflict {
 pub struct Definition {
     pub mod_position: usize,
     pub file: String,
+}
+
+/// Why a definition is the one the game uses.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Reason {
+    /// Its file name sorts last, and in this folder later files override
+    /// earlier ones (last in, only served).
+    LastFile,
+    /// Its file name sorts first, and this folder keeps the first
+    /// definition it reads (first in, only served).
+    FirstFile,
+    /// Its file has the same name as another mod's, so the load order
+    /// decides.
+    LoadOrder,
+    /// It's a localisation file in a `replace` folder, which overrides
+    /// the others.
+    Replace,
+}
+
+impl Reason {
+    /// Why it wins, to follow "<mod>'s version is used: ".
+    pub fn explain(self, fios: bool) -> &'static str {
+        match self {
+            Reason::LastFile => "its file name sorts last, and in this folder later files override earlier ones",
+            Reason::FirstFile => "its file name sorts first, and this folder keeps the first definition it reads",
+            Reason::LoadOrder if fios => "its file has the same name as another mod's, and this mod loads first",
+            Reason::LoadOrder => "its file has the same name as another mod's, and this mod loads later",
+            Reason::Replace => "it's in a localisation replace folder, which overrides the others",
+        }
+    }
+}
+
+/// Folders where the game keeps the first definition of an object it
+/// reads rather than the last, from Irony Mod Manager's Stellaris rules.
+const FIOS_FOLDERS: &[&str] = &[
+    "common/component_sets",
+    "common/component_templates",
+    "common/event_chains",
+    "common/global_ship_designs",
+    "common/scripted_variables",
+    "common/section_templates",
+    "common/ship_behaviors",
+    "common/special_projects",
+    "common/strategic_resources",
+    "events",
+    "common/solar_system_initializers",
+    "common/traits",
+    "common/start_screen_messages",
+    "common/governments/authorities",
+];
+
+/// Whether objects in `category` follow first-in-only-served rules.
+pub fn is_fios(category: &str) -> bool {
+    FIOS_FOLDERS.iter().any(|f| category.eq_ignore_ascii_case(f) || is_under(category, f))
+}
+
+impl ObjectConflict {
+    /// The definition the game uses, as an index into `definitions`, and
+    /// why. The game reads a folder's files sorted by name, whichever mod
+    /// they come from; same-named files are read in load order.
+    pub fn winner(&self) -> Option<(usize, Reason)> {
+        let fios = is_fios(&self.category);
+        let stem = |d: &Definition| {
+            let name = d.file.rsplit('/').next().unwrap_or(&d.file);
+            name.rsplit_once('.').map_or(name, |(stem, _)| stem).to_owned()
+        };
+        let mut candidates: Vec<usize> = (0..self.definitions.len()).collect();
+        let mut replaced = false;
+        if self.category == "localisation" {
+            let in_replace = |d: &Definition| d.file.split('/').rev().skip(1).any(|part| part.eq_ignore_ascii_case("replace"));
+            let replacing: Vec<usize> = candidates.iter().copied().filter(|&i| in_replace(&self.definitions[i])).collect();
+            if !replacing.is_empty() && replacing.len() < candidates.len() {
+                candidates = replacing;
+                replaced = true;
+            }
+        }
+        // By file name, then load position.
+        let key = |i: usize| (stem(&self.definitions[i]), self.definitions[i].mod_position);
+        let best = if fios {
+            candidates.iter().copied().min_by(|&a, &b| key(a).cmp(&key(b)))?
+        } else {
+            candidates.iter().copied().max_by(|&a, &b| key(a).cmp(&key(b)))?
+        };
+        let w = &self.definitions[best];
+        let tied = candidates.iter().any(|&i| {
+            let d = &self.definitions[i];
+            d.mod_position != w.mod_position && stem(d) == stem(w)
+        });
+        let reason = if tied {
+            Reason::LoadOrder
+        } else if replaced && candidates.len() == 1 {
+            Reason::Replace
+        } else if fios {
+            Reason::FirstFile
+        } else {
+            Reason::LastFile
+        };
+        Some((best, reason))
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -334,6 +433,35 @@ mod tests {
         assert_eq!(report.skipped, [(2, "Mod files not found".to_owned())]);
 
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn picks_the_definition_the_game_uses() {
+        let conflict = |category: &str, defs: &[(usize, &str)]| ObjectConflict {
+            category: category.into(),
+            key: "x".into(),
+            definitions: defs.iter().map(|&(m, f)| Definition { mod_position: m, file: f.into() }).collect(),
+        };
+        // Later file names override earlier ones, whatever the load order.
+        let c = conflict("common/buildings", &[(0, "common/buildings/zz_mine.txt"), (1, "common/buildings/00_theirs.txt")]);
+        assert_eq!(c.winner(), Some((0, Reason::LastFile)));
+        // Names compare without the extension, case-sensitively like the game.
+        let c = conflict("common/buildings", &[(0, "common/buildings/a_x.txt"), (1, "common/buildings/a.txt"), (2, "common/buildings/B.txt")]);
+        assert_eq!(c.winner(), Some((0, Reason::LastFile)));
+        // Events keep the first definition read.
+        let c = conflict("events", &[(0, "events/zz.txt"), (1, "events/aa.txt")]);
+        assert_eq!(c.winner(), Some((1, Reason::FirstFile)));
+        assert!(is_fios("common/governments/authorities") && is_fios("common/traits") && !is_fios("common/species_traits"));
+        // Same names: the load order decides, either way round.
+        let c = conflict("common/buildings", &[(0, "common/buildings/sub/x.txt"), (3, "common/buildings/x.txt")]);
+        assert_eq!(c.winner(), Some((1, Reason::LoadOrder)));
+        let c = conflict("events", &[(0, "events/a/x.txt"), (3, "events/x.txt")]);
+        assert_eq!(c.winner(), Some((0, Reason::LoadOrder)));
+        // Localisation in a replace folder beats the rest.
+        let c = conflict("localisation", &[(0, "localisation/replace/a_l_english.yml"), (1, "localisation/english/z_l_english.yml")]);
+        assert_eq!(c.winner(), Some((0, Reason::Replace)));
+        let c = conflict("localisation", &[(0, "localisation/replace/z_l_english.yml"), (1, "localisation/english/replace/a_l_english.yml")]);
+        assert_eq!(c.winner(), Some((0, Reason::LastFile)));
     }
 
     #[test]

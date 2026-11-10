@@ -4,8 +4,8 @@
 //! Within a folder the game reads files from all mods in file-name order.
 //! For most `common/` folders the last definition read wins, so merged
 //! objects go in files that sort after everything else; for the folders
-//! where the first one wins (and for events) they sort first. The folder
-//! list and the idea of non-ASCII prefixes that sort after `zzz_` come from
+//! where the first one wins (see [`conflicts::is_fios`]) they sort first.
+//! The folder list and the idea of non-ASCII prefixes that sort after `zzz_` come from
 //! the patches Irony Mod Manager writes
 //! (MIT, © 2020 Mario, https://github.com/bcssov/IronyModManager).
 
@@ -14,14 +14,14 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+use super::conflicts;
+
 pub const NAME: &str = "DrukhalManager Merged Patch";
 const FOLDER: &str = "drukhal_merged_patch";
 /// How `dlc_load.json` refers to the patch.
 pub const ID: &str = "mod/drukhal_merged_patch.mod";
 const MANIFEST: &str = "drukhal_merges.json";
 
-/// Folders where the first definition read wins.
-const FIRST_WINS: &[&str] = &["events", "common/section_templates", "common/traits", "common/strategic_resources"];
 /// UTF-8 sorts after every ASCII name, including `zzz_` and `~` prefixes
 /// and Irony's own `伞伞zzz_` patches.
 const SORT_LAST: &str = "伞伞伞_drukhal_";
@@ -159,7 +159,29 @@ impl Patch {
             Err(e) if e.kind() == io::ErrorKind::NotFound => Manifest::default(),
             Err(e) => return Err(e),
         };
-        Ok(Self { root, manifest })
+        let mut patch = Self { root, manifest };
+        patch.rename_misplaced()?;
+        Ok(patch)
+    }
+
+    /// Moves merges saved under a name that no longer sorts where it must,
+    /// as older versions did for some first-wins folders.
+    fn rename_misplaced(&mut self) -> io::Result<()> {
+        let mut moved = false;
+        for merge in &mut self.manifest.merges {
+            let wanted = file_for(&merge.category, &merge.key);
+            if merge.file == wanted {
+                continue;
+            }
+            let (from, to) = (self.root.join(&merge.file), self.root.join(&wanted));
+            if from.is_file() {
+                std::fs::create_dir_all(to.parent().unwrap())?;
+                std::fs::rename(&from, &to)?;
+            }
+            merge.file = wanted;
+            moved = true;
+        }
+        if moved { self.write_manifest() } else { Ok(()) }
     }
 
     pub fn get(&self, category: &str, key: &str) -> Option<&Merge> {
@@ -286,7 +308,12 @@ impl Patch {
 
         let merge = Merge { category: category.into(), key: key.into(), script: script.into(), sources, file, prints };
         match self.manifest.merges.iter_mut().find(|m| m.category == category && m.key == key) {
-            Some(existing) => *existing = merge,
+            Some(existing) => {
+                if existing.file != merge.file {
+                    remove_if_present(&self.root.join(&existing.file))?;
+                }
+                *existing = merge;
+            }
             None => self.manifest.merges.push(merge),
         }
         self.write_manifest()
@@ -318,7 +345,7 @@ fn file_for(category: &str, key: &str) -> String {
         let folder = language.strip_prefix("l_").unwrap_or(language);
         return format!("localisation/replace/{folder}/drukhal_{name}_{language}.yml");
     }
-    let prefix = if FIRST_WINS.contains(&category) { SORT_FIRST } else { SORT_LAST };
+    let prefix = if conflicts::is_fios(category) { SORT_FIRST } else { SORT_LAST };
     format!("{category}/{prefix}{safe}.txt")
 }
 
@@ -356,6 +383,28 @@ fn write_atomic(path: &Path, contents: &[u8]) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn moves_merges_saved_under_a_name_that_loses() {
+        let user = std::env::temp_dir().join(format!("drukhal-misplaced-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&user);
+        std::fs::create_dir_all(user.join("mod")).unwrap();
+        let mut patch = Patch::open(&user).unwrap();
+        patch.save(&user, None, "common/component_templates", "c", "c = {}", vec![]).unwrap();
+        // As an older version saved it: sorting last, where the first wins.
+        let old = "common/component_templates/伞伞伞_drukhal_c.txt";
+        let root = Patch::root(&user);
+        std::fs::rename(root.join(file_for("common/component_templates", "c")), root.join(old)).unwrap();
+        patch.manifest.merges[0].file = old.into();
+        patch.write_manifest().unwrap();
+
+        let patch = Patch::open(&user).unwrap();
+        let wanted = file_for("common/component_templates", "c");
+        assert_eq!(patch.get("common/component_templates", "c").unwrap().file, wanted);
+        assert!(root.join(&wanted).is_file() && !root.join(old).exists());
+        assert_eq!(Patch::open(&user).unwrap().get("common/component_templates", "c").unwrap().file, wanted, "saved");
+        std::fs::remove_dir_all(user).unwrap();
+    }
 
     #[test]
     fn notices_when_sources_change() {
@@ -440,6 +489,7 @@ mod tests {
         assert_eq!(file_for("common/buildings", "building_lab"), "common/buildings/伞伞伞_drukhal_building_lab.txt");
         assert_eq!(file_for("common/traits", "trait_x"), "common/traits/!!!!!!_drukhal_trait_x.txt");
         assert_eq!(file_for("events", "ns.12"), "events/!!!!!!_drukhal_ns.12.txt");
+        assert_eq!(file_for("common/component_templates", "c"), "common/component_templates/!!!!!!_drukhal_c.txt");
         assert_eq!(file_for("localisation", "l_german:lab"), "localisation/replace/german/drukhal_lab_l_german.yml");
         assert!(SORT_LAST > "zzzz_" && SORT_LAST > "~ste" && SORT_LAST > "伞伞zzz_");
         assert!(SORT_FIRST < "!_pd" && SORT_FIRST < "00_");
