@@ -36,6 +36,11 @@
     <control>keyboard</control>
   </supports>
   <releases>
+    <release version="0.3.6" date="2026-11-10">
+      <description>
+        <p>Conflicts between a mod and the mods it depends on, such as a compatibility patch and the mods it patches, are hidden, since the patch is meant to override them. Show them again from Rules… on the Conflicts page.</p>
+      </description>
+    </release>
     <release version="0.3.5" date="2026-11-10">
       <description>
         <p>When an AI merge comes back broken, the error goes back to the model once for a corrected version before the merge counts as failed.</p>
