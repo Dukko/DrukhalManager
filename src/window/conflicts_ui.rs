@@ -467,6 +467,7 @@ impl Window {
             items,
             game_dir: self.game.as_ref().map(|g| g.dir.clone()),
             provider: self.settings.borrow().ready_provider(),
+            parallel: self.settings.borrow().merges_at_once(),
             save,
             open_preferences,
             on_done,

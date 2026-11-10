@@ -21,7 +21,7 @@ pub const AI_PAGE: &str = "ai";
 pub fn present(parent: &impl IsA<gtk::Widget>, settings: Settings, page: Option<&str>, on_close: impl Fn(Settings) + 'static) {
     let dialog = adw::PreferencesDialog::new();
     let (game_page, read_game) = game_page(&settings.game);
-    let (ai_page, read_provider) = ai_page(&settings.provider);
+    let (ai_page, read_provider, read_parallel) = ai_page(&settings.provider, settings.parallel_merges);
     let (updates_page, read_updates) = updates_page(&settings.updates);
     dialog.add(&game_page);
     dialog.add(&ai_page);
@@ -34,7 +34,9 @@ pub fn present(parent: &impl IsA<gtk::Widget>, settings: Settings, page: Option<
     let on_close = Rc::new(RefCell::new(Some(on_close)));
     dialog.connect_closed(move |_| {
         if let Some(f) = on_close.borrow_mut().take() {
-            f(Settings { provider: read_provider(), ignored: ignored.clone(), ignore_rules: ignore_rules.clone(), game: read_game(), updates: read_updates(), key_in_keyring });
+            let provider = read_provider();
+            let parallel_merges = read_parallel(&provider);
+            f(Settings { provider, ignored: ignored.clone(), ignore_rules: ignore_rules.clone(), parallel_merges, game: read_game(), updates: read_updates(), key_in_keyring });
         }
     });
     dialog.present(Some(parent));
@@ -149,7 +151,7 @@ fn game_page(options: &GameOptions) -> (adw::PreferencesPage, impl Fn() -> GameO
     (page, read)
 }
 
-fn ai_page(current: &Provider) -> (adw::PreferencesPage, impl Fn() -> Provider + use<>) {
+fn ai_page(current: &Provider, parallel: Option<u32>) -> (adw::PreferencesPage, impl Fn() -> Provider + use<>, impl Fn(&Provider) -> Option<u32> + use<>) {
     // Remember both providers' fields while the user switches between them.
     let (mut anthropic_key, mut openai) = (String::new(), settings::openrouter());
     match current {
@@ -195,10 +197,18 @@ fn ai_page(current: &Provider) -> (adw::PreferencesPage, impl Fn() -> Provider +
     sync(&provider);
     provider.connect_selected_notify(sync);
 
+    let merge_all = adw::PreferencesGroup::builder().title("Merge All").build();
+    let parallel_row = adw::SpinRow::with_range(1.0, f64::from(settings::MAX_PARALLEL), 1.0);
+    parallel_row.set_title("Merges at Once");
+    parallel_row.set_subtitle("How many objects Merge All sends to the provider at the same time. Lower it if the provider rate-limits you.");
+    parallel_row.set_value(f64::from(parallel.unwrap_or_else(|| settings::default_parallel(current))));
+    merge_all.add(&parallel_row);
+
     let page = page("AI Merging", AI_PAGE, "applications-science-symbolic");
     page.add(&choice);
     page.add(&anthropic);
     page.add(&compatible);
+    page.add(&merge_all);
     let read = move || {
         if provider.selected() == 0 {
             Provider::Anthropic { api_key: anthropic_key_row.text().trim().to_owned() }
@@ -211,7 +221,9 @@ fn ai_page(current: &Provider) -> (adw::PreferencesPage, impl Fn() -> Provider +
             }
         }
     };
-    (page, read)
+    // Only remembered when it differs from the provider's default.
+    let read_parallel = move |provider: &Provider| Some(parallel_row.value() as u32).filter(|&n| n != settings::default_parallel(provider));
+    (page, read, read_parallel)
 }
 
 fn updates_page(options: &UpdateOptions) -> (adw::PreferencesPage, impl Fn() -> UpdateOptions + use<>) {

@@ -264,9 +264,15 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
                         let provider = provider.clone();
                         let (c, k) = (category.clone(), key.clone());
                         let heading = key.clone();
-                        let result = thinking_view::run(&thinking, Some(&heading), move |on| ai::merge(&provider, &c, &k, vanilla.as_ref(), &sources, on)).await;
+                        let result = thinking_view::run(&thinking, Some(&heading), move |on| {
+                            let check = |text: &str| crate::merge_dialog::validate(&c, &k, text);
+                            ai::merge_checked(&provider, &c, &k, vanilla.as_ref(), &sources, &check, on)
+                        })
+                        .await;
                         let merged = match result {
-                            Some(Ok(m)) => plan.borrow().as_ref().map_or(Err("the merge was closed".to_owned()), |p| p.validate_item(index, &m.script)),
+                            Some(Ok(checked)) => checked
+                                .script
+                                .and_then(|_| plan.borrow().as_ref().map_or(Err("the merge was closed".to_owned()), |p| p.validate_item(index, &checked.merged.script))),
                             Some(Err(e)) => Err(e),
                             None => Err("failed unexpectedly".to_owned()),
                         };
