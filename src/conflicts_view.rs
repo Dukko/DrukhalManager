@@ -537,7 +537,10 @@ impl Page {
                 }
                 match analysis.simple.contains_key(&i) {
                     true => (Status::Simple, format!("{mods} · simple, no AI needed")),
-                    false => (Status::Open, mods),
+                    false => match c.winner() {
+                        Some((w, _)) => (Status::Open, format!("{mods} · {} wins", analysis.name(c.definitions[w].mod_position))),
+                        None => (Status::Open, mods),
+                    },
                 }
             }
             Item::File(i) => {

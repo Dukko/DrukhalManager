@@ -12,6 +12,7 @@ use gtk::{gio, glib};
 use super::{Item, Page, chip, arrow, diff_bar, note, object_key, option_toggle, plural};
 use crate::diff_view::{Card, Compare, Header, Pair};
 use crate::merge::ai;
+use crate::merge::conflicts::{self, ObjectConflict};
 use crate::merge::source::Source;
 use crate::merge::trivial;
 use crate::merge_dialog::{self, Loaded};
@@ -101,6 +102,13 @@ impl Steps {
     }
 
     /// Whether the left card still shows the first mod's version as it is.
+    /// Which of the versions is the one the game uses, if it was found.
+    fn winner(&self, c: &ObjectConflict) -> Option<usize> {
+        let (w, _) = c.winner()?;
+        let w = &c.definitions[w];
+        (0..self.loaded.sources.len()).find(|&i| self.positions[i] == w.mod_position && self.loaded.sources[i].file == w.file)
+    }
+
     fn left_is_first(&self) -> bool {
         self.next == 1 && !self.edited
     }
@@ -279,6 +287,11 @@ pub fn view(page: &Rc<Page>, index: usize) -> (gtk::Widget, Rc<dyn std::any::Any
     (view.root.clone().upcast(), view)
 }
 
+/// The badge on the version the game uses today.
+fn in_game() -> (String, Option<&'static str>) {
+    ("In game".into(), Some("success"))
+}
+
 /// Removes every page but the visible one.
 fn drop_hidden(stack: &gtk::Stack) {
     let visible = stack.visible_child();
@@ -438,6 +451,10 @@ impl ObjectView {
         while let Some(child) = self.notes.first_child() {
             self.notes.remove(&child);
         }
+        if let Some((w, reason)) = c.winner().filter(|_| !(hooks.is_merged)(&self.category, &self.name)) {
+            let name = analysis.name(c.definitions[w].mod_position);
+            self.notes.append(&note(&format!("In game now, {name}'s version is used: {}.", reason.explain(conflicts::is_fios(&self.category))), None));
+        }
         if !steps.loaded.missing.is_empty() {
             self.notes.append(&note(&format!("Couldn't find the definition in: {}", steps.loaded.missing.join(", ")), Some("warning")));
         }
@@ -481,12 +498,17 @@ impl ObjectView {
         let (left, right) = (steps.left_source(), steps.right_source());
         let right_edited = steps.right_edit.is_some();
         let right_position = steps.positions[steps.next];
+        let winner = match self.item {
+            Item::Object(i) => steps.winner(&analysis.report.objects[i]),
+            _ => None,
+        };
+        let right_wins = winner == Some(steps.next);
 
         let left_button = gtk::Button::builder().sensitive(!busy).build();
         let left_header = if steps.left_is_first() {
             left_button.set_label("Use This Version");
             left_button.set_tooltip_text(Some(&format!("Keep {}'s version and leave out {}'s changes", left.label, right.label)));
-            Header { title: left.label.clone(), subtitle: analysis.origin(steps.positions[0], &left.file), color: Some(steps.positions[0]), badge: None }
+            Header { title: left.label.clone(), subtitle: analysis.origin(steps.positions[0], &left.file), color: Some(steps.positions[0]), badge: (winner == Some(0)).then(in_game) }
         } else {
             left_button.set_label("Keep This");
             left_button.set_tooltip_text(Some(&format!("Keep the result so far and leave out {}'s changes", right.label)));
@@ -511,7 +533,7 @@ impl ObjectView {
             title: right_title.clone(),
             subtitle: right_origin.clone(),
             color: Some(right_position),
-            badge: Some(if edited { ("Edited".into(), Some("accent")) } else { ("Loads later".into(), None) }),
+            badge: if edited { Some(("Edited".into(), Some("accent"))) } else { right_wins.then(in_game) },
         };
         pair.right.set_header(&right_header(right_edited));
         let revert = gtk::Button::builder().icon_name("document-revert-symbolic").tooltip_text("Undo your edits to this version").sensitive(right_edited && !busy).css_classes(["flat"]).build();
@@ -683,7 +705,15 @@ impl ObjectView {
                 let pair = Pair::new(false);
                 pair.left.set_header(&result_header);
                 pair.right.set_header(&match other {
-                    Final::Source(i) => Header { title: theirs.label.clone(), subtitle: analysis.origin(steps.positions[i], &theirs.file), color: Some(steps.positions[i]), badge: None },
+                    Final::Source(i) => Header {
+                        title: theirs.label.clone(),
+                        subtitle: analysis.origin(steps.positions[i], &theirs.file),
+                        color: Some(steps.positions[i]),
+                        badge: match self.item {
+                            Item::Object(o) => (steps.winner(&analysis.report.objects[o]) == Some(i)).then(in_game),
+                            _ => None,
+                        },
+                    },
                     _ => Header { title: "Base Game".into(), subtitle: theirs.file.clone(), color: None, badge: None },
                 });
                 let bar = diff_bar(&pair);
