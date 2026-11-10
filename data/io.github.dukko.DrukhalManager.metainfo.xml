@@ -36,6 +36,12 @@
     <control>keyboard</control>
   </supports>
   <releases>
+    <release version="0.3.4" date="2026-11-10">
+      <description>
+        <p>Ignore rules: hide conflicts by path, such as gfx/** or localisation/*, optionally only for an exact set of mods. Open them with Rules… on the Conflicts page, which previews how many conflicts each rule hides.</p>
+        <p>The mod list marks Workshop mods with an update Steam hasn't finished downloading, mods still downloading, and mods you unsubscribed from.</p>
+      </description>
+    </release>
     <release version="0.3.3" date="2026-11-10">
       <description>
         <p>The Conflicts page shows which mod's version the game uses today, and why: file names, the folder's rule, or the load order.</p>
