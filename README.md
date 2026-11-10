@@ -13,7 +13,7 @@
 
 Built with Rust, GTK 4 and libadwaita · A fork of [Irony Mod Manager](https://github.com/bcssov/IronyModManager)
 
-<img src="docs/screenshots/mod-list.png" alt="The load order: every enabled mod with its thumbnail, game version and tags" width="820">
+<img src="docs/screenshots/hero.png" alt="The load order: every enabled mod with its thumbnail, game version and tags" width="860">
 
 </div>
 
@@ -81,7 +81,7 @@ Drag mods into order, type a position, or use **Sort by Dependencies**. Thumbnai
 
 ### ⚔️ Conflicts, side by side
 
-<img src="docs/screenshots/conflicts.png" alt="The Conflicts page: a sidebar of conflicts by folder, and two versions of one object side by side, the in-game one marked">
+<img src="docs/screenshots/conflicts-framed.png" alt="The Conflicts page: a sidebar of conflicts by folder, and two versions of one object side by side, the in-game one marked">
 
 Every file and object that more than one enabled mod changes is listed by folder, with a search and a filter by mod. Pick one to see two versions side by side, with the changed lines and words highlighted.
 
