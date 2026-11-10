@@ -726,6 +726,10 @@ const CSS: &str = r#"
 button.chip { min-height: 0; }
 .status-dot { min-width: 14px; min-height: 14px; border-radius: 99px; border: 2px solid alpha(currentColor, 0.4); }
 .status-dot.progress { border-color: @accent_color; border-right-color: alpha(currentColor, 0.15); border-bottom-color: alpha(currentColor, 0.15); }
+.conflict-split .sidebar-pane, .conflict-split .sidebar-pane:backdrop { background-color: transparent; box-shadow: none; border: none; }
+.conflict-sidebar { border-radius: 12px; background-color: var(--sidebar-bg-color); color: var(--sidebar-fg-color); box-shadow: 0 0 0 1px var(--sidebar-border-color); }
+.conflict-sidebar:backdrop { background-color: var(--sidebar-backdrop-color); }
+.conflict-sidebar .navigation-sidebar { background: transparent; }
 .conflict-list row.folder { padding-top: 14px; }
 .conflict-list row.folder label { font-size: 0.85em; font-weight: bold; }
 .conflict-list row.conflict { padding: 6px 8px; border-radius: 8px; margin: 1px 6px; }

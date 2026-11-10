@@ -331,7 +331,15 @@ pub fn build(analysis: &Rc<Analysis>, rescan: gtk::Button, hooks: Rc<MergeHooks>
     footer.append(&show_ignored);
     footer.append(&rescan);
 
-    let sidebar = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    // A rounded card inset from the window's edges, like the code cards.
+    let sidebar = gtk::Box::builder()
+        .orientation(gtk::Orientation::Vertical)
+        .css_classes(["conflict-sidebar"])
+        .overflow(gtk::Overflow::Hidden)
+        .margin_top(12)
+        .margin_bottom(12)
+        .margin_start(12)
+        .build();
     sidebar.append(&top);
     sidebar.append(&list_scroll);
     sidebar.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
@@ -344,6 +352,7 @@ pub fn build(analysis: &Rc<Analysis>, rescan: gtk::Button, hooks: Rc<MergeHooks>
         .min_sidebar_width(260.0)
         .max_sidebar_width(380.0)
         .sidebar_width_fraction(0.24)
+        .css_classes(["conflict-split"])
         .build();
 
     let page = Rc::new(Page {

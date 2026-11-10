@@ -2,13 +2,14 @@
 //! shown beside each mod in the load order.
 
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 use adw::prelude::*;
 use gtk::{gdk, gio, glib};
 
 use super::Window;
+use crate::merge::patch;
 use crate::mods::{Mod, archive};
 
 const SIZE: i32 = 40;
@@ -18,6 +19,7 @@ const STORED: i32 = SIZE * 2;
 const CSS: &str = "
 .mod-thumbnail { border-radius: 6px; }
 .mod-thumbnail.placeholder { background: alpha(currentColor, 0.08); }
+.mod-thumbnail.patch { background: alpha(@accent_bg_color, 0.15); }
 ";
 
 /// Decoded thumbnails by file, so rebuilding the list doesn't read them
@@ -37,13 +39,27 @@ pub(super) fn add_css() {
     }
 }
 
-/// Where a mod's thumbnail is, if its descriptor names one. Zipped mods
-/// use their unpacked copy.
+/// Where a mod's thumbnail is: the picture its descriptor names, or else
+/// `thumbnail.png`, which Steam and the launcher show when it names none.
+/// Zipped mods use their unpacked copy.
 fn picture_path(m: &Mod) -> Option<PathBuf> {
-    let name = m.descriptor.picture.as_deref().filter(|p| !p.trim().is_empty())?;
     let content = m.content.as_deref()?;
     let dir = if content.is_file() { archive::files(content).ok()? } else { content.to_path_buf() };
-    Some(dir.join(name.trim()))
+    let named = m.descriptor.picture.as_deref().map(str::trim).filter(|p| !p.is_empty());
+    named.into_iter().chain(["thumbnail.png", "thumbnail.jpg", "thumbnail.jpeg"]).find_map(|name| find(&dir, name))
+}
+
+/// `name` in `dir`, ignoring case: mods made on Windows often name a
+/// `Thumbnail.png` as `thumbnail.png`.
+fn find(dir: &Path, name: &str) -> Option<PathBuf> {
+    let exact = dir.join(name);
+    if exact.is_file() {
+        return Some(exact);
+    }
+    let wanted = Path::new(name);
+    let folder = dir.join(wanted.parent().unwrap_or(Path::new("")));
+    let file = wanted.file_name()?;
+    std::fs::read_dir(folder).ok()?.flatten().find(|e| e.file_name().eq_ignore_ascii_case(file) && e.path().is_file()).map(|e| e.path())
 }
 
 impl Window {
@@ -57,6 +73,13 @@ impl Window {
             .overflow(gtk::Overflow::Hidden)
             .css_classes(["mod-thumbnail", "placeholder"])
             .build();
+        // The merged patch is this app's, so it wears the app's icon.
+        if m.id == patch::ID {
+            picture.set_icon_name(Some(crate::APP_ID));
+            picture.set_css_classes(&["mod-thumbnail", "patch"]);
+            picture.set_tooltip_text(Some("Made by Drukhal Manager from your merges"));
+            return picture;
+        }
         let Some(path) = picture_path(m) else { return picture };
         let mut cache = self.thumbnails.borrow_mut();
         if let Some(texture) = cache.loaded.get(&path) {
@@ -126,6 +149,19 @@ mod tests {
             }
         }
         pixbuf.savev(path, "png", &[]).unwrap();
+    }
+
+    #[test]
+    fn finds_thumbnails_the_descriptor_doesnt_name() {
+        let dir = std::env::temp_dir().join(format!("drukhal-thumb-find-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("gfx")).unwrap();
+        std::fs::write(dir.join("Thumbnail.PNG"), b"").unwrap();
+        std::fs::write(dir.join("gfx/Cover.png"), b"").unwrap();
+        assert_eq!(find(&dir, "thumbnail.png"), Some(dir.join("Thumbnail.PNG")), "ignores case");
+        assert_eq!(find(&dir, "gfx/cover.png"), Some(dir.join("gfx/Cover.png")));
+        assert_eq!(find(&dir, "missing.png"), None);
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]
