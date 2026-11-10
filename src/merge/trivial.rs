@@ -164,7 +164,7 @@ mod tests {
         }
         let names: Vec<String> = enabled.iter().map(|m| m.descriptor.name.clone()).collect();
         let start = std::time::Instant::now();
-        let report = crate::merge::conflicts::analyze(&inputs);
+        let report = crate::merge::conflicts::analyze(&inputs, None);
         println!("scan: {:?}, {} object conflicts", start.elapsed(), report.objects.len());
         let game = crate::paradox::game::find(&crate::paradox::steam::library_folders(&home)).map(|g| g.dir);
         let roots: Vec<_> = inputs.iter().map(|i| i.root.clone().filter(|r| r.is_dir())).collect();

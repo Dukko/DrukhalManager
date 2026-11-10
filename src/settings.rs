@@ -51,6 +51,40 @@ pub struct GameOptions {
     /// Fix descriptors whose paths went stale before launching.
     pub refresh_descriptors: bool,
     pub close_after_launch: bool,
+    /// The localisation languages the conflict scan reads, as the game's
+    /// files name them; `None` for the game's own language.
+    pub scan_languages: Option<Vec<String>>,
+    /// Leaves localisation out of the conflict scan altogether.
+    pub skip_localisation: bool,
+}
+
+impl GameOptions {
+    /// The languages the conflict scan reads: empty when localisation is
+    /// skipped, else the chosen ones or the game's language.
+    pub fn languages(&self, user_dir: &Path) -> std::collections::BTreeSet<String> {
+        if self.skip_localisation {
+            return Default::default();
+        }
+        match &self.scan_languages {
+            Some(chosen) => chosen.iter().cloned().collect(),
+            None => [game_language(user_dir)].into(),
+        }
+    }
+}
+
+/// The language the game is set to, from its `settings.txt`
+/// (`language="l_english"`), or English.
+pub fn game_language(user_dir: &Path) -> String {
+    std::fs::read_to_string(user_dir.join("settings.txt"))
+        .ok()
+        .and_then(|src| {
+            src.lines().find_map(|line| {
+                let value = line.trim().strip_prefix("language")?.trim_start().strip_prefix('=')?;
+                let value = value.trim().trim_matches('"').strip_prefix("l_")?;
+                crate::merge::conflicts::LANGUAGES.iter().find(|(id, _)| *id == value).map(|(id, _)| id.to_string())
+            })
+        })
+        .unwrap_or_else(|| "english".to_owned())
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -203,5 +237,19 @@ mod tests {
         let s: Settings = serde_json::from_str(old).unwrap();
         assert_eq!(s.game, GameOptions::default());
         assert_eq!(s.updates, UpdateOptions::default());
+    }
+
+    #[test]
+    fn reads_the_game_language() {
+        let dir = std::env::temp_dir().join(format!("dm-game-language-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        assert_eq!(game_language(&dir), "english", "no settings.txt");
+        std::fs::write(dir.join("settings.txt"), "gui_scale=1.0\nlanguage=\"l_german\"\n").unwrap();
+        assert_eq!(game_language(&dir), "german");
+        let options = GameOptions { scan_languages: Some(vec!["french".into(), "polish".into()]), ..Default::default() };
+        assert_eq!(options.languages(&dir), ["french".to_owned(), "polish".to_owned()].into());
+        assert_eq!(GameOptions::default().languages(&dir), ["german".to_owned()].into());
+        assert!(GameOptions { skip_localisation: true, ..options }.languages(&dir).is_empty());
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 }

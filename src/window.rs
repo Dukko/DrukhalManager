@@ -518,7 +518,11 @@ impl Window {
                 if *ui.settings.borrow() == settings {
                     return;
                 }
+                let languages_changed = ui.settings.borrow().game.languages(&ui.paths.user_dir) != settings.game.languages(&ui.paths.user_dir);
                 ui.settings.replace(settings);
+                if languages_changed && ui.analysis.borrow().is_some() {
+                    ui.scan();
+                }
                 if key_changed {
                     // Saved once the keyring has (or couldn't take) the key.
                     ui.store_api_key();
