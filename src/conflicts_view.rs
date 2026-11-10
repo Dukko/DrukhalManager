@@ -212,6 +212,8 @@ struct Group {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Status {
     Open,
+    /// Open, but one version keeps every change, so no AI is needed.
+    Simple,
     InProgress,
     Saved,
     Outdated,
@@ -522,7 +524,7 @@ impl Page {
                     return (Status::Saved, format!("{mods} · saved to patch"));
                 }
                 match analysis.simple.contains_key(&i) {
-                    true => (Status::Open, format!("{mods} · simple, no AI needed")),
+                    true => (Status::Simple, format!("{mods} · simple, no AI needed")),
                     false => (Status::Open, mods),
                 }
             }
@@ -676,6 +678,13 @@ impl Page {
         let icon = |name: &str, class: &str, tooltip: &str| gtk::Image::builder().icon_name(name).css_classes([class]).tooltip_text(tooltip).build().upcast::<gtk::Widget>();
         let widget = match status {
             Status::Open => gtk::Box::builder().css_classes(["status-dot"]).tooltip_text("Not resolved yet").build().upcast(),
+            Status::Simple => {
+                let reason = match item {
+                    Item::Object(i) => self.analysis.simple.get(&i).cloned().unwrap_or_default(),
+                    _ => String::new(),
+                };
+                icon("media-flash-symbolic", "accent", &format!("Simple merge, no AI needed: {reason}"))
+            }
             Status::InProgress => gtk::Box::builder().css_classes(["status-dot", "progress"]).tooltip_text("Being merged").build().upcast(),
             Status::Saved => icon("emblem-ok-symbolic", "success", "Saved to the merged patch"),
             Status::Outdated => icon("dialog-warning-symbolic", "warning", "The mods changed since this was merged"),

@@ -42,8 +42,10 @@ pub struct Diff {
 }
 
 /// Past this many differences the line diff gives up matching and marks
-/// the rest as changed, to bound time and memory on unrelated texts.
-const MAX_EDITS: usize = 4000;
+/// the rest as changed, to bound time and memory on unrelated texts. The
+/// search keeps about `MAX_EDITS²` numbers (32 MB here) and runs on the
+/// main thread.
+const MAX_EDITS: usize = 2000;
 
 /// Diffs two texts line by line. With `ignore_whitespace`, lines that only
 /// differ in spacing or indentation count as the same.
@@ -87,11 +89,13 @@ fn middle<T: PartialEq>(a: &[T], b: &[T], max: usize) -> Vec<Op> {
     let limit = ((n + m) as usize).min(max) as isize;
     let offset = limit + 1;
     let mut v = vec![0isize; 2 * offset as usize + 1];
-    // v after each round, to walk back the path.
+    // The diagonals -d..=d of v as each round starts, to walk back the
+    // path; the rest of v is unused then, and copying it all made the
+    // memory grow with the texts' length times the rounds.
     let mut trace: Vec<Vec<isize>> = Vec::new();
     let mut found = None;
     'search: for d in 0..=limit {
-        trace.push(v.clone());
+        trace.push(v[(offset - d) as usize..=(offset + d) as usize].to_vec());
         let mut k = -d;
         while k <= d {
             let i = (k + offset) as usize;
@@ -118,11 +122,12 @@ fn middle<T: PartialEq>(a: &[T], b: &[T], max: usize) -> Vec<Op> {
     let mut ops = Vec::new();
     let (mut x, mut y) = (n, m);
     for d in (1..=d_end).rev() {
-        let v = &trace[d as usize];
+        // Diagonal k of round d is at k + d in its window.
+        let window = &trace[d as usize];
+        let at = |k: isize| window[(k + d) as usize];
         let k = x - y;
-        let i = (k + offset) as usize;
-        let prev_k = if k == -d || (k != d && v[i - 1] < v[i + 1]) { k + 1 } else { k - 1 };
-        let prev_x = v[(prev_k + offset) as usize];
+        let prev_k = if k == -d || (k != d && at(k - 1) < at(k + 1)) { k + 1 } else { k - 1 };
+        let prev_x = at(prev_k);
         let prev_y = prev_x - prev_k;
         while x > prev_x && y > prev_y {
             ops.push(Op::Keep);
@@ -292,6 +297,27 @@ mod tests {
         let b: Vec<char> = "CBABAC".chars().collect();
         let ops = edits(&a, &b, 100);
         assert_eq!(ops.iter().filter(|&&o| o != Op::Keep).count(), 5);
+    }
+
+    #[test]
+    fn stays_minimal_on_longer_texts() {
+        // Every 7th line changed in a long file: the diff finds exactly those.
+        let a: Vec<String> = (0..3000).map(|i| format!("line {i}")).collect();
+        let b: Vec<String> = (0..3000).map(|i| if i % 7 == 0 { format!("changed {i}") } else { format!("line {i}") }).collect();
+        let ops = edits(&a, &b, MAX_EDITS);
+        let changed = (0..3000).filter(|i| i % 7 == 0).count();
+        assert_eq!(ops.iter().filter(|&&o| o == Op::Delete).count(), changed);
+        assert_eq!(ops.iter().filter(|&&o| o == Op::Insert).count(), changed);
+    }
+
+    #[test]
+    fn unrelated_big_texts_finish_quickly() {
+        let a: Vec<String> = (0..20_000).map(|i| format!("a {i}")).collect();
+        let b: Vec<String> = (0..20_000).map(|i| format!("b {i}")).collect();
+        let start = std::time::Instant::now();
+        let ops = edits(&a, &b, MAX_EDITS);
+        assert_eq!(ops.len(), 40_000);
+        assert!(start.elapsed() < std::time::Duration::from_secs(10), "took {:?}", start.elapsed());
     }
 
     #[test]
