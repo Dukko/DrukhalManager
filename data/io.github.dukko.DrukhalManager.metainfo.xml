@@ -36,6 +36,13 @@
     <control>keyboard</control>
   </supports>
   <releases>
+    <release version="0.3.0" date="2026-11-09">
+      <description>
+        <p>Conflicts that need no AI, because only one mod changed the object from the base game or every mod ships the same version, are marked on the Conflicts page. Merge All saves them directly, without calls or cost, and the merge dialog fills in the version to use.</p>
+        <p>Workshop mods have new menu items: Open in Steam, Open Workshop Page in Browser, Copy Workshop Link and Unsubscribe in Steam.</p>
+        <p>Looking up the base game's versions of many objects is much faster.</p>
+      </description>
+    </release>
     <release version="0.2.9" date="2026-11-09">
       <description>
         <p>Merge All merges every conflicting object in a folder with AI. It shows the number of calls and an estimated cost first, streams the model's thinking under each object, lets you view each merged result, and reports the tokens and cost actually used.</p>
