@@ -19,6 +19,10 @@ pub struct Settings {
     /// Rules that hide conflicts by path; see `merge::ignore_rules`.
     #[serde(default)]
     pub ignore_rules: String,
+    /// How many objects Merge All merges at once, if not the provider's
+    /// default.
+    #[serde(default)]
+    pub parallel_merges: Option<u32>,
     #[serde(default)]
     pub game: GameOptions,
     #[serde(default)]
@@ -61,13 +65,25 @@ impl Default for UpdateOptions {
     }
 }
 
+/// The most merges Merge All runs at once.
+pub const MAX_PARALLEL: u32 = 8;
+
+/// Merges at once unless chosen: one for Claude, whose rate limits are
+/// tight for long requests, a few for other providers.
+pub fn default_parallel(provider: &Provider) -> u32 {
+    match provider {
+        Provider::Anthropic { .. } => 1,
+        Provider::OpenAiCompatible { .. } => 4,
+    }
+}
+
 fn default_provider() -> Provider {
     Provider::Anthropic { api_key: String::new() }
 }
 
 impl Default for Settings {
     fn default() -> Self {
-        Self { provider: default_provider(), ignored: Default::default(), ignore_rules: String::new(), game: Default::default(), updates: Default::default(), key_in_keyring: false }
+        Self { provider: default_provider(), ignored: Default::default(), ignore_rules: String::new(), parallel_merges: None, game: Default::default(), updates: Default::default(), key_in_keyring: false }
     }
 }
 
@@ -120,6 +136,11 @@ impl Settings {
 
     /// The provider to use, with an empty Anthropic key filled in from
     /// `ANTHROPIC_API_KEY`. `None` if it isn't usable yet.
+    /// How many objects Merge All merges at once.
+    pub fn merges_at_once(&self) -> usize {
+        self.parallel_merges.unwrap_or_else(|| default_parallel(&self.provider)).clamp(1, MAX_PARALLEL) as usize
+    }
+
     pub fn ready_provider(&self) -> Option<Provider> {
         match &self.provider {
             Provider::Anthropic { api_key } if api_key.is_empty() => {
@@ -150,7 +171,7 @@ mod tests {
     fn saves_privately_and_loads() {
         let path = std::env::temp_dir().join(format!("drukhal-settings-{}/settings.json", std::process::id()));
         assert_eq!(Settings::load(&path), Settings::default());
-        let s = Settings { provider: Provider::OpenAiCompatible { base_url: "http://localhost:11434/v1".into(), model: "qwen".into(), api_key: String::new() }, ignored: ["file:x".to_owned()].into(), ignore_rules: "gfx/**".into(), game: GameOptions { launch_args: "-debug".into(), close_after_launch: true, ..Default::default() }, updates: UpdateOptions { check_at_startup: true, skipped_version: Some("0.2.0".into()) }, key_in_keyring: false };
+        let s = Settings { provider: Provider::OpenAiCompatible { base_url: "http://localhost:11434/v1".into(), model: "qwen".into(), api_key: String::new() }, ignored: ["file:x".to_owned()].into(), ignore_rules: "gfx/**".into(), parallel_merges: Some(3), game: GameOptions { launch_args: "-debug".into(), close_after_launch: true, ..Default::default() }, updates: UpdateOptions { check_at_startup: true, skipped_version: Some("0.2.0".into()) }, key_in_keyring: false };
         s.save(&path).unwrap();
         assert_eq!(Settings::load(&path), s);
         assert!(s.ready_provider().is_some());

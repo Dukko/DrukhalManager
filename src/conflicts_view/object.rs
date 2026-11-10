@@ -758,11 +758,20 @@ impl ObjectView {
         self.render(gtk::StackTransitionType::None);
         let (category, key, view) = (self.category.clone(), self.name.clone(), self.clone());
         glib::spawn_future_local(async move {
-            let result = thinking_view::run(&view.thinking, None, move |on| ai::merge(&provider, &category, &key, vanilla.as_ref(), &sources, on)).await;
+            let result = thinking_view::run(&view.thinking, None, move |on| {
+                let check = |text: &str| merge_dialog::validate(&category, &key, text);
+                ai::merge_checked(&provider, &category, &key, vanilla.as_ref(), &sources, &check, on)
+            })
+            .await;
             view.busy.set(false);
             match result {
-                Some(Ok(merged)) => {
-                    view.with_steps(|s| s.merged(merged.script, merged.notes));
+                Some(Ok(checked)) => {
+                    // Kept even when still rejected, to fix by hand.
+                    let problem = checked.script.err();
+                    view.with_steps(|s| s.merged(checked.merged.script, checked.merged.notes));
+                    if let Some(problem) = problem {
+                        view.error.replace(Some(format!("The model's result still has a problem after a correction: {problem}. Fix it by hand, or undo and try again.")));
+                    }
                     view.render(gtk::StackTransitionType::SlideLeft);
                 }
                 Some(Err(message)) => {

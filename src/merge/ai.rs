@@ -201,8 +201,57 @@ fn agent() -> ureq::Agent {
     ureq::Agent::config_builder().http_status_as_error(false).timeout_global(Some(Duration::from_secs(600))).build().into()
 }
 
-pub fn merge(provider: &Provider, category: &str, key: &str, vanilla: Option<&Source>, sources: &[Source], on: &mut dyn FnMut(Progress)) -> Result<Merged, String> {
-    complete(provider, SYSTEM, &prompt(category, key, vanilla, sources), on)
+/// A merge checked by the caller, after at most one correction.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Checked {
+    /// The last answer, kept even when rejected so it can be shown.
+    pub merged: Merged,
+    /// The checked script, or why the last answer was rejected.
+    pub script: Result<String, String>,
+    /// Whether the first answer was rejected and the model asked again.
+    pub retried: bool,
+}
+
+/// Merges, checks the result with `check`, and if it's rejected sends the
+/// problem back once for a corrected version. `merged.usage` covers both
+/// requests.
+pub fn merge_checked(
+    provider: &Provider,
+    category: &str,
+    key: &str,
+    vanilla: Option<&Source>,
+    sources: &[Source],
+    check: &dyn Fn(&str) -> Result<String, String>,
+    on: &mut dyn FnMut(Progress),
+) -> Result<Checked, String> {
+    let request = prompt(category, key, vanilla, sources);
+    let first = complete(provider, SYSTEM, &request, on)?;
+    let problem = match check(&first.script) {
+        Ok(script) => return Ok(Checked { merged: first, script: Ok(script), retried: false }),
+        Err(problem) => problem,
+    };
+    on(Progress::Thinking(format!("\n\nThe result was rejected: {problem}. Asking the model to correct it.\n\n")));
+    let retry = format!("{request}\n{}", correction(&first.script, &problem));
+    let mut second = match complete(provider, SYSTEM, &retry, on) {
+        Ok(second) => second,
+        Err(e) => return Ok(Checked { script: Err(format!("{problem} (the correction failed: {e})")), merged: first, retried: true }),
+    };
+    second.usage = match (first.usage, second.usage) {
+        (Some(mut a), Some(b)) => {
+            a += b;
+            Some(a)
+        }
+        (a, b) => a.or(b),
+    };
+    let script = check(&second.script);
+    Ok(Checked { merged: second, script, retried: true })
+}
+
+/// What follows the original request when asking for a corrected merge.
+fn correction(previous: &str, problem: &str) -> String {
+    format!(
+        "Your previous answer was rejected by the tool that saves it: {problem}\n\n<previous_answer>\n{previous}\n</previous_answer>\n\nReply again with a corrected merge that fixes this, following the same rules.\n"
+    )
 }
 
 const FIX_SYSTEM: &str = "You are an expert Stellaris modder repairing a mod's broken script.
@@ -251,19 +300,47 @@ fn merge_anthropic(api_key: &str, system: &str, prompt: &str, on: &mut dyn FnMut
         "messages": [{"role": "user", "content": prompt}]
     });
 
-    let mut response = agent()
-        .post(ANTHROPIC_URL)
-        .header("x-api-key", api_key)
-        .header("anthropic-version", API_VERSION)
-        .header("anthropic-beta", FALLBACK_BETA)
-        .send_json(&body)
-        .map_err(|e| format!("Could not reach the Claude API: {e}"))?;
+    let mut response = with_backoff(on, || {
+        agent()
+            .post(ANTHROPIC_URL)
+            .header("x-api-key", api_key)
+            .header("anthropic-version", API_VERSION)
+            .header("anthropic-beta", FALLBACK_BETA)
+            .send_json(&body)
+            .map_err(|e| format!("Could not reach the Claude API: {e}"))
+    })?;
     let status = response.status();
     if status != 200 {
         let reply: Value = response.body_mut().read_json().unwrap_or(Value::Null);
         return Err(http_error("The Claude API", status.as_u16(), &reply));
     }
     anthropic_stream(std::io::BufReader::new(response.into_body().into_reader()), on)
+}
+
+/// Times a rate-limited or overloaded request is tried again.
+const RETRIES: u32 = 4;
+
+/// Sends the request, waiting and trying again while the provider is rate
+/// limited (429) or overloaded (503, 529): as long as it asks in
+/// `retry-after`, or else 5, 10, 20 and 40 seconds.
+fn with_backoff(on: &mut dyn FnMut(Progress), mut send: impl FnMut() -> Result<ureq::http::Response<ureq::Body>, String>) -> Result<ureq::http::Response<ureq::Body>, String> {
+    let mut attempt = 0;
+    loop {
+        let response = send()?;
+        let status = response.status().as_u16();
+        if !matches!(status, 429 | 503 | 529) || attempt >= RETRIES {
+            return Ok(response);
+        }
+        let asked = response.headers().get("retry-after").and_then(|v| v.to_str().ok()).and_then(|v| v.trim().parse::<u64>().ok());
+        let wait = backoff(attempt, asked);
+        on(Progress::Thinking(format!("\nThe provider is busy (error {status}); trying again in {} seconds.\n", wait.as_secs())));
+        std::thread::sleep(wait);
+        attempt += 1;
+    }
+}
+
+fn backoff(attempt: u32, asked: Option<u64>) -> Duration {
+    Duration::from_secs(asked.unwrap_or(5 << attempt).clamp(1, 120))
 }
 
 /// Reads Server-Sent Events, calling `f` with each event's data.
@@ -347,11 +424,13 @@ fn merge_openai(base_url: &str, model: &str, api_key: &str, system: &str, prompt
         "response_format": {"type": "json_schema", "json_schema": {"name": "merge", "strict": true, "schema": schema()}}
     });
     let url = format!("{}/chat/completions", base_url.trim_end_matches('/'));
-    let mut request = agent().post(&url).header("content-type", "application/json");
-    if !api_key.is_empty() {
-        request = request.header("authorization", &format!("Bearer {api_key}"));
-    }
-    let mut response = request.send_json(&body).map_err(|e| format!("Could not reach {url}: {e}"))?;
+    let mut response = with_backoff(on, || {
+        let mut request = agent().post(&url).header("content-type", "application/json");
+        if !api_key.is_empty() {
+            request = request.header("authorization", &format!("Bearer {api_key}"));
+        }
+        request.send_json(&body).map_err(|e| format!("Could not reach {url}: {e}"))
+    })?;
     let status = response.status();
     if status != 200 {
         let reply: Value = response.body_mut().read_json().unwrap_or(Value::Null);
@@ -497,6 +576,75 @@ fn parse_merged(text: &str) -> Result<Merged, String> {
 mod tests {
     use super::*;
 
+    /// Serves OpenAI-style streamed replies, one per request, and records
+    /// the prompts it was sent.
+    fn fake_server(replies: Vec<(u16, String)>) -> (String, std::sync::mpsc::Receiver<String>) {
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}/v1", listener.local_addr().unwrap());
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            for (status, content) in replies {
+                let (mut stream, _) = listener.accept().unwrap();
+                let mut request = Vec::new();
+                let mut buf = [0u8; 65536];
+                // Headers, then as much body as Content-Length says.
+                loop {
+                    let n = stream.read(&mut buf).unwrap();
+                    request.extend_from_slice(&buf[..n]);
+                    let text = String::from_utf8_lossy(&request);
+                    if let Some(end) = text.find("\r\n\r\n") {
+                        let length = text.lines().find_map(|l| l.to_ascii_lowercase().strip_prefix("content-length:").map(|v| v.trim().parse::<usize>().unwrap())).unwrap_or(0);
+                        if request.len() >= end + 4 + length {
+                            break;
+                        }
+                    }
+                }
+                tx.send(String::from_utf8_lossy(&request).into_owned()).unwrap();
+                let body = if status == 200 {
+                    let chunk = json!({"choices": [{"delta": {"content": content}}]});
+                    format!("data: {chunk}\n\ndata: [DONE]\n\n")
+                } else {
+                    json!({"error": {"message": content}}).to_string()
+                };
+                let kind = if status == 200 { "text/event-stream" } else { "application/json" };
+                let extra = if status == 429 { "retry-after: 1\r\n" } else { "" };
+                write!(stream, "HTTP/1.1 {status} X\r\ncontent-type: {kind}\r\n{extra}content-length: {}\r\nconnection: close\r\n\r\n{body}", body.len()).unwrap();
+            }
+        });
+        (url, rx)
+    }
+
+    #[test]
+    fn asks_again_once_when_the_result_is_rejected() {
+        let answer = |script: &str| json!({"script": script, "notes": "n"}).to_string();
+        let (url, prompts) = fake_server(vec![(429, "slow down".into()), (200, answer("lab = {")), (200, answer("lab = { cost = 3 }"))]);
+        let provider = Provider::OpenAiCompatible { base_url: url, model: "m".into(), api_key: String::new() };
+        let a = Source { label: "A".into(), file: "a.txt".into(), text: "lab = { cost = 1 }".into() };
+        let check = |text: &str| crate::merge_dialog::validate("common/buildings", "lab", text);
+        let mut thinking = String::new();
+        let checked = merge_checked(&provider, "common/buildings", "lab", None, &[a.clone(), a], &check, &mut |p| {
+            if let Progress::Thinking(t) = p {
+                thinking.push_str(&t);
+            }
+        })
+        .unwrap();
+        assert!(checked.retried);
+        assert_eq!(checked.script.as_deref(), Ok("lab = { cost = 3 }"));
+        assert!(thinking.contains("trying again in 1 seconds") && thinking.contains("The result was rejected"), "{thinking}");
+        let sent: Vec<String> = prompts.try_iter().collect();
+        assert_eq!(sent.len(), 3, "the rate-limited request, the first answer and the correction");
+        assert!(sent[2].contains("previous_answer") && sent[2].contains("lab = {"), "the correction includes the rejected answer");
+    }
+
+    #[test]
+    fn waits_longer_each_time_unless_told() {
+        assert_eq!([0, 1, 2, 3].map(|a| backoff(a, None).as_secs()), [5, 10, 20, 40]);
+        assert_eq!(backoff(0, Some(30)).as_secs(), 30);
+        assert_eq!(backoff(0, Some(9999)).as_secs(), 120, "capped");
+        assert!(correction("x = {", "syntax error at line 1").contains("<previous_answer>\nx = {\n</previous_answer>"));
+    }
+
     #[test]
     fn builds_prompt_in_priority_order() {
         let v = Source { label: "Vanilla".into(), file: "common/buildings/00_buildings.txt".into(), text: "building_lab = {}".into() };
@@ -594,7 +742,8 @@ mod tests {
         let b = Source { label: "Lab Jobs".into(), file: "common/buildings/b.txt".into(), text: "building_lab = {\n\tcost = { minerals = 100 }\n\tupkeep = { energy = 2 }\n\tplanet_modifier = { job_researcher_add = 1 }\n}".into() };
         let e = estimate("common/buildings", "building_lab", Some(&v), &[a.clone(), b.clone()]);
         println!("estimate: {e:?}");
-        let merged = merge(&provider, "common/buildings", "building_lab", Some(&v), &[a, b], &mut |_| {}).expect("merge failed");
+        let check = |text: &str| Ok(text.to_owned());
+        let merged = merge_checked(&provider, "common/buildings", "building_lab", Some(&v), &[a, b], &check, &mut |_| {}).expect("merge failed").merged;
         println!("script:\n{}\nnotes: {}\nusage: {:?}", merged.script, merged.notes, merged.usage);
         assert!(merged.script.contains("minerals = 50") && merged.script.contains("job_researcher_add"));
     }
