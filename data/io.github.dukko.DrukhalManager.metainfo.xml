@@ -36,6 +36,12 @@
     <control>keyboard</control>
   </supports>
   <releases>
+    <release version="0.2.9" date="2026-11-09">
+      <description>
+        <p>Merge All merges every conflicting object in a folder with AI. It shows the number of calls and an estimated cost first, streams the model's thinking under each object, lets you view each merged result, and reports the tokens and cost actually used.</p>
+        <p>Workshop mods downloaded by Steam now appear without starting the Paradox Launcher, and updated mods show their new name and version.</p>
+      </description>
+    </release>
     <release version="0.2.8" date="2026-11-09">
       <description>
         <p>Reload Mods (F5 or Ctrl+R) picks up mods subscribed, updated or removed while the app is open, keeping the load order.</p>
