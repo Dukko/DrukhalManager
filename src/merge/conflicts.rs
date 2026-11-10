@@ -232,13 +232,50 @@ impl ObjectConflict {
     }
 }
 
+/// The languages Stellaris ships localisation for, as its files name them
+/// (`*_l_english.yml`), with how to show them.
+pub const LANGUAGES: &[(&str, &str)] = &[
+    ("english", "English"),
+    ("braz_por", "Brazilian Portuguese"),
+    ("french", "French"),
+    ("german", "German"),
+    ("japanese", "Japanese"),
+    ("korean", "Korean"),
+    ("polish", "Polish"),
+    ("russian", "Russian"),
+    ("simp_chinese", "Simplified Chinese"),
+    ("spanish", "Spanish"),
+];
+
+/// The language a localisation file is for, from its `_l_<language>.yml`
+/// name, if it's one the game knows.
+pub fn file_language(path: &str) -> Option<&'static str> {
+    let name = path.rsplit('/').next()?.to_lowercase();
+    let stem = name.strip_suffix(".yml")?;
+    LANGUAGES.iter().map(|(id, _)| *id).find(|id| stem.strip_suffix(id).is_some_and(|rest| rest.ends_with("l_")))
+}
+
+/// Whether the scan reads `path`, given the languages it reads (`None` for
+/// all). Files of languages the game doesn't know are always read.
+fn reads(path: &str, languages: Option<&BTreeSet<String>>) -> bool {
+    let Some(languages) = languages else { return true };
+    let lower = path.to_lowercase();
+    if !(lower.starts_with("localisation/") || lower.starts_with("localization/")) {
+        return true;
+    }
+    !lower.ends_with(".yml") || file_language(path).is_none_or(|l| languages.contains(l))
+}
+
 /// Folders whose objects the game merges rather than overrides.
 const MERGED_FOLDERS: &[&str] = &["common/on_actions", "common/defines"];
 
 /// Folders of script fragments pasted into other scripts, not objects.
 pub const FRAGMENT_FOLDERS: &[&str] = &["common/inline_scripts"];
 
-pub fn analyze(mods: &[ModInput]) -> Report {
+/// Finds the files and objects more than one of `mods` defines. Only the
+/// localisation of `languages` is read; `None` reads every language, and an
+/// empty set none.
+pub fn analyze(mods: &[ModInput], languages: Option<&BTreeSet<String>>) -> Report {
     let mut report = Report::default();
 
     // Lowercased relative path -> (load position, path as spelled in that
@@ -262,7 +299,7 @@ pub fn analyze(mods: &[ModInput]) -> Report {
         // A later `replace_path` makes the game ignore earlier mods' files in
         // that folder, so they cannot conflict.
         files.retain(|path, _| !m.replace_path.iter().any(|r| is_under(path, r)));
-        for path in found {
+        for path in found.into_iter().filter(|p| reads(p, languages)) {
             files.entry(path.to_lowercase()).or_default().push((position, path));
         }
     }
@@ -291,6 +328,11 @@ pub fn analyze(mods: &[ModInput]) -> Report {
                 continue;
             }
         };
+        // Entries under another language's header, in a file named for one
+        // that's read, are left out too.
+        let keys = keys.into_iter().filter(|k| {
+            category != "localisation" || languages.is_none_or(|l| k.split_once(':').is_none_or(|(lang, _)| lang.strip_prefix("l_").is_none_or(|lang| !LANGUAGES.iter().any(|(id, _)| *id == lang) || l.contains(lang))))
+        });
         for key in keys {
             objects.entry((category.clone(), key)).or_default().push(Definition { mod_position: winner, file: path.clone() });
         }
@@ -451,7 +493,7 @@ mod tests {
             ("localisation/b_l_german.yml", "l_german:\n only_a:0 \"A\"\n"),
         ]);
 
-        let report = analyze(&[input(&root, "a", &[]), input(&root, "b", &[])]);
+        let report = analyze(&[input(&root, "a", &[]), input(&root, "b", &[])], None);
 
         assert_eq!(report.files, [FileConflict { path: "common/buildings/Shared.txt".into(), mods: vec![0, 1] }]);
         let objects: Vec<(&str, &str)> = report.objects.iter().map(|c| (c.category.as_str(), c.key.as_str())).collect();
@@ -469,7 +511,7 @@ mod tests {
         write(&root.join("a"), &[("common/ethics/x.txt", "ethic_a = {}"), ("events/broken.txt", "country_event = {")]);
         write(&root.join("b"), &[("common/ethics/x.txt", "ethic_a = {}")]);
 
-        let report = analyze(&[input(&root, "a", &[]), input(&root, "b", &["common/ethics"]), ModInput { root: None, replace_path: vec![] }]);
+        let report = analyze(&[input(&root, "a", &[]), input(&root, "b", &["common/ethics"]), ModInput { root: None, replace_path: vec![] }], None);
         assert!(report.files.is_empty());
         assert!(report.objects.is_empty());
         assert_eq!(report.errors.len(), 1);
@@ -477,6 +519,44 @@ mod tests {
         assert_eq!(report.skipped, [(2, "Mod files not found".to_owned())]);
 
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn reads_only_the_chosen_languages() {
+        assert_eq!(file_language("localisation/english/mod_l_english.yml"), Some("english"));
+        assert_eq!(file_language("localisation/replace/x_L_SIMP_CHINESE.yml"), Some("simp_chinese"));
+        assert_eq!(file_language("localisation/notes.yml"), None);
+        assert_eq!(file_language("localisation/l_german.yml"), Some("german"));
+
+        let root = std::env::temp_dir().join(format!("dm-languages-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        // Each mod names its files after itself, so the keys conflict as
+        // objects; both also ship one shared German file.
+        for name in ["a", "b"] {
+            for (path, src) in [
+                (format!("localisation/{name}_l_english.yml"), "l_english:\n key:0 \"x\"\nl_german:\n stray:0 \"x\"\n"),
+                (format!("localisation/{name}_l_german.yml"), "l_german:\n key:0 \"x\"\n"),
+                ("localisation/shared_l_german.yml".to_owned(), "l_german:\n shared:0 \"x\"\n"),
+                ("common/buildings/b.txt".to_owned(), "b = {}\n"),
+            ] {
+                let file = root.join(name).join(path);
+                std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+                std::fs::write(file, src).unwrap();
+            }
+        }
+        let mods = [input(&root, "a", &[]), input(&root, "b", &[])];
+        let found = |languages: Option<&BTreeSet<String>>| {
+            let report = analyze(&mods, languages);
+            let mut found: Vec<String> = report.objects.iter().map(|c| c.key.clone()).collect();
+            found.extend(report.files.iter().map(|c| c.path.clone()));
+            found.sort();
+            found
+        };
+        assert_eq!(found(None), ["common/buildings/b.txt", "l_english:key", "l_german:key", "l_german:stray", "localisation/shared_l_german.yml"]);
+        let english = BTreeSet::from(["english".to_owned()]);
+        assert_eq!(found(Some(&english)), ["common/buildings/b.txt", "l_english:key"], "German files and the stray German entries are left out");
+        assert_eq!(found(Some(&BTreeSet::new())), ["common/buildings/b.txt"], "no localisation at all");
+        std::fs::remove_dir_all(&root).unwrap();
     }
 
     #[test]

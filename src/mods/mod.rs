@@ -197,7 +197,7 @@ mod tests {
             .iter()
             .map(|m| ModInput { root: Some(archive::files_in(m.content.as_ref().unwrap(), &cache).unwrap()), replace_path: vec![] })
             .collect();
-        let report = conflicts::analyze(&inputs);
+        let report = conflicts::analyze(&inputs, None);
         assert!(report.skipped.is_empty(), "{:?}", report.skipped);
         // Both zips ship common/buildings/b.txt; the Workshop one wins.
         assert_eq!(report.files.len(), 1);

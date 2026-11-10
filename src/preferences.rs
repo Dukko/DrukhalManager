@@ -9,6 +9,7 @@ use adw::prelude::*;
 use gtk::{gio, glib};
 
 use crate::merge::ai::{CLAUDE_MODEL, OPENROUTER_URL, Provider};
+use crate::merge::conflicts::LANGUAGES;
 use crate::paradox::{game, steam};
 use crate::settings::{self, GameOptions, Settings, UpdateOptions};
 use crate::update;
@@ -138,15 +139,74 @@ fn game_page(options: &GameOptions) -> (adw::PreferencesPage, impl Fn() -> GameO
         args_row.set_tooltip_text(Some("Added after the launcher's own arguments, e.g. -debug_mode"));
     }
 
+    // Which localisation the conflict scan reads, like Irony's Allowed
+    // Languages.
+    let user_dir = options.data_dir.clone().unwrap_or_else(steam::stellaris_user_dir);
+    let game_language = settings::game_language(&user_dir);
+    let chosen = {
+        let mut o = options.clone();
+        o.skip_localisation = false;
+        o.languages(&user_dir)
+    };
+    let scan = adw::PreferencesGroup::builder()
+        .title("Conflict Scan")
+        .description("Localisation in languages you don't play in adds conflicts you don't need to solve. Changes apply on the next scan.")
+        .build();
+    let localisation = adw::ExpanderRow::builder()
+        .title("Localisation")
+        .show_enable_switch(true)
+        .enable_expansion(!options.skip_localisation)
+        .build();
+    let checks: Vec<(&'static str, gtk::CheckButton)> = LANGUAGES
+        .iter()
+        .map(|(id, name)| {
+            let check = gtk::CheckButton::builder().active(chosen.contains(*id)).valign(gtk::Align::Center).build();
+            let row = adw::ActionRow::builder().title(*name).activatable_widget(&check).build();
+            if *id == game_language {
+                row.set_subtitle("The game's language");
+            }
+            row.add_prefix(&check);
+            localisation.add_row(&row);
+            (*id, check)
+        })
+        .collect();
+    let checks = Rc::new(checks);
+    let summarize = {
+        let (localisation, checks) = (localisation.clone(), checks.clone());
+        move || {
+            let names: Vec<&str> = LANGUAGES.iter().zip(checks.iter()).filter(|(_, (_, c))| c.is_active()).map(|((_, name), _)| *name).collect();
+            localisation.set_subtitle(&match (localisation.enables_expansion(), names.len()) {
+                (false, _) | (true, 0) => "Not scanned".to_owned(),
+                (true, n) if n == LANGUAGES.len() => "Every language".to_owned(),
+                (true, n) if n <= 2 => names.join(", "),
+                (true, n) => format!("{n} languages"),
+            });
+        }
+    };
+    summarize();
+    for (_, check) in checks.iter() {
+        let summarize = summarize.clone();
+        check.connect_toggled(move |_| summarize());
+    }
+    localisation.connect_enable_expansion_notify(move |_| summarize());
+    scan.add(&localisation);
+
     let page = page("Game", "game", "input-gaming-symbolic");
     page.add(&folders);
     page.add(&launching);
+    page.add(&scan);
     let read = move || GameOptions {
         executable: exe.borrow().clone(),
         data_dir: data_dir.borrow().clone(),
         launch_args: args_row.text().trim().to_owned(),
         refresh_descriptors: refresh_row.is_active(),
         close_after_launch: close_row.is_active(),
+        scan_languages: {
+            let picked: Vec<String> = checks.iter().filter(|(_, c)| c.is_active()).map(|(id, _)| id.to_string()).collect();
+            // Just the game's language keeps following the game.
+            (picked != [game_language.as_str()]).then_some(picked)
+        },
+        skip_localisation: !localisation.enables_expansion(),
     };
     (page, read)
 }

@@ -73,6 +73,7 @@ impl Window {
 
         let weak = Rc::downgrade(self);
         let game_dir = self.game.as_ref().map(|g| g.dir.clone());
+        let languages = self.settings.borrow().game.languages(&self.paths.user_dir);
         let labels: Vec<String> = names.clone();
         glib::spawn_future_local(async move {
             let result = gio::spawn_blocking(move || {
@@ -87,7 +88,7 @@ impl Window {
                     }
                 }
                 let roots: Vec<_> = inputs.iter().map(|i| i.root.clone().filter(|r| r.is_dir())).collect();
-                let report = conflicts::analyze(&inputs);
+                let report = conflicts::analyze(&inputs, Some(&languages));
                 let simple = crate::merge::trivial::simple_conflicts(&report, &roots, &labels, game_dir.as_deref());
                 (report, roots, simple)
             })
