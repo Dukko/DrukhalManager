@@ -36,6 +36,12 @@
     <control>keyboard</control>
   </supports>
   <releases>
+    <release version="0.3.8" date="2026-11-10">
+      <description>
+        <p>The Flatpak now applies custom libadwaita colour schemes from ~/.config/gtk-4.0/gtk.css, such as DankMaterialShell's or matugen's, and picks up a new palette while it's open.</p>
+        <p>When an update needs a new Flatpak permission, which the app can't install itself, it says how to update instead.</p>
+      </description>
+    </release>
     <release version="0.3.7" date="2026-11-10">
       <description>
         <p>Choose which localisation languages the conflict scan reads, in Preferences under Game. It defaults to the game's language, so translations you don't play in no longer show up as conflicts, and localisation can be left out of the scan altogether.</p>
