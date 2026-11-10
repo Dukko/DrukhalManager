@@ -36,6 +36,12 @@
     <control>keyboard</control>
   </supports>
   <releases>
+    <release version="0.3.3" date="2026-11-10">
+      <description>
+        <p>The Conflicts page shows which mod's version the game uses today, and why: file names, the folder's rule, or the load order.</p>
+        <p>Fixed merges in some folders, such as scripted variables and component templates, being ignored by the game. Merges already saved there are moved to the right place.</p>
+      </description>
+    </release>
     <release version="0.3.2" date="2026-11-10">
       <description>
         <p>The Conflicts page has a new look: conflicts are listed in a sidebar, and each one shows the two versions side by side with the differences highlighted.</p>
