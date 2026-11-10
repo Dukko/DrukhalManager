@@ -1,7 +1,8 @@
 //! Mod thumbnails: the descriptor's `picture` (usually `thumbnail.png`),
-//! shown beside each mod in the load order.
+//! shown beside each mod in the load order. Workshop mods without one
+//! use their Workshop preview, downloaded once and kept in the cache.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
@@ -11,6 +12,7 @@ use gtk::{gdk, gio, glib};
 use super::Window;
 use crate::merge::patch;
 use crate::mods::{Mod, archive};
+use crate::paradox::workshop;
 
 const SIZE: i32 = 40;
 /// Stored at twice the size shown, for high-density screens.
@@ -29,6 +31,16 @@ pub(super) struct Cache {
     loaded: HashMap<PathBuf, Option<gdk::Texture>>,
     /// Being read, with the images waiting for each.
     pending: HashMap<PathBuf, Vec<glib::WeakRef<gtk::Image>>>,
+    /// Workshop items whose preview was asked for since the list was
+    /// last reloaded, so a missing one isn't asked for again.
+    asked: HashSet<u64>,
+    /// Waiting to be asked for, in one request.
+    queued: Vec<u64>,
+}
+
+/// Where a Workshop item's downloaded preview is kept.
+fn previews_dir() -> PathBuf {
+    glib::user_cache_dir().join("DrukhalManager/previews")
 }
 
 pub(super) fn add_css() {
@@ -80,7 +92,18 @@ impl Window {
             picture.set_tooltip_text(Some("Made by Drukhal Manager from your merges"));
             return picture;
         }
-        let Some(path) = picture_path(m) else { return picture };
+        let path = match picture_path(m) {
+            Some(path) => path,
+            None => {
+                let Some(id) = m.descriptor.remote_file_id else { return picture };
+                let path = previews_dir().join(id.to_string());
+                if !path.is_file() {
+                    self.download_preview(id, path, &picture);
+                    return picture;
+                }
+                path
+            }
+        };
         let mut cache = self.thumbnails.borrow_mut();
         if let Some(texture) = cache.loaded.get(&path) {
             show(&picture, texture.as_ref());
@@ -92,7 +115,12 @@ impl Window {
             return picture; // already being read
         }
         drop(cache);
+        self.read_thumbnail(path);
+        picture
+    }
 
+    /// Reads `path` and shows it in the images waiting for it.
+    fn read_thumbnail(self: &Rc<Self>, path: PathBuf) {
         let weak = Rc::downgrade(self);
         glib::spawn_future_local(async move {
             let file = path.clone();
@@ -106,7 +134,50 @@ impl Window {
             }
             cache.loaded.insert(path, texture);
         });
-        picture
+    }
+
+    /// Fetches Workshop item `id`'s preview into `path` and shows it in
+    /// `picture`. Items asked for together go to Steam in one request.
+    fn download_preview(self: &Rc<Self>, id: u64, path: PathBuf, picture: &gtk::Image) {
+        let mut cache = self.thumbnails.borrow_mut();
+        let new = cache.asked.insert(id);
+        if !new && !cache.pending.contains_key(&path) {
+            return; // asked for before, and Steam had none
+        }
+        cache.pending.entry(path).or_default().push(picture.downgrade());
+        if !new {
+            return; // on its way
+        }
+        cache.queued.push(id);
+        if cache.queued.len() > 1 {
+            return; // a request is about to go
+        }
+        drop(cache);
+
+        let weak = Rc::downgrade(self);
+        glib::spawn_future_local(async move {
+            // Let the rest of the list queue its items first.
+            glib::timeout_future(std::time::Duration::from_millis(100)).await;
+            let Some(ui) = weak.upgrade() else { return };
+            let ids = std::mem::take(&mut ui.thumbnails.borrow_mut().queued);
+            drop(ui);
+            let dir = previews_dir();
+            let saved = gio::spawn_blocking({
+                let (ids, dir) = (ids.clone(), dir.clone());
+                move || workshop::download_previews(&ids, &dir)
+            })
+            .await
+            .unwrap_or_default();
+            let Some(ui) = weak.upgrade() else { return };
+            for id in ids {
+                let path = dir.join(id.to_string());
+                if saved.contains(&id) {
+                    ui.read_thumbnail(path);
+                } else {
+                    ui.thumbnails.borrow_mut().pending.remove(&path);
+                }
+            }
+        });
     }
 }
 

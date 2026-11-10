@@ -1,6 +1,6 @@
 //! Steam Workshop collections, read with Steam's public web API (no key
 //! needed): `GetCollectionDetails` for the items, `GetPublishedFileDetails`
-//! for their titles.
+//! for their titles and preview images.
 
 use std::collections::{HashMap, HashSet};
 
@@ -117,6 +117,8 @@ struct FileDetails {
     title: String,
     #[serde(default)]
     consumer_app_id: u32,
+    #[serde(default)]
+    preview_url: String,
 }
 
 /// The collections among `json`'s entries, children in Steam's sort order.
@@ -170,21 +172,78 @@ fn to_shared(root: u64, items: &[u64], files: &HashMap<u64, (String, u32)>) -> R
     Ok(Shared { format: 1, name, mods })
 }
 
+/// The preview image links of the files Steam found, for those that have
+/// one on Steam's servers.
+fn parse_previews(json: &str) -> Result<HashMap<u64, String>, String> {
+    let reply: Envelope<FileResponse> = serde_json::from_str(json).map_err(|e| format!("Unexpected reply from Steam: {e}"))?;
+    Ok(reply
+        .response
+        .publishedfiledetails
+        .into_iter()
+        .filter(|f| f.result == OK && f.preview_url.starts_with("https://"))
+        .filter_map(|f| Some((f.publishedfileid.parse().ok()?, f.preview_url)))
+        .collect())
+}
+
+fn agent() -> ureq::Agent {
+    ureq::Agent::config_builder().timeout_global(Some(std::time::Duration::from_secs(30))).build().into()
+}
+
+fn user_agent() -> String {
+    format!("DrukhalManager/{}", env!("CARGO_PKG_VERSION"))
+}
+
+/// Calls one of the API's methods for `ids`, returning Steam's reply.
+fn post(agent: &ureq::Agent, method: &str, count: &str, ids: &[u64]) -> Result<String, String> {
+    let mut form = vec![(count.to_owned(), ids.len().to_string())];
+    form.extend(ids.iter().enumerate().map(|(i, id)| (format!("publishedfileids[{i}]"), id.to_string())));
+    agent
+        .post(&format!("{API}/{method}/v1/"))
+        .header("user-agent", &user_agent())
+        .send_form(form)
+        .map_err(|e| format!("Could not reach Steam: {e}"))?
+        .body_mut()
+        .read_to_string()
+        .map_err(|e| format!("Could not read Steam's reply: {e}"))
+}
+
+/// Previews bigger than this aren't saved; Steam caps them at 1 MB.
+const MAX_PREVIEW: u64 = 4 * 1024 * 1024;
+
+/// Downloads the Workshop preview images of `ids` into `dir`, each named by
+/// its id, and returns the ids saved. Items without a preview, or whose
+/// download fails, are skipped: a thumbnail isn't worth an error. Blocks;
+/// call off the main thread.
+pub fn download_previews(ids: &[u64], dir: &std::path::Path) -> Vec<u64> {
+    let agent = agent();
+    let mut saved = Vec::new();
+    if std::fs::create_dir_all(dir).is_err() {
+        return saved;
+    }
+    for batch in ids.chunks(100) {
+        let Ok(previews) = post(&agent, "GetPublishedFileDetails", "itemcount", batch).and_then(|json| parse_previews(&json)) else { continue };
+        for (id, url) in previews {
+            let bytes = agent
+                .get(&url)
+                .header("user-agent", &user_agent())
+                .call()
+                .ok()
+                .and_then(|mut reply| reply.body_mut().with_config().limit(MAX_PREVIEW).read_to_vec().ok());
+            let Some(bytes) = bytes.filter(|b| !b.is_empty()) else { continue };
+            let path = dir.join(id.to_string());
+            let tmp = path.with_extension("tmp");
+            if std::fs::write(&tmp, bytes).and_then(|()| std::fs::rename(&tmp, &path)).is_ok() {
+                saved.push(id);
+            }
+        }
+    }
+    saved
+}
+
 /// Fetches the collection. Blocks; call off the main thread.
 pub fn fetch(root: u64) -> Result<Shared, String> {
-    let agent: ureq::Agent = ureq::Agent::config_builder().timeout_global(Some(std::time::Duration::from_secs(30))).build().into();
-    let post = |method: &str, count: &str, ids: &[u64]| -> Result<String, String> {
-        let mut form = vec![(count.to_owned(), ids.len().to_string())];
-        form.extend(ids.iter().enumerate().map(|(i, id)| (format!("publishedfileids[{i}]"), id.to_string())));
-        agent
-            .post(&format!("{API}/{method}/v1/"))
-            .header("user-agent", &format!("DrukhalManager/{}", env!("CARGO_PKG_VERSION")))
-            .send_form(form)
-            .map_err(|e| format!("Could not reach Steam: {e}"))?
-            .body_mut()
-            .read_to_string()
-            .map_err(|e| format!("Could not read Steam's reply: {e}"))
-    };
+    let agent = agent();
+    let post = |method: &str, count: &str, ids: &[u64]| post(&agent, method, count, ids);
     let items = expand(root, |ids| parse_collections(&post("GetCollectionDetails", "collectioncount", ids)?))?;
     let mut files = HashMap::new();
     let all: Vec<u64> = std::iter::once(root).chain(items.iter().copied()).collect();
@@ -227,6 +286,14 @@ mod tests {
         assert_eq!(files[&10], ("Friends' game".to_owned(), STELLARIS_APP_ID));
         assert!(!files.contains_key(&1));
         assert!(parse_files("<html>").is_err());
+
+        let json = r#"{"response":{"result":1,"resultcount":3,"publishedfiledetails":[
+            {"publishedfileid":"10","result":1,"preview_url":"https://images.steamusercontent.com/ugc/1/2/"},
+            {"publishedfileid":"11","result":1,"preview_url":""},
+            {"publishedfileid":"12","result":1,"preview_url":"http://example.com/x.png"}]}}"#;
+        let previews = parse_previews(json).unwrap();
+        assert_eq!(previews.len(), 1, "only items with an https preview");
+        assert_eq!(previews[&10], "https://images.steamusercontent.com/ugc/1/2/");
     }
 
     #[test]
@@ -260,6 +327,19 @@ mod tests {
         assert!(shared.mods.len() > 10);
         assert!(shared.mods.iter().all(|m| m.steam_id.is_some() && !m.name.starts_with("Workshop item")));
         assert!(fetch(819148835).is_err(), "a mod isn't a collection");
+    }
+
+    /// Talks to Steam: `cargo test -- --ignored downloads_real_previews`.
+    #[test]
+    #[ignore]
+    fn downloads_real_previews() {
+        let dir = std::env::temp_dir().join(format!("drukhal-previews-{}", std::process::id()));
+        let shared = fetch(2089433274).unwrap();
+        let ids: Vec<u64> = shared.mods.iter().filter_map(|m| m.steam_id).take(3).collect();
+        let saved = download_previews(&ids, &dir);
+        assert!(!saved.is_empty());
+        assert!(gtk::gdk_pixbuf::Pixbuf::from_file(dir.join(saved[0].to_string())).is_ok(), "an image");
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]
