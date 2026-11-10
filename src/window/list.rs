@@ -29,7 +29,12 @@ impl Window {
                 let settings = self.settings.borrow();
                 let ignored = |k: &str| settings.ignored.contains(k);
                 let rules = crate::merge::ignore_rules::Rules::parse(&settings.ignore_rules);
-                let ignored = conflicts_view::Ignores { keys: &ignored, rules: &rules, names: &a.names };
+                let ignored = conflicts_view::Ignores {
+                    keys: &ignored,
+                    rules: &rules,
+                    names: &a.names,
+                    dependencies: (!settings.show_dependency_conflicts).then_some(&a.depends_on[..]),
+                };
                 let counts = a.report.counts_by_mod_where(
                     a.names.len(),
                     |c| !conflicts_view::file_ignored(&ignored, c),
