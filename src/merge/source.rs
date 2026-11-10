@@ -88,6 +88,41 @@ pub fn vanilla(game_dir: &Path, category: &str, key: &str) -> Option<Source> {
     })
 }
 
+/// The base game's definitions of several objects in one category, reading
+/// each game file once. Missing ones are left out.
+pub fn vanilla_many(game_dir: &Path, category: &str, keys: &[String]) -> std::collections::HashMap<String, Source> {
+    let (dir, recursive, extension) = match category {
+        "localisation" => (game_dir.join("localisation"), true, "yml"),
+        _ => (game_dir.join(category), false, "txt"),
+    };
+    let mut files = Vec::new();
+    collect(&dir, recursive, extension, &mut files);
+    files.sort();
+    if category == "localisation" {
+        // Only the languages asked for; the game ships a dozen.
+        let languages: std::collections::HashSet<String> = keys.iter().filter_map(|k| Some(format!("_{}.yml", k.split_once(':')?.0.to_lowercase()))).collect();
+        files.retain(|f| f.file_name().is_some_and(|n| languages.iter().any(|l| n.to_string_lossy().to_lowercase().ends_with(l.as_str()))));
+    }
+    let mut found = std::collections::HashMap::new();
+    for path in files {
+        if found.len() == keys.len() {
+            break;
+        }
+        let Ok(bytes) = std::fs::read(&path) else { continue };
+        let src = String::from_utf8_lossy(&bytes);
+        let Some(file) = path.strip_prefix(game_dir).ok().map(|f| f.to_string_lossy().into_owned()) else { continue };
+        for key in keys {
+            if found.contains_key(key) {
+                continue;
+            }
+            if let Some(text) = extract(category, key, &src) {
+                found.insert(key.clone(), Source { label: "Vanilla".into(), file: file.clone(), text });
+            }
+        }
+    }
+    found
+}
+
 fn collect(dir: &Path, recursive: bool, extension: &str, out: &mut Vec<std::path::PathBuf>) {
     let Ok(entries) = std::fs::read_dir(dir) else { return };
     for entry in entries.flatten() {

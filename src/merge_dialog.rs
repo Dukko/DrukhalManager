@@ -39,12 +39,19 @@ pub struct Request {
     pub on_saved: Box<dyn Fn()>,
 }
 
-struct Loaded {
-    vanilla: Option<Source>,
-    sources: Vec<Source>,
-    missing: Vec<String>,
+pub(crate) struct Loaded {
+    pub vanilla: Option<Source>,
+    pub sources: Vec<Source>,
+    pub missing: Vec<String>,
     /// Fingerprints of the versions found, to notice later changes.
-    prints: Vec<Print>,
+    pub prints: Vec<Print>,
+}
+
+impl Loaded {
+    /// Whether there is anything to merge: two mods, or a mod and the game.
+    pub fn mergeable(&self) -> bool {
+        self.sources.len() >= 2 || (self.vanilla.is_some() && !self.sources.is_empty())
+    }
 }
 
 pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
@@ -127,7 +134,7 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
             for s in result.vanilla.iter().chain(&result.sources) {
                 versions.add(&version_row(s, &buffer, &notes));
             }
-            merge_button.set_sensitive(result.sources.len() >= 2 || (result.vanilla.is_some() && !result.sources.is_empty()));
+            merge_button.set_sensitive(result.mergeable());
             loaded.replace(Some(result));
         }
     ));
@@ -223,7 +230,12 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
 }
 
 fn load(category: &str, key: &str, game_dir: Option<&std::path::Path>, origins: Vec<(String, String, PathBuf, String)>) -> Loaded {
-    let vanilla = game_dir.and_then(|dir| source::vanilla(dir, category, key));
+    load_with(category, key, game_dir.and_then(|dir| source::vanilla(dir, category, key)), origins)
+}
+
+/// Reads each mod's version of the object, given the game's version.
+/// `origins` are (mod id, name, folder, file), in load order.
+pub(crate) fn load_with(category: &str, key: &str, vanilla: Option<Source>, origins: Vec<(String, String, PathBuf, String)>) -> Loaded {
     let mut prints: Vec<Print> = vanilla.iter().map(|v| Print::new(VANILLA, "Vanilla", &v.file, &v.text)).collect();
     let mut sources = Vec::new();
     let mut missing = Vec::new();

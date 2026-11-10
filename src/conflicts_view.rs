@@ -43,6 +43,8 @@ pub struct MergeHooks {
     pub is_file_merged: Box<dyn Fn(&str) -> bool>,
     /// Opens the file merge dialog for a file override.
     pub open_file: Box<dyn Fn(usize, Box<dyn Fn()>)>,
+    /// Opens the AI merge of several object conflicts in one folder.
+    pub merge_folder: Box<dyn Fn(Vec<usize>)>,
     /// Opens the fix dialog for a file that failed to parse.
     pub open_fix: Box<dyn Fn(usize, Box<dyn Fn()>)>,
     pub is_ignored: Box<dyn Fn(&str) -> bool>,
@@ -229,7 +231,7 @@ pub fn build(analysis: &Rc<Analysis>, rescan: gtk::Button, hooks: Rc<MergeHooks>
             let hooks = hooks.clone();
             Rc::new(move |i| file_row(&analysis, i, &hooks))
         };
-        section(&page, "Overridden Files", "Only the copy from the mod loaded last is used. Merge a script or localisation file to keep every mod's objects.", groups, make, files_folder_key, &hooks);
+        section(&page, "Overridden Files", "Only the copy from the mod loaded last is used. Merge a script or localisation file to keep every mod's objects.", groups, make, files_folder_key, &hooks, None);
     }
     if !objects.is_empty() {
         let mut groups: BTreeMap<String, Vec<usize>> = BTreeMap::new();
@@ -241,7 +243,14 @@ pub fn build(analysis: &Rc<Analysis>, rescan: gtk::Button, hooks: Rc<MergeHooks>
             let hooks = hooks.clone();
             Rc::new(move |i| object_row(&analysis, i, &hooks))
         };
-        section(&page, "Conflicting Objects", "Defined by several mods; which one the game keeps depends on the folder. Merge one to keep every mod's changes.", groups, make, objects_folder_key, &hooks);
+        let merge_all: Rc<dyn Fn(&[usize])> = {
+            let (analysis, hooks) = (analysis.clone(), hooks.clone());
+            Rc::new(move |items: &[usize]| {
+                let ignored = |k: &str| (hooks.is_ignored)(k);
+                (hooks.merge_folder)(items.iter().copied().filter(|&i| !object_ignored(&ignored, &analysis.report.objects[i])).collect());
+            })
+        };
+        section(&page, "Conflicting Objects", "Defined by several mods; which one the game keeps depends on the folder. Merge one to keep every mod's changes, or merge a whole folder with AI.", groups, make, objects_folder_key, &hooks, Some(merge_all));
     }
 
     if !errors.is_empty() || !skipped.is_empty() {
@@ -278,7 +287,8 @@ pub fn build(analysis: &Rc<Analysis>, rescan: gtk::Button, hooks: Rc<MergeHooks>
 
 /// A heading plus one collapsed row per folder. Each folder's rows are only
 /// built when it is first expanded.
-fn section(page: &gtk::Box, title: &str, description: &str, groups: BTreeMap<String, Vec<usize>>, make: Rc<dyn Fn(usize) -> adw::ActionRow>, folder_key: fn(&str) -> String, hooks: &Rc<MergeHooks>) {
+#[allow(clippy::too_many_arguments)]
+fn section(page: &gtk::Box, title: &str, description: &str, groups: BTreeMap<String, Vec<usize>>, make: Rc<dyn Fn(usize) -> adw::ActionRow>, folder_key: fn(&str) -> String, hooks: &Rc<MergeHooks>, merge_all: Option<Rc<dyn Fn(&[usize])>>) {
     page.append(&heading(title, description));
     let list = boxed_list();
     for (folder, items) in groups {
@@ -287,6 +297,17 @@ fn section(page: &gtk::Box, title: &str, description: &str, groups: BTreeMap<Str
             .subtitle(plural(items.len(), "conflict", "conflicts"))
             .use_markup(false)
             .build();
+        if let Some(merge_all) = &merge_all {
+            let button = gtk::Button::builder()
+                .label("Merge All…")
+                .tooltip_text("Merge every conflict in this folder with AI, after an estimate of the cost")
+                .valign(gtk::Align::Center)
+                .css_classes(["flat"])
+                .build();
+            let (merge_all, items) = (merge_all.clone(), items.clone());
+            button.connect_clicked(move |_| merge_all(&items));
+            expander.add_suffix(&button);
+        }
         expander.add_suffix(&ignore_button(hooks, folder_key(&folder), expander.upcast_ref(), "Ignore every conflict in this folder"));
         let filled = Cell::new(false);
         let make = make.clone();

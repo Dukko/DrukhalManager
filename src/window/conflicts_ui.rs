@@ -10,6 +10,7 @@ use super::{display_name, status_page};
 use super::Window;
 use crate::conflicts_view::{self, Analysis, MergeHooks};
 use crate::file_merge_dialog;
+use crate::folder_merge_dialog;
 use crate::fix_dialog;
 use crate::merge::conflicts::{self, ModInput};
 use crate::merge::patch::{self, Patch};
@@ -297,6 +298,13 @@ impl Window {
             }
         });
         let weak = Rc::downgrade(self);
+        let folder = analysis.clone();
+        let merge_folder = Box::new(move |indices: Vec<usize>| {
+            if let Some(ui) = weak.upgrade() {
+                ui.open_folder_merge(&folder, indices);
+            }
+        });
+        let weak = Rc::downgrade(self);
         let errors = analysis.clone();
         let open_fix = Box::new(move |index: usize, mark_fixed: Box<dyn Fn()>| {
             if let Some(ui) = weak.upgrade() {
@@ -349,6 +357,7 @@ impl Window {
             open,
             is_file_merged,
             open_file,
+            merge_folder,
             open_fix,
             is_ignored,
             set_ignored,
@@ -360,6 +369,62 @@ impl Window {
             remove_merge,
             keep_merge,
         })
+    }
+
+    /// Opens the AI merge of the object conflicts at `indices`, which are
+    /// all in one folder.
+    pub(super) fn open_folder_merge(self: &Rc<Self>, analysis: &Rc<Analysis>, indices: Vec<usize>) {
+        let Some(category) = indices.first().map(|&i| analysis.report.objects[i].category.clone()) else { return };
+        let items = {
+            let patch = self.patch.borrow();
+            let stale = self.stale.borrow();
+            indices
+                .iter()
+                .map(|&i| {
+                    let c = &analysis.report.objects[i];
+                    let origins = c
+                        .definitions
+                        .iter()
+                        .filter_map(|d| Some((analysis.ids[d.mod_position].clone(), analysis.name(d.mod_position).to_owned(), analysis.roots[d.mod_position].clone()?, d.file.clone())))
+                        .collect();
+                    let is_stale = stale.iter().any(|s| s.object.as_ref().is_some_and(|(cat, k)| cat == &c.category && k == &c.key));
+                    let saved = patch.as_ref().and_then(|p| p.get(&c.category, &c.key)).map(|m| m.script.clone());
+                    let merged = saved.is_some() && !is_stale;
+                    folder_merge_dialog::Item { key: c.key.clone(), origins, merged, saved }
+                })
+                .collect()
+        };
+        let weak = Rc::downgrade(self);
+        let save = {
+            let category = category.clone();
+            Box::new(move |key: &str, script: &str, prints: Vec<patch::Print>| {
+                let ui = weak.upgrade().ok_or("The window was closed")?;
+                ui.save_merge(&category, key, script, prints)
+            })
+        };
+        let weak = Rc::downgrade(self);
+        let open_preferences = Box::new(move || {
+            if let Some(ui) = weak.upgrade() {
+                ui.open_preferences(Some(crate::preferences::AI_PAGE));
+            }
+        });
+        let weak = Rc::downgrade(self);
+        let on_done = Box::new(move |_saved: usize| {
+            if let Some(ui) = weak.upgrade() {
+                ui.patch_saved();
+                ui.render_conflicts();
+            }
+        });
+        let request = folder_merge_dialog::Request {
+            category,
+            items,
+            game_dir: self.game.as_ref().map(|g| g.dir.clone()),
+            provider: self.settings.borrow().ready_provider(),
+            save,
+            open_preferences,
+            on_done,
+        };
+        folder_merge_dialog::present(&self.window, request);
     }
 
     pub(super) fn open_fix(

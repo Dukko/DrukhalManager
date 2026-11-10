@@ -49,12 +49,119 @@ pub enum Progress {
     Output(String),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 pub struct Merged {
     /// The merged definition, ready to drop into a file.
     pub script: String,
     /// What was combined and any judgement calls, for the user to review.
     pub notes: String,
+    /// Tokens the request used, when the provider reports them.
+    #[serde(skip)]
+    pub usage: Option<Usage>,
+}
+
+/// Tokens billed for one request. Output includes the model's thinking.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct Usage {
+    pub input: u64,
+    pub output: u64,
+    /// What the provider charged in dollars, when it says (OpenRouter does).
+    pub cost: Option<f64>,
+}
+
+impl std::ops::AddAssign for Usage {
+    fn add_assign(&mut self, other: Self) {
+        self.input += other.input;
+        self.output += other.output;
+        self.cost = match (self.cost, other.cost) {
+            (Some(a), Some(b)) => Some(a + b),
+            (a, b) => a.or(b),
+        };
+    }
+}
+
+/// Claude Opus 5.5's price in US dollars per million input and output tokens.
+const CLAUDE_PRICE: (f64, f64) = (4.0, 20.0);
+
+/// What a request is expected to use before it's sent.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct Estimate {
+    pub input: u64,
+    /// Without thinking: just the merged script and notes.
+    pub output_low: u64,
+    /// With room for the model's reasoning.
+    pub output_high: u64,
+}
+
+impl std::ops::AddAssign for Estimate {
+    fn add_assign(&mut self, other: Self) {
+        self.input += other.input;
+        self.output_low += other.output_low;
+        self.output_high += other.output_high;
+    }
+}
+
+/// Roughly how many tokens text costs; Paradox script tokenizes densely.
+fn tokens(text: &str) -> u64 {
+    (text.len() as u64).div_ceil(3)
+}
+
+/// A rough guess at what merging one object will use.
+pub fn estimate(category: &str, key: &str, vanilla: Option<&Source>, sources: &[Source]) -> Estimate {
+    let input = tokens(SYSTEM) + tokens(&prompt(category, key, vanilla, sources));
+    let largest = sources.iter().chain(vanilla).map(|s| tokens(&s.text)).max().unwrap_or(0);
+    // The merged script is about as long as the longest version, plus notes
+    // and JSON escaping. Thinking at high effort varies a lot.
+    let output_low = largest + largest / 5 + 150;
+    let output_high = output_low + 1500 + input;
+    Estimate { input, output_low, output_high }
+}
+
+/// Dollars per million input and output tokens.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Price {
+    pub input: f64,
+    pub output: f64,
+}
+
+impl Price {
+    pub fn cost(&self, input: u64, output: u64) -> f64 {
+        (input as f64 * self.input + output as f64 * self.output) / 1_000_000.0
+    }
+}
+
+/// The model's price, when it can be found: fixed for Claude, and looked up
+/// from the `/models` list for OpenAI-compatible services that publish
+/// prices there (OpenRouter). Blocking; run it off the main thread.
+pub fn price(provider: &Provider) -> Option<Price> {
+    match provider {
+        Provider::Anthropic { .. } => Some(Price { input: CLAUDE_PRICE.0, output: CLAUDE_PRICE.1 }),
+        Provider::OpenAiCompatible { base_url, model, api_key } => {
+            let url = format!("{}/models", base_url.trim_end_matches('/'));
+            let mut request = ureq::Agent::config_builder().http_status_as_error(false).timeout_global(Some(Duration::from_secs(20))).build().new_agent().get(&url);
+            if !api_key.is_empty() {
+                request = request.header("authorization", &format!("Bearer {api_key}"));
+            }
+            let mut response = request.call().ok()?;
+            if response.status() != 200 {
+                return None;
+            }
+            let list: Value = response.body_mut().read_json().ok()?;
+            listed_price(&list, model)
+        }
+    }
+}
+
+/// Reads a model's price from an OpenRouter-style model list, which gives
+/// dollars per token as strings.
+fn listed_price(list: &Value, model: &str) -> Option<Price> {
+    let entry = list["data"].as_array()?.iter().find(|m| m["id"].as_str() == Some(model))?;
+    let per_million = |field: &str| -> Option<f64> {
+        let v = &entry["pricing"][field];
+        let per_token = v.as_str().and_then(|s| s.parse::<f64>().ok()).or_else(|| v.as_f64())?;
+        Some(per_token * 1_000_000.0)
+    };
+    Some(Price { input: per_million("prompt")?, output: per_million("completion")? })
 }
 
 const SYSTEM: &str = "You are an expert Stellaris modder who merges conflicting mods.
@@ -181,9 +288,17 @@ fn read_sse(reader: impl BufRead, mut f: impl FnMut(&str) -> Result<(), String>)
 fn anthropic_stream(reader: impl BufRead, on: &mut dyn FnMut(Progress)) -> Result<Merged, String> {
     let mut text = String::new();
     let mut stop_reason = None;
+    let mut usage = Usage::default();
+    let count = |u: &Value, field: &str| u[field].as_u64().unwrap_or(0);
     read_sse(reader, |data| {
         let event: Value = serde_json::from_str(data).map_err(|e| format!("Unreadable event from the Claude API: {e}"))?;
         match event["type"].as_str() {
+            Some("message_start") => {
+                let u = &event["message"]["usage"];
+                usage.input = count(u, "input_tokens") + count(u, "cache_creation_input_tokens") + count(u, "cache_read_input_tokens");
+                usage.output = count(u, "output_tokens");
+                usage.cost = Some(Price { input: CLAUDE_PRICE.0, output: CLAUDE_PRICE.1 }.cost(usage.input, usage.output));
+            }
             Some("content_block_delta") => match event["delta"]["type"].as_str() {
                 Some("thinking_delta") => on(Progress::Thinking(event["delta"]["thinking"].as_str().unwrap_or_default().to_owned())),
                 Some("text_delta") => {
@@ -193,7 +308,14 @@ fn anthropic_stream(reader: impl BufRead, on: &mut dyn FnMut(Progress)) -> Resul
                 }
                 _ => {}
             },
-            Some("message_delta") => stop_reason = event["delta"]["stop_reason"].as_str().map(str::to_owned),
+            Some("message_delta") => {
+                stop_reason = event["delta"]["stop_reason"].as_str().map(str::to_owned);
+                // Cumulative, so the last one is the total.
+                if let Some(output) = event["usage"]["output_tokens"].as_u64() {
+                    usage.output = output;
+                    usage.cost = Some(Price { input: CLAUDE_PRICE.0, output: CLAUDE_PRICE.1 }.cost(usage.input, usage.output));
+                }
+            }
             Some("error") => return Err(format!("The Claude API reported an error: {}", event["error"]["message"].as_str().unwrap_or("unknown"))),
             _ => {}
         }
@@ -202,7 +324,7 @@ fn anthropic_stream(reader: impl BufRead, on: &mut dyn FnMut(Progress)) -> Resul
     match stop_reason.as_deref() {
         Some("refusal") => Err("Claude declined to merge this object.".into()),
         Some("max_tokens") => Err("The merged result was too long and got cut off.".into()),
-        _ => parse_merged(&text),
+        _ => parse_merged(&text).map(|m| Merged { usage: Some(usage), ..m }),
     }
 }
 
@@ -214,6 +336,8 @@ fn merge_openai(base_url: &str, model: &str, api_key: &str, system: &str, prompt
         "model": model,
         "messages": [{"role": "system", "content": system}, {"role": "user", "content": prompt}],
         "stream": true,
+        // Asks for a final chunk with the token counts.
+        "stream_options": {"include_usage": true},
         // Servers that don't support structured output usually ignore this;
         // the prompt asks for JSON either way.
         "response_format": {"type": "json_schema", "json_schema": {"name": "merge", "strict": true, "schema": schema()}}
@@ -262,6 +386,7 @@ fn openai_stream(mut reader: impl BufRead, on: &mut dyn FnMut(Progress)) -> Resu
 
     let (mut raw, mut thinking_sent, mut answer_sent) = (String::new(), 0, 0);
     let mut finish = None;
+    let mut usage = None;
     read_sse(reader, |data| {
         if data.trim() == "[DONE]" {
             return Ok(());
@@ -269,6 +394,9 @@ fn openai_stream(mut reader: impl BufRead, on: &mut dyn FnMut(Progress)) -> Resu
         let chunk: Value = serde_json::from_str(data).map_err(|e| format!("Unreadable event from the AI provider: {e}"))?;
         if let Some(message) = chunk.pointer("/error/message").and_then(Value::as_str) {
             return Err(format!("The AI provider reported an error: {message}"));
+        }
+        if chunk["usage"].is_object() {
+            usage = openai_usage(&chunk["usage"]);
         }
         let choice = &chunk["choices"][0];
         if let Some(reason) = choice["finish_reason"].as_str() {
@@ -296,8 +424,12 @@ fn openai_stream(mut reader: impl BufRead, on: &mut dyn FnMut(Progress)) -> Resu
     match finish.as_deref() {
         Some("length") => Err("The merged result was too long and got cut off.".into()),
         Some("content_filter") => Err("The model declined to merge this object.".into()),
-        _ => parse_merged(split_think(&raw).1),
+        _ => parse_merged(split_think(&raw).1).map(|m| Merged { usage, ..m }),
     }
+}
+
+fn openai_usage(u: &Value) -> Option<Usage> {
+    Some(Usage { input: u["prompt_tokens"].as_u64()?, output: u["completion_tokens"].as_u64().unwrap_or(0), cost: u["cost"].as_f64() })
 }
 
 fn prompt(category: &str, key: &str, vanilla: Option<&Source>, sources: &[Source]) -> String {
@@ -342,7 +474,7 @@ fn parse_openai(status: u16, reply: &Value) -> Result<Merged, String> {
         return Err(format!("The model declined to merge this object: {refusal}"));
     }
     let text = choice.pointer("/message/content").and_then(Value::as_str).ok_or("The AI provider sent an empty reply.")?;
-    parse_merged(text)
+    parse_merged(text).map(|m| Merged { usage: openai_usage(&reply["usage"]), ..m })
 }
 
 /// Reads the `{script, notes}` object, tolerating the code fences and
@@ -382,9 +514,13 @@ mod tests {
 
     #[test]
     fn streams_anthropic_thinking_and_answer() {
-        let sse = "event: message_start\ndata: {\"type\":\"message_start\"}\n\nevent: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"thinking_delta\",\"thinking\":\"Comparing the \"}}\n\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"thinking_delta\",\"thinking\":\"two versions.\"}}\n\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"signature_delta\",\"signature\":\"x\"}}\n\ndata: {\"type\":\"content_block_delta\",\"index\":1,\"delta\":{\"type\":\"text_delta\",\"text\":\"{\\\"script\\\":\\\"x = {}\\\",\"}}\n\ndata: {\"type\":\"content_block_delta\",\"index\":1,\"delta\":{\"type\":\"text_delta\",\"text\":\"\\\"notes\\\":\\\"n\\\"}\"}}\n\nevent: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"}}\n\n";
+        let sse = "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":10,\"cache_read_input_tokens\":20,\"output_tokens\":1}}}\n\nevent: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"thinking_delta\",\"thinking\":\"Comparing the \"}}\n\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"thinking_delta\",\"thinking\":\"two versions.\"}}\n\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"signature_delta\",\"signature\":\"x\"}}\n\ndata: {\"type\":\"content_block_delta\",\"index\":1,\"delta\":{\"type\":\"text_delta\",\"text\":\"{\\\"script\\\":\\\"x = {}\\\",\"}}\n\ndata: {\"type\":\"content_block_delta\",\"index\":1,\"delta\":{\"type\":\"text_delta\",\"text\":\"\\\"notes\\\":\\\"n\\\"}\"}}\n\nevent: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":12}}\n\n";
         let (result, thinking, output) = collect(|on| anthropic_stream(sse.as_bytes(), on));
-        assert_eq!(result.unwrap(), Merged { script: "x = {}".into(), notes: "n".into() });
+        let merged = result.unwrap();
+        assert_eq!((merged.script.as_str(), merged.notes.as_str()), ("x = {}", "n"));
+        let usage = merged.usage.unwrap();
+        assert_eq!((usage.input, usage.output), (30, 12));
+        assert!((usage.cost.unwrap() - (30.0 * 4.0 + 12.0 * 20.0) / 1e6).abs() < 1e-12);
         assert_eq!(thinking, "Comparing the two versions.");
         assert!(output.starts_with("{\"script\""));
 
@@ -398,9 +534,12 @@ mod tests {
     fn streams_openai_reasoning_in_every_style() {
         let chunk = |delta: Value| format!("data: {}\n\n", json!({"choices": [{"delta": delta}]}));
         // OpenRouter's separate `reasoning` field.
-        let sse = [chunk(json!({"reasoning": "Hmm. "})), chunk(json!({"content": "{\"script\":\"a = {}\",\"notes\":\"\"}"})), "data: [DONE]\n\n".into()].concat();
+        let usage = format!("data: {}\n\n", json!({"choices": [], "usage": {"prompt_tokens": 7, "completion_tokens": 3, "cost": 0.0001}}));
+        let sse = [chunk(json!({"reasoning": "Hmm. "})), chunk(json!({"content": "{\"script\":\"a = {}\",\"notes\":\"\"}"})), usage, "data: [DONE]\n\n".into()].concat();
         let (result, thinking, _) = collect(|on| openai_stream(sse.as_bytes(), on));
-        assert_eq!((result.unwrap().script, thinking.as_str()), ("a = {}".to_owned(), "Hmm. "));
+        let merged = result.unwrap();
+        assert_eq!((merged.script.as_str(), thinking.as_str()), ("a = {}", "Hmm. "));
+        assert_eq!(merged.usage, Some(Usage { input: 7, output: 3, cost: Some(0.0001) }));
         // Inline <think> tags, split across chunks.
         let sse = [chunk(json!({"content": "<thi"})), chunk(json!({"content": "nk>Let me"})), chunk(json!({"content": " see</think>{\"script\":\"b = {}\","})), chunk(json!({"content": "\"notes\":\"\"}"}))].concat();
         let (result, thinking, output) = collect(|on| openai_stream(sse.as_bytes(), on));
@@ -416,10 +555,44 @@ mod tests {
     #[test]
     fn parses_openai_replies() {
         let fenced = json!({"choices": [{"finish_reason": "stop", "message": {"content": "Here you go:\n```json\n{\"script\": \"x = {}\", \"notes\": \"n\"}\n```"}}]});
-        assert_eq!(parse_openai(200, &fenced).unwrap(), Merged { script: "x = {}".into(), notes: "n".into() });
+        let merged = parse_openai(200, &fenced).unwrap();
+        assert_eq!((merged.script.as_str(), merged.notes.as_str(), merged.usage), ("x = {}", "n", None));
         assert!(parse_openai(200, &json!({"choices": [{"finish_reason": "length", "message": {"content": "{"}}]})).unwrap_err().contains("cut off"));
         assert!(parse_openai(401, &json!({"error": "No auth credentials found"})).unwrap_err().contains("No auth credentials"));
         assert!(parse_openai(200, &json!({"choices": [{"message": {"content": "sorry"}}]})).is_err());
+    }
+
+    #[test]
+    fn estimates_tokens_and_reads_prices() {
+        let a = Source { label: "A".into(), file: "a.txt".into(), text: "x = { a = yes }".repeat(100) };
+        let e = estimate("common/buildings", "x", None, &[a.clone(), a]);
+        assert!(e.input > 1000 && e.output_low > 500 && e.output_high > e.output_low);
+        assert_eq!(price(&Provider::Anthropic { api_key: "k".into() }).unwrap().cost(1_000_000, 100_000), 6.0);
+        let list = json!({"data": [{"id": "a/b", "pricing": {"prompt": "0.0000003", "completion": "0.0000012"}}, {"id": "free", "pricing": {}}]});
+        let p = listed_price(&list, "a/b").unwrap();
+        assert!((p.input - 0.3).abs() < 1e-9 && (p.output - 1.2).abs() < 1e-9);
+        assert_eq!(listed_price(&list, "free"), None);
+        assert_eq!(listed_price(&list, "missing"), None);
+    }
+
+    /// Sends one small merge with the saved provider and key. Costs real
+    /// money, so it only runs on request:
+    /// `cargo test live_merge -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn live_merge_with_saved_provider() {
+        let path = crate::settings::path();
+        let provider = crate::settings::Settings::load(&path).with_keyring(&path).ready_provider().expect("no AI provider set up");
+        println!("model: {}", provider.model_name());
+        println!("price: {:?}", price(&provider));
+        let v = Source { label: "Vanilla".into(), file: "common/buildings/00_buildings.txt".into(), text: "building_lab = {\n\tcost = { minerals = 100 }\n\tupkeep = { energy = 2 }\n}".into() };
+        let a = Source { label: "Cheap Labs".into(), file: "common/buildings/a.txt".into(), text: "building_lab = {\n\tcost = { minerals = 50 }\n\tupkeep = { energy = 2 }\n}".into() };
+        let b = Source { label: "Lab Jobs".into(), file: "common/buildings/b.txt".into(), text: "building_lab = {\n\tcost = { minerals = 100 }\n\tupkeep = { energy = 2 }\n\tplanet_modifier = { job_researcher_add = 1 }\n}".into() };
+        let e = estimate("common/buildings", "building_lab", Some(&v), &[a.clone(), b.clone()]);
+        println!("estimate: {e:?}");
+        let merged = merge(&provider, "common/buildings", "building_lab", Some(&v), &[a, b], &mut |_| {}).expect("merge failed");
+        println!("script:\n{}\nnotes: {}\nusage: {:?}", merged.script, merged.notes, merged.usage);
+        assert!(merged.script.contains("minerals = 50") && merged.script.contains("job_researcher_add"));
     }
 
     #[test]
