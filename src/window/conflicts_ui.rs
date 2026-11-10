@@ -14,6 +14,7 @@ use crate::folder_merge_dialog;
 use crate::fix_dialog;
 use crate::merge::conflicts::{self, ModInput};
 use crate::merge::patch::{self, Patch};
+use crate::merge::snapshot;
 use crate::mods::{self, archive, Mod};
 use crate::settings;
 
@@ -151,6 +152,9 @@ impl Window {
     }
 
     pub(super) fn remove_merge(self: &Rc<Self>, stale: &patch::Stale) {
+        if let Err(e) = self.snapshot_patch(snapshot::BEFORE_REMOVING) {
+            return self.toast_error_message(&e);
+        }
         let result = self.with_patch(|p, _, _| match &stale.object {
             Some((category, key)) => p.remove(category, key),
             None => p.remove_file(&stale.path),
@@ -452,8 +456,15 @@ impl Window {
         let weak = Rc::downgrade(self);
         let save = {
             let category = category.clone();
+            // The patch is backed up before the run's first save, so runs
+            // that save nothing leave no backup behind.
+            let backed_up = std::cell::Cell::new(false);
             Box::new(move |key: &str, script: &str, prints: Vec<patch::Print>| {
                 let ui = weak.upgrade().ok_or("The window was closed")?;
+                if !backed_up.get() {
+                    ui.snapshot_patch(&snapshot::before_merge_all(&category))?;
+                    backed_up.set(true);
+                }
                 ui.save_merge(&category, key, script, prints)
             })
         };

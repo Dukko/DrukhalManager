@@ -7,5 +7,6 @@ pub mod file_merge;
 pub mod ignore_rules;
 pub mod lint;
 pub mod patch;
+pub mod snapshot;
 pub mod source;
 pub mod trivial;

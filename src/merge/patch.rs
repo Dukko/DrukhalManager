@@ -404,10 +404,31 @@ impl Patch {
         std::fs::create_dir_all(&self.root)?;
         let version = supported_version(game_version);
         let inner = format!("name=\"{NAME}\"\ntags={{\n\t\"Fixes\"\n}}\nsupported_version=\"{version}\"\n");
-        let outer = format!("{inner}path=\"{}\"\n", self.root.display());
         write_atomic(&self.root.join("descriptor.mod"), inner.as_bytes())?;
-        write_atomic(&user_dir.join(ID), outer.as_bytes())
+        write_outer(user_dir, &self.root, &inner)
     }
+
+    /// Writes the descriptor the launcher finds the patch by from the one
+    /// in its folder, as after restoring the folder from a backup.
+    pub fn link(user_dir: &Path) -> io::Result<()> {
+        let root = Self::root(user_dir);
+        match std::fs::read_to_string(root.join("descriptor.mod")) {
+            Ok(inner) => write_outer(user_dir, &root, &inner),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(()),
+            Err(e) => Err(e),
+        }
+    }
+}
+
+fn write_outer(user_dir: &Path, root: &Path, inner: &str) -> io::Result<()> {
+    let outer = format!("{}\npath=\"{}\"\n", inner.trim_end(), root.display());
+    write_atomic(&user_dir.join(ID), outer.as_bytes())
+}
+
+/// How many merged objects and files the patch copy at `dir` holds.
+pub fn summary(dir: &Path) -> Option<(usize, usize)> {
+    let manifest: Manifest = serde_json::from_slice(&std::fs::read(dir.join(MANIFEST)).ok()?).ok()?;
+    Some((manifest.merges.len(), manifest.files.len()))
 }
 
 /// What [`Patch::recheck`] found about one merge's sources.

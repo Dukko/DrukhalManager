@@ -1,5 +1,6 @@
 //! The main window: a load order editor.
 
+mod backups_ui;
 mod collections_ui;
 mod conflicts_ui;
 mod ignore_rules_ui;
@@ -155,6 +156,7 @@ pub fn build(
     menu.append(Some("Re_load Mods"), Some("win.reload"));
     menu.append(Some("Last Game's _Errors…"), Some("win.errors"));
     menu.append(Some("_Multiplayer Check…"), Some("win.multiplayer"));
+    menu.append(Some("Merged Patch _Backups…"), Some("win.patch-backups"));
     menu.append(Some("_Preferences"), Some("win.preferences"));
     menu.append(Some("_Keyboard Shortcuts"), Some("win.shortcuts"));
     menu.append(Some("_About DrukhalManager"), Some("win.about"));
@@ -455,6 +457,14 @@ pub fn build(
         }
     });
     window.add_action(&multiplayer);
+    let backups = gio::SimpleAction::new("patch-backups", None);
+    let weak = Rc::downgrade(&ui);
+    backups.connect_activate(move |_, _| {
+        if let Some(ui) = weak.upgrade() {
+            ui.show_patch_backups();
+        }
+    });
+    window.add_action(&backups);
     let find = gio::SimpleAction::new("find", None);
     let weak = Rc::downgrade(&ui);
     find.connect_activate(move |_, _| {
