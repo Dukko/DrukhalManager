@@ -185,7 +185,7 @@ pub(crate) fn walk(root: &Path, dir: &Path, out: &mut Vec<String>) -> std::io::R
     Ok(())
 }
 
-fn is_under(path: &str, folder: &str) -> bool {
+pub(crate) fn is_under(path: &str, folder: &str) -> bool {
     let folder = folder.trim_matches('/');
     path.len() > folder.len() && path[..folder.len()].eq_ignore_ascii_case(folder) && path.as_bytes()[folder.len()] == b'/'
 }

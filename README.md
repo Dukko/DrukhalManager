@@ -15,6 +15,13 @@ Built with Rust, GTK4 and libadwaita.
   from the header. Each one syncs to its own Paradox Launcher playset.
   Import a launcher playset (Irony's, for example) or a shared file, and
   export a collection to share. Shared files match mods by Steam ID.
+- **Workshop collections**: import one from its link or ID. Mods you don't
+  have yet are listed with links to subscribe, and join the collection once
+  Steam has downloaded them.
+- **Merge into One Mod**: copies a collection's files into a single local
+  mod, the way the game would load them, like Irony's basic merge.
+- **Reload Mods** (F5): picks up mods subscribed to or removed while the
+  app is open, keeping your unsaved load order.
 - **Load order checks**: warns when a mod loads before a mod it depends on
   (**Sort by Dependencies** fixes it), and notes missing dependencies and
   mods made for an older game version.

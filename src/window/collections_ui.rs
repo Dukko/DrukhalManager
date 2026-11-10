@@ -8,6 +8,8 @@ use gtk::{gio, glib};
 
 use super::Window;
 use crate::conflicts_view::plural;
+use crate::merge::collection;
+use crate::mods::archive;
 use crate::mods::collections::{self, Collections};
 use crate::paradox::{launcher_db, workshop};
 
@@ -54,6 +56,7 @@ impl Window {
         action("collection-import-playset", Window::import_playset);
         action("collection-import-file", Window::import_file);
         action("collection-import-workshop", Window::import_workshop);
+        action("collection-merge", Window::merge_collection);
         action("collection-export", Window::export_collection);
 
         let active = self.collections.borrow().active.clone();
@@ -108,6 +111,7 @@ impl Window {
         share.append(Some("_Import from File…"), Some("win.collection-import-file"));
         share.append(Some("Import _Workshop Collection…"), Some("win.collection-import-workshop"));
         share.append(Some("_Export to File…"), Some("win.collection-export"));
+        share.append(Some("_Merge into One Mod…"), Some("win.collection-merge"));
         menu.append_section(None, &share);
 
         self.collection_button.set_menu_model(Some(&menu));
@@ -422,6 +426,97 @@ impl Window {
             let (mods, missing) = collections::resolve(&shared, &ui.state.borrow().mods);
             ui.add_and_switch(&shared.name, mods, missing);
         });
+    }
+
+    /// Copies the load order's files into one local mod (Irony's "Merge
+    /// (Basic)") and switches to a collection holding just that mod.
+    fn merge_collection(self: &Rc<Self>) {
+        let active = self.collections.borrow().active.clone();
+        let (inputs, left_out): (Vec<(std::path::PathBuf, Vec<String>)>, Vec<String>) = {
+            let state = self.state.borrow();
+            let mut left_out = Vec::new();
+            let inputs = state
+                .enabled
+                .iter()
+                .map(|&i| &state.mods[i])
+                .filter_map(|m| match &m.content {
+                    Some(content) => Some((content.clone(), m.descriptor.replace_path.clone())),
+                    None => {
+                        left_out.push(super::display_name(m).to_owned());
+                        None
+                    }
+                })
+                .collect();
+            (inputs, left_out)
+        };
+        if inputs.is_empty() {
+            return self.toast_error("Enable some mods to merge first");
+        }
+        let name = collection::mod_name(&active);
+        let mut body = format!(
+            "Copies the files of the {} in the load order into a new local mod, “{name}”, the way the game would load them, and switches to a collection holding just that mod. Your mods and “{active}” aren't changed. The merge takes as much disk space as the mods.",
+            plural(inputs.len(), "mod", "mods")
+        );
+        if self.collections.borrow().get(&name).is_some() {
+            body.push_str(&format!("\n\nIt replaces the earlier merge in “{name}”."));
+        }
+        if !left_out.is_empty() {
+            body.push_str(&format!("\n\nThese mods' files weren't found, so they're left out: {}", left_out.join(", ")));
+        }
+        let dialog = adw::AlertDialog::new(Some("Merge into One Mod?"), Some(&body));
+        dialog.add_responses(&[("cancel", "_Cancel"), ("merge", "_Merge")]);
+        dialog.set_response_appearance("merge", adw::ResponseAppearance::Suggested);
+        dialog.set_default_response(Some("merge"));
+        dialog.set_close_response("cancel");
+        let weak = Rc::downgrade(self);
+        dialog.connect_response(None, move |_, response| {
+            let (Some(ui), "merge") = (weak.upgrade(), response) else { return };
+            let toast = adw::Toast::builder().title(format!("Merging into “{name}”…")).timeout(0).build();
+            ui.toasts.add_toast(toast.clone());
+            let user_dir = ui.paths.user_dir.clone();
+            let version = crate::merge::patch::supported_version(ui.game.as_ref().and_then(|g| g.version.as_deref()));
+            let (active, inputs, name) = (active.clone(), inputs.clone(), name.clone());
+            let weak = Rc::downgrade(&ui);
+            glib::spawn_future_local(async move {
+                let merged = gio::spawn_blocking(move || {
+                    // Zipped mods are copied from their unpacked files.
+                    let inputs = inputs
+                        .into_iter()
+                        .map(|(content, replace_path)| Ok(collection::Input { root: archive::files(&content)?, replace_path }))
+                        .collect::<std::io::Result<Vec<_>>>()?;
+                    collection::write(&user_dir, &active, &version, &inputs)
+                })
+                .await
+                .unwrap_or_else(|_| Err(std::io::Error::other("the merge failed")));
+                toast.dismiss();
+                let Some(ui) = weak.upgrade() else { return };
+                let merged = match merged {
+                    Ok(merged) => merged,
+                    Err(e) => return ui.toast_error(&format!("Could not merge the collection: {e}")),
+                };
+                ui.toasts.add_toast(adw::Toast::new(&format!("Merged {} into “{name}”", plural(merged.files, "file", "files"))));
+                // The new mod shows up once the mod list is read again.
+                ui.reload(move |ui| ui.use_merged(name, merged.id));
+            });
+        });
+        dialog.present(Some(&self.window));
+    }
+
+    /// Puts the merged mod alone in its collection and switches to it.
+    fn use_merged(self: &Rc<Self>, name: String, id: String) {
+        let exists = self.collections.borrow().get(&name).is_some();
+        if exists {
+            self.collections.borrow_mut().set_mods(&name, vec![id.clone()]);
+        } else {
+            self.collections.borrow_mut().add(&name, vec![id.clone()]);
+        }
+        self.save_collections();
+        self.rebuild_collection_menu();
+        if self.collections.borrow().active == name {
+            self.apply_collection_mods(&[id]);
+        } else {
+            self.switch_collection(name);
+        }
     }
 
     fn export_collection(self: &Rc<Self>) {

@@ -294,12 +294,18 @@ impl Patch {
 
     fn write_descriptors(&self, user_dir: &Path, game_version: Option<&str>) -> io::Result<()> {
         std::fs::create_dir_all(&self.root)?;
-        let version = game_version.and_then(|v| v.rsplit_once('.')).map_or("*".to_owned(), |(major_minor, _)| format!("{major_minor}.*"));
+        let version = supported_version(game_version);
         let inner = format!("name=\"{NAME}\"\ntags={{\n\t\"Fixes\"\n}}\nsupported_version=\"{version}\"\n");
         let outer = format!("{inner}path=\"{}\"\n", self.root.display());
         write_atomic(&self.root.join("descriptor.mod"), inner.as_bytes())?;
         write_atomic(&user_dir.join(ID), outer.as_bytes())
     }
+}
+
+/// A descriptor's `supported_version` for the installed game: `v4.5.3`
+/// gives `v4.5.*`, unknown gives `*`.
+pub fn supported_version(game_version: Option<&str>) -> String {
+    game_version.and_then(|v| v.rsplit_once('.')).map_or("*".to_owned(), |(major_minor, _)| format!("{major_minor}.*"))
 }
 
 fn file_for(category: &str, key: &str) -> String {
