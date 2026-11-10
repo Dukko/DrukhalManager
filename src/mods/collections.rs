@@ -155,18 +155,21 @@ pub fn export(name: &str, ids: &[String], mods: &[Mod]) -> Shared {
 pub fn resolve(shared: &Shared, mods: &[Mod]) -> (Vec<String>, Vec<String>) {
     let (mut found, mut missing) = (Vec::new(), Vec::new());
     for s in &shared.mods {
-        let m = s
-            .steam_id
-            .and_then(|sid| mods.iter().find(|m| m.descriptor.remote_file_id == Some(sid)))
-            .or_else(|| mods.iter().find(|m| m.id == s.id))
-            .or_else(|| mods.iter().find(|m| m.descriptor.name.eq_ignore_ascii_case(&s.name)));
-        match m {
+        match find(s, mods) {
             Some(m) if !found.contains(&m.id) => found.push(m.id.clone()),
             Some(_) => {}
             None => missing.push(s.name.clone()),
         }
     }
     (found, missing)
+}
+
+/// The installed mod a shared one stands for, as `resolve` matches them.
+pub fn find<'a>(s: &SharedMod, mods: &'a [Mod]) -> Option<&'a Mod> {
+    s.steam_id
+        .and_then(|sid| mods.iter().find(|m| m.descriptor.remote_file_id == Some(sid)))
+        .or_else(|| mods.iter().find(|m| m.id == s.id))
+        .or_else(|| mods.iter().find(|m| m.descriptor.name.eq_ignore_ascii_case(&s.name)))
 }
 
 #[cfg(test)]

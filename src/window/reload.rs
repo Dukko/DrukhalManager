@@ -15,9 +15,9 @@ impl Window {
     pub(super) fn add_reload_action(self: &Rc<Self>, app: &adw::Application) {
         let action = gio::SimpleAction::new("reload", None);
         let weak = Rc::downgrade(self);
-        action.connect_activate(move |action, _| {
+        action.connect_activate(move |_, _| {
             if let Some(ui) = weak.upgrade() {
-                ui.reload(action);
+                ui.reload(|_| {});
             }
         });
         self.window.add_action(&action);
@@ -25,12 +25,16 @@ impl Window {
     }
 
     /// Reads the descriptors and Workshop folders again in the background,
-    /// keeping the load order, collection and unsaved changes.
-    fn reload(self: &Rc<Self>, action: &gio::SimpleAction) {
+    /// keeping the load order, collection and unsaved changes, then calls
+    /// `then` if it worked.
+    pub(super) fn reload(self: &Rc<Self>, then: impl FnOnce(&Rc<Window>) + 'static) {
+        let Some(action) = self.window.lookup_action("reload").and_downcast::<gio::SimpleAction>() else { return };
+        if !action.is_enabled() {
+            return; // already reloading
+        }
         action.set_enabled(false);
         let user_dir = self.paths.user_dir.clone();
         let weak = Rc::downgrade(self);
-        let action = action.clone();
         glib::spawn_future_local(async move {
             let found = gio::spawn_blocking(move || {
                 // Libraries may have been added since startup.
@@ -56,6 +60,7 @@ impl Window {
                 ui.scan();
             }
             ui.toasts.add_toast(adw::Toast::builder().title(summary(&added, &removed)).timeout(8).build());
+            then(&ui);
         });
     }
 }
