@@ -336,9 +336,18 @@ impl Window {
             menu.append_item(&item);
         }
         if m.descriptor.remote_file_id.is_some() {
-            let item = gio::MenuItem::new(Some("Open Workshop Page"), None);
-            item.set_action_and_target_value(Some("win.open-workshop"), Some(&index_variant));
-            menu.append_item(&item);
+            let workshop = gio::Menu::new();
+            for (label, action) in [
+                ("Open in _Steam", "win.open-in-steam"),
+                ("Open Workshop Page in _Browser", "win.open-workshop"),
+                ("Copy _Workshop Link", "win.copy-workshop-link"),
+                ("_Unsubscribe in Steam…", "win.unsubscribe"),
+            ] {
+                let item = gio::MenuItem::new(Some(label), None);
+                item.set_action_and_target_value(Some(action), Some(&index_variant));
+                workshop.append_item(&item);
+            }
+            menu.append_section(None, &workshop);
         }
 
         let toggle = gtk::Switch::builder()

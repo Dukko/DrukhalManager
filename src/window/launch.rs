@@ -83,20 +83,41 @@ impl Window {
         );
     }
 
+    fn workshop_id(&self, index: usize) -> Option<u64> {
+        self.state.borrow().mods.get(index).and_then(|m| m.descriptor.remote_file_id)
+    }
+
+    /// Opens the mod's Workshop page in the web browser.
     pub(super) fn open_workshop(&self, index: usize) {
-        let Some(id) = self
-            .state
-            .borrow()
-            .mods
-            .get(index)
-            .and_then(|m| m.descriptor.remote_file_id)
-        else {
-            return;
-        };
-        gtk::UriLauncher::new(&format!(
-            "https://steamcommunity.com/sharedfiles/filedetails/?id={id}"
-        ))
-        .launch(Some(&self.window), None::<&gio::Cancellable>, |_| {});
+        let Some(id) = self.workshop_id(index) else { return };
+        gtk::UriLauncher::new(&workshop_url(id)).launch(Some(&self.window), None::<&gio::Cancellable>, |_| {});
+    }
+
+    /// Opens the mod's Workshop page in the Steam client, where the player
+    /// is signed in; in the browser if Steam doesn't take the link.
+    pub(super) fn open_in_steam(&self, index: usize) {
+        let Some(id) = self.workshop_id(index) else { return };
+        let window = self.window.downgrade();
+        gtk::UriLauncher::new(&format!("steam://url/CommunityFilePage/{id}")).launch(Some(&self.window), None::<&gio::Cancellable>, move |result| {
+            if result.is_err() {
+                let window = window.upgrade();
+                gtk::UriLauncher::new(&workshop_url(id)).launch(window.as_ref(), None::<&gio::Cancellable>, |_| {});
+            }
+        });
+    }
+
+    /// Steam can't be asked to unsubscribe directly, so this opens the page
+    /// in Steam and says what to do there.
+    pub(super) fn unsubscribe_in_steam(&self, index: usize) {
+        let Some(name) = self.state.borrow().mods.get(index).map(|m| super::display_name(m).to_owned()) else { return };
+        self.open_in_steam(index);
+        self.toasts.add_toast(adw::Toast::builder().title(format!("Click Unsubscribe on {name}'s page in Steam, then reload the mods (F5)")).timeout(10).build());
+    }
+
+    pub(super) fn copy_workshop_link(&self, index: usize) {
+        let Some(id) = self.workshop_id(index) else { return };
+        self.window.clipboard().set_text(&workshop_url(id));
+        self.toasts.add_toast(adw::Toast::new("Copied the Workshop link"));
     }
 
     /// Offers to continue the last save in the Launch menu, if there is one.
@@ -356,4 +377,8 @@ impl Window {
         });
         dialog.present(Some(&self.window));
     }
+}
+
+fn workshop_url(id: u64) -> String {
+    format!("https://steamcommunity.com/sharedfiles/filedetails/?id={id}")
 }

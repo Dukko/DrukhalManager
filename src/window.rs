@@ -392,6 +392,9 @@ pub fn build(
     for (name, open) in [
         ("open-folder", Window::open_folder as fn(&Window, usize)),
         ("open-workshop", Window::open_workshop),
+        ("open-in-steam", Window::open_in_steam),
+        ("unsubscribe", Window::unsubscribe_in_steam),
+        ("copy-workshop-link", Window::copy_workshop_link),
     ] {
         let action = gio::SimpleAction::new(name, Some(glib::VariantTy::UINT32));
         let weak = Rc::downgrade(&ui);
