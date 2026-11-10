@@ -129,8 +129,9 @@ To install by hand elsewhere, copy `target/release/drukhal-manager` to your `PAT
 <br>
 
 1. Bump the version in `Cargo.toml` and add a `<release>` to `data/io.github.dukko.DrukhalManager.metainfo.xml`.
-2. If dependencies changed, regenerate `flatpak/cargo-sources.json` (see `flatpak/generate-cargo-sources.py`); the build fails if it is stale.
-3. Merge it into `master` through a pull request. The *Tag release* workflow tags `vX.Y.Z`, builds the Flatpak, publishes the signed repository to GitHub Pages and attaches `DrukhalManager.flatpak` to the release.
+2. If the release adds a permission to `flatpak/io.github.dukko.DrukhalManager.yml`, say so in the release notes: Flatpak won't let the app update itself into it, so users update with `flatpak update` or their software centre instead.
+3. If dependencies changed, regenerate `flatpak/cargo-sources.json` (see `flatpak/generate-cargo-sources.py`); the build fails if it is stale.
+4. Merge it into `master` through a pull request. The *Tag release* workflow tags `vX.Y.Z`, builds the Flatpak, publishes the signed repository to GitHub Pages and attaches `DrukhalManager.flatpak` to the release.
 
 </details>
 

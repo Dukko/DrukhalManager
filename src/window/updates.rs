@@ -164,7 +164,7 @@ impl Window {
                 toast.set_title("No update to install yet. A new release can take a few minutes to reach Flatpak.");
                 toast.set_timeout(8);
             }
-            Progress::Failed(message) => toast.set_title(&format!("Could not update: {message}")),
+            Progress::Failed(message) => toast.set_title(&failure(&message)),
         }
         // Finished: the next update starts a new toast. Re-adding shows the
         // finished state even if the user dismissed the progress toast.
@@ -195,5 +195,24 @@ impl Window {
                 ),
             }
         });
+    }
+}
+
+/// What to say when an update fails. Flatpak won't let an app update itself
+/// into a version that asks for more permissions; only the user can approve
+/// those, from a terminal or a software centre.
+fn failure(message: &str) -> String {
+    if message.to_lowercase().contains("permission") {
+        return "This update needs a new permission, which only you can approve. Run “flatpak update io.github.dukko.DrukhalManager” in a terminal, or update from your software centre".to_owned();
+    }
+    format!("Could not update: {message}")
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn explains_updates_that_need_new_permissions() {
+        assert!(super::failure("New version requires new permissions").contains("flatpak update io.github.dukko.DrukhalManager"));
+        assert_eq!(super::failure("no space"), "Could not update: no space");
     }
 }
