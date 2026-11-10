@@ -622,6 +622,7 @@ impl Window {
                         source: mods::Source::Local,
                         load_position: None,
                         error: None,
+                        steam: None,
                     });
                     state.mods.len() - 1
                 }

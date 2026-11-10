@@ -4,7 +4,7 @@
 //! `libraryfolders.vdf`) follows Irony Mod Manager's `SteamDirectory`
 //! (MIT, © 2020 Mario, https://github.com/bcssov/IronyModManager).
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 
 pub const STELLARIS_APP_ID: u32 = 281990;
@@ -148,13 +148,19 @@ pub fn installed_items(content_dir: &Path) -> Option<Vec<u64>> {
 }
 
 fn installed_in(src: &str) -> Vec<u64> {
-    let tokens = vdf_tokens(src);
-    let Some(start) = tokens.windows(2).position(|w| matches!(&w[0], Token::Str(k) if k == "WorkshopItemsInstalled") && w[1] == Token::Open) else {
+    items_in(&vdf_tokens(src), "WorkshopItemsInstalled").into_iter().map(|(id, _)| id).collect()
+}
+
+/// The items in the manifest's block `section`, with each one's
+/// `"key" "value"` pairs, in file order.
+fn items_in(tokens: &[Token], section: &str) -> Vec<(u64, HashMap<String, String>)> {
+    let Some(start) = tokens.windows(2).position(|w| matches!(&w[0], Token::Str(k) if k == section) && w[1] == Token::Open) else {
         return Vec::new();
     };
-    let mut items = Vec::new();
+    let mut items: Vec<(u64, HashMap<String, String>)> = Vec::new();
     let mut depth = 0;
-    for (i, token) in tokens.iter().enumerate().skip(start + 1) {
+    let mut i = start + 1;
+    while let Some(token) = tokens.get(i) {
         match token {
             Token::Open => depth += 1,
             Token::Close => {
@@ -164,11 +170,78 @@ fn installed_in(src: &str) -> Vec<u64> {
                 }
             }
             // Item ids are the keys of the blocks directly inside.
-            Token::Str(key) if depth == 1 && tokens.get(i + 1) == Some(&Token::Open) => items.extend(key.parse::<u64>().ok()),
+            Token::Str(key) if depth == 1 && tokens.get(i + 1) == Some(&Token::Open) => {
+                if let Ok(id) = key.parse() {
+                    items.push((id, HashMap::new()));
+                }
+            }
+            Token::Str(key) if depth == 2 => {
+                if let (Some(Token::Str(value)), Some((_, fields))) = (tokens.get(i + 1), items.last_mut()) {
+                    fields.insert(key.clone(), value.clone());
+                    i += 1;
+                }
+            }
             Token::Str(_) => {}
         }
+        i += 1;
     }
     items
+}
+
+/// What Steam says about a Workshop item.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ItemState {
+    Installed,
+    /// Installed, but Steam has a newer version it hasn't finished
+    /// downloading.
+    UpdatePending,
+    /// Subscribed, but not downloaded yet.
+    Downloading,
+    /// Not in Steam's manifest: unsubscribed, or removed from the
+    /// Workshop.
+    Unsubscribed,
+}
+
+/// The state of every Workshop item Steam knows about for the app whose
+/// content folders are `content_dirs`. `None` when no manifest could be
+/// read, so nothing can be said about any item.
+pub fn item_states(content_dirs: &[PathBuf]) -> Option<HashMap<u64, ItemState>> {
+    let mut states = HashMap::new();
+    let mut read_any = false;
+    for dir in content_dirs {
+        let (Some(app), Some(workshop)) = (dir.file_name().and_then(|a| a.to_str()), dir.parent().and_then(Path::parent)) else { continue };
+        let Ok(src) = std::fs::read_to_string(workshop.join(format!("appworkshop_{app}.acf"))) else { continue };
+        read_any = true;
+        for (id, state) in states_in(&src) {
+            // An item in two libraries counts as installed if either has it.
+            let entry = states.entry(id).or_insert(state);
+            if state == ItemState::Installed {
+                *entry = state;
+            }
+        }
+    }
+    read_any.then_some(states)
+}
+
+fn states_in(src: &str) -> HashMap<u64, ItemState> {
+    let tokens = vdf_tokens(src);
+    let installed: HashMap<u64, HashMap<String, String>> = items_in(&tokens, "WorkshopItemsInstalled").into_iter().collect();
+    let mut states: HashMap<u64, ItemState> = installed.keys().map(|&id| (id, ItemState::Installed)).collect();
+    for (id, details) in items_in(&tokens, "WorkshopItemDetails") {
+        let newer = |current: &str, latest: &str| match (details.get(current), details.get(latest)) {
+            (Some(c), Some(l)) => c != l && !l.is_empty() && l != "0",
+            _ => false,
+        };
+        let state = if !installed.contains_key(&id) {
+            ItemState::Downloading
+        } else if newer("manifest", "latest_manifest") || newer("timeupdated", "latest_timeupdated") {
+            ItemState::UpdatePending
+        } else {
+            ItemState::Installed
+        };
+        states.insert(id, state);
+    }
+    states
 }
 
 #[cfg(test)]
@@ -180,6 +253,39 @@ mod tests {
         let acf = "\"AppWorkshop\"\n{\n\t\"appid\"\t\"281990\"\n\t\"WorkshopItemsInstalled\"\n\t{\n\t\t\"865040033\"\n\t\t{\n\t\t\t\"size\"\t\"1\"\n\t\t}\n\t\t\"1067631798\"\n\t\t{\n\t\t\t\"size\"\t\"2\"\n\t\t}\n\t}\n\t\"WorkshopItemDetails\"\n\t{\n\t\t\"999\"\n\t\t{\n\t\t}\n\t}\n}\n";
         assert_eq!(installed_in(acf), [865040033, 1067631798]);
         assert_eq!(installed_in("\"AppWorkshop\" { }"), Vec::<u64>::new());
+    }
+
+    #[test]
+    fn reads_what_steam_says_about_each_item() {
+        let acf = r#""AppWorkshop"
+{
+	"WorkshopItemsInstalled"
+	{
+		"1" { "size" "1" "timeupdated" "100" "manifest" "a" }
+		"2" { "size" "1" "timeupdated" "100" "manifest" "b" }
+		"3" { "size" "1" "timeupdated" "100" "manifest" "c" }
+	}
+	"WorkshopItemDetails"
+	{
+		"1" { "manifest" "a" "timeupdated" "100" "latest_timeupdated" "100" "latest_manifest" "a" }
+		"2" { "manifest" "b" "timeupdated" "100" "latest_timeupdated" "200" "latest_manifest" "b2" }
+		"4" { "manifest" "0" "timeupdated" "0" "latest_timeupdated" "300" "latest_manifest" "d" }
+	}
+}"#;
+        let states = states_in(acf);
+        assert_eq!(states[&1], ItemState::Installed);
+        assert_eq!(states[&2], ItemState::UpdatePending);
+        assert_eq!(states[&3], ItemState::Installed, "no details: as installed");
+        assert_eq!(states[&4], ItemState::Downloading);
+        assert_eq!(states.len(), 4);
+
+        let root = std::env::temp_dir().join(format!("drukhal-steam-states-{}", std::process::id()));
+        let content = root.join("steamapps/workshop/content/281990");
+        std::fs::create_dir_all(&content).unwrap();
+        assert_eq!(item_states(std::slice::from_ref(&content)), None, "no manifest, nothing known");
+        std::fs::write(root.join("steamapps/workshop/appworkshop_281990.acf"), acf).unwrap();
+        assert_eq!(item_states(&[content]).unwrap()[&2], ItemState::UpdatePending);
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

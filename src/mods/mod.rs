@@ -11,6 +11,8 @@ pub mod load_order;
 pub use descriptor::Descriptor;
 use load_order::DlcLoad;
 
+use crate::paradox::steam::{self, ItemState};
+
 use std::collections::HashMap;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -33,6 +35,9 @@ pub struct Mod {
     /// Position in the load order, if enabled.
     pub load_position: Option<usize>,
     pub error: Option<String>,
+    /// What Steam says about a Workshop mod; `None` for local mods, or
+    /// when Steam's manifest couldn't be read.
+    pub steam: Option<ItemState>,
 }
 
 /// Reads every descriptor in `<user_dir>/mod`, resolves where its files live,
@@ -42,6 +47,7 @@ pub fn discover(user_dir: &Path, workshop_dirs: &[PathBuf]) -> io::Result<Vec<Mo
     let load = DlcLoad::read(user_dir)?;
     let positions: HashMap<&str, usize> = load.enabled_mods.iter().enumerate().map(|(i, m)| (m.as_str(), i)).collect();
 
+    let states = steam::item_states(workshop_dirs);
     let mut mods = Vec::new();
     for entry in std::fs::read_dir(user_dir.join("mod"))? {
         let path = entry?.path();
@@ -57,10 +63,17 @@ pub fn discover(user_dir: &Path, workshop_dirs: &[PathBuf]) -> io::Result<Vec<Mo
             Err(e) => (Descriptor::default(), Some(format!("Unreadable descriptor: {e}"))),
         };
         let content = resolve_content(&descriptor, user_dir, workshop_dirs);
-        let error = error.or_else(|| content.is_none().then(|| "Mod files not found".to_owned()));
+        let steam = descriptor.remote_file_id.zip(states.as_ref()).map(|(id, states)| states.get(&id).copied().unwrap_or(ItemState::Unsubscribed));
+        let error = error.or_else(|| {
+            content.is_none().then(|| match steam {
+                Some(ItemState::Unsubscribed) => "Unsubscribed in Steam, so its files are gone".to_owned(),
+                Some(ItemState::Downloading) => "Steam hasn't downloaded it yet".to_owned(),
+                _ => "Mod files not found".to_owned(),
+            })
+        });
         let source = if descriptor.remote_file_id.is_some() { Source::Workshop } else { Source::Local };
         let load_position = positions.get(id.as_str()).copied();
-        mods.push(Mod { id, descriptor, content, source, load_position, error });
+        mods.push(Mod { id, descriptor, content, source, load_position, error, steam });
     }
 
     // Keep enabled entries whose descriptor is gone, so saving doesn't
@@ -70,7 +83,7 @@ pub fn discover(user_dir: &Path, workshop_dirs: &[PathBuf]) -> io::Result<Vec<Mo
         if !known.contains(id) {
             let descriptor = Descriptor { name: id.clone(), ..Descriptor::default() };
             let error = Some("Descriptor file not found".to_owned());
-            mods.push(Mod { id: id.clone(), descriptor, content: None, source: Source::Local, load_position: Some(position), error });
+            mods.push(Mod { id: id.clone(), descriptor, content: None, source: Source::Local, load_position: Some(position), error, steam: None });
         }
     }
 
@@ -103,6 +116,35 @@ fn resolve_content(d: &Descriptor, user_dir: &Path, workshop_dirs: &[PathBuf]) -
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn says_what_steam_is_doing_with_workshop_mods() {
+        let root = std::env::temp_dir().join(format!("drukhal-steam-mods-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let (user, workshop) = (root.join("user"), root.join("steamapps/workshop"));
+        let content = workshop.join("content/281990");
+        std::fs::create_dir_all(user.join("mod")).unwrap();
+        std::fs::create_dir_all(content.join("1/common")).unwrap();
+        for (id, name) in [(1, "Updating"), (2, "Gone"), (3, "Coming")] {
+            std::fs::write(user.join(format!("mod/ugc_{id}.mod")), format!("name=\"{name}\"\npath=\"{}\"\nremote_file_id=\"{id}\"\n", content.join(id.to_string()).display())).unwrap();
+        }
+        std::fs::write(user.join("mod/local.mod"), "name=\"Local\"\npath=\"mod/local\"\n").unwrap();
+        let acf = r#""AppWorkshop" { "WorkshopItemsInstalled" { "1" { "manifest" "a" } }
+            "WorkshopItemDetails" { "1" { "manifest" "a" "latest_manifest" "b" } "3" { "manifest" "0" "latest_manifest" "c" } } }"#;
+        std::fs::write(workshop.join("appworkshop_281990.acf"), acf).unwrap();
+
+        let mods = discover(&user, std::slice::from_ref(&content)).unwrap();
+        let get = |name: &str| mods.iter().find(|m| m.descriptor.name == name).unwrap();
+        assert_eq!((get("Updating").steam, get("Updating").error.as_deref()), (Some(ItemState::UpdatePending), None));
+        assert_eq!((get("Gone").steam, get("Gone").error.as_deref()), (Some(ItemState::Unsubscribed), Some("Unsubscribed in Steam, so its files are gone")));
+        assert_eq!(get("Coming").error.as_deref(), Some("Steam hasn't downloaded it yet"));
+        assert_eq!(get("Local").steam, None);
+
+        std::fs::remove_file(workshop.join("appworkshop_281990.acf")).unwrap();
+        let mods = discover(&user, &[content]).unwrap();
+        assert!(mods.iter().all(|m| m.steam.is_none()), "without a manifest nothing is claimed");
+        std::fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn discovers_and_orders_mods() {

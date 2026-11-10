@@ -11,6 +11,7 @@ use super::state::State;
 use crate::conflicts_view;
 use crate::merge::patch;
 use crate::mods::{self, Mod, checks};
+use crate::paradox::steam::ItemState;
 
 impl Window {
     pub(super) fn refresh(self: &Rc<Self>) {
@@ -258,6 +259,15 @@ impl Window {
                 .build();
             row.add_suffix(&badge);
         }
+        if let Some((label, tooltip, class)) = steam_badge(m.steam) {
+            let badge = gtk::Label::builder()
+                .label(label)
+                .tooltip_text(tooltip)
+                .valign(gtk::Align::Center)
+                .css_classes([class, "caption"])
+                .build();
+            row.add_suffix(&badge);
+        }
         let is_patch = m.id == patch::ID;
         // One icon for everything wrong with this mod, worst first.
         let mut problems: Vec<(checks::Severity, String)> = Vec::new();
@@ -343,6 +353,9 @@ impl Window {
                 ("Copy _Workshop Link", "win.copy-workshop-link"),
                 ("_Unsubscribe in Steam…", "win.unsubscribe"),
             ] {
+                if action == "win.unsubscribe" && m.steam == Some(ItemState::Unsubscribed) {
+                    continue;
+                }
                 let item = gio::MenuItem::new(Some(label), None);
                 item.set_action_and_target_value(Some(action), Some(&index_variant));
                 workshop.append_item(&item);
@@ -494,4 +507,23 @@ fn changes_checksum(m: &Mod) -> bool {
         .as_deref()
         .and_then(|c| if c.is_file() { mods::archive::files(c).ok() } else { Some(c.to_path_buf()) })
         .is_some_and(|root| crate::multiplayer::changes_checksum(&root))
+}
+
+/// A label for what Steam is doing with a Workshop mod, if it's worth
+/// knowing before playing: its text, tooltip and style class.
+fn steam_badge(state: Option<ItemState>) -> Option<(&'static str, &'static str, &'static str)> {
+    match state? {
+        ItemState::Installed => None,
+        ItemState::UpdatePending => Some((
+            "Update pending",
+            "Steam has a newer version it hasn't finished downloading. Let it finish before playing, or the game may load a half-updated mod.",
+            "warning",
+        )),
+        ItemState::Downloading => Some(("Downloading", "Steam hasn't finished downloading this mod", "warning")),
+        ItemState::Unsubscribed => Some((
+            "Unsubscribed",
+            "You're no longer subscribed to this mod in Steam. Once Steam removes its files, Repair in the banner above the list can remove it from the list.",
+            "dim-label",
+        )),
+    }
 }

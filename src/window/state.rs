@@ -322,6 +322,7 @@ mod tests {
                 source: mods::Source::Local,
                 load_position: enabled.iter().position(|&e| e == i),
                 error: None,
+                steam: None,
             })
             .collect();
         State::new(mods)
@@ -391,6 +392,7 @@ mod tests {
             source: mods::Source::Local,
             load_position: None,
             error: None,
+            steam: None,
         });
         s.set_enabled(4, true);
         s.set_enabled(2, true);
@@ -429,6 +431,7 @@ mod tests {
                 source: mods::Source::Local,
                 load_position: Some(0),
                 error: None,
+                steam: None,
             },
             Mod {
                 id: "mod/a.mod".into(),
@@ -437,6 +440,7 @@ mod tests {
                 source: mods::Source::Local,
                 load_position: Some(1),
                 error: None,
+                steam: None,
             },
         ];
         let s = State::new(mods);

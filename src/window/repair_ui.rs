@@ -5,6 +5,7 @@ use std::rc::Rc;
 use adw::prelude::*;
 
 use super::Window;
+use crate::paradox::steam::ItemState;
 use crate::conflicts_view;
 use crate::mods;
 
@@ -19,10 +20,27 @@ impl Window {
             ));
         }
         if !findings.orphans.is_empty() {
-            parts.push(format!(
-                "{} belong to mods whose files are gone",
-                conflicts_view::plural(findings.orphans.len(), "descriptor", "descriptors")
-            ));
+            let state = self.state.borrow();
+            let unsubscribed = findings
+                .orphans
+                .iter()
+                .filter(|o| state.mods.iter().any(|m| m.id == o.id && m.steam == Some(ItemState::Unsubscribed)))
+                .count();
+            parts.push(match unsubscribed {
+                0 => format!(
+                    "{} belong to mods whose files are gone",
+                    conflicts_view::plural(findings.orphans.len(), "descriptor", "descriptors")
+                ),
+                n if n == findings.orphans.len() => format!(
+                    "{} you unsubscribed from in Steam {} still listed",
+                    conflicts_view::plural(n, "mod", "mods"),
+                    if n == 1 { "is" } else { "are" }
+                ),
+                n => format!(
+                    "{} belong to mods whose files are gone, {n} of them unsubscribed in Steam",
+                    conflicts_view::plural(findings.orphans.len(), "descriptor", "descriptors")
+                ),
+            });
         }
         self.repair_banner.set_title(&parts.join("; "));
         self.repair_banner.set_revealed(!findings.is_empty());
