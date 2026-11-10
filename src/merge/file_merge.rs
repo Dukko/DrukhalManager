@@ -101,11 +101,17 @@ impl Plan {
 
     pub fn render(&self) -> String {
         if self.category == "localisation" {
+            // Each language's entries under its own header, in the order
+            // the headers came; entries before any header stay on top.
+            let languages: Vec<&str> = self.preamble.iter().map(|h| h.trim_end_matches(':')).collect();
+            let language = |item: &Item| item.key.split_once(':').map_or("", |(l, _)| l).to_owned();
             let mut out = String::from("\u{feff}");
-            out.push_str(&self.preamble.join("\n"));
-            for item in &self.items {
-                out.push_str(&format!("\n {}", item.text));
+            let mut lines: Vec<String> = self.items.iter().filter(|i| !languages.contains(&language(i).as_str())).map(|i| format!(" {}", i.text)).collect();
+            for (header, name) in self.preamble.iter().zip(&languages) {
+                lines.push(header.clone());
+                lines.extend(self.items.iter().filter(|i| language(i) == *name).map(|i| format!(" {}", i.text)));
             }
+            out.push_str(&lines.join("\n"));
             out.push('\n');
             return out;
         }
@@ -296,15 +302,16 @@ fn split(category: &str, wrapped: bool, src: &str, repeated: &Repeated) -> Resul
                 continue;
             }
             if !line.starts_with([' ', '\t']) && trimmed.ends_with(':') {
+                // A file may hold several languages, each under its header;
+                // a repeated header continues that language.
                 language = trimmed.trim_end_matches(':').to_owned();
-                preamble.push((language.clone(), trimmed.to_owned()));
+                if !preamble.iter().any(|(l, _)| *l == language) {
+                    preamble.push((language.clone(), trimmed.to_owned()));
+                }
                 continue;
             }
             let Some((key, _)) = trimmed.split_once(':') else { continue };
             objects.push(Object { group: None, key: format!("{language}:{key}"), text: trimmed.to_owned(), entry: None });
-        }
-        if preamble.len() > 1 {
-            return Err("This file holds several languages, which isn't supported yet".into());
         }
         return check_unique(Split { preamble, objects });
     }
@@ -488,6 +495,30 @@ mod tests {
         assert!(matches!(plan.items[0].status, Status::Conflict { .. }));
         assert_eq!(plan.items[1].status, Status::Recovered(vec!["A".into()]));
         assert_eq!(plan.render(), "\u{feff}l_english:\n lab:0 \"Laboratory\"\n farm:0 \"Farm\"\n");
+    }
+
+    #[test]
+    fn merges_localisation_with_several_languages() {
+        let a = "\u{feff}l_english:\n lab:0 \"Lab\"\n farm:0 \"Farm\"\nl_german:\n lab:0 \"Labor\"\n farm:0 \"Farm\"\n";
+        let b = "l_german:\n lab:0 \"Forschungslabor\"\nl_english:\n lab:0 \"Laboratory\"\nl_french:\n lab:0 \"Laboratoire\"\nl_german:\n mine:0 \"Mine\"\n";
+        let plan = plan("localisation/x_l_english.yml", None, &[v("A", a), v("B", b)]).unwrap();
+        let status = |key: &str| &plan.items.iter().find(|i| i.key == key).unwrap().status;
+        assert!(matches!(status("l_english:lab"), Status::Conflict { .. }));
+        assert!(matches!(status("l_german:lab"), Status::Conflict { .. }), "same key, other language: its own conflict");
+        assert_eq!(*status("l_german:farm"), Status::Recovered(vec!["A".into()]));
+        assert_eq!(*status("l_german:mine"), Status::Same, "a repeated header continues its language");
+        assert_eq!(*status("l_french:lab"), Status::Same);
+        assert_eq!(
+            plan.render(),
+            "\u{feff}l_german:\n lab:0 \"Forschungslabor\"\n mine:0 \"Mine\"\n farm:0 \"Farm\"\nl_english:\n lab:0 \"Laboratory\"\n farm:0 \"Farm\"\nl_french:\n lab:0 \"Laboratoire\"\n",
+            "the winner's languages in its order, each entry under its own header"
+        );
+        let german = plan.items.iter().position(|i| i.key == "l_german:lab").unwrap();
+        assert_eq!(plan.validate_item(german, "lab:0 \"Labor (neu)\"").unwrap(), "lab:0 \"Labor (neu)\"");
+
+        // Entries before any header stay above the headers.
+        let plan = plan_of("localisation/x_l_english.yml", &[" stray:0 \"S\"\nl_english:\n a:0 \"A\"\n", "l_english:\n a:0 \"A\"\n"]);
+        assert_eq!(plan.render(), "\u{feff} stray:0 \"S\"\nl_english:\n a:0 \"A\"\n");
     }
 
     #[test]
