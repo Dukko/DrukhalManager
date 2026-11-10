@@ -12,7 +12,7 @@ use super::Window;
 /// action without one shows no keys.
 const SECTIONS: &[(&str, &[(&str, &str)])] = &[
     ("General", &[("Preferences", "win.preferences"), ("Keyboard Shortcuts", "win.shortcuts")]),
-    ("Load Order", &[("Save Load Order", "win.save"), ("Search Mods", "win.find"), ("Undo", "win.undo"), ("Redo", "win.redo")]),
+    ("Load Order", &[("Save Load Order", "win.save"), ("Search Mods", "win.find"), ("Reload Mods", "win.reload"), ("Undo", "win.undo"), ("Redo", "win.redo")]),
     ("Pages", &[("Load Order", "win.page::load-order"), ("Conflicts", "win.page::conflicts")]),
 ];
 

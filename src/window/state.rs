@@ -1,5 +1,6 @@
 //! The load order state: which mods are enabled and in what order.
 
+use super::display_name;
 use crate::merge::patch;
 use crate::mods::{checks, Mod};
 
@@ -261,6 +262,41 @@ impl State {
         missing
     }
 
+    /// Swaps in a freshly discovered mod list, keeping the current load
+    /// order and unsaved changes. New mods start disabled. Returns the
+    /// names of mods that appeared, and of those that went away (or whose
+    /// files did).
+    pub(crate) fn reload(&mut self, mods: Vec<Mod>) -> (Vec<String>, Vec<String>) {
+        let old: std::collections::HashMap<&str, &Mod> =
+            self.mods.iter().map(|m| (m.id.as_str(), m)).collect();
+        let added = mods
+            .iter()
+            .filter(|m| !old.contains_key(m.id.as_str()))
+            .map(|m| display_name(m).to_owned())
+            .collect();
+        let new: std::collections::HashMap<&str, &Mod> =
+            mods.iter().map(|m| (m.id.as_str(), m)).collect();
+        let removed = self
+            .mods
+            .iter()
+            .filter(|m| match new.get(m.id.as_str()) {
+                None => true,
+                Some(n) => m.content.is_some() && n.content.is_none(),
+            })
+            .map(|m| display_name(m).to_owned())
+            .collect();
+        let (ids, dirty) = self.snapshot();
+        let before = ids.len();
+        self.mods = mods;
+        // Not a change the user made, so it isn't recorded for undo; the
+        // snapshots are ids, so history still applies.
+        self.apply((ids, dirty));
+        if self.enabled.len() != before {
+            self.dirty = true;
+        }
+        (added, removed)
+    }
+
     pub(crate) fn enabled_ids(&self) -> Vec<String> {
         self.enabled
             .iter()
@@ -504,5 +540,40 @@ mod tests {
             steps += 1;
         }
         assert_eq!(steps, MAX_HISTORY);
+    }
+
+    #[test]
+    fn reloading_keeps_the_order_and_disables_new_mods() {
+        let mut s = state(&[2, 0]);
+        for m in &mut s.mods {
+            m.content = Some(std::path::PathBuf::from(&m.id));
+        }
+        s.move_to(0, 1);
+        assert!(s.dirty);
+        // On disk: mod 1 is gone, mod 3 lost its files, mod 4 is new and
+        // already in the saved load order.
+        let mut mods: Vec<Mod> = s.mods.iter().filter(|m| m.id != "mod/1.mod").cloned().collect();
+        mods.iter_mut().find(|m| m.id == "mod/3.mod").unwrap().content = None;
+        let mut new = mods[0].clone();
+        new.id = "mod/4.mod".into();
+        new.descriptor.name = "4".into();
+        new.load_position = Some(0);
+        mods.insert(0, new);
+
+        let (added, removed) = s.reload(mods);
+        assert_eq!(added, ["4"]);
+        assert_eq!(removed, ["1", "3"]);
+        assert_eq!(s.enabled_ids(), ["mod/0.mod", "mod/2.mod"], "unsaved order kept");
+        assert!(s.dirty, "still unsaved");
+        assert!(!s.enabled_ids().contains(&"mod/4.mod".to_owned()), "new mods start disabled");
+        assert!(s.undo(), "history survives a reload");
+        assert_eq!(s.enabled_ids(), ["mod/2.mod", "mod/0.mod"]);
+
+        // Dropping an enabled mod changes the load order.
+        let mut s = state(&[0, 1]);
+        let mods = s.mods.iter().filter(|m| m.id != "mod/1.mod").cloned().collect();
+        s.reload(mods);
+        assert_eq!(s.enabled_ids(), ["mod/0.mod"]);
+        assert!(s.dirty);
     }
 }

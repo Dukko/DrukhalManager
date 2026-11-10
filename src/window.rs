@@ -5,6 +5,7 @@ mod conflicts_ui;
 mod launch;
 mod list;
 mod persist;
+mod reload;
 mod repair_ui;
 mod shortcuts;
 mod state;
@@ -145,6 +146,7 @@ pub fn build(
     let menu = gio::Menu::new();
     menu.append(Some("_Undo"), Some("win.undo"));
     menu.append(Some("_Redo"), Some("win.redo"));
+    menu.append(Some("Re_load Mods"), Some("win.reload"));
     menu.append(Some("Last Game's _Errors…"), Some("win.errors"));
     menu.append(Some("_Multiplayer Check…"), Some("win.multiplayer"));
     menu.append(Some("_Preferences"), Some("win.preferences"));
@@ -320,6 +322,7 @@ pub fn build(
     ui.load_api_key();
     ui.add_update_actions();
     ui.add_shortcuts_action(app);
+    ui.add_reload_action(app);
 
     let weak = Rc::downgrade(&ui);
     undo_action.connect_activate(move |_, _| {
