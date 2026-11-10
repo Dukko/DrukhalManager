@@ -98,6 +98,7 @@ pub fn build(
     found: io::Result<Vec<Mod>>,
 ) {
     thumbnails::add_css();
+    crate::sandbox::load_host_stylesheet();
     let stack = adw::ViewStack::new();
     let switcher = adw::ViewSwitcher::builder()
         .stack(&stack)
