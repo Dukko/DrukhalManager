@@ -98,7 +98,7 @@ Every file and object that more than one enabled mod changes is listed by folder
 - **Overridden files** are split into their objects. Objects the copies agree on, or that only one mod changed, are combined directly, and the AI is only asked about real disagreements.
 - **Broken braces** are listed under **Problems**. **Fix…** repairs them automatically, and **Fix with AI** restores the intended nesting.
 
-Everything is saved to **DrukhalManager Merged Patch**, a local mod that loads last, with files named so its definitions win. Merges whose mods changed since are flagged as outdated, and your mods are never modified.
+Everything is saved to **DrukhalManager Merged Patch**, a local mod that loads last, with files named so its definitions win. Merges whose mods or the base game changed since are flagged as outdated, and your mods are never modified. The patch is backed up before each Merge All and before merges are removed, and **Merged Patch Backups…** in the main menu restores any of the last ten.
 
 <table>
 <tr>
