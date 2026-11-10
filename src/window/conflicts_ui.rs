@@ -14,7 +14,6 @@ use crate::folder_merge_dialog;
 use crate::fix_dialog;
 use crate::merge::conflicts::{self, ModInput};
 use crate::merge::patch::{self, Patch};
-use crate::merge_dialog;
 use crate::mods::{self, archive, Mod};
 use crate::settings;
 
@@ -95,6 +94,7 @@ impl Window {
             match result {
                 Ok((report, roots, simple)) => {
                     ui.check_stale();
+                    ui.conflict_session.borrow_mut().rescanned();
                     ui.analysis.replace(Some(Rc::new(Analysis {
                         revision: Cell::new(revision),
                         names,
@@ -235,11 +235,9 @@ impl Window {
             return;
         };
         let hooks = self.merge_hooks(&analysis);
-        self.conflicts_page.set_child(Some(&conflicts_view::build(
-            &analysis,
-            self.rescan_button(),
-            hooks,
-        )));
+        let (widget, view) = conflicts_view::build(&analysis, self.rescan_button(), hooks);
+        self.conflicts_page.set_child(Some(&widget));
+        self.conflicts_view.replace(Some(view));
     }
 
     /// Opens the Conflicts page showing only the conflicts of the mod at
@@ -275,28 +273,33 @@ impl Window {
     pub(super) fn merge_hooks(self: &Rc<Self>, analysis: &Rc<Analysis>) -> Rc<MergeHooks> {
         let weak = Rc::downgrade(self);
         let is_merged = Box::new(move |category: &str, key: &str| {
-            weak.upgrade().is_some_and(|ui| {
-                ui.patch
-                    .borrow()
-                    .as_ref()
-                    .is_some_and(|p| p.get(category, key).is_some())
-            })
+            weak.upgrade().is_some_and(|ui| ui.patch.borrow().as_ref().is_some_and(|p| p.get(category, key).is_some()))
         });
         let weak = Rc::downgrade(self);
-        let objects = analysis.clone();
-        let open = Box::new(move |index: usize, mark_merged: Box<dyn Fn()>| {
+        let existing = Box::new(move |category: &str, key: &str| {
+            weak.upgrade().and_then(|ui| ui.patch.borrow().as_ref().and_then(|p| p.get(category, key).cloned()))
+        });
+        let weak = Rc::downgrade(self);
+        let save_object = Box::new(move |category: &str, key: &str, script: &str, prints: Vec<patch::Print>| {
+            let ui = weak.upgrade().ok_or("The window was closed")?;
+            ui.save_merge(category, key, script, prints)
+        });
+        let weak = Rc::downgrade(self);
+        let save_file = Box::new(move |path: &str, contents: &str, prints: Vec<patch::Print>| {
+            let ui = weak.upgrade().ok_or("The window was closed")?;
+            ui.with_patch(|patch, user_dir, version| patch.save_file(user_dir, version, path, contents, prints))
+        });
+        let weak = Rc::downgrade(self);
+        let patch_saved = Box::new(move || {
             if let Some(ui) = weak.upgrade() {
-                ui.open_merge(&objects, index, mark_merged);
+                ui.patch_saved();
             }
         });
         let weak = Rc::downgrade(self);
+        let reload_stale = Box::new(move || weak.upgrade().map(|ui| ui.stale.borrow().clone()).unwrap_or_default());
+        let weak = Rc::downgrade(self);
         let is_file_merged = Box::new(move |path: &str| {
-            weak.upgrade().is_some_and(|ui| {
-                ui.patch
-                    .borrow()
-                    .as_ref()
-                    .is_some_and(|p| p.get_file(path).is_some())
-            })
+            weak.upgrade().is_some_and(|ui| ui.patch.borrow().as_ref().is_some_and(|p| p.get_file(path).is_some()))
         });
         let weak = Rc::downgrade(self);
         let files = analysis.clone();
@@ -320,10 +323,7 @@ impl Window {
             }
         });
         let weak = Rc::downgrade(self);
-        let is_ignored = Box::new(move |key: &str| {
-            weak.upgrade()
-                .is_some_and(|ui| ui.settings.borrow().ignored.contains(key))
-        });
+        let is_ignored = Box::new(move |key: &str| weak.upgrade().is_some_and(|ui| ui.settings.borrow().ignored.contains(key)));
         let weak = Rc::downgrade(self);
         let set_ignored = Box::new(move |key: &str, ignore: bool| {
             if let Some(ui) = weak.upgrade() {
@@ -360,9 +360,32 @@ impl Window {
                 ui.keep_merge(stale);
             }
         });
+        let weak = Rc::downgrade(self);
+        let rerender = Box::new(move || {
+            if let Some(ui) = weak.upgrade() {
+                glib::idle_add_local_once(move || ui.render_conflicts());
+            }
+        });
+        let weak = Rc::downgrade(self);
+        let provider = Box::new(move || weak.upgrade().and_then(|ui| ui.settings.borrow().ready_provider()));
+        let weak = Rc::downgrade(self);
+        let open_preferences = Box::new(move || {
+            if let Some(ui) = weak.upgrade() {
+                ui.open_preferences(Some(crate::preferences::AI_PAGE));
+            }
+        });
+        let weak = Rc::downgrade(self);
+        let toast = Box::new(move |message: &str| {
+            if let Some(ui) = weak.upgrade() {
+                ui.toasts.add_toast(adw::Toast::new(message));
+            }
+        });
         Rc::new(MergeHooks {
             is_merged,
-            open,
+            existing,
+            save_object,
+            save_file,
+            patch_saved,
             is_file_merged,
             open_file,
             merge_folder,
@@ -373,9 +396,16 @@ impl Window {
             toggle_show_ignored,
             filter,
             set_filter,
-            stale: self.stale.borrow().clone(),
+            stale: std::cell::RefCell::new(self.stale.borrow().clone()),
+            reload_stale,
             remove_merge,
             keep_merge,
+            rerender,
+            game_dir: self.game.as_ref().map(|g| g.dir.clone()),
+            provider,
+            open_preferences,
+            toast,
+            session: self.conflict_session.clone(),
         })
     }
 
@@ -559,69 +589,6 @@ impl Window {
         let version = self.game.as_ref().and_then(|g| g.version.as_deref());
         f(patch.as_mut().unwrap(), &self.paths.user_dir, version)
             .map_err(|e| format!("Could not save the merged patch: {e}"))
-    }
-
-    pub(super) fn open_merge(
-        self: &Rc<Self>,
-        analysis: &Rc<Analysis>,
-        index: usize,
-        mark_merged: Box<dyn Fn()>,
-    ) {
-        let conflict = &analysis.report.objects[index];
-        let origins = conflict
-            .definitions
-            .iter()
-            .filter_map(|d| {
-                let root = analysis.roots[d.mod_position].clone()?;
-                Some(merge_dialog::Origin {
-                    mod_id: analysis.ids[d.mod_position].clone(),
-                    label: analysis.name(d.mod_position).to_owned(),
-                    root,
-                    file: d.file.clone(),
-                })
-            })
-            .collect();
-        let (category, key) = (conflict.category.clone(), conflict.key.clone());
-        let existing = self
-            .patch
-            .borrow()
-            .as_ref()
-            .and_then(|p| p.get(&category, &key).cloned());
-
-        let weak = Rc::downgrade(self);
-        let save = {
-            let (category, key) = (category.clone(), key.clone());
-            Box::new(move |script: &str, prints: Vec<patch::Print>| {
-                let ui = weak.upgrade().ok_or("The window was closed")?;
-                ui.save_merge(&category, &key, script, prints)
-            })
-        };
-        let weak = Rc::downgrade(self);
-        let open_preferences = Box::new(move || {
-            if let Some(ui) = weak.upgrade() {
-                ui.open_preferences(Some(crate::preferences::AI_PAGE));
-            }
-        });
-        let weak = Rc::downgrade(self);
-        let on_saved = Box::new(move || {
-            mark_merged();
-            if let Some(ui) = weak.upgrade() {
-                ui.patch_saved();
-            }
-        });
-
-        let request = merge_dialog::Request {
-            category,
-            key,
-            origins,
-            game_dir: self.game.as_ref().map(|g| g.dir.clone()),
-            provider: self.settings.borrow().ready_provider(),
-            existing,
-            save,
-            open_preferences,
-            on_saved,
-        };
-        merge_dialog::present(&self.window, request);
     }
 
     pub(super) fn save_merge(

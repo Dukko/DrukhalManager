@@ -1,4 +1,6 @@
 mod conflicts_view;
+mod diff;
+mod diff_view;
 mod error_report_dialog;
 mod file_merge_dialog;
 mod fix_dialog;
@@ -32,6 +34,14 @@ fn main() -> gtk::glib::ExitCode {
 fn build_ui(app: &adw::Application) {
     // Picks up the installed icon for the window.
     gtk::Window::set_default_icon_name(APP_ID);
+    // The app's own icons, when run from the source tree; the Flatpak
+    // installs them with the theme's.
+    let icons = std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/data/icons"));
+    if icons.is_dir()
+        && let Some(display) = gtk::gdk::Display::default()
+    {
+        gtk::IconTheme::for_display(&display).add_search_path(icons);
+    }
     let home = gtk::glib::home_dir();
     // Folders chosen in Preferences replace the detected ones.
     let options = settings::Settings::load(&settings::path()).game;

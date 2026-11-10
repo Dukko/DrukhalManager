@@ -1,15 +1,18 @@
 //! Mod thumbnails: the descriptor's `picture` (usually `thumbnail.png`),
-//! shown beside each mod in the load order.
+//! shown beside each mod in the load order. Workshop mods without one
+//! use their Workshop preview, downloaded once and kept in the cache.
 
-use std::collections::HashMap;
-use std::path::PathBuf;
+use std::collections::{HashMap, HashSet};
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 use adw::prelude::*;
 use gtk::{gdk, gio, glib};
 
 use super::Window;
+use crate::merge::patch;
 use crate::mods::{Mod, archive};
+use crate::paradox::workshop;
 
 const SIZE: i32 = 40;
 /// Stored at twice the size shown, for high-density screens.
@@ -18,6 +21,7 @@ const STORED: i32 = SIZE * 2;
 const CSS: &str = "
 .mod-thumbnail { border-radius: 6px; }
 .mod-thumbnail.placeholder { background: alpha(currentColor, 0.08); }
+.mod-thumbnail.patch { background: alpha(@accent_bg_color, 0.15); }
 ";
 
 /// Decoded thumbnails by file, so rebuilding the list doesn't read them
@@ -27,6 +31,16 @@ pub(super) struct Cache {
     loaded: HashMap<PathBuf, Option<gdk::Texture>>,
     /// Being read, with the images waiting for each.
     pending: HashMap<PathBuf, Vec<glib::WeakRef<gtk::Image>>>,
+    /// Workshop items whose preview was asked for since the list was
+    /// last reloaded, so a missing one isn't asked for again.
+    asked: HashSet<u64>,
+    /// Waiting to be asked for, in one request.
+    queued: Vec<u64>,
+}
+
+/// Where a Workshop item's downloaded preview is kept.
+fn previews_dir() -> PathBuf {
+    glib::user_cache_dir().join("DrukhalManager/previews")
 }
 
 pub(super) fn add_css() {
@@ -37,13 +51,27 @@ pub(super) fn add_css() {
     }
 }
 
-/// Where a mod's thumbnail is, if its descriptor names one. Zipped mods
-/// use their unpacked copy.
+/// Where a mod's thumbnail is: the picture its descriptor names, or else
+/// `thumbnail.png`, which Steam and the launcher show when it names none.
+/// Zipped mods use their unpacked copy.
 fn picture_path(m: &Mod) -> Option<PathBuf> {
-    let name = m.descriptor.picture.as_deref().filter(|p| !p.trim().is_empty())?;
     let content = m.content.as_deref()?;
     let dir = if content.is_file() { archive::files(content).ok()? } else { content.to_path_buf() };
-    Some(dir.join(name.trim()))
+    let named = m.descriptor.picture.as_deref().map(str::trim).filter(|p| !p.is_empty());
+    named.into_iter().chain(["thumbnail.png", "thumbnail.jpg", "thumbnail.jpeg"]).find_map(|name| find(&dir, name))
+}
+
+/// `name` in `dir`, ignoring case: mods made on Windows often name a
+/// `Thumbnail.png` as `thumbnail.png`.
+fn find(dir: &Path, name: &str) -> Option<PathBuf> {
+    let exact = dir.join(name);
+    if exact.is_file() {
+        return Some(exact);
+    }
+    let wanted = Path::new(name);
+    let folder = dir.join(wanted.parent().unwrap_or(Path::new("")));
+    let file = wanted.file_name()?;
+    std::fs::read_dir(folder).ok()?.flatten().find(|e| e.file_name().eq_ignore_ascii_case(file) && e.path().is_file()).map(|e| e.path())
 }
 
 impl Window {
@@ -57,7 +85,25 @@ impl Window {
             .overflow(gtk::Overflow::Hidden)
             .css_classes(["mod-thumbnail", "placeholder"])
             .build();
-        let Some(path) = picture_path(m) else { return picture };
+        // The merged patch is this app's, so it wears the app's icon.
+        if m.id == patch::ID {
+            picture.set_icon_name(Some(crate::APP_ID));
+            picture.set_css_classes(&["mod-thumbnail", "patch"]);
+            picture.set_tooltip_text(Some("Made by Drukhal Manager from your merges"));
+            return picture;
+        }
+        let path = match picture_path(m) {
+            Some(path) => path,
+            None => {
+                let Some(id) = m.descriptor.remote_file_id else { return picture };
+                let path = previews_dir().join(id.to_string());
+                if !path.is_file() {
+                    self.download_preview(id, path, &picture);
+                    return picture;
+                }
+                path
+            }
+        };
         let mut cache = self.thumbnails.borrow_mut();
         if let Some(texture) = cache.loaded.get(&path) {
             show(&picture, texture.as_ref());
@@ -69,7 +115,12 @@ impl Window {
             return picture; // already being read
         }
         drop(cache);
+        self.read_thumbnail(path);
+        picture
+    }
 
+    /// Reads `path` and shows it in the images waiting for it.
+    fn read_thumbnail(self: &Rc<Self>, path: PathBuf) {
         let weak = Rc::downgrade(self);
         glib::spawn_future_local(async move {
             let file = path.clone();
@@ -83,7 +134,50 @@ impl Window {
             }
             cache.loaded.insert(path, texture);
         });
-        picture
+    }
+
+    /// Fetches Workshop item `id`'s preview into `path` and shows it in
+    /// `picture`. Items asked for together go to Steam in one request.
+    fn download_preview(self: &Rc<Self>, id: u64, path: PathBuf, picture: &gtk::Image) {
+        let mut cache = self.thumbnails.borrow_mut();
+        let new = cache.asked.insert(id);
+        if !new && !cache.pending.contains_key(&path) {
+            return; // asked for before, and Steam had none
+        }
+        cache.pending.entry(path).or_default().push(picture.downgrade());
+        if !new {
+            return; // on its way
+        }
+        cache.queued.push(id);
+        if cache.queued.len() > 1 {
+            return; // a request is about to go
+        }
+        drop(cache);
+
+        let weak = Rc::downgrade(self);
+        glib::spawn_future_local(async move {
+            // Let the rest of the list queue its items first.
+            glib::timeout_future(std::time::Duration::from_millis(100)).await;
+            let Some(ui) = weak.upgrade() else { return };
+            let ids = std::mem::take(&mut ui.thumbnails.borrow_mut().queued);
+            drop(ui);
+            let dir = previews_dir();
+            let saved = gio::spawn_blocking({
+                let (ids, dir) = (ids.clone(), dir.clone());
+                move || workshop::download_previews(&ids, &dir)
+            })
+            .await
+            .unwrap_or_default();
+            let Some(ui) = weak.upgrade() else { return };
+            for id in ids {
+                let path = dir.join(id.to_string());
+                if saved.contains(&id) {
+                    ui.read_thumbnail(path);
+                } else {
+                    ui.thumbnails.borrow_mut().pending.remove(&path);
+                }
+            }
+        });
     }
 }
 
@@ -126,6 +220,19 @@ mod tests {
             }
         }
         pixbuf.savev(path, "png", &[]).unwrap();
+    }
+
+    #[test]
+    fn finds_thumbnails_the_descriptor_doesnt_name() {
+        let dir = std::env::temp_dir().join(format!("drukhal-thumb-find-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("gfx")).unwrap();
+        std::fs::write(dir.join("Thumbnail.PNG"), b"").unwrap();
+        std::fs::write(dir.join("gfx/Cover.png"), b"").unwrap();
+        assert_eq!(find(&dir, "thumbnail.png"), Some(dir.join("Thumbnail.PNG")), "ignores case");
+        assert_eq!(find(&dir, "gfx/cover.png"), Some(dir.join("gfx/Cover.png")));
+        assert_eq!(find(&dir, "missing.png"), None);
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]
