@@ -36,6 +36,14 @@
     <control>keyboard</control>
   </supports>
   <releases>
+    <release version="0.3.2" date="2026-11-10">
+      <description>
+        <p>The Conflicts page has a new look: conflicts are listed in a sidebar, and each one shows the two versions side by side with the differences highlighted.</p>
+        <p>The later-loading version can be edited by hand before you use it, and your edits can be undone.</p>
+        <p>More mod thumbnails show up: mods without a picture in their descriptor use their thumbnail.png, file names match whatever their capitalisation, and Workshop mods with no image on disk show their Workshop preview.</p>
+        <p>The merged patch is marked with the app's icon.</p>
+      </description>
+    </release>
     <release version="0.3.1" date="2026-11-09">
       <description>
         <p>Fixed the conflict scan failing when a mod has files with non-English characters in their names.</p>
