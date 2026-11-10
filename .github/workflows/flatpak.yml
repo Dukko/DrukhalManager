@@ -4,12 +4,19 @@ name: Flatpak release
 # Pages (https://dukko.github.io/DrukhalManager/) so installs update with
 # `flatpak update`, and attach DrukhalManager.flatpak to the release.
 # Running it by hand rebuilds and republishes the repo from the chosen ref
-# without touching releases.
+# without touching releases. tag.yml calls it with the tag it just made,
+# since tags pushed by a workflow don't start other workflows.
 
 on:
   push:
     tags: ['v*']
   workflow_dispatch:
+  workflow_call:
+    inputs:
+      tag:
+        description: The release tag to build
+        type: string
+        required: true
 
 permissions:
   contents: write
@@ -30,6 +37,8 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
 
       - name: Check cargo-sources.json matches Cargo.lock
         run: |
@@ -67,10 +76,10 @@ jobs:
           path: ${{ runner.temp }}/site
 
       - name: Attach the bundle to the release
-        if: startsWith(github.ref, 'refs/tags/')
+        if: inputs.tag != '' || startsWith(github.ref, 'refs/tags/')
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ github.ref_name }}
+          TAG: ${{ inputs.tag || github.ref_name }}
         run: |
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" DrukhalManager.flatpak --clobber
