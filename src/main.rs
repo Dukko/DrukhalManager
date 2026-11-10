@@ -38,6 +38,10 @@ fn build_ui(app: &adw::Application) {
     let user_dir = options.data_dir.clone().unwrap_or_else(steam::stellaris_user_dir);
     let libraries = steam::library_folders(&home);
     let workshop_dirs = steam::workshop_dirs(&home, steam::STELLARIS_APP_ID);
+    // Mods subscribed or updated since the Paradox Launcher last ran.
+    for error in mods::sync::sync(&user_dir, &workshop_dirs).errors {
+        eprintln!("{error}");
+    }
     let found = mods::discover(&user_dir, &workshop_dirs);
     let paths = window::Paths { user_dir, backup_dir: sandbox::data_dir().join("DrukhalManager/backups") };
     let game = match &options.executable {

@@ -39,13 +39,18 @@ impl Window {
             let found = gio::spawn_blocking(move || {
                 // Libraries may have been added since startup.
                 let workshop_dirs = steam::workshop_dirs(&glib::home_dir(), steam::STELLARIS_APP_ID);
-                mods::discover(&user_dir, &workshop_dirs).map_err(|e| e.to_string())
+                // Registers mods Steam downloaded since, as the launcher would.
+                let synced = mods::sync::sync(&user_dir, &workshop_dirs);
+                for error in &synced.errors {
+                    eprintln!("{error}");
+                }
+                mods::discover(&user_dir, &workshop_dirs).map(|found| (found, synced.updated)).map_err(|e| e.to_string())
             })
             .await
             .unwrap_or_else(|_| Err("the reload failed".to_owned()));
             action.set_enabled(true);
             let Some(ui) = weak.upgrade() else { return };
-            let found = match found {
+            let (found, updated) = match found {
                 Ok(found) => found,
                 Err(e) => return ui.toast_error_message(&format!("Could not reload mods: {e}")),
             };
@@ -59,17 +64,20 @@ impl Window {
             if rescan {
                 ui.scan();
             }
-            ui.toasts.add_toast(adw::Toast::builder().title(summary(&added, &removed)).timeout(8).build());
+            ui.toasts.add_toast(adw::Toast::builder().title(summary(&added, &updated, &removed)).timeout(8).build());
             then(&ui);
         });
     }
 }
 
-/// "2 new mods: A, B · Gigastructural Engineering was removed"
-fn summary(added: &[String], removed: &[String]) -> String {
+/// "2 new mods: A, B · 1 updated: C · Gigastructural Engineering was removed"
+fn summary(added: &[String], updated: &[String], removed: &[String]) -> String {
     let mut parts = Vec::new();
     if !added.is_empty() {
         parts.push(format!("{}: {}", plural(added.len(), "new mod", "new mods"), names(added)));
+    }
+    if !updated.is_empty() {
+        parts.push(format!("{} updated: {}", updated.len(), names(updated)));
     }
     match removed.len() {
         0 => {}
@@ -103,11 +111,12 @@ mod tests {
 
     #[test]
     fn summarises_what_changed() {
-        assert_eq!(summary(&[], &[]), "Mods reloaded, none added or removed");
-        assert_eq!(summary(&strings(&["A", "B"]), &[]), "2 new mods: A, B");
-        assert_eq!(summary(&[], &strings(&["Giga"])), "Giga was removed");
+        assert_eq!(summary(&[], &[], &[]), "Mods reloaded, none added or removed");
+        assert_eq!(summary(&strings(&["A", "B"]), &[], &[]), "2 new mods: A, B");
+        assert_eq!(summary(&[], &strings(&["C"]), &[]), "1 updated: C");
+        assert_eq!(summary(&[], &[], &strings(&["Giga"])), "Giga was removed");
         assert_eq!(
-            summary(&strings(&["A", "B", "C", "D", "E"]), &strings(&["X", "Y"])),
+            summary(&strings(&["A", "B", "C", "D", "E"]), &[], &strings(&["X", "Y"])),
             "5 new mods: A, B, C and 2 more · 2 mods were removed: X, Y"
         );
     }

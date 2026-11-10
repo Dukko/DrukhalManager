@@ -82,9 +82,15 @@ pub fn stellaris_user_dir() -> PathBuf {
     crate::sandbox::data_dir().join("Paradox Interactive/Stellaris")
 }
 
-/// Values of every `"key" "value"` pair named `key` in a Valve KeyValues
-/// document, at any depth. Enough for `libraryfolders.vdf`.
-fn vdf_values(src: &str, key: &str) -> Vec<String> {
+#[derive(Debug, PartialEq)]
+enum Token {
+    Str(String),
+    Open,
+    Close,
+}
+
+/// Splits a Valve KeyValues document (`.vdf`, `.acf`) into tokens.
+fn vdf_tokens(src: &str) -> Vec<Token> {
     let mut tokens = Vec::new();
     let mut chars = src.chars().peekable();
     while let Some(c) = chars.next() {
@@ -102,9 +108,10 @@ fn vdf_values(src: &str, key: &str) -> Vec<String> {
                         _ => s.push(c),
                     }
                 }
-                tokens.push(Some(s));
+                tokens.push(Token::Str(s));
             }
-            '{' | '}' => tokens.push(None),
+            '{' => tokens.push(Token::Open),
+            '}' => tokens.push(Token::Close),
             '/' if chars.peek() == Some(&'/') => {
                 for c in chars.by_ref() {
                     if c == '\n' {
@@ -116,17 +123,64 @@ fn vdf_values(src: &str, key: &str) -> Vec<String> {
         }
     }
     tokens
+}
+
+/// Values of every `"key" "value"` pair named `key` in a Valve KeyValues
+/// document, at any depth. Enough for `libraryfolders.vdf`.
+fn vdf_values(src: &str, key: &str) -> Vec<String> {
+    vdf_tokens(src)
         .windows(2)
         .filter_map(|w| match (&w[0], &w[1]) {
-            (Some(k), Some(v)) if k.eq_ignore_ascii_case(key) => Some(v.clone()),
+            (Token::Str(k), Token::Str(v)) if k.eq_ignore_ascii_case(key) => Some(v.clone()),
             _ => None,
         })
         .collect()
 }
 
+/// The Workshop items Steam has installed for an app, from the manifest next
+/// to its content folder (`steamapps/workshop/appworkshop_<app>.acf`).
+/// `content_dir` is `steamapps/workshop/content/<app>`. `None` when there is
+/// no readable manifest.
+pub fn installed_items(content_dir: &Path) -> Option<Vec<u64>> {
+    let app = content_dir.file_name()?.to_str()?;
+    let acf = content_dir.parent()?.parent()?.join(format!("appworkshop_{app}.acf"));
+    Some(installed_in(&std::fs::read_to_string(acf).ok()?))
+}
+
+fn installed_in(src: &str) -> Vec<u64> {
+    let tokens = vdf_tokens(src);
+    let Some(start) = tokens.windows(2).position(|w| matches!(&w[0], Token::Str(k) if k == "WorkshopItemsInstalled") && w[1] == Token::Open) else {
+        return Vec::new();
+    };
+    let mut items = Vec::new();
+    let mut depth = 0;
+    for (i, token) in tokens.iter().enumerate().skip(start + 1) {
+        match token {
+            Token::Open => depth += 1,
+            Token::Close => {
+                depth -= 1;
+                if depth == 0 {
+                    break;
+                }
+            }
+            // Item ids are the keys of the blocks directly inside.
+            Token::Str(key) if depth == 1 && tokens.get(i + 1) == Some(&Token::Open) => items.extend(key.parse::<u64>().ok()),
+            Token::Str(_) => {}
+        }
+    }
+    items
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn lists_installed_workshop_items() {
+        let acf = "\"AppWorkshop\"\n{\n\t\"appid\"\t\"281990\"\n\t\"WorkshopItemsInstalled\"\n\t{\n\t\t\"865040033\"\n\t\t{\n\t\t\t\"size\"\t\"1\"\n\t\t}\n\t\t\"1067631798\"\n\t\t{\n\t\t\t\"size\"\t\"2\"\n\t\t}\n\t}\n\t\"WorkshopItemDetails\"\n\t{\n\t\t\"999\"\n\t\t{\n\t\t}\n\t}\n}\n";
+        assert_eq!(installed_in(acf), [865040033, 1067631798]);
+        assert_eq!(installed_in("\"AppWorkshop\" { }"), Vec::<u64>::new());
+    }
 
     #[test]
     fn reports_links_to_missing_folders() {

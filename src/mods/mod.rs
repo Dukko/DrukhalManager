@@ -5,6 +5,7 @@ pub mod checks;
 pub mod collections;
 mod descriptor;
 pub mod repair;
+pub mod sync;
 pub mod load_order;
 
 pub use descriptor::Descriptor;
