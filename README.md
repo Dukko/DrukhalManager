@@ -36,9 +36,21 @@ Built with Rust, GTK4 and libadwaita.
 ## Merging conflicts
 
 The Conflicts page lists every file and object that more than one enabled mod
-changes. For an object conflict, **Merge…** sends each mod's version, plus the
-base game's version when it can be found, to an AI model. You get back a
-combined definition that you can review and edit before saving it.
+changes in a sidebar, grouped by folder, with a search, a filter by mod and
+each conflict's status. Selecting one shows the versions side by side, with
+the lines and words that differ highlighted and both sides scrolling
+together. The arrow buttons (Alt+Up and Alt+Down) step through the
+differences, **Base Game** marks what each version changed from the game's own
+version instead, and **Ignore Spacing** skips lines that only differ in
+indentation.
+
+An object conflict is resolved two versions at a time. Keep either one, copy
+single differences across with **Take Change**, or **Merge with AI**, which
+sends both versions, plus the base game's version when it can be found, to an
+AI model. The result so far stays on the left and the next mod's version
+slides in on the right, until one result is left. Review or edit it, compare
+it with any version, and **Save to Patch**. For an overridden file, the chips
+above the cards pick which two copies to compare.
 
 When several mods ship the same file, the game only uses the last copy.
 **Merge…** on an overridden script or localisation file splits every copy
@@ -59,9 +71,10 @@ and flags the objects it touched. **Fix with AI** then restores the intended
 nesting of just those objects. The fixed copy is saved through the merged
 patch, so the mod itself is never modified.
 
-Without AI, **Use This Version** keeps one mod's version as it is, and the
-eye button ignores a conflict, or a whole folder, so it no longer shows or
-counts.
+The eye button ignores a conflict so it no longer shows or counts, and each
+folder's menu ignores the whole folder or merges all of its objects with AI.
+Merges whose mods changed since they were saved are listed under **Outdated
+Merges**, to merge again or remove.
 
 Choose the AI provider in Preferences (Ctrl+,):
 

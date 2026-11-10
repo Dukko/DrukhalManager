@@ -55,6 +55,10 @@ struct Window {
     repair_banner: adw::Banner,
     stack: adw::ViewStack,
     conflicts_page: adw::Bin,
+    /// The Conflicts page's state, kept while the page shows.
+    conflicts_view: RefCell<Option<Rc<dyn std::any::Any>>>,
+    /// What the Conflicts page remembers between rebuilds.
+    conflict_session: Rc<RefCell<crate::conflicts_view::Session>>,
     analysis: RefCell<Option<Rc<Analysis>>>,
     scanning: Cell<bool>,
     /// Whether the Conflicts page shows ignored conflicts (dimmed).
@@ -245,8 +249,9 @@ pub fn build(
         "view-list-symbolic",
     );
     let conflicts_page = adw::Bin::new();
+    conflicts_page.set_vexpand(true);
     stack.add_titled_with_icon(
-        &scrolled_page(&conflicts_page),
+        &conflicts_page,
         Some("conflicts"),
         "Conflicts",
         "dialog-warning-symbolic",
@@ -302,6 +307,8 @@ pub fn build(
         repair_banner: repair_banner.clone(),
         stack: stack.clone(),
         conflicts_page,
+        conflicts_view: RefCell::new(None),
+        conflict_session: Rc::default(),
         analysis: RefCell::new(None),
         scanning: Cell::new(false),
         show_ignored: Cell::new(false),
