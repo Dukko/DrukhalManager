@@ -30,6 +30,8 @@ pub struct Analysis {
     /// itself is not scanned, so these can differ).
     pub load_positions: Vec<usize>,
     pub report: Report,
+    /// Object conflicts that need no AI to merge, by index, with why.
+    pub simple: std::collections::HashMap<usize, String>,
 }
 
 /// What the page needs from the window to offer merging.
@@ -417,6 +419,15 @@ fn object_row(analysis: &Analysis, index: usize, hooks: &Rc<MergeHooks>) -> adw:
     let r = row(&c.key, &names.join(" · "));
     let files: Vec<String> = c.definitions.iter().map(|d| format!("{}: {}", analysis.name(d.mod_position), d.file)).collect();
     r.set_tooltip_text(Some(&files.join("\n")));
+    if let Some(reason) = analysis.simple.get(&index) {
+        r.add_prefix(
+            &gtk::Image::builder()
+                .icon_name("media-flash-symbolic")
+                .tooltip_text(format!("Simple merge, no AI needed: {reason}"))
+                .css_classes(["accent"])
+                .build(),
+        );
+    }
     r.add_suffix(&ignore_button(hooks, object_key(&c.category, &c.key), r.upcast_ref(), "Ignore this conflict"));
 
     let (merged, button) = merge_controls((hooks.is_merged)(&c.category, &c.key), hooks.stale_object(&c.category, &c.key));

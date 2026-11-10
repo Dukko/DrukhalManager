@@ -12,6 +12,7 @@ use gtk::{gio, glib};
 use crate::merge::ai::{self, Provider};
 use crate::merge::patch::{Merge, Print, VANILLA};
 use crate::merge::source::{self, Source};
+use crate::merge::trivial;
 use crate::paradox::script;
 use crate::thinking_view::{self, ThinkingView};
 
@@ -133,6 +134,14 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
             }));
             for s in result.vanilla.iter().chain(&result.sources) {
                 versions.add(&version_row(s, &buffer, &notes));
+            }
+            // Nothing to merge when one version already keeps every change.
+            if buffer.char_count() == 0
+                && let Some(resolved) = result.mergeable().then(|| trivial::resolve(result.vanilla.as_ref(), &result.sources)).flatten()
+            {
+                buffer.set_text(&result.sources[resolved.index].text);
+                notes.set_label(&format!("{}, so that version keeps every change and is filled in above. Save it as it is, or Merge to ask the AI anyway.", resolved.reason));
+                notes.set_visible(true);
             }
             merge_button.set_sensitive(result.mergeable());
             loaded.replace(Some(result));

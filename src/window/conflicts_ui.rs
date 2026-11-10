@@ -53,7 +53,7 @@ impl Window {
                 .enumerate()
                 .filter(|(_, m)| m.id != patch::ID)
                 .collect();
-            let names = scanned
+            let names: Vec<String> = scanned
                 .iter()
                 .map(|(_, m)| display_name(m).to_owned())
                 .collect();
@@ -70,6 +70,8 @@ impl Window {
         };
 
         let weak = Rc::downgrade(self);
+        let game_dir = self.game.as_ref().map(|g| g.dir.clone());
+        let labels: Vec<String> = names.clone();
         glib::spawn_future_local(async move {
             let result = gio::spawn_blocking(move || {
                 // Zipped mods are read from an unpacked copy; one that can't
@@ -82,14 +84,16 @@ impl Window {
                         input.root = Some(files);
                     }
                 }
-                let roots = inputs.iter().map(|i| i.root.clone().filter(|r| r.is_dir())).collect();
-                (conflicts::analyze(&inputs), roots)
+                let roots: Vec<_> = inputs.iter().map(|i| i.root.clone().filter(|r| r.is_dir())).collect();
+                let report = conflicts::analyze(&inputs);
+                let simple = crate::merge::trivial::simple_conflicts(&report, &roots, &labels, game_dir.as_deref());
+                (report, roots, simple)
             })
             .await;
             let Some(ui) = weak.upgrade() else { return };
             ui.scanning.set(false);
             match result {
-                Ok((report, roots)) => {
+                Ok((report, roots, simple)) => {
                     ui.check_stale();
                     ui.analysis.replace(Some(Rc::new(Analysis {
                         revision: Cell::new(revision),
@@ -98,6 +102,7 @@ impl Window {
                         roots,
                         load_positions,
                         report,
+                        simple,
                     })));
                     ui.render_conflicts();
                     // Shows the per-mod counts, and rescans if the load order

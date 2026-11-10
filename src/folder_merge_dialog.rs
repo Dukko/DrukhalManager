@@ -13,6 +13,7 @@ use gtk::{gio, glib};
 use crate::merge::ai::{self, Estimate, Price, Provider, Usage};
 use crate::merge::patch::Print;
 use crate::merge::source;
+use crate::merge::trivial::{self, Resolved};
 use crate::merge_dialog::{self, Loaded};
 use crate::thinking_view::{self, ThinkingView};
 
@@ -50,6 +51,8 @@ struct Row {
     /// Shows or hides the merged script.
     show: gtk::ToggleButton,
     result: gtk::Label,
+    /// Set when one version can be used as it is, without the AI.
+    resolved: Option<Resolved>,
 }
 
 impl Row {
@@ -115,20 +118,27 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
                 total += r.estimate;
             }
             let n = chosen.len();
+            let free = chosen.iter().filter(|r| r.resolved.is_some()).count();
+            let calls = n - free;
             start.set_label(&if n == 0 { "Merge".to_owned() } else { format!("Merge {}", crate::conflicts_view::plural(n, "Object", "Objects")) });
-            start.set_sensitive(n > 0 || !has_provider);
-            if !has_provider {
+            start.set_sensitive(n > 0);
+            if calls > 0 && !has_provider {
                 start.set_label("Set Up AI…");
-                start.set_sensitive(true);
             }
             if n == 0 {
                 summary.set_label("Nothing selected to merge");
                 detail.set_label("");
                 return;
             }
+            let without_ai = if free > 0 { format!(" · {free} without AI") } else { String::new() };
+            if calls == 0 {
+                summary.set_label(&format!("No AI calls needed · {} can be used as they are", crate::conflicts_view::plural(free, "version", "versions")));
+                detail.set_label("Each of these was changed by only one mod, or is the same in every mod.");
+                return;
+            }
             summary.set_label(&format!(
-                "{} · about {} tokens in, {}–{} out",
-                crate::conflicts_view::plural(n, "call", "calls"),
+                "{}{without_ai} · about {} tokens in, {}–{} out",
+                crate::conflicts_view::plural(calls, "AI call", "AI calls"),
                 tokens(total.input),
                 tokens(total.output_low),
                 tokens(total.output_high)
@@ -215,10 +225,15 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
                         }
                     }
                 ));
+                let resolved = l.mergeable().then(|| trivial::resolve(l.vanilla.as_ref(), &l.sources)).flatten();
                 let estimate = if l.mergeable() {
                     check.set_active(!item.merged);
-                    row.set_subtitle(&if item.merged { format!("Already merged · {}", names.join(" · ")) } else { names.join(" · ") });
-                    ai::estimate(&request.category, &item.key, l.vanilla.as_ref(), &l.sources)
+                    let mut subtitle = names.join(" · ");
+                    if let Some(r) = &resolved {
+                        subtitle = format!("No AI needed: {} · {subtitle}", r.reason);
+                    }
+                    row.set_subtitle(&if item.merged { format!("Already merged · {subtitle}") } else { subtitle });
+                    if resolved.is_some() { Estimate::default() } else { ai::estimate(&request.category, &item.key, l.vanilla.as_ref(), &l.sources) }
                 } else {
                     check.set_sensitive(false);
                     row.set_subtitle(&if l.missing.is_empty() { "Nothing to merge".to_owned() } else { format!("Could not find it in: {}", l.missing.join(", ")) });
@@ -227,7 +242,7 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
                 let update = update.clone();
                 check.connect_active_notify(move |_| update());
                 objects.add(&row);
-                let r = Row { check, row, state, estimate, thinking, show, result };
+                let r = Row { check, row, state, estimate, thinking, show, result, resolved };
                 if let Some(saved) = &item.saved {
                     r.set_result(saved);
                 }
@@ -286,13 +301,15 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
         #[weak]
         stop,
         move |start| {
-            let Some(provider) = request.provider.clone() else {
-                dialog.close();
-                (request.open_preferences)();
-                return;
-            };
             let chosen: Vec<usize> = rows.borrow().iter().enumerate().filter(|(_, r)| r.check.is_active()).map(|(i, _)| i).collect();
             if chosen.is_empty() {
+                return;
+            }
+            let needs_ai = chosen.iter().any(|&i| rows.borrow()[i].resolved.is_none());
+            let provider = request.provider.clone();
+            if needs_ai && provider.is_none() {
+                dialog.close();
+                (request.open_preferences)();
                 return;
             }
             running.set(true);
@@ -304,7 +321,8 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
             }
             let (request, rows, loaded, running, cancelled) = (request.clone(), rows.clone(), loaded.clone(), running.clone(), cancelled.clone());
             glib::spawn_future_local(async move {
-                let (mut saved, mut failed, mut used, mut counted) = (0, 0, Usage::default(), false);
+                let (mut saved, mut failed, mut used, mut counted, mut without_ai) = (0, 0, Usage::default(), false, 0);
+                let mut ai_calls = 0;
                 let total = chosen.len();
                 for (done, &i) in chosen.iter().enumerate() {
                     if cancelled.get() {
@@ -313,6 +331,36 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
                     let key = request.items[i].key.clone();
                     progress.set_fraction(done as f64 / total as f64);
                     progress.set_text(Some(&format!("Merging {} of {total}: {key}", done + 1)));
+                    // One version keeps every change: save it without asking.
+                    let resolved = rows.borrow()[i].resolved.clone();
+                    if let Some(resolved) = resolved {
+                        let (text, prints) = {
+                            let l = &loaded.borrow()[i];
+                            (l.sources[resolved.index].text.clone(), l.prints.clone())
+                        };
+                        let outcome = merge_dialog::validate(&request.category, &key, &text).and_then(|script| (request.save)(&key, &script, prints));
+                        let rows = rows.borrow();
+                        let r = &rows[i];
+                        r.set_result(&text);
+                        let icon = match outcome {
+                            Ok(()) => {
+                                saved += 1;
+                                without_ai += 1;
+                                r.row.set_subtitle(&format!("Used as it is: {}", resolved.reason));
+                                gtk::Image::builder().icon_name("emblem-ok-symbolic").css_classes(["success"]).tooltip_text("Saved to the patch without AI").build()
+                            }
+                            Err(e) => {
+                                failed += 1;
+                                r.row.set_subtitle(&e);
+                                gtk::Image::builder().icon_name("dialog-warning-symbolic").css_classes(["warning"]).tooltip_text(e.as_str()).build()
+                            }
+                        };
+                        r.state.add_child(&icon);
+                        r.state.set_visible_child(&icon);
+                        continue;
+                    }
+                    let Some(provider) = provider.clone() else { continue };
+                    ai_calls += 1;
                     // The row being merged opens to show the model thinking.
                     let thinking = {
                         let rows = rows.borrow();
@@ -374,11 +422,16 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
                 progress.set_text(Some(&if skipped > 0 { format!("Stopped · {skipped} not merged") } else { "Done".to_owned() }));
                 stop.set_visible(false);
                 let mut line = format!("Merged {saved} of {total}");
+                if without_ai > 0 {
+                    line.push_str(&format!(" · {without_ai} without AI"));
+                }
                 if failed > 0 {
                     line.push_str(&format!(" · {failed} failed"));
                 }
                 summary.set_label(&line);
-                detail.set_label(&if counted {
+                detail.set_label(&if ai_calls == 0 {
+                    "No AI calls were needed".to_owned()
+                } else if counted {
                     let cost = used.cost.map(|c| format!(" · cost {}", dollars(c))).unwrap_or_default();
                     format!("Used {} tokens in and {} out{cost}", tokens(used.input), tokens(used.output))
                 } else {
