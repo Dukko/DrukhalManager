@@ -36,6 +36,12 @@
     <control>keyboard</control>
   </supports>
   <releases>
+    <release version="0.3.1" date="2026-11-09">
+      <description>
+        <p>Fixed the conflict scan failing when a mod has files with non-English characters in their names.</p>
+        <p>A failed scan now shows what went wrong.</p>
+      </description>
+    </release>
     <release version="0.3.0" date="2026-11-09">
       <description>
         <p>Conflicts that need no AI, because only one mod changed the object from the base game or every mod ships the same version, are marked on the Conflicts page. Merge All saves them directly, without calls or cost, and the merge dialog fills in the version to use.</p>
