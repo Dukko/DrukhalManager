@@ -127,7 +127,8 @@ impl Window {
         });
     }
 
-    /// Compares the patch's fingerprints with the enabled mods' files.
+    /// Compares the patch's fingerprints with the enabled mods' files and
+    /// the base game's.
     pub(super) fn check_stale(&self) {
         let stale = {
             let state = self.state.borrow();
@@ -139,10 +140,11 @@ impl Window {
             if let Some(game) = &self.game {
                 roots.insert(patch::VANILLA.to_owned(), game.dir.clone());
             }
+            let version = self.game.as_ref().and_then(|g| g.version.as_deref());
             self.patch
-                .borrow()
-                .as_ref()
-                .map(|p| p.stale(&roots))
+                .borrow_mut()
+                .as_mut()
+                .map(|p| p.recheck(&roots, version))
                 .unwrap_or_default()
         };
         self.stale.replace(stale);
@@ -218,7 +220,7 @@ impl Window {
             .await
             .unwrap_or_default();
             let Some(ui) = weak.upgrade() else { return };
-            match ui.with_patch(|p, _, _| p.track(object.as_ref(), &path, prints)) {
+            match ui.with_patch(|p, _, version| p.track(object.as_ref(), &path, prints, version)) {
                 Ok(()) => {
                     ui.check_stale();
                     ui.render_conflicts();

@@ -9,6 +9,7 @@
 //! the patches Irony Mod Manager writes
 //! (MIT, © 2020 Mario, https://github.com/bcssov/IronyModManager).
 
+use std::collections::{HashMap, HashSet};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
@@ -41,6 +42,10 @@ pub struct Merge {
     /// before fingerprints existed.
     #[serde(default)]
     pub prints: Vec<Print>,
+    /// The game version it was last checked against, to notice what an
+    /// update adds; `None` for merges saved before versions were recorded.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub game_version: Option<String>,
 }
 
 /// A fingerprint of one source of a merge, to notice when it changes.
@@ -86,6 +91,8 @@ pub struct Stale {
     /// Saved before fingerprints existed, so changes can't be noticed;
     /// [`Patch::track`] starts tracking it.
     pub untracked: bool,
+    /// Whether the base game changed it, rather than only its mods.
+    pub base_game: bool,
 }
 
 /// Why an untracked merge is listed.
@@ -131,6 +138,9 @@ pub struct FileMerge {
     pub sources: Vec<String>,
     #[serde(default)]
     pub prints: Vec<Print>,
+    /// As [`Merge::game_version`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub game_version: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -199,7 +209,7 @@ impl Patch {
         let target = self.root.join(path);
         std::fs::create_dir_all(target.parent().unwrap())?;
         write_atomic(&target, contents.as_bytes())?;
-        let merge = FileMerge { path: path.to_owned(), sources, prints };
+        let merge = FileMerge { path: path.to_owned(), sources, prints, game_version: game_version.map(str::to_owned) };
         match self.manifest.files.iter_mut().find(|f| f.path.eq_ignore_ascii_case(path)) {
             Some(existing) => *existing = merge,
             None => self.manifest.files.push(merge),
@@ -225,46 +235,115 @@ impl Patch {
         self.write_manifest()
     }
 
-    /// Merges whose sources changed since they were saved. `roots` maps the
-    /// enabled mods' descriptor ids, and [`VANILLA`], to their folders.
-    pub fn stale(&self, roots: &std::collections::HashMap<String, PathBuf>) -> Vec<Stale> {
-        let check = |prints: &[Print], text_of: &dyn Fn(&str) -> Option<String>, missing: &str| -> Vec<String> {
-            prints
-                .iter()
-                .filter_map(|p| {
-                    let Some(root) = roots.get(&p.mod_id) else {
-                        return Some(format!("{} isn't enabled any more", p.name));
-                    };
-                    let src = std::fs::read(root.join(&p.file)).ok().map(|b| String::from_utf8_lossy(&b).into_owned());
-                    match src.as_deref().and_then(|s| text_of(s)) {
-                        None => Some(format!("{} {missing}", p.name)),
-                        Some(text) if fingerprint(&text) != p.hash => Some(if p.mod_id == VANILLA { "The base game changed it in an update".to_owned() } else { format!("{} changed it", p.name) }),
-                        Some(_) => None,
-                    }
-                })
-                .collect()
+    /// Compares every merge with its sources as they are now and returns the
+    /// ones that changed since they were saved. `roots` maps the enabled
+    /// mods' descriptor ids, and [`VANILLA`], to their folders; without the
+    /// base game's folder its versions aren't checked. `game_version` is the
+    /// installed game's (e.g. `v4.5.3`).
+    ///
+    /// Along the way it records the game version each merge was checked
+    /// against, so that after an update it also notices definitions the base
+    /// game added, and follows base-game definitions that moved to another
+    /// file. That bookkeeping is saved if it changed.
+    pub fn recheck(&mut self, roots: &HashMap<String, PathBuf>, game_version: Option<&str>) -> Vec<Stale> {
+        let game_dir = roots.get(VANILLA).map(PathBuf::as_path);
+        let updated = |checked: Option<&str>| matches!((checked, game_version), (Some(was), Some(now)) if was != now);
+        let changed_in = |checked: Option<&str>| match (updated(checked), game_version) {
+            (true, Some(now)) => format!("The base game changed it in {now}"),
+            _ => "The base game changed it in an update".to_owned(),
         };
-        let mut stale = Vec::new();
-        for m in &self.manifest.merges {
-            let (category, key) = (m.category.clone(), m.key.clone());
-            if m.prints.is_empty() {
-                stale.push(Stale { object: Some((category, key)), path: m.file.clone(), reasons: vec![UNTRACKED.to_owned()], untracked: true });
-                continue;
+        let has_vanilla = |prints: &[Print]| prints.iter().any(|p| p.mod_id == VANILLA);
+
+        // Objects the base game didn't define when merged, but might since an
+        // update: looked up per folder, reading each game file once.
+        let mut added: HashSet<(String, String)> = HashSet::new();
+        if let (Some(dir), Some(_)) = (game_dir, game_version) {
+            let mut wanted: HashMap<&str, Vec<String>> = HashMap::new();
+            for m in &self.manifest.merges {
+                if !m.prints.is_empty() && !has_vanilla(&m.prints) && updated(m.game_version.as_deref()) {
+                    wanted.entry(&m.category).or_default().push(m.key.clone());
+                }
             }
-            let reasons = check(&m.prints, &|src| super::source::extract(&category, &key, src), "no longer defines it");
-            if !reasons.is_empty() {
-                stale.push(Stale { object: Some((m.category.clone(), m.key.clone())), path: m.file.clone(), reasons, untracked: false });
+            for (category, keys) in wanted {
+                added.extend(super::source::vanilla_many(dir, category, &keys).into_keys().map(|k| (category.to_owned(), k)));
             }
         }
-        for f in &self.manifest.files {
-            if f.prints.is_empty() {
-                stale.push(Stale { object: None, path: f.path.clone(), reasons: vec![UNTRACKED.to_owned()], untracked: true });
+
+        let mut stale = Vec::new();
+        let mut dirty = false;
+        for m in &mut self.manifest.merges {
+            let (category, key) = (m.category.clone(), m.key.clone());
+            if m.prints.is_empty() {
+                stale.push(Stale { object: Some((category, key)), path: m.file.clone(), reasons: vec![UNTRACKED.to_owned()], untracked: true, base_game: false });
                 continue;
             }
-            let reasons = check(&f.prints, &|src| Some(src.to_owned()), "no longer ships this file");
-            if !reasons.is_empty() {
-                stale.push(Stale { object: None, path: f.path.clone(), reasons, untracked: false });
+            let text_of = |src: &str| super::source::extract(&category, &key, src);
+            let mut check = Check::default();
+            for p in &mut m.prints {
+                if p.mod_id != VANILLA {
+                    check.mod_print(p, roots, &text_of, "no longer defines it");
+                    continue;
+                }
+                let Some(dir) = game_dir else { continue };
+                let mut now = read_text(dir, &p.file).and_then(|s| text_of(&s));
+                if now.is_none() {
+                    // Updates often move definitions between files.
+                    if let Some(v) = super::source::vanilla(dir, &category, &key) {
+                        if fingerprint(&v.text) == p.hash {
+                            p.file = v.file;
+                            dirty = true;
+                        }
+                        now = Some(v.text);
+                    }
+                }
+                match now {
+                    None => check.base_game("The base game no longer defines it".to_owned()),
+                    Some(text) if fingerprint(&text) != p.hash => check.base_game(changed_in(m.game_version.as_deref())),
+                    Some(_) => {}
+                }
             }
+            if added.contains(&(category.clone(), key.clone())) {
+                check.base_game(format!("The base game added it in {}", game_version.unwrap_or_default()));
+            }
+            dirty |= check.confirm(&mut m.game_version, game_dir, game_version);
+            if !check.reasons.is_empty() {
+                stale.push(Stale { object: Some((category, key)), path: m.file.clone(), base_game: check.base_game, reasons: check.reasons, untracked: false });
+            }
+        }
+        for f in &mut self.manifest.files {
+            if f.prints.is_empty() {
+                stale.push(Stale { object: None, path: f.path.clone(), reasons: vec![UNTRACKED.to_owned()], untracked: true, base_game: false });
+                continue;
+            }
+            let text_of = |src: &str| Some(src.to_owned());
+            let mut check = Check::default();
+            for p in &f.prints {
+                if p.mod_id != VANILLA {
+                    check.mod_print(p, roots, &text_of, "no longer ships this file");
+                    continue;
+                }
+                let Some(dir) = game_dir else { continue };
+                match read_text(dir, &p.file) {
+                    None => check.base_game("The base game no longer ships this file".to_owned()),
+                    Some(text) if fingerprint(&text) != p.hash => check.base_game(changed_in(f.game_version.as_deref())),
+                    Some(_) => {}
+                }
+            }
+            if let Some(dir) = game_dir
+                && !has_vanilla(&f.prints)
+                && updated(f.game_version.as_deref())
+                && dir.join(&f.path).is_file()
+            {
+                check.base_game(format!("The base game added this file in {}", game_version.unwrap_or_default()));
+            }
+            dirty |= check.confirm(&mut f.game_version, game_dir, game_version);
+            if !check.reasons.is_empty() {
+                stale.push(Stale { object: None, path: f.path.clone(), base_game: check.base_game, reasons: check.reasons, untracked: false });
+            }
+        }
+        if dirty && let Err(e) = self.write_manifest() {
+            // Only bookkeeping: the next check redoes it.
+            eprintln!("Could not update the merged patch's records: {e}");
         }
         stale
     }
@@ -278,15 +357,17 @@ impl Patch {
         }
     }
 
-    /// Records `prints` as what a merge's sources look like, so later
-    /// changes to them are noticed. For merges saved before fingerprints.
-    pub fn track(&mut self, object: Option<&(String, String)>, path: &str, prints: Vec<Print>) -> io::Result<()> {
+    /// Records `prints` as what a merge's sources look like in game version
+    /// `game_version`, so later changes to them are noticed. For merges
+    /// saved before fingerprints.
+    pub fn track(&mut self, object: Option<&(String, String)>, path: &str, prints: Vec<Print>, game_version: Option<&str>) -> io::Result<()> {
         let slot = match object {
-            Some((category, key)) => self.manifest.merges.iter_mut().find(|m| &m.category == category && &m.key == key).map(|m| &mut m.prints),
-            None => self.manifest.files.iter_mut().find(|f| f.path.eq_ignore_ascii_case(path)).map(|f| &mut f.prints),
+            Some((category, key)) => self.manifest.merges.iter_mut().find(|m| &m.category == category && &m.key == key).map(|m| (&mut m.prints, &mut m.game_version)),
+            None => self.manifest.files.iter_mut().find(|f| f.path.eq_ignore_ascii_case(path)).map(|f| (&mut f.prints, &mut f.game_version)),
         };
-        let Some(slot) = slot else { return Err(io::Error::new(io::ErrorKind::NotFound, "It is no longer in the patch")) };
+        let Some((slot, version)) = slot else { return Err(io::Error::new(io::ErrorKind::NotFound, "It is no longer in the patch")) };
         *slot = prints;
+        *version = game_version.map(str::to_owned);
         self.write_manifest()
     }
 
@@ -306,7 +387,7 @@ impl Patch {
         std::fs::create_dir_all(path.parent().unwrap())?;
         write_atomic(&path, render(category, key, script).as_bytes())?;
 
-        let merge = Merge { category: category.into(), key: key.into(), script: script.into(), sources, file, prints };
+        let merge = Merge { category: category.into(), key: key.into(), script: script.into(), sources, file, prints, game_version: game_version.map(str::to_owned) };
         match self.manifest.merges.iter_mut().find(|m| m.category == category && m.key == key) {
             Some(existing) => {
                 if existing.file != merge.file {
@@ -327,6 +408,54 @@ impl Patch {
         write_atomic(&self.root.join("descriptor.mod"), inner.as_bytes())?;
         write_atomic(&user_dir.join(ID), outer.as_bytes())
     }
+}
+
+/// What [`Patch::recheck`] found about one merge's sources.
+#[derive(Default)]
+struct Check {
+    reasons: Vec<String>,
+    /// Whether the base game's version changed, so the merge can't be
+    /// counted as checked against the current game.
+    base_game: bool,
+}
+
+impl Check {
+    fn base_game(&mut self, reason: String) {
+        self.reasons.push(reason);
+        self.base_game = true;
+    }
+
+    /// Compares a mod's source with `p`, `missing` saying what it means when
+    /// the mod no longer has it.
+    fn mod_print(&mut self, p: &Print, roots: &HashMap<String, PathBuf>, text_of: &dyn Fn(&str) -> Option<String>, missing: &str) {
+        let Some(root) = roots.get(&p.mod_id) else {
+            self.reasons.push(format!("{} isn't enabled any more", p.name));
+            return;
+        };
+        match read_text(root, &p.file).and_then(|s| text_of(&s)) {
+            None => self.reasons.push(format!("{} {missing}", p.name)),
+            Some(text) if fingerprint(&text) != p.hash => self.reasons.push(format!("{} changed it", p.name)),
+            Some(_) => {}
+        }
+    }
+
+    /// Records the merge as checked against `game_version`, unless the base
+    /// game changed it or wasn't looked at; whether that changed `checked`.
+    /// Merges from before versions were recorded are taken as made against
+    /// the current game, as [`Patch::track`] does for their mods.
+    fn confirm(&self, checked: &mut Option<String>, game_dir: Option<&Path>, game_version: Option<&str>) -> bool {
+        match (game_dir, game_version) {
+            (Some(_), Some(now)) if !self.base_game && checked.as_deref() != Some(now) => {
+                *checked = Some(now.to_owned());
+                true
+            }
+            _ => false,
+        }
+    }
+}
+
+fn read_text(root: &Path, file: &str) -> Option<String> {
+    std::fs::read(root.join(file)).ok().map(|b| String::from_utf8_lossy(&b).into_owned())
 }
 
 /// A descriptor's `supported_version` for the installed game: `v4.5.3`
@@ -423,15 +552,15 @@ mod tests {
         ];
         patch.save(&user, None, "common/buildings", "lab", "lab = { cost = 3 }", prints).unwrap();
         let mut roots: std::collections::HashMap<String, PathBuf> = [("mod/a.mod".to_owned(), a.clone()), ("mod/b.mod".to_owned(), b.clone()), (VANILLA.to_owned(), game.clone())].into();
-        assert!(patch.stale(&roots).is_empty(), "reformatting and unrelated objects don't count");
+        assert!(patch.recheck(&roots, None).is_empty(), "reformatting and unrelated objects don't count");
 
         std::fs::write(b.join("common/buildings/b.txt"), "lab = { cost = 5 }").unwrap();
         std::fs::write(game.join("common/buildings/00.txt"), "").unwrap();
         roots.remove("mod/a.mod");
-        let stale = patch.stale(&roots);
+        let stale = patch.recheck(&roots, None);
         assert_eq!(stale.len(), 1);
         assert_eq!(stale[0].object, Some(("common/buildings".into(), "lab".into())));
-        assert_eq!(stale[0].reasons, ["Vanilla no longer defines it", "A isn't enabled any more", "B changed it"]);
+        assert_eq!(stale[0].reasons, ["The base game no longer defines it", "A isn't enabled any more", "B changed it"]);
 
         patch.remove("common/buildings", "lab").unwrap();
         assert!(Patch::open(&user).unwrap().get("common/buildings", "lab").is_none());
@@ -458,7 +587,7 @@ mod tests {
         let mut patch = Patch::open(&user).unwrap();
         let mut roots: std::collections::HashMap<String, PathBuf> = [("mod/a.mod".to_owned(), a.clone()), ("mod/b.mod".to_owned(), b.clone()), (VANILLA.to_owned(), game.clone())].into();
 
-        let stale = patch.stale(&roots);
+        let stale = patch.recheck(&roots, None);
         assert_eq!(stale.len(), 2);
         assert!(stale.iter().all(|s| s.untracked && s.reasons == [UNTRACKED]));
         assert_eq!(patch.sources(stale[0].object.as_ref(), &stale[0].path).unwrap(), ["A", "B"]);
@@ -467,20 +596,82 @@ mod tests {
         let (ma, mb) = (("mod/a.mod".to_owned(), "A".to_owned(), a.clone()), ("mod/b.mod".to_owned(), "B".to_owned(), b.clone()));
         let prints = object_prints("common/buildings", "lab", Some(&game), &[(ma.clone(), "common/buildings/a.txt".into()), (mb.clone(), "common/buildings/b.txt".into())]);
         assert_eq!(prints.iter().map(|p| p.mod_id.as_str()).collect::<Vec<_>>(), [VANILLA, "mod/a.mod", "mod/b.mod"]);
-        patch.track(stale[0].object.as_ref(), &stale[0].path, prints).unwrap();
-        patch.track(None, "common/buildings/shared.txt", file_prints("common/buildings/shared.txt", Some(&game), &[ma, mb])).unwrap();
+        patch.track(stale[0].object.as_ref(), &stale[0].path, prints, None).unwrap();
+        patch.track(None, "common/buildings/shared.txt", file_prints("common/buildings/shared.txt", Some(&game), &[ma, mb]), None).unwrap();
         let mut patch = Patch::open(&user).unwrap();
-        assert!(patch.stale(&roots).is_empty(), "tracked and unchanged");
+        assert!(patch.recheck(&roots, None).is_empty(), "tracked and unchanged");
 
         // From now on, changes are noticed.
         std::fs::write(b.join("common/buildings/b.txt"), "lab = { cost = 9 }").unwrap();
         roots.remove("mod/a.mod");
-        let stale = patch.stale(&roots);
+        let stale = patch.recheck(&roots, None);
         assert_eq!(stale.iter().map(|s| (s.untracked, s.reasons.clone())).collect::<Vec<_>>(), [
             (false, vec!["A isn't enabled any more".to_owned(), "B changed it".to_owned()]),
             (false, vec!["A isn't enabled any more".to_owned()]),
         ]);
-        assert!(patch.track(Some(&("events".into(), "gone".into())), "", vec![]).is_err());
+        assert!(patch.track(Some(&("events".into(), "gone".into())), "", vec![], None).is_err());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn rechecks_after_a_game_update() {
+        let root = std::env::temp_dir().join(format!("drukhal-update-{}", std::process::id()));
+        let (user, a, b, game) = (root.join("user"), root.join("a"), root.join("b"), root.join("game"));
+        let write = |dir: &Path, file: &str, text: &str| {
+            std::fs::create_dir_all(dir.join(file).parent().unwrap()).unwrap();
+            std::fs::write(dir.join(file), text).unwrap();
+        };
+        for dir in [&a, &b] {
+            write(dir, "common/buildings/m.txt", "lab = {}\nfarm = {}\nmine = {}");
+            write(dir, "interface/x.gui", "guiTypes = {}");
+        }
+        write(&game, "common/buildings/00.txt", "lab = { cost = 0 }");
+        std::fs::create_dir_all(user.join("mod")).unwrap();
+        let mods = [(("mod/a.mod".to_owned(), "A".to_owned(), a.clone()), "common/buildings/m.txt".to_owned()), (("mod/b.mod".to_owned(), "B".to_owned(), b.clone()), "common/buildings/m.txt".to_owned())];
+        let mut patch = Patch::open(&user).unwrap();
+        for key in ["lab", "farm", "mine"] {
+            let prints = object_prints("common/buildings", key, Some(&game), &mods);
+            patch.save(&user, Some("v4.5.3"), "common/buildings", key, &format!("{key} = {{}}"), prints).unwrap();
+        }
+        let file_mods: Vec<SourceMod> = mods.iter().map(|(m, _)| m.clone()).collect();
+        patch.save_file(&user, Some("v4.5.3"), "interface/x.gui", "guiTypes = {}", file_prints("interface/x.gui", Some(&game), &file_mods)).unwrap();
+        let roots: HashMap<String, PathBuf> = [("mod/a.mod".to_owned(), a.clone()), ("mod/b.mod".to_owned(), b.clone()), (VANILLA.to_owned(), game.clone())].into();
+        assert!(patch.recheck(&roots, Some("v4.5.3")).is_empty());
+
+        // Without the base game's folder, its versions aren't checked.
+        let mods_only: HashMap<String, PathBuf> = roots.iter().filter(|(id, _)| *id != VANILLA).map(|(k, v)| (k.clone(), v.clone())).collect();
+        assert!(patch.recheck(&mods_only, Some("v4.6.0")).is_empty(), "nothing to blame on an unknown game");
+
+        // The update moves lab to another file unchanged, changes nothing
+        // about mine, and adds farm and the interface file.
+        std::fs::remove_file(game.join("common/buildings/00.txt")).unwrap();
+        write(&game, "common/buildings/01.txt", "lab = { cost = 0 }\nfarm = { cost = 7 }");
+        write(&game, "interface/x.gui", "guiTypes = { new = yes }");
+        let stale = patch.recheck(&roots, Some("v4.6.0"));
+        assert_eq!(stale.iter().map(|s| (s.path.as_str(), s.reasons.clone(), s.base_game)).collect::<Vec<_>>(), [
+            (file_for("common/buildings", "farm").as_str(), vec!["The base game added it in v4.6.0".to_owned()], true),
+            ("interface/x.gui", vec!["The base game added this file in v4.6.0".to_owned()], true),
+        ]);
+
+        // The unchanged merges count as checked against the new version,
+        // and lab's fingerprint follows it to its new file.
+        let mut patch = Patch::open(&user).unwrap();
+        assert_eq!(patch.get("common/buildings", "lab").unwrap().game_version.as_deref(), Some("v4.6.0"));
+        assert_eq!(patch.get("common/buildings", "lab").unwrap().prints[0].file, "common/buildings/01.txt");
+        assert_eq!(patch.get("common/buildings", "mine").unwrap().game_version.as_deref(), Some("v4.6.0"));
+        assert_eq!(patch.get("common/buildings", "farm").unwrap().game_version.as_deref(), Some("v4.5.3"), "still outdated");
+        assert_eq!(patch.recheck(&roots, Some("v4.6.0")).len(), 2, "until re-merged");
+
+        // A later change to lab names the update it came with.
+        write(&game, "common/buildings/01.txt", "lab = { cost = 1 }\nfarm = { cost = 7 }");
+        let stale = patch.recheck(&roots, Some("v4.6.1"));
+        assert_eq!(stale[0].reasons, ["The base game changed it in v4.6.1"]);
+
+        // Merges from before versions were recorded are taken as made
+        // against the installed game.
+        patch.manifest.merges.iter_mut().for_each(|m| m.game_version = None);
+        patch.recheck(&roots, Some("v4.6.1"));
+        assert_eq!(patch.get("common/buildings", "mine").unwrap().game_version.as_deref(), Some("v4.6.1"));
         std::fs::remove_dir_all(root).unwrap();
     }
 

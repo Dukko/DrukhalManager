@@ -644,7 +644,7 @@ impl Page {
                 }
                 (Status::Attention, parts.join(" · "))
             }
-            Item::Outdated => (Status::Attention, "Mods changed since they were merged".into()),
+            Item::Outdated => (Status::Attention, outdated_summary(&self.hooks.stale.borrow()).into()),
             Item::Untracked => (Status::Attention, "Saved by an older version".into()),
         }
     }
@@ -777,7 +777,7 @@ impl Page {
             }
             Status::InProgress => gtk::Box::builder().css_classes(["status-dot", "progress"]).tooltip_text("Being merged").build().upcast(),
             Status::Saved => icon("emblem-ok-symbolic", "success", "Saved to the merged patch"),
-            Status::Outdated => icon("dialog-warning-symbolic", "warning", "The mods changed since this was merged"),
+            Status::Outdated => icon("dialog-warning-symbolic", "warning", "Its mods or the base game changed since this was merged"),
             Status::Ignored => icon("view-conceal-symbolic", "dim-label", "Ignored"),
             Status::Attention => icon("dialog-warning-symbolic", "warning", ""),
         };
@@ -977,14 +977,15 @@ impl Page {
     }
 
     fn stale_view(self: &Rc<Self>, untracked: bool) -> gtk::Widget {
-        let (title, description) = if untracked {
-            ("Merges to Check", "These were merged by an older version of DrukhalManager, which didn't record what the mods looked like, so their updates can't be noticed. If one still looks right, keep it to track changes from now on; otherwise re-merge it from the list, or remove it.")
-        } else {
-            ("Outdated Merges", "Mods changed since these were merged or fixed, so the patch may be undoing their updates. Re-merge them from the list, or remove them from the patch.")
-        };
-        let header = self.detail_header(title, if untracked { "Saved by an older version" } else { "The mods changed since" });
-        let intro = gtk::Label::builder().label(description).wrap(true).xalign(0.0).css_classes(["dim-label"]).build();
         let all = self.hooks.stale.borrow().clone();
+        let (title, subtitle, description) = if untracked {
+            ("Merges to Check", "Saved by an older version", "These were merged by an older version of DrukhalManager, which didn't record what the mods looked like, so their updates can't be noticed. If one still looks right, keep it to track changes from now on; otherwise re-merge it from the list, or remove it.".to_owned())
+        } else {
+            let what = if all.iter().any(|s| !s.untracked && s.base_game) { "Mods or the base game" } else { "Mods" };
+            ("Outdated Merges", outdated_summary(&all), format!("{what} changed since these were merged or fixed, so the patch may be undoing their updates. Re-merge them from the list, or remove them from the patch."))
+        };
+        let header = self.detail_header(title, subtitle);
+        let intro = gtk::Label::builder().label(&description).wrap(true).xalign(0.0).css_classes(["dim-label"]).build();
         let stale: Vec<&Stale> = all.iter().filter(|s| s.untracked == untracked).collect();
         scrolled_detail(&[header.widget.upcast(), intro.upcast(), self.stale_list(&stale).upcast()])
     }
@@ -1148,6 +1149,16 @@ fn scrolled_detail(children: &[gtk::Widget]) -> gtk::Widget {
 
 /// The merged-state icon and the merge button for a row. An out-of-date
 /// merge shows a warning with the reasons instead of a check mark.
+/// What changed since the outdated merges were saved.
+fn outdated_summary(stale: &[Stale]) -> &'static str {
+    let outdated = || stale.iter().filter(|s| !s.untracked);
+    match (outdated().any(|s| s.base_game), outdated().all(|s| s.base_game)) {
+        (true, true) => "The base game changed since they were merged",
+        (true, false) => "Mods or the base game changed since they were merged",
+        _ => "Mods changed since they were merged",
+    }
+}
+
 fn merge_controls(is_merged: bool, stale: Option<&[String]>) -> (gtk::Image, gtk::Button) {
     let merged = gtk::Image::builder().icon_name("emblem-ok-symbolic").tooltip_text("Merged into the patch").css_classes(["success"]).visible(is_merged).build();
     let label = match (stale, is_merged) {
