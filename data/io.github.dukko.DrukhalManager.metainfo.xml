@@ -36,6 +36,12 @@
     <control>keyboard</control>
   </supports>
   <releases>
+    <release version="0.3.5" date="2026-11-10">
+      <description>
+        <p>When an AI merge comes back broken, the error goes back to the model once for a corrected version before the merge counts as failed.</p>
+        <p>Merge All can merge several objects at once; set how many in Preferences. Merges wait and try again when the provider is rate limited.</p>
+      </description>
+    </release>
     <release version="0.3.4" date="2026-11-10">
       <description>
         <p>Ignore rules: hide conflicts by path, such as gfx/** or localisation/*, optionally only for an exact set of mods. Open them with Rules… on the Conflicts page, which previews how many conflicts each rule hides.</p>
