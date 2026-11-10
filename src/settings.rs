@@ -16,6 +16,9 @@ pub struct Settings {
     /// Conflicts the user chose to ignore, as keys from `conflicts_view`.
     #[serde(default)]
     pub ignored: std::collections::BTreeSet<String>,
+    /// Rules that hide conflicts by path; see `merge::ignore_rules`.
+    #[serde(default)]
+    pub ignore_rules: String,
     #[serde(default)]
     pub game: GameOptions,
     #[serde(default)]
@@ -64,7 +67,7 @@ fn default_provider() -> Provider {
 
 impl Default for Settings {
     fn default() -> Self {
-        Self { provider: default_provider(), ignored: Default::default(), game: Default::default(), updates: Default::default(), key_in_keyring: false }
+        Self { provider: default_provider(), ignored: Default::default(), ignore_rules: String::new(), game: Default::default(), updates: Default::default(), key_in_keyring: false }
     }
 }
 
@@ -147,7 +150,7 @@ mod tests {
     fn saves_privately_and_loads() {
         let path = std::env::temp_dir().join(format!("drukhal-settings-{}/settings.json", std::process::id()));
         assert_eq!(Settings::load(&path), Settings::default());
-        let s = Settings { provider: Provider::OpenAiCompatible { base_url: "http://localhost:11434/v1".into(), model: "qwen".into(), api_key: String::new() }, ignored: ["file:x".to_owned()].into(), game: GameOptions { launch_args: "-debug".into(), close_after_launch: true, ..Default::default() }, updates: UpdateOptions { check_at_startup: true, skipped_version: Some("0.2.0".into()) }, key_in_keyring: false };
+        let s = Settings { provider: Provider::OpenAiCompatible { base_url: "http://localhost:11434/v1".into(), model: "qwen".into(), api_key: String::new() }, ignored: ["file:x".to_owned()].into(), ignore_rules: "gfx/**".into(), game: GameOptions { launch_args: "-debug".into(), close_after_launch: true, ..Default::default() }, updates: UpdateOptions { check_at_startup: true, skipped_version: Some("0.2.0".into()) }, key_in_keyring: false };
         s.save(&path).unwrap();
         assert_eq!(Settings::load(&path), s);
         assert!(s.ready_provider().is_some());
