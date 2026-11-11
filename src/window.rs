@@ -519,6 +519,16 @@ pub fn build(
         }
     });
     window.add_action(&get_requirements);
+    for (name, ignore) in [("ignore-requirement", true), ("unignore-requirement", false)] {
+        let action = gio::SimpleAction::new(name, Some(glib::VariantTy::UINT64));
+        let weak = Rc::downgrade(&ui);
+        action.connect_activate(move |_, id| {
+            if let (Some(ui), Some(id)) = (weak.upgrade(), id.and_then(|i| i.get::<u64>())) {
+                ui.ignore_requirement(id, ignore);
+            }
+        });
+        window.add_action(&action);
+    }
     let show_conflicts = gio::SimpleAction::new("show-conflicts", Some(glib::VariantTy::UINT32));
     let weak = Rc::downgrade(&ui);
     show_conflicts.connect_activate(move |_, index| {

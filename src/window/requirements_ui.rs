@@ -4,6 +4,7 @@
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
+use adw::prelude::*;
 use gtk::{gio, glib};
 
 use super::Window;
@@ -22,7 +23,30 @@ const NO_KEY: Duration = Duration::from_secs(24 * 3600);
 impl Window {
     /// Fills in the mods' requirements from the cache.
     pub(super) fn apply_requirements(&self) {
-        self.requirements.borrow().apply(&mut self.state.borrow_mut().mods);
+        self.requirements.borrow().apply(&mut self.state.borrow_mut().mods, &self.settings.borrow().ignored_requirements);
+    }
+
+    /// Stops treating a Workshop item as a requirement of any mod, or
+    /// starts again (`ignore` false, for Undo).
+    pub(super) fn ignore_requirement(self: &Rc<Self>, id: u64, ignore: bool) {
+        let name = self.state.borrow().mods.iter().flat_map(|m| &m.requires).find(|r| r.steam_id == id).map(|r| r.name.clone());
+        {
+            let mut settings = self.settings.borrow_mut();
+            if ignore { settings.ignored_requirements.insert(id) } else { settings.ignored_requirements.remove(&id) };
+        }
+        self.save_settings("ignored requirements");
+        self.refresh();
+        if ignore {
+            let name = name.unwrap_or_else(|| format!("Workshop item {id}"));
+            self.toasts.add_toast(
+                adw::Toast::builder()
+                    .title(format!("“{}” is no longer treated as required", glib::markup_escape_text(&name)))
+                    .button_label("_Undo")
+                    .action_name("win.unignore-requirement")
+                    .action_target(&id.to_variant())
+                    .build(),
+            );
+        }
     }
 
     /// Fetches the requirements of enabled Workshop mods that aren't known

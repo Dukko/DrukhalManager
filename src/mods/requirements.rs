@@ -3,13 +3,18 @@
 //! Fetched from Steam now and then and kept in a cache, so checks work
 //! offline and startup doesn't wait for the network.
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 
 use super::{Mod, Required};
+
+/// Workshop items some authors list as "required" only to make people
+/// read the description, such as "Stellaris 101: How to Read". They aren't
+/// mods, so they're never treated as requirements.
+pub const NOT_MODS: [u64; 1] = [2819720352];
 
 /// How long a fetched list is trusted before it's fetched again.
 const FRESH: Duration = Duration::from_secs(3 * 24 * 3600);
@@ -60,10 +65,12 @@ impl Cache {
         }
     }
 
-    /// Fills in each Workshop mod's `requires` from the cache.
-    pub fn apply(&self, mods: &mut [Mod]) {
+    /// Fills in each Workshop mod's `requires` from the cache, leaving out
+    /// [`NOT_MODS`] and the items the user said aren't really required.
+    pub fn apply(&self, mods: &mut [Mod], ignored: &BTreeSet<u64>) {
         for m in mods {
-            m.requires = m.descriptor.remote_file_id.and_then(|id| self.items.get(&id)).map(|(_, r)| r.clone()).unwrap_or_default();
+            let required = m.descriptor.remote_file_id.and_then(|id| self.items.get(&id)).map(|(_, r)| r.as_slice()).unwrap_or_default();
+            m.requires = required.iter().filter(|r| !NOT_MODS.contains(&r.steam_id) && !ignored.contains(&r.steam_id)).cloned().collect();
         }
     }
 }
@@ -83,9 +90,9 @@ mod tests {
         let mut mods = vec![m(1), m(2)];
         let mut cache = Cache::default();
         assert_eq!(cache.stale(&mods), [1, 2]);
-        cache.update([(1, vec![(2, "Two".to_owned()), (1, "Itself".to_owned())]), (2, vec![])].into());
+        cache.update([(1, vec![(2, "Two".to_owned()), (1, "Itself".to_owned()), (NOT_MODS[0], "Stellaris 101: How to Read".to_owned()), (7, "Ignored".to_owned())]), (2, vec![])].into());
         assert!(cache.stale(&mods).is_empty());
-        cache.apply(&mut mods);
+        cache.apply(&mut mods, &BTreeSet::from([7]));
         assert_eq!(mods[0].requires, [Required { steam_id: 2, name: "Two".into() }], "never requires itself");
         assert!(mods[1].requires.is_empty());
 

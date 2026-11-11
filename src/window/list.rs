@@ -441,6 +441,16 @@ impl Window {
             let item = gio::MenuItem::new(Some("_Get Required Mods"), None);
             item.set_action_and_target_value(Some("win.get-requirements"), Some(&index_variant));
             menu.append_item(&item);
+            // Some authors "require" things that aren't mods, or aren't
+            // really needed.
+            for r in &m.requires {
+                let quoted = format!("“{}”", r.name);
+                if issues.iter().any(|i| i.message.starts_with("Requires “") && i.message.contains(&quoted)) {
+                    let item = gio::MenuItem::new(Some(&format!("{quoted} Isn't Really Required")), None);
+                    item.set_action_and_target_value(Some("win.ignore-requirement"), Some(&r.steam_id.to_variant()));
+                    menu.append_item(&item);
+                }
+            }
         }
         let item = gio::MenuItem::new(Some("_Rename…"), None);
         item.set_action_and_target_value(Some("win.rename-mod"), Some(&index_variant));
