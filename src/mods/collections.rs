@@ -172,8 +172,88 @@ pub fn find<'a>(s: &SharedMod, mods: &'a [Mod]) -> Option<&'a Mod> {
         .or_else(|| mods.iter().find(|m| m.descriptor.name.eq_ignore_ascii_case(&s.name)))
 }
 
+/// The first line of a copied load order, before its name.
+const TEXT_HEADER: &str = "Stellaris load order";
+
+/// A shared collection as text to paste in a chat or forum post: one
+/// numbered line per mod, with its Workshop page or, for a local mod, its
+/// descriptor id. `from_text` reads it back.
+pub fn to_text(shared: &Shared) -> String {
+    let mut text = format!("{TEXT_HEADER} “{}” ({} mods)\n", shared.name, shared.mods.len());
+    for (i, m) in shared.mods.iter().enumerate() {
+        let name = m.name.trim();
+        match m.steam_id {
+            Some(id) => text.push_str(&format!("{}. {name} — {}\n", i + 1, crate::paradox::workshop::page_url(id))),
+            None => text.push_str(&format!("{}. {name} ({})\n", i + 1, m.id)),
+        }
+    }
+    text
+}
+
+/// Reads a load order from pasted text: a collection file's JSON, or the
+/// list `to_text` writes. Lines that aren't numbered are skipped, so a
+/// list quoted with chat around it still reads.
+pub fn from_text(text: &str) -> Option<Shared> {
+    if let Ok(shared) = serde_json::from_str::<Shared>(text.trim()) {
+        return Some(shared);
+    }
+    let mut name = "Pasted".to_owned();
+    let mut mods = Vec::new();
+    for line in text.lines().map(str::trim) {
+        if let Some(rest) = line.strip_prefix(TEXT_HEADER) {
+            if let Some(n) = rest.split('“').nth(1).and_then(|r| r.split('”').next()) {
+                name = n.to_owned();
+            }
+            continue;
+        }
+        let Some((number, rest)) = line.split_once(". ") else { continue };
+        if number.is_empty() || !number.bytes().all(|b| b.is_ascii_digit()) {
+            continue;
+        }
+        let rest = rest.trim();
+        let mod_ = if let Some((title, url)) = rest.rsplit_once(" — ")
+            && let Some(id) = url.split("id=").nth(1).and_then(|id| id.split(|c: char| !c.is_ascii_digit()).next()?.parse().ok())
+        {
+            SharedMod { name: title.trim().to_owned(), steam_id: Some(id), id: String::new() }
+        } else if let Some(open) = rest.rfind(" (mod/")
+            && rest.ends_with(".mod)")
+        {
+            SharedMod { name: rest[..open].trim().to_owned(), steam_id: None, id: rest[open + 2..rest.len() - 1].to_owned() }
+        } else {
+            SharedMod { name: rest.to_owned(), steam_id: None, id: String::new() }
+        };
+        mods.push(mod_);
+    }
+    (!mods.is_empty()).then_some(Shared { format: 1, name, mods })
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn copies_as_text_and_back() {
+        let shared = Shared {
+            format: 1,
+            name: "Main".into(),
+            mods: vec![
+                SharedMod { name: "UI Overhaul Dynamic".into(), steam_id: Some(1623423360), id: "mod/ugc_1623423360.mod".into() },
+                SharedMod { name: "My Patch (v2)".into(), steam_id: None, id: "mod/my_patch.mod".into() },
+            ],
+        };
+        let text = to_text(&shared);
+        assert_eq!(
+            text,
+            "Stellaris load order “Main” (2 mods)\n1. UI Overhaul Dynamic — https://steamcommunity.com/sharedfiles/filedetails/?id=1623423360\n2. My Patch (v2) (mod/my_patch.mod)\n"
+        );
+        let back = from_text(&format!("here's mine:\n{text}\nhave fun")).unwrap();
+        assert_eq!(back.name, "Main");
+        assert_eq!(back.mods[0].steam_id, Some(1623423360));
+        assert_eq!((back.mods[1].name.as_str(), back.mods[1].id.as_str()), ("My Patch (v2)", "mod/my_patch.mod"));
+        assert_eq!(from_text(&serde_json::to_string(&shared).unwrap()), Some(shared), "JSON exports paste too");
+        let plain = from_text("1. Gigastructural Engineering\n2. ACOT").unwrap();
+        assert_eq!((plain.name.as_str(), plain.mods[1].name.as_str()), ("Pasted", "ACOT"), "names alone match by name");
+        assert_eq!(from_text("hello"), None);
+    }
+
     use super::*;
     use crate::mods::{Descriptor, Source};
 
