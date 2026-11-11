@@ -309,6 +309,11 @@ fn updates_page(options: &UpdateOptions) -> (adw::PreferencesPage, impl Fn() -> 
         })
         .active(options.check_at_startup)
         .build();
+    let prerelease_row = adw::SwitchRow::builder()
+        .title("Include Test Versions")
+        .subtitle("Also offers betas and release candidates, which may have bugs")
+        .active(options.prereleases)
+        .build();
     let check_row = adw::ActionRow::builder().title("Check for Updates").build();
     let spinner = adw::Spinner::builder().visible(false).build();
     let check = gtk::Button::builder().label("Check").valign(gtk::Align::Center).build();
@@ -316,6 +321,7 @@ fn updates_page(options: &UpdateOptions) -> (adw::PreferencesPage, impl Fn() -> 
     check_row.add_suffix(&check);
     check_row.set_activatable_widget(Some(&check));
     group.add(&startup_row);
+    group.add(&prerelease_row);
     group.add(&check_row);
 
     // Filled in when a newer release is found.
@@ -361,23 +367,31 @@ fn updates_page(options: &UpdateOptions) -> (adw::PreferencesPage, impl Fn() -> 
         }
     });
     check.connect_clicked({
-        let (check_row, spinner, release, notes, ignore, found, skipped) =
-            (check_row.clone(), spinner.clone(), release.clone(), notes.clone(), ignore.clone(), found.clone(), skipped.clone());
+        let (check_row, spinner, release, notes, ignore, found, skipped, prerelease_row, install) =
+            (check_row.clone(), spinner.clone(), release.clone(), notes.clone(), ignore.clone(), found.clone(), skipped.clone(), prerelease_row.clone(), install.clone());
         move |button| {
             button.set_sensitive(false);
             spinner.set_visible(true);
             check_row.set_subtitle("");
-            let (button, check_row, spinner, release, notes, ignore, found, skipped) =
-                (button.clone(), check_row.clone(), spinner.clone(), release.clone(), notes.clone(), ignore.clone(), found.clone(), skipped.clone());
+            let prereleases = prerelease_row.is_active();
+            let (button, check_row, spinner, release, notes, ignore, found, skipped, install) =
+                (button.clone(), check_row.clone(), spinner.clone(), release.clone(), notes.clone(), ignore.clone(), found.clone(), skipped.clone(), install.clone());
             glib::spawn_future_local(async move {
-                let result = gio::spawn_blocking(update::latest).await.unwrap_or_else(|_| Err("The check failed".to_owned()));
+                let result = gio::spawn_blocking(move || update::latest(prereleases)).await.unwrap_or_else(|_| Err("The check failed".to_owned()));
                 button.set_sensitive(true);
                 spinner.set_visible(false);
                 match result {
                     Ok(latest) if update::is_newer(&latest.version, update::CURRENT) => {
-                        check_row.set_subtitle(&format!("Version {} is available", latest.version));
+                        check_row.set_subtitle(&format!("{} {} is available", if latest.prerelease { "Test version" } else { "Version" }, latest.version));
                         release.set_title(&format!("What's New in {}", latest.version));
-                        notes.set_label(&if latest.notes.is_empty() { "No release notes.".to_owned() } else { latest.notes.replace("**", "") });
+                        let mut text = if latest.notes.is_empty() { "No release notes.".to_owned() } else { latest.notes.replace("**", "") };
+                        // The repository Flatpak updates from only has
+                        // stable releases.
+                        if latest.prerelease && flatpak {
+                            text.push_str("\n\nTest versions aren't in DrukhalManager's Flatpak repository. To try this one, download DrukhalManager.flatpak from its release page and run “flatpak install --reinstall DrukhalManager.flatpak”. The next stable release replaces it as usual.");
+                        }
+                        notes.set_label(&text);
+                        install.set_visible(flatpak && !latest.prerelease);
                         ignore.set_active(skipped.borrow().as_deref() == Some(latest.version.as_str()));
                         release.set_visible(true);
                         found.replace(Some(latest));
@@ -396,6 +410,6 @@ fn updates_page(options: &UpdateOptions) -> (adw::PreferencesPage, impl Fn() -> 
     page.add(&version);
     page.add(&group);
     page.add(&release);
-    let read = move || UpdateOptions { check_at_startup: startup_row.is_active(), skipped_version: skipped.borrow().clone() };
+    let read = move || UpdateOptions { check_at_startup: startup_row.is_active(), skipped_version: skipped.borrow().clone(), prereleases: prerelease_row.is_active() };
     (page, read)
 }
