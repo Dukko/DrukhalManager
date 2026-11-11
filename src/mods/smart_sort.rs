@@ -389,6 +389,7 @@ mod tests {
             load_position: None,
             error: None,
             steam: None,
+            requires: Vec::new(),
         }
     }
 

@@ -27,6 +27,8 @@ pub fn present(parent: &impl IsA<gtk::Widget>, settings: Settings, page: Option<
     let (updates_page, read_updates) = updates_page(&settings.updates);
     let (tool_group, read_tool) = merge_tool_group(&settings.merge_tool);
     ai_page.add(&tool_group);
+    let (steam_group, read_steam_key) = steam_key_group();
+    game_page.add(&steam_group);
     dialog.add(&game_page);
     dialog.add(&ai_page);
     dialog.add(&updates_page);
@@ -41,10 +43,43 @@ pub fn present(parent: &impl IsA<gtk::Widget>, settings: Settings, page: Option<
         if let Some(f) = on_close.borrow_mut().take() {
             let provider = read_provider();
             let parallel_merges = read_parallel(&provider);
-            f(Settings { provider, parallel_merges, game: read_game(), updates: read_updates(), merge_tool: read_tool(), ..base.clone() });
+            f(Settings { provider, parallel_merges, game: read_game(), updates: read_updates(), merge_tool: read_tool(), new_steam_key: read_steam_key(), ..base.clone() });
         }
     });
     dialog.present(Some(parent));
+}
+
+/// The Steam Web API key, which lets DrukhalManager read mods' Workshop
+/// "Required items". Loaded from the keyring in the background; the
+/// reader returns it only if it was changed.
+fn steam_key_group() -> (adw::PreferencesGroup, impl Fn() -> Option<String> + use<>) {
+    let group = adw::PreferencesGroup::builder()
+        .title("Steam Workshop")
+        .description("With your own Steam Web API key, the mod list also checks the Workshop's “Required items” of enabled mods, which many mods list only there. Get a key at <a href=\"https://steamcommunity.com/dev/apikey\">steamcommunity.com/dev/apikey</a>; it's kept in your keyring.")
+        .build();
+    let row = adw::PasswordEntryRow::builder().title("Steam Web API Key").build();
+    group.add(&row);
+    let loaded: Rc<RefCell<Option<String>>> = Rc::default();
+    glib::spawn_future_local(glib::clone!(
+        #[weak]
+        row,
+        #[strong]
+        loaded,
+        async move {
+            let key = gio::spawn_blocking(|| crate::secrets::get(crate::secrets::STEAM)).await.ok().and_then(Result::ok).flatten().unwrap_or_default();
+            // Not if the user typed something meanwhile.
+            if row.text().is_empty() {
+                row.set_text(&key);
+            }
+            loaded.replace(Some(key));
+        }
+    ));
+    let read = move || {
+        let text = row.text().trim().to_owned();
+        let before = loaded.borrow().clone();
+        (before.as_deref() != Some(text.as_str()) && !(before.is_none() && text.is_empty())).then_some(text)
+    };
+    (group, read)
 }
 
 /// The external merge tool's command, with presets for common tools.

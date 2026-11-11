@@ -43,6 +43,11 @@ pub fn version_matches(supported: &str, game: &str) -> bool {
     true
 }
 
+/// Installed mods by Workshop id.
+fn by_steam_id(mods: &[Mod]) -> HashMap<u64, usize> {
+    mods.iter().enumerate().filter_map(|(i, m)| Some((m.descriptor.remote_file_id?, i))).collect()
+}
+
 fn by_name(mods: &[Mod]) -> HashMap<String, usize> {
     mods.iter().enumerate().map(|(i, m)| (m.descriptor.name.trim().to_lowercase(), i)).collect()
 }
@@ -54,6 +59,8 @@ pub fn check(mods: &[Mod], enabled: &[usize], game_version: Option<&str>) -> Has
     let mut issues: HashMap<usize, Vec<Issue>> = HashMap::new();
     let mut add = |i: usize, severity, message: String, fixed_by_sorting| issues.entry(i).or_default().push(Issue { severity, message, fixed_by_sorting });
 
+    // Mods found loading before a mod that needs them.
+    let mut late = std::collections::HashSet::new();
     for (p, &i) in enabled.iter().enumerate() {
         for dep in &mods[i].descriptor.dependencies {
             match names.get(&dep.trim().to_lowercase()) {
@@ -62,7 +69,25 @@ pub fn check(mods: &[Mod], enabled: &[usize], game_version: Option<&str>) -> Has
                 None => add(i, Severity::Info, format!("Lists “{dep}” as a dependency, but it isn't installed (it may be optional)"), false),
                 Some(d) => match position.get(d) {
                     None => add(i, Severity::Info, format!("Lists “{dep}” as a dependency, but it's disabled (it may be optional)"), false),
-                    Some(&dp) if dp > p => add(i, Severity::Warning, format!("Should load after “{dep}”"), true),
+                    Some(&dp) if dp > p => {
+                        late.insert((i, *d));
+                        add(i, Severity::Warning, format!("Should load after “{dep}”"), true);
+                    }
+                    _ => {}
+                },
+            }
+        }
+    }
+    // Workshop required items aren't optional, unlike dependencies.
+    let steam_ids = by_steam_id(mods);
+    for (p, &i) in enabled.iter().enumerate() {
+        for r in &mods[i].requires {
+            match steam_ids.get(&r.steam_id) {
+                None => add(i, Severity::Warning, format!("Requires “{}” from the Workshop, which isn't installed", r.name), false),
+                Some(d) => match position.get(d) {
+                    None => add(i, Severity::Warning, format!("Requires “{}”, which is disabled", r.name), false),
+                    // Said once, if it's also a dependency by name.
+                    Some(&dp) if dp > p && late.insert((i, *d)) => add(i, Severity::Warning, format!("Should load after “{}”", mods[*d].descriptor.name.trim()), true),
                     _ => {}
                 },
             }
@@ -83,27 +108,34 @@ pub fn check(mods: &[Mod], enabled: &[usize], game_version: Option<&str>) -> Has
 /// depends on, otherwise keeping the current order.
 pub fn sort_by_dependencies(mods: &[Mod], enabled: &[usize]) -> Vec<usize> {
     let names = by_name(mods);
+    let steam_ids = by_steam_id(mods);
     let is_enabled: std::collections::HashSet<usize> = enabled.iter().copied().collect();
     let mut placed = Vec::with_capacity(enabled.len());
     let mut state: HashMap<usize, bool> = HashMap::new(); // false = visiting, true = placed
 
-    fn visit(i: usize, mods: &[Mod], names: &HashMap<String, usize>, is_enabled: &std::collections::HashSet<usize>, state: &mut HashMap<usize, bool>, placed: &mut Vec<usize>) {
+    struct Lookup<'a> {
+        names: &'a HashMap<String, usize>,
+        steam_ids: &'a HashMap<u64, usize>,
+        is_enabled: &'a std::collections::HashSet<usize>,
+    }
+    fn visit(i: usize, mods: &[Mod], by: &Lookup, state: &mut HashMap<usize, bool>, placed: &mut Vec<usize>) {
         if state.contains_key(&i) {
             return; // placed already, or a dependency cycle
         }
         state.insert(i, false);
-        for dep in &mods[i].descriptor.dependencies {
-            if let Some(&d) = names.get(&dep.trim().to_lowercase())
-                && is_enabled.contains(&d)
-            {
-                visit(d, mods, names, is_enabled, state, placed);
+        let deps = mods[i].descriptor.dependencies.iter().filter_map(|dep| by.names.get(&dep.trim().to_lowercase()));
+        let required = mods[i].requires.iter().filter_map(|r| by.steam_ids.get(&r.steam_id));
+        for &d in deps.chain(required) {
+            if by.is_enabled.contains(&d) {
+                visit(d, mods, by, state, placed);
             }
         }
         state.insert(i, true);
         placed.push(i);
     }
+    let by = Lookup { names: &names, steam_ids: &steam_ids, is_enabled: &is_enabled };
     for &i in enabled {
-        visit(i, mods, &names, &is_enabled, &mut state, &mut placed);
+        visit(i, mods, &by, &mut state, &mut placed);
     }
     placed
 }
@@ -131,6 +163,7 @@ mod tests {
             load_position: None,
             error: None,
             steam: None,
+            requires: Vec::new(),
         }
     }
 
@@ -160,6 +193,22 @@ mod tests {
         let sorted = sort_by_dependencies(&mods, &enabled);
         assert_eq!(sorted, [1, 2, 0, 4]);
         assert!(check(&mods, &sorted, None).get(&0).is_none(), "sorting fixes the order issues");
+    }
+
+    #[test]
+    fn checks_workshop_requirements() {
+        let required = |id: u64, name: &str| crate::mods::Required { steam_id: id, name: name.into() };
+        let mut mods = vec![m("Patch", &["Base"], ""), m("Base", &[], ""), m("Other", &[], ""), m("Off", &[], "")];
+        mods[1].descriptor.remote_file_id = Some(1);
+        mods[2].descriptor.remote_file_id = Some(2);
+        mods[3].descriptor.remote_file_id = Some(3);
+        mods[0].requires = vec![required(1, "Base"), required(2, "Other on Steam"), required(3, "Off"), required(9, "Gone")];
+        let enabled = [0, 1, 2];
+        let issues = check(&mods, &enabled, None);
+        let messages: Vec<&str> = issues[&0].iter().map(|x| x.message.as_str()).collect();
+        assert_eq!(messages, ["Should load after “Base”", "Should load after “Other”", "Requires “Off”, which is disabled", "Requires “Gone” from the Workshop, which isn't installed"]);
+        assert!(issues[&0].iter().all(|x| x.severity == Severity::Warning));
+        assert_eq!(sort_by_dependencies(&mods, &enabled), [1, 2, 0], "required items load first");
     }
 
     #[test]

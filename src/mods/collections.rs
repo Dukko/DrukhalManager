@@ -487,7 +487,7 @@ mod tests {
     use crate::mods::{Descriptor, Source};
 
     fn m(id: &str, name: &str, steam: Option<u64>) -> Mod {
-        Mod { id: id.into(), descriptor: Descriptor { name: name.into(), remote_file_id: steam, ..Default::default() }, content: None, source: Source::Workshop, load_position: None, error: None, steam: None }
+        Mod { id: id.into(), descriptor: Descriptor { name: name.into(), remote_file_id: steam, ..Default::default() }, content: None, source: Source::Workshop, load_position: None, error: None, steam: None, requires: Vec::new() }
     }
 
     #[test]

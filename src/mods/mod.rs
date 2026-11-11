@@ -7,6 +7,7 @@ pub mod extra;
 pub mod filter;
 mod descriptor;
 pub mod repair;
+pub mod requirements;
 pub mod smart_sort;
 pub mod sync;
 pub mod load_order;
@@ -41,6 +42,16 @@ pub struct Mod {
     /// What Steam says about a Workshop mod; `None` for local mods, or
     /// when Steam's manifest couldn't be read.
     pub steam: Option<ItemState>,
+    /// The Workshop items its Workshop page says it requires, once fetched
+    /// (see `requirements`).
+    pub requires: Vec<Required>,
+}
+
+/// A Workshop item a mod requires.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct Required {
+    pub steam_id: u64,
+    pub name: String,
 }
 
 impl Mod {
@@ -85,7 +96,7 @@ pub fn discover(user_dir: &Path, workshop_dirs: &[PathBuf]) -> io::Result<Vec<Mo
         });
         let source = if descriptor.remote_file_id.is_some() { Source::Workshop } else { Source::Local };
         let load_position = positions.get(id.as_str()).copied();
-        mods.push(Mod { id, descriptor, content, source, load_position, error, steam });
+        mods.push(Mod { id, descriptor, content, source, load_position, error, steam, requires: Vec::new() });
     }
 
     // Keep enabled entries whose descriptor is gone, so saving doesn't
@@ -95,7 +106,7 @@ pub fn discover(user_dir: &Path, workshop_dirs: &[PathBuf]) -> io::Result<Vec<Mo
         if !known.contains(id) {
             let descriptor = Descriptor { name: id.clone(), ..Descriptor::default() };
             let error = Some("Descriptor file not found".to_owned());
-            mods.push(Mod { id: id.clone(), descriptor, content: None, source: Source::Local, load_position: Some(position), error, steam: None });
+            mods.push(Mod { id: id.clone(), descriptor, content: None, source: Source::Local, load_position: Some(position), error, steam: None, requires: Vec::new() });
         }
     }
 

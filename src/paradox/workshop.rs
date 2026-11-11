@@ -240,6 +240,80 @@ pub fn download_previews(ids: &[u64], dir: &std::path::Path) -> Vec<u64> {
     saved
 }
 
+/// Items asked about per call.
+pub const ITEMS_PER_CALL: usize = 100;
+
+#[derive(Deserialize)]
+struct DetailsResponse {
+    #[serde(default)]
+    publishedfiledetails: Vec<Details>,
+}
+
+#[derive(Deserialize)]
+struct Details {
+    publishedfileid: String,
+    result: u32,
+    #[serde(default)]
+    title: String,
+    #[serde(default)]
+    children: Vec<DetailsChild>,
+}
+
+#[derive(Deserialize)]
+struct DetailsChild {
+    publishedfileid: String,
+}
+
+/// Required items and titles from an `IPublishedFileService/GetDetails`
+/// reply: item -> (title, required item ids).
+fn parse_details(json: &str) -> Result<HashMap<u64, (String, Vec<u64>)>, String> {
+    let reply: Envelope<DetailsResponse> = serde_json::from_str(json).map_err(|e| format!("Unexpected reply from Steam: {e}"))?;
+    Ok(reply
+        .response
+        .publishedfiledetails
+        .into_iter()
+        .filter(|d| d.result == OK)
+        .filter_map(|d| Some((d.publishedfileid.parse().ok()?, (d.title, d.children.iter().filter_map(|c| c.publishedfileid.parse().ok()).collect()))))
+        .collect())
+}
+
+fn details(agent: &ureq::Agent, key: &str, ids: &[u64]) -> Result<HashMap<u64, (String, Vec<u64>)>, String> {
+    let mut query = vec![("key".to_owned(), key.to_owned()), ("includechildren".to_owned(), "true".to_owned())];
+    query.extend(ids.iter().enumerate().map(|(i, id)| (format!("publishedfileids[{i}]"), id.to_string())));
+    let json = agent
+        .get("https://api.steampowered.com/IPublishedFileService/GetDetails/v1/")
+        .header("user-agent", &user_agent())
+        .query_pairs(query.iter().map(|(k, v)| (k.as_str(), v.as_str())))
+        .call()
+        .map_err(|e| match e {
+            ureq::Error::StatusCode(401 | 403) => "Steam didn't accept the Steam Web API key".to_owned(),
+            e => format!("Could not reach Steam: {e}"),
+        })?
+        .body_mut()
+        .read_to_string()
+        .map_err(|e| format!("Could not read Steam's reply: {e}"))?;
+    parse_details(&json)
+}
+
+/// The Workshop items each of `ids` requires (its "Required items"), with
+/// their titles, for up to [`ITEMS_PER_CALL`] of them. The public API
+/// doesn't list them, so this uses Steam's Web API with the user's own key.
+/// Blocks; call off the main thread.
+pub fn requirements(key: &str, ids: &[u64]) -> Result<HashMap<u64, Vec<(u64, String)>>, String> {
+    let agent = agent();
+    let ids = &ids[..ids.len().min(ITEMS_PER_CALL)];
+    let items = details(&agent, key, ids)?;
+    let wanted: Vec<u64> = items.values().flat_map(|(_, c)| c.iter().copied()).collect::<HashSet<_>>().into_iter().collect();
+    let mut titles: HashMap<u64, String> = HashMap::new();
+    for batch in wanted.chunks(ITEMS_PER_CALL) {
+        titles.extend(details(&agent, key, batch)?.into_iter().map(|(id, (title, _))| (id, title)));
+    }
+    let name = |id: u64| titles.get(&id).map(|t| t.trim()).filter(|t| !t.is_empty()).map_or_else(|| format!("Workshop item {id}"), str::to_owned);
+    // Items Steam doesn't know (removed, hidden) require nothing to get.
+    Ok(ids.iter().map(|id| (*id, items.get(id).map(|(_, c)| c.iter().map(|&r| (r, name(r))).collect()).unwrap_or_default())).collect())
+}
+
+
 /// Fetches the collection. Blocks; call off the main thread.
 pub fn fetch(root: u64) -> Result<Shared, String> {
     let agent = agent();
@@ -264,6 +338,20 @@ mod tests {
         assert_eq!(parse_id("https://steamcommunity.com/workshop/filedetails/?l=german&id=42#comments"), Some(42));
         assert_eq!(parse_id("https://steamcommunity.com/sharedfiles/filedetails/"), None);
         assert_eq!(parse_id("not a link"), None);
+    }
+
+    #[test]
+    fn reads_required_items_from_details() {
+        let json = r#"{"response":{"publishedfiledetails":[
+            {"result":1,"publishedfileid":"2966277231","title":"MECR+UIOD","children":[
+                {"publishedfileid":"2652578379","sortorder":0,"file_type":0},
+                {"publishedfileid":"1623423360","sortorder":1,"file_type":0}]},
+            {"result":1,"publishedfileid":"3090328185","title":"No requirements"},
+            {"result":9,"publishedfileid":"5"}]}}"#;
+        let parsed = parse_details(json).unwrap();
+        assert_eq!(parsed[&2966277231], ("MECR+UIOD".to_owned(), vec![2652578379, 1623423360]));
+        assert!(parsed[&3090328185].1.is_empty());
+        assert!(!parsed.contains_key(&5));
     }
 
     #[test]
@@ -354,3 +442,4 @@ mod tests {
         assert!(to_shared(10, &[1], &other).is_err());
     }
 }
+
