@@ -53,6 +53,9 @@ pub struct Settings {
     /// Workshop items the user said aren't really required, by id.
     #[serde(default)]
     pub ignored_requirements: std::collections::BTreeSet<u64>,
+    /// The game version seen last time, to notice game updates.
+    #[serde(default)]
+    pub last_game_version: Option<String>,
     /// The external merge tool's command, with `{left}`, `{right}`,
     /// `{base}` and `{output}`; empty for none.
     #[serde(default)]
@@ -166,7 +169,7 @@ fn default_provider() -> Provider {
 
 impl Default for Settings {
     fn default() -> Self {
-        Self { provider: default_provider(), ignored: Default::default(), ignore_rules: String::new(), parallel_merges: None, show_dependency_conflicts: false, game: Default::default(), updates: Default::default(), sort_categories: Default::default(), aliases: Default::default(), disabled_order: Default::default(), key_in_keyring: false, new_steam_key: None, ignored_requirements: Default::default(), merge_tool: String::new() }
+        Self { provider: default_provider(), ignored: Default::default(), ignore_rules: String::new(), parallel_merges: None, show_dependency_conflicts: false, game: Default::default(), updates: Default::default(), sort_categories: Default::default(), aliases: Default::default(), disabled_order: Default::default(), key_in_keyring: false, new_steam_key: None, ignored_requirements: Default::default(), last_game_version: None, merge_tool: String::new() }
     }
 }
 
@@ -263,7 +266,7 @@ mod tests {
     fn saves_privately_and_loads() {
         let path = std::env::temp_dir().join(format!("drukhal-settings-{}/settings.json", std::process::id()));
         assert_eq!(Settings::load(&path), Settings::default());
-        let s = Settings { provider: Provider::OpenAiCompatible { base_url: "http://localhost:11434/v1".into(), model: "qwen".into(), api_key: String::new() }, ignored: ["file:x".to_owned()].into(), ignore_rules: "gfx/**".into(), parallel_merges: Some(3), show_dependency_conflicts: true, game: GameOptions { launch_args: "-debug".into(), close_after_launch: true, ..Default::default() }, updates: UpdateOptions { check_at_startup: true, skipped_version: Some("0.2.0".into()), prereleases: true }, sort_categories: [("mod/ugc_1.mod".to_owned(), "ui".to_owned())].into(), aliases: [("mod/ugc_2.mod".to_owned(), "UIOD".to_owned())].into(), disabled_order: DisabledOrder::RecentlyUpdated, key_in_keyring: false, new_steam_key: None, ignored_requirements: Default::default(), merge_tool: "meld {left} {right}".into() };
+        let s = Settings { provider: Provider::OpenAiCompatible { base_url: "http://localhost:11434/v1".into(), model: "qwen".into(), api_key: String::new() }, ignored: ["file:x".to_owned()].into(), ignore_rules: "gfx/**".into(), parallel_merges: Some(3), show_dependency_conflicts: true, game: GameOptions { launch_args: "-debug".into(), close_after_launch: true, ..Default::default() }, updates: UpdateOptions { check_at_startup: true, skipped_version: Some("0.2.0".into()), prereleases: true }, sort_categories: [("mod/ugc_1.mod".to_owned(), "ui".to_owned())].into(), aliases: [("mod/ugc_2.mod".to_owned(), "UIOD".to_owned())].into(), disabled_order: DisabledOrder::RecentlyUpdated, key_in_keyring: false, new_steam_key: None, ignored_requirements: Default::default(), last_game_version: None, merge_tool: "meld {left} {right}".into() };
         s.save(&path).unwrap();
         assert_eq!(Settings::load(&path), s);
         assert!(s.ready_provider().is_some());

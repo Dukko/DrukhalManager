@@ -94,7 +94,7 @@ impl Window {
         self.toasts.add_toast(adw::Toast::builder().title(message).timeout(0).build());
     }
 
-    fn rebuild_collection_menu(&self) {
+    pub(super) fn rebuild_collection_menu(&self) {
         let collections = self.collections.borrow();
         let menu = gio::Menu::new();
         let list = gio::Menu::new();
@@ -136,7 +136,7 @@ impl Window {
         }
     }
 
-    fn save_collections(&self) {
+    pub(super) fn save_collections(&self) {
         if let Err(e) = self.collections.borrow().save(&collections::path()) {
             self.toast_error(&format!("Could not save collections: {e}"));
         }
