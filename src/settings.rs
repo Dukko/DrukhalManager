@@ -106,11 +106,14 @@ pub struct UpdateOptions {
     pub check_at_startup: bool,
     /// A release the user chose not to be told about again.
     pub skipped_version: Option<String>,
+    /// Also offers test versions (betas and release candidates).
+    #[serde(default)]
+    pub prereleases: bool,
 }
 
 impl Default for UpdateOptions {
     fn default() -> Self {
-        Self { check_at_startup: crate::sandbox::is_flatpak(), skipped_version: None }
+        Self { check_at_startup: crate::sandbox::is_flatpak(), skipped_version: None, prereleases: false }
     }
 }
 
@@ -229,7 +232,7 @@ mod tests {
     fn saves_privately_and_loads() {
         let path = std::env::temp_dir().join(format!("drukhal-settings-{}/settings.json", std::process::id()));
         assert_eq!(Settings::load(&path), Settings::default());
-        let s = Settings { provider: Provider::OpenAiCompatible { base_url: "http://localhost:11434/v1".into(), model: "qwen".into(), api_key: String::new() }, ignored: ["file:x".to_owned()].into(), ignore_rules: "gfx/**".into(), parallel_merges: Some(3), show_dependency_conflicts: true, game: GameOptions { launch_args: "-debug".into(), close_after_launch: true, ..Default::default() }, updates: UpdateOptions { check_at_startup: true, skipped_version: Some("0.2.0".into()) }, sort_categories: [("mod/ugc_1.mod".to_owned(), "ui".to_owned())].into(), aliases: [("mod/ugc_2.mod".to_owned(), "UIOD".to_owned())].into(), disabled_order: DisabledOrder::RecentlyUpdated, key_in_keyring: false };
+        let s = Settings { provider: Provider::OpenAiCompatible { base_url: "http://localhost:11434/v1".into(), model: "qwen".into(), api_key: String::new() }, ignored: ["file:x".to_owned()].into(), ignore_rules: "gfx/**".into(), parallel_merges: Some(3), show_dependency_conflicts: true, game: GameOptions { launch_args: "-debug".into(), close_after_launch: true, ..Default::default() }, updates: UpdateOptions { check_at_startup: true, skipped_version: Some("0.2.0".into()), prereleases: true }, sort_categories: [("mod/ugc_1.mod".to_owned(), "ui".to_owned())].into(), aliases: [("mod/ugc_2.mod".to_owned(), "UIOD".to_owned())].into(), disabled_order: DisabledOrder::RecentlyUpdated, key_in_keyring: false };
         s.save(&path).unwrap();
         assert_eq!(Settings::load(&path), s);
         assert!(s.ready_provider().is_some());

@@ -56,12 +56,13 @@ impl Window {
         }
         let weak = Rc::downgrade(self);
         glib::spawn_future_local(async move {
-            if let Ok(Ok(latest)) = gio::spawn_blocking(update::latest).await
+            let prereleases = options.prereleases;
+            if let Ok(Ok(latest)) = gio::spawn_blocking(move || update::latest(prereleases)).await
                 && update::is_newer(&latest.version, update::CURRENT)
                 && options.skipped_version.as_deref() != Some(latest.version.as_str())
                 && let Some(ui) = weak.upgrade()
             {
-                ui.announce_update(Some(&latest.version));
+                ui.announce_update(Some(&latest));
             }
             // While it runs, Flatpak also reports versions published later.
             if crate::sandbox::is_flatpak()
@@ -78,15 +79,19 @@ impl Window {
         });
     }
 
-    fn announce_update(&self, version: Option<&str>) {
+    fn announce_update(&self, release: Option<&update::Release>) {
         if self.update_announced.replace(true) {
             return;
         }
-        let title = match version {
-            Some(v) => format!("DrukhalManager {v} is available"),
+        let title = match release {
+            Some(r) if r.prerelease => format!("Test version {} of DrukhalManager is available", r.version),
+            Some(r) => format!("DrukhalManager {} is available", r.version),
             None => "A new version of DrukhalManager is available".to_owned(),
         };
-        let (label, action) = if crate::sandbox::is_flatpak() { ("Update", "win.install-update") } else { ("Details", "win.show-update") };
+        // Test versions aren't in the Flatpak repository; Preferences says
+        // how to get one.
+        let installable = crate::sandbox::is_flatpak() && !release.is_some_and(|r| r.prerelease);
+        let (label, action) = if installable { ("Update", "win.install-update") } else { ("Details", "win.show-update") };
         self.toasts.add_toast(adw::Toast::builder().title(title).button_label(label).action_name(action).timeout(0).build());
     }
 

@@ -6,6 +6,10 @@ name: Flatpak release
 # Running it by hand rebuilds and republishes the repo from the chosen ref
 # without touching releases. tag.yml calls it with the tag it just made,
 # since tags pushed by a workflow don't start other workflows.
+#
+# A test version (a tag with a suffix, like v0.4.0-beta.1) is published as
+# a GitHub prerelease with its bundle only. It never goes to the repo, so
+# installs that follow it with `flatpak update` stay on stable releases.
 
 on:
   push:
@@ -35,6 +39,8 @@ env:
 jobs:
   build:
     runs-on: ubuntu-24.04
+    outputs:
+      prerelease: ${{ steps.kind.outputs.prerelease }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -71,7 +77,18 @@ jobs:
           gpg --batch --import <<< "$FLATPAK_GPG_PRIVATE_KEY"
           flatpak/publish.sh "$RUNNER_TEMP/repo" "$RUNNER_TEMP/site" DrukhalManager.flatpak "$GPG_KEY_ID"
 
+      - name: Check whether this is a test version
+        id: kind
+        env:
+          TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          case "$TAG" in
+            v*-*) echo "prerelease=true" >> "$GITHUB_OUTPUT" ;;
+            *) echo "prerelease=false" >> "$GITHUB_OUTPUT" ;;
+          esac
+
       - uses: actions/upload-pages-artifact@v3
+        if: steps.kind.outputs.prerelease != 'true'
         with:
           path: ${{ runner.temp }}/site
 
@@ -80,6 +97,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ inputs.tag || github.ref_name }}
+          PRERELEASE: ${{ steps.kind.outputs.prerelease }}
         run: |
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" DrukhalManager.flatpak --clobber
@@ -95,15 +113,18 @@ jobs:
                       if el.tag in ("p", "li") and el.text:
                           print(("- " if el.tag == "li" else "") + " ".join(el.text.split()))
           EOF
+            kind=()
+            if [ "$PRERELEASE" = true ]; then kind=(--prerelease); fi
             if [ -s "$RUNNER_TEMP/notes.md" ]; then
-              gh release create "$TAG" DrukhalManager.flatpak --verify-tag --notes-file "$RUNNER_TEMP/notes.md"
+              gh release create "$TAG" DrukhalManager.flatpak --verify-tag "${kind[@]}" --notes-file "$RUNNER_TEMP/notes.md"
             else
-              gh release create "$TAG" DrukhalManager.flatpak --verify-tag --generate-notes
+              gh release create "$TAG" DrukhalManager.flatpak --verify-tag "${kind[@]}" --generate-notes
             fi
           fi
 
   deploy:
     needs: build
+    if: needs.build.outputs.prerelease != 'true'
     runs-on: ubuntu-24.04
     environment:
       name: github-pages

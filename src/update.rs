@@ -16,6 +16,8 @@ use serde::Deserialize;
 pub const CURRENT: &str = env!("CARGO_PKG_VERSION");
 pub const RELEASES_URL: &str = "https://github.com/Dukko/DrukhalManager/releases";
 const LATEST_API: &str = "https://api.github.com/repos/Dukko/DrukhalManager/releases/latest";
+/// Recent releases, prereleases included, newest first.
+const RELEASES_API: &str = "https://api.github.com/repos/Dukko/DrukhalManager/releases?per_page=20";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Release {
@@ -24,6 +26,9 @@ pub struct Release {
     /// Markdown, as written on GitHub.
     pub notes: String,
     pub url: String,
+    /// A test version, e.g. `0.4.0-beta.1`. The Flatpak repository only
+    /// carries stable releases, so these are installed from their bundle.
+    pub prerelease: bool,
 }
 
 #[derive(Deserialize)]
@@ -32,42 +37,76 @@ struct GithubRelease {
     #[serde(default)]
     body: Option<String>,
     html_url: String,
+    #[serde(default)]
+    prerelease: bool,
+    #[serde(default)]
+    draft: bool,
 }
 
-/// The latest published release. Blocks; call off the main thread.
-pub fn latest() -> Result<Release, String> {
+impl From<GithubRelease> for Release {
+    fn from(r: GithubRelease) -> Self {
+        let version = r.tag_name.trim_start_matches('v').to_owned();
+        Release { prerelease: r.prerelease || version.contains('-'), version, notes: r.body.unwrap_or_default().trim().to_owned(), url: r.html_url }
+    }
+}
+
+/// The latest published release, or with `prereleases` the latest of any
+/// kind. Blocks; call off the main thread.
+pub fn latest(prereleases: bool) -> Result<Release, String> {
     let agent: ureq::Agent = ureq::Agent::config_builder()
         .timeout_global(Some(std::time::Duration::from_secs(20)))
         .build()
         .into();
     let mut response = agent
-        .get(LATEST_API)
+        .get(if prereleases { RELEASES_API } else { LATEST_API })
         .header("accept", "application/vnd.github+json")
         .header("user-agent", &format!("DrukhalManager/{CURRENT}"))
         .call()
         .map_err(|e| format!("Could not reach GitHub: {e}"))?;
-    let release: GithubRelease = response.body_mut().read_json().map_err(|e| format!("Unexpected reply from GitHub: {e}"))?;
-    Ok(Release {
-        version: release.tag_name.trim_start_matches('v').to_owned(),
-        notes: release.body.unwrap_or_default().trim().to_owned(),
-        url: release.html_url,
-    })
+    let unexpected = |e: ureq::Error| format!("Unexpected reply from GitHub: {e}");
+    if !prereleases {
+        return Ok(response.body_mut().read_json::<GithubRelease>().map_err(unexpected)?.into());
+    }
+    let releases: Vec<GithubRelease> = response.body_mut().read_json().map_err(unexpected)?;
+    newest(releases.into_iter().filter(|r| !r.draft).map(Release::from)).ok_or_else(|| "No releases are published yet".to_owned())
+}
+
+/// The release with the highest version.
+fn newest(releases: impl Iterator<Item = Release>) -> Option<Release> {
+    releases.reduce(|best, r| if is_newer(&r.version, &best.version) { r } else { best })
 }
 
 /// Whether `candidate` is a later version than `current`, comparing the
-/// dot-separated numbers (`0.10.0` > `0.9.3`). Anything unparsable is not
-/// newer.
+/// dot-separated numbers (`0.10.0` > `0.9.3`). A prerelease such as
+/// `0.4.0-beta.2` comes before its release and after `0.4.0-beta.1`, as in
+/// semantic versioning. Anything unparsable is not newer.
 pub fn is_newer(candidate: &str, current: &str) -> bool {
-    fn parts(v: &str) -> Option<Vec<u64>> {
-        v.trim_start_matches('v').split('.').map(|p| p.parse().ok()).collect()
+    fn numbers(v: &str) -> Option<Vec<u64>> {
+        v.split('.').map(|p| p.parse().ok()).collect()
     }
-    match (parts(candidate), parts(current)) {
-        (Some(a), Some(b)) => {
-            let len = a.len().max(b.len());
-            let pad = |v: Vec<u64>| v.into_iter().chain(std::iter::repeat(0)).take(len).collect::<Vec<_>>();
-            pad(a) > pad(b)
-        }
-        _ => false,
+    /// Its numbers, and its prerelease part if any.
+    fn parse(v: &str) -> Option<(Vec<u64>, Option<&str>)> {
+        let v = v.trim_start_matches('v');
+        let (core, pre) = match v.split_once('-') {
+            Some((core, pre)) => (core, Some(pre)),
+            None => (v, None),
+        };
+        Some((numbers(core)?, pre))
+    }
+    /// Numeric parts compare as numbers, and sort before words.
+    fn pre_key(pre: &str) -> Vec<(u8, u64, &str)> {
+        pre.split('.').map(|p| p.parse().map_or((1, 0, p), |n| (0, n, ""))).collect()
+    }
+    let (Some((a, a_pre)), Some((b, b_pre))) = (parse(candidate), parse(current)) else { return false };
+    let len = a.len().max(b.len());
+    let pad = |v: Vec<u64>| v.into_iter().chain(std::iter::repeat(0)).take(len).collect::<Vec<_>>();
+    match pad(a).cmp(&pad(b)) {
+        std::cmp::Ordering::Equal => match (a_pre, b_pre) {
+            (None, Some(_)) => true,
+            (Some(x), Some(y)) => pre_key(x) > pre_key(y),
+            _ => false,
+        },
+        order => order == std::cmp::Ordering::Greater,
     }
 }
 
@@ -211,6 +250,21 @@ mod tests {
         assert!(!is_newer("0.1.1.0", "0.1.1"));
         assert!(!is_newer("0.1.0", "0.1.1"));
         assert!(!is_newer("nightly", "0.1.1"));
+        assert!(is_newer("0.4.0-beta.1", "0.3.10"));
+        assert!(is_newer("0.4.0", "0.4.0-beta.1"), "the release follows its betas");
+        assert!(!is_newer("0.4.0-beta.1", "0.4.0"));
+        assert!(is_newer("0.4.0-beta.2", "0.4.0-beta.1"));
+        assert!(is_newer("0.4.0-beta.10", "0.4.0-beta.9"));
+        assert!(is_newer("0.4.0-rc.1", "0.4.0-beta.3"));
+        assert!(!is_newer("0.4.0-beta.1", "0.4.0-beta.1"));
+    }
+
+    #[test]
+    fn picks_the_newest_release() {
+        let r = |v: &str| Release { version: v.into(), notes: String::new(), url: String::new(), prerelease: v.contains('-') };
+        assert_eq!(newest(["0.4.0-beta.1", "0.3.10", "0.4.0-beta.2", "0.3.9"].map(r).into_iter()).unwrap().version, "0.4.0-beta.2");
+        assert_eq!(newest(["0.4.0-beta.2", "0.4.0"].map(r).into_iter()).unwrap().version, "0.4.0");
+        assert!(newest(std::iter::empty()).is_none());
     }
 
     #[test]
