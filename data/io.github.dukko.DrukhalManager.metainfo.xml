@@ -36,6 +36,15 @@
     <control>keyboard</control>
   </supports>
   <releases>
+    <release version="0.6.0" date="2026-11-11">
+      <description>
+        <p>Merge into One Mod can write the merged mod as one zip file, and can write it to an extra mod folder.</p>
+        <p>An Extra Mod Folder, in Preferences, lists and loads the mods kept in it, such as local mods on another drive or in a git checkout.</p>
+        <p>Export with the Merged Patch saves a collection together with its merged patch in one zip. Importing it installs the patch, after backing up yours.</p>
+        <p>The multiplayer report can include all the game's files, to find modified or damaged ones outside the multiplayer checksum. Repeated reports are faster, as file hashes are remembered.</p>
+        <p>Merge Tool… on the Conflicts page opens two versions of a definition in Meld, KDiff3, VS Code or another tool set in Preferences, and uses what you save. The Flatpak needs a one-time permission for it, which the app explains.</p>
+      </description>
+    </release>
     <release version="0.5.0" date="2026-11-11">
       <description>
         <p>The mod search understands filters: enabled:, source:, achievements:, conflicts: and version:, with -- to leave mods out, || for either, and quoted phrases. It also finds mods by Workshop ID. The Filters button next to the search box sets them for you.</p>
