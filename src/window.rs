@@ -469,6 +469,14 @@ pub fn build(
         });
         window.add_action(&action);
     }
+    let rename_mod = gio::SimpleAction::new("rename-mod", Some(glib::VariantTy::UINT32));
+    let weak = Rc::downgrade(&ui);
+    rename_mod.connect_activate(move |_, index| {
+        if let (Some(ui), Some(index)) = (weak.upgrade(), index.and_then(|i| i.get::<u32>())) {
+            ui.rename_mod(index as usize);
+        }
+    });
+    window.add_action(&rename_mod);
     let show_conflicts = gio::SimpleAction::new("show-conflicts", Some(glib::VariantTy::UINT32));
     let weak = Rc::downgrade(&ui);
     show_conflicts.connect_activate(move |_, index| {

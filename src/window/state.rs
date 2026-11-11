@@ -129,10 +129,11 @@ impl State {
         disabled
     }
 
-    /// The disabled mods in `order`. Ties, and mods whose files can't be
-    /// found, go by name.
-    pub(crate) fn disabled_in(&self, order: DisabledOrder) -> Vec<usize> {
+    /// The disabled mods in `order`, by the names in `aliases` where the
+    /// user gave one. Ties, and mods whose files can't be found, go by name.
+    pub(crate) fn disabled_in(&self, order: DisabledOrder, aliases: &std::collections::BTreeMap<String, String>) -> Vec<usize> {
         let mut disabled = self.disabled();
+        disabled.sort_by_cached_key(|&i| aliases.get(&self.mods[i].id).unwrap_or(&self.mods[i].descriptor.name).to_lowercase());
         if order == DisabledOrder::RecentlyUpdated {
             // Stable, so equal times stay in name order.
             disabled.sort_by_cached_key(|&i| std::cmp::Reverse(self.mods[i].updated()));
@@ -488,8 +489,11 @@ mod tests {
             std::fs::File::open(&dir).unwrap().set_modified(age).unwrap();
             s.mods[i].content = Some(dir);
         }
-        assert_eq!(s.disabled_in(DisabledOrder::Name), [1, 2, 3]);
-        assert_eq!(s.disabled_in(DisabledOrder::RecentlyUpdated), [3, 1, 2], "newest first, missing files last");
+        let none = Default::default();
+        assert_eq!(s.disabled_in(DisabledOrder::Name, &none), [1, 2, 3]);
+        assert_eq!(s.disabled_in(DisabledOrder::RecentlyUpdated, &none), [3, 1, 2], "newest first, missing files last");
+        let aliases = [("mod/3.mod".to_owned(), "0 first".to_owned())].into();
+        assert_eq!(s.disabled_in(DisabledOrder::Name, &aliases), [3, 1, 2], "by the name the user gave");
         std::fs::remove_dir_all(&root).unwrap();
     }
 
