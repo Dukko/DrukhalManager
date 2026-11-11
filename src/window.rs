@@ -198,7 +198,7 @@ pub fn build(
         .visible(false)
         .build();
     let sort_alpha_button = gtk::Button::builder()
-        .icon_name("view-sort-ascending-symbolic")
+        .child(&adw::ButtonContent::builder().icon_name("view-sort-ascending-symbolic").label("Sort A–Z, Dependencies First").build())
         .tooltip_text("Sort alphabetically, keeping mods after the mods they depend on")
         .css_classes(["flat"])
         .valign(gtk::Align::Center)
