@@ -9,6 +9,7 @@ mod descriptor;
 pub mod repair;
 pub mod game_update;
 pub mod requirements;
+pub mod saves;
 pub mod smart_sort;
 pub mod sync;
 pub mod load_order;

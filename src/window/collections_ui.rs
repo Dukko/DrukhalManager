@@ -166,7 +166,7 @@ impl Window {
         self.refresh();
     }
 
-    fn switch_collection(self: &Rc<Self>, name: String) {
+    pub(super) fn switch_collection(self: &Rc<Self>, name: String) {
         if name == self.collections.borrow().active {
             return;
         }

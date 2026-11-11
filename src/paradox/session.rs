@@ -40,6 +40,9 @@ pub fn ended(user_dir: &Path, since: SystemTime) -> Option<Ended> {
 /// `continue_game.json`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LastSave {
+    /// The campaign's folder under the user directory, e.g.
+    /// `save games/omnian_1`, which holds all of its saves.
+    pub folder: String,
     /// The empire's name.
     pub empire: String,
     /// The in-game date, e.g. `2370.07.01`.
@@ -58,7 +61,13 @@ pub fn last_save(user_dir: &Path) -> Option<LastSave> {
     if !path.is_file() && !user_dir.join(format!("{save}.sav")).is_file() {
         return None;
     }
-    Some(LastSave { empire: field("desc").unwrap_or("your empire").to_owned(), date: field("date").unwrap_or_default().to_owned() })
+    let folder = save.rsplit_once('/').map_or("", |(folder, _)| folder).to_owned();
+    Some(LastSave { folder, empire: field("desc").unwrap_or("your empire").to_owned(), date: field("date").unwrap_or_default().to_owned() })
+}
+
+/// Whether the game saved, or continued, a game at or after `since`.
+pub fn saved_since(user_dir: &Path, since: SystemTime) -> bool {
+    modified(&user_dir.join("continue_game.json")).is_some_and(|t| t >= since)
 }
 
 #[cfg(test)]
@@ -104,7 +113,7 @@ mod tests {
         .unwrap();
         assert_eq!(super::last_save(&dir), None, "the save was deleted");
         std::fs::write(dir.join("save games/omnian_1/autosave_2370.07.01.sav"), "").unwrap();
-        assert_eq!(super::last_save(&dir), Some(super::LastSave { empire: "Omnian Animus".into(), date: "2370.07.01".into() }));
+        assert_eq!(super::last_save(&dir), Some(super::LastSave { folder: "save games/omnian_1".into(), empire: "Omnian Animus".into(), date: "2370.07.01".into() }));
         std::fs::remove_dir_all(dir).unwrap();
     }
 }
