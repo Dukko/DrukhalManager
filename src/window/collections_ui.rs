@@ -183,7 +183,7 @@ impl Window {
     }
 
     /// Asks for one line of text, then calls `done` with it.
-    fn ask_text(self: &Rc<Self>, title: &str, field: &str, initial: &str, confirm: &str, done: impl Fn(&Rc<Window>, String) + 'static) {
+    pub(super) fn ask_text(self: &Rc<Self>, title: &str, field: &str, initial: &str, confirm: &str, done: impl Fn(&Rc<Window>, String) + 'static) {
         let entry = adw::EntryRow::builder().title(field).text(initial).build();
         let list = gtk::ListBox::builder().css_classes(["boxed-list"]).selection_mode(gtk::SelectionMode::None).build();
         list.append(&entry);

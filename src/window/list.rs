@@ -71,8 +71,11 @@ impl Window {
                 issues.get(&index).unwrap_or(&none),
             ));
         }
-        let order = self.settings.borrow().disabled_order;
-        for index in state.disabled_in(order) {
+        let disabled = {
+            let settings = self.settings.borrow();
+            state.disabled_in(settings.disabled_order, &settings.aliases)
+        };
+        for index in disabled {
             self.disabled_list.append(&self.row(
                 &state.mods[index],
                 index,
@@ -224,6 +227,29 @@ impl Window {
         });
     }
 
+    /// Asks for a name to show for the mod at `index` instead of its own.
+    /// An empty name, or the mod's own, goes back to the real one.
+    pub(super) fn rename_mod(self: &Rc<Self>, index: usize) {
+        let (id, real) = {
+            let state = self.state.borrow();
+            let Some(m) = state.mods.get(index) else { return };
+            (m.id.clone(), display_name(m).trim().to_owned())
+        };
+        let current = self.settings.borrow().aliases.get(&id).cloned().unwrap_or_else(|| real.clone());
+        self.ask_text("Rename Mod", "Name", &current, "_Rename", move |ui, name| {
+            {
+                let mut settings = ui.settings.borrow_mut();
+                if name.is_empty() || name == real {
+                    settings.aliases.remove(&id);
+                } else {
+                    settings.aliases.insert(id.clone(), name);
+                }
+            }
+            ui.save_settings("the mod's name");
+            ui.refresh();
+        });
+    }
+
     pub(super) fn row(
         self: &Rc<Self>,
         m: &Mod,
@@ -233,12 +259,18 @@ impl Window {
         issues: &[checks::Issue],
     ) -> adw::ActionRow {
         let d = &m.descriptor;
-        let name = display_name(m);
+        let alias = self.settings.borrow().aliases.get(&m.id).cloned();
+        let name = alias.as_deref().unwrap_or(display_name(m));
         let source = match m.source {
             mods::Source::Workshop => "Workshop",
             mods::Source::Local => "Local",
         };
-        let mut subtitle = vec![source.to_owned()];
+        let mut subtitle = Vec::new();
+        if alias.is_some() {
+            // The real name, which search also matches.
+            subtitle.push(display_name(m).trim().to_owned());
+        }
+        subtitle.push(source.to_owned());
         if !d.game_version().is_empty() {
             subtitle.push(format!("Stellaris {}", d.game_version()));
         }
@@ -351,6 +383,9 @@ impl Window {
             }
             menu.append_section(None, &moves);
         }
+        let item = gio::MenuItem::new(Some("_Rename…"), None);
+        item.set_action_and_target_value(Some("win.rename-mod"), Some(&index_variant));
+        menu.append_item(&item);
         if m.content.is_some() {
             let item = gio::MenuItem::new(Some("Open Folder"), None);
             item.set_action_and_target_value(Some("win.open-folder"), Some(&index_variant));
