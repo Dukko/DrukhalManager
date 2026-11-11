@@ -11,7 +11,7 @@ use gtk::{gio, glib};
 
 use crate::conflicts_view::plural;
 use crate::mods::archive;
-use crate::multiplayer::{self, Comparison, FileDiff, HashCache, ModInput, Progress, Report};
+use crate::multiplayer::{self, Build, Comparison, FileDiff, HashCache, ModInput, Progress, Report};
 
 /// Files listed per mod; the rest are summarised.
 const ROWS_PER_MOD: usize = 200;
@@ -23,6 +23,8 @@ pub struct Request {
     pub mods: Vec<(String, Option<u64>, Option<PathBuf>)>,
     pub game_dir: Option<PathBuf>,
     pub game_version: Option<String>,
+    /// The build of the game that's installed, if it was found.
+    pub build: Option<Build>,
 }
 
 impl Request {
@@ -35,7 +37,8 @@ impl Request {
             .collect();
         let path = HashCache::path();
         let mut cache = HashCache::load(&path);
-        let report = multiplayer::report(self.game_dir.as_deref(), self.game_version.as_deref(), all_game_files, &mods, progress, &mut cache);
+        let mut report = multiplayer::report(self.game_dir.as_deref(), self.game_version.as_deref(), all_game_files, &mods, progress, &mut cache);
+        report.build = self.build;
         // Only a speed-up, so failing to keep it doesn't matter.
         let _ = cache.save(&path);
         report
@@ -104,6 +107,10 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
     let bar = gtk::ProgressBar::builder().show_text(true).pulse_step(0.1).margin_top(12).visible(false).build();
     intro.add(&bar);
     page.add(&intro);
+    // Windows players can't make a report, so say it before comparing.
+    if request.build == Some(Build::Linux) {
+        page.add(&adw::PreferencesGroup::builder().title("Playing With Windows Players").description(format!("You run the native Linux build. {}", multiplayer::BUILDS_DIFFER)).build());
+    }
     let busy = Busy { bar, rows: [save.clone().upcast(), open.clone().upcast(), all_files.clone().upcast()] };
 
     let results: Rc<std::cell::RefCell<Vec<adw::PreferencesGroup>>> = Rc::default();
@@ -258,10 +265,13 @@ fn render(c: &Comparison, theirs: &str) -> Vec<adw::PreferencesGroup> {
     }
     let mut out = vec![group(&format!("Compared With {theirs}"), "What differs between your setup and theirs. Fix these so you all have the same.")];
 
-    if c.game_version.is_some() || !c.game_files.is_empty() {
-        let g = group("Game", "");
+    if c.game_version.is_some() || c.builds.is_some() || !c.game_files.is_empty() {
+        let g = group("Game", if c.builds.is_some() { multiplayer::BUILDS_DIFFER } else { "" });
         if let Some((mine, theirs)) = &c.game_version {
             g.add(&label_row("Different game version", &format!("Yours: {mine} · Theirs: {theirs}")));
+        }
+        if let Some((mine, theirs)) = c.builds {
+            g.add(&label_row("Different game build", &format!("Yours: {} · Theirs: {}", mine.describe(), theirs.describe())));
         }
         if !c.game_files.is_empty() {
             g.add(&files_expander("Game files", &c.game_files));
