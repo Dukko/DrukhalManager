@@ -85,7 +85,7 @@ impl Window {
         options.append(&hide_dependencies);
         body.append(&options);
         body.append(&gtk::Label::builder().label(HELP).wrap(true).xalign(0.0).css_classes(["dim-label"]).build());
-        body.append(&editor);
+        body.append(&crate::resize_grip::resizable(&editor));
         body.append(&summary);
         body.append(&preview_scroll);
 

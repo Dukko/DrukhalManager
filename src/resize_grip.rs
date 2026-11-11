@@ -47,8 +47,11 @@ pub fn resizable(scroll: &gtk::ScrolledWindow) -> gtk::Box {
 }
 
 /// Fixes `scroll`'s height, in the order GTK accepts: the maximum may never
-/// be below the minimum.
+/// be below the minimum. A box that stretched to fill the space stops, so
+/// the height it's dragged to holds and its neighbours take the rest.
 fn set_height(scroll: &gtk::ScrolledWindow, height: i32) {
+    scroll.set_vexpand(false);
+    scroll.set_propagate_natural_height(true);
     if height > scroll.max_content_height() {
         scroll.set_max_content_height(height);
         scroll.set_min_content_height(height);

@@ -62,7 +62,7 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
     let thinking = ThinkingView::new();
     let result_box = gtk::Box::new(gtk::Orientation::Vertical, 8);
     result_box.append(&thinking.widget);
-    result_box.append(&editor_scroll);
+    result_box.append(&crate::resize_grip::resizable(&editor_scroll));
     result.add(&result_box);
 
     let page = adw::PreferencesPage::new();
