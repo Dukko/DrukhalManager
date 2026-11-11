@@ -110,7 +110,7 @@ impl Window {
     pub(super) fn show_saves(self: &Rc<Self>) {
         let saves = Saves::load(&saves::path());
         if saves.campaigns.is_empty() {
-            return self.toasts.add_toast(adw::Toast::new("No saves yet: games played from DrukhalManager are listed here"));
+            return self.add_toast(adw::Toast::new("No saves yet: games played from DrukhalManager are listed here"));
         }
         let active = self.collections.borrow().active.clone();
         let current = self.playing().mods;

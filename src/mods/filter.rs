@@ -23,6 +23,60 @@ pub struct Facts {
     /// The game version the mod supports, e.g. `3.12.*`.
     pub version: String,
     pub conflicts: bool,
+    /// Doesn't declare support for the installed game version.
+    pub outdated: bool,
+    /// Has a warning: a missing requirement, a bad load order, a broken
+    /// descriptor and the like.
+    pub attention: bool,
+}
+
+/// The sidebar's lists of mods, each a filter over the same rows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum View {
+    #[default]
+    All,
+    Attention,
+    Outdated,
+    Conflicts,
+    NoAchievements,
+    Disabled,
+}
+
+impl View {
+    pub const ALL: [View; 6] = [View::All, View::Attention, View::Outdated, View::Conflicts, View::NoAchievements, View::Disabled];
+
+    pub fn title(self) -> &'static str {
+        match self {
+            View::All => "Load Order",
+            View::Attention => "Needs Attention",
+            View::Outdated => "Not Updated for This Game",
+            View::Conflicts => "Has Conflicts",
+            View::NoAchievements => "Turns Off Achievements",
+            View::Disabled => "Disabled",
+        }
+    }
+
+    pub fn icon(self) -> &'static str {
+        match self {
+            View::All => "view-list-symbolic",
+            View::Attention => "dialog-warning-symbolic",
+            View::Outdated => "software-update-available-symbolic",
+            View::Conflicts => "edit-copy-symbolic",
+            View::NoAchievements => "action-unavailable-symbolic",
+            View::Disabled => "list-remove-symbolic",
+        }
+    }
+
+    pub fn matches(self, f: &Facts) -> bool {
+        match self {
+            View::All => true,
+            View::Attention => f.attention,
+            View::Outdated => f.enabled && f.outdated,
+            View::Conflicts => f.conflicts,
+            View::NoAchievements => f.enabled && !f.achievements,
+            View::Disabled => !f.enabled,
+        }
+    }
 }
 
 /// The filter keys, in the order the filter popover shows them.
@@ -212,6 +266,8 @@ mod tests {
             source: Source::Workshop,
             version: "v3.12.*".into(),
             conflicts: true,
+            outdated: false,
+            attention: true,
         }
     }
 
@@ -253,6 +309,15 @@ mod tests {
         assert!(!matches("ethics || enabled:no"));
         assert!(!matches("ethics ||"), "an unfinished alternative is ignored");
         assert!(!matches("enabled:maybe"), "a value it doesn't know is text");
+    }
+
+    #[test]
+    fn views_pick_mods() {
+        let f = facts();
+        assert!(View::All.matches(&f) && View::Attention.matches(&f) && View::Conflicts.matches(&f) && View::NoAchievements.matches(&f));
+        assert!(!View::Outdated.matches(&f) && !View::Disabled.matches(&f));
+        let off = Facts { enabled: false, ..facts() };
+        assert!(View::Disabled.matches(&off) && !View::NoAchievements.matches(&off), "only enabled mods cost achievements");
     }
 
     #[test]

@@ -38,9 +38,9 @@ impl Window {
         self.refresh();
         if ignore {
             let name = name.unwrap_or_else(|| format!("Workshop item {id}"));
-            self.toasts.add_toast(
+            self.add_toast(
                 adw::Toast::builder()
-                    .title(format!("“{}” is no longer treated as required", glib::markup_escape_text(&name)))
+                    .title(format!("“{}” is no longer treated as required", name))
                     .button_label("_Undo")
                     .action_name("win.unignore-requirement")
                     .action_target(&id.to_variant())
@@ -151,7 +151,7 @@ impl Window {
             gtk::UriLauncher::new(&format!("steam://url/CommunityFilePage/{id}")).launch(Some(&self.window), None::<&gio::Cancellable>, |_| {});
         }
         if !missing.is_empty() {
-            self.toasts.add_toast(adw::Toast::new(&format!(
+            self.add_toast(adw::Toast::new(&format!(
                 "Opened {} in Steam: subscribe there, then reload (F5)",
                 plural(missing.len(), "Workshop page", "Workshop pages")
             )));

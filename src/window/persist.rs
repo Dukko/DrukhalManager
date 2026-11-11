@@ -2,6 +2,8 @@
 
 use std::rc::Rc;
 
+use adw::prelude::*;
+
 use super::Window;
 use super::display_name;
 use crate::mods;
@@ -20,7 +22,7 @@ impl Window {
                         c.update(ids, &self.state.borrow().mods);
                     }
                     if let Err(e) = collections.save(&mods::collections::path()) {
-                        self.toasts.add_toast(
+                        self.add_toast(
                             adw::Toast::builder()
                                 .title(format!("Could not save collections: {e}"))
                                 .timeout(0)
@@ -30,11 +32,11 @@ impl Window {
                 }
                 self.restore_banner.set_revealed(false);
                 self.refresh();
-                self.toasts.add_toast(self.sync_launcher());
+                self.add_toast(self.sync_launcher());
                 true
             }
             Err(e) => {
-                self.toasts.add_toast(
+                self.add_toast(
                     adw::Toast::builder()
                         .title(format!("Could not save load order: {e}"))
                         .timeout(0)
@@ -70,14 +72,27 @@ impl Window {
         match launcher_db::sync(&self.paths.user_dir, &self.paths.backup_dir, &playset_name, &playset) {
             Ok(None) => adw::Toast::new("Load order saved"),
             Ok(Some(synced)) if synced.missing.is_empty() => adw::Toast::new(&format!("Load order saved and set as the “{playset_name}” playset in the Paradox Launcher")),
-            Ok(Some(synced)) => adw::Toast::builder()
-                .title(format!(
-                    "Load order saved. The Paradox Launcher doesn't know {} yet, so its playset leaves {} out",
-                    synced.missing.join(", "),
-                    if synced.missing.len() == 1 { "it" } else { "them" }
-                ))
-                .timeout(0)
-                .build(),
+            Ok(Some(synced)) => {
+                // Names can be long; they're listed behind Show.
+                let toast = adw::Toast::builder()
+                    .title(format!("Load order saved. The Paradox Launcher doesn't know {} yet", crate::conflicts_view::plural(synced.missing.len(), "mod", "mods")))
+                    .button_label("Show")
+                    .timeout(0)
+                    .build();
+                let window = self.window.downgrade();
+                toast.connect_button_clicked(move |_| {
+                    let body = format!(
+                        "Its “{playset_name}” playset leaves {} out until the Launcher has seen {}: open the Launcher once, then save again.\n\n{}",
+                        if synced.missing.len() == 1 { "this mod" } else { "these mods" },
+                        if synced.missing.len() == 1 { "it" } else { "them" },
+                        synced.missing.iter().map(|m| format!("• {m}")).collect::<Vec<_>>().join("\n")
+                    );
+                    let dialog = adw::AlertDialog::new(Some("Not in the Paradox Launcher Yet"), Some(&body));
+                    dialog.add_response("close", "_Close");
+                    dialog.present(window.upgrade().as_ref());
+                });
+                toast
+            }
             Err(e) => adw::Toast::builder().title(format!("Load order saved, but the Paradox Launcher's playset wasn't updated: {e}")).timeout(0).build(),
         }
     }

@@ -32,7 +32,7 @@ impl Window {
             (state.mods.clone(), state.enabled.clone())
         };
         if enabled.is_empty() {
-            return self.toasts.add_toast(adw::Toast::new("No mods are enabled"));
+            return self.add_toast(adw::Toast::new("No mods are enabled"));
         }
         let overrides: Rc<RefCell<HashMap<String, Category>>> = Rc::new(RefCell::new(
             self.settings.borrow().sort_categories.iter().filter_map(|(id, key)| Some((id.clone(), Category::from_key(key)?))).collect(),

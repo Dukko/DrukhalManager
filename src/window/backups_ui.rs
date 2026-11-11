@@ -101,7 +101,7 @@ impl Window {
         }
         self.patch_saved();
         self.render_conflicts();
-        self.toasts.add_toast(adw::Toast::new(&format!("Restored the merged patch from {}", when(snapshot))));
+        self.add_toast(adw::Toast::new(&format!("Restored the merged patch from {}", when(snapshot))));
     }
 }
 

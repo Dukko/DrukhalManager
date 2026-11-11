@@ -152,7 +152,7 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
                         Ok(Err(e)) => format!("Could not save the report: {e}"),
                         Err(_) => "Could not save the report".to_owned(),
                     };
-                    toasts.add_toast(adw::Toast::new(&message));
+                    toasts.add_toast(adw::Toast::builder().title(message).use_markup(false).build());
                 });
             });
         }
@@ -200,7 +200,7 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
                                 results.borrow_mut().push(group);
                             }
                         }
-                        Err(message) => toasts.add_toast(adw::Toast::builder().title(message).timeout(0).build()),
+                        Err(message) => toasts.add_toast(adw::Toast::builder().title(message).use_markup(false).timeout(0).build()),
                     }
                 });
             });

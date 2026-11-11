@@ -111,13 +111,13 @@ impl Window {
     pub(super) fn unsubscribe_in_steam(&self, index: usize) {
         let Some(name) = self.state.borrow().mods.get(index).map(|m| super::display_name(m).to_owned()) else { return };
         self.open_in_steam(index);
-        self.toasts.add_toast(adw::Toast::builder().title(format!("Click Unsubscribe on {name}'s page in Steam, then reload the mods (F5)")).timeout(10).build());
+        self.add_toast(adw::Toast::builder().title(format!("Click Unsubscribe on {name}'s page in Steam, then reload the mods (F5)")).timeout(10).build());
     }
 
     pub(super) fn copy_workshop_link(&self, index: usize) {
         let Some(id) = self.workshop_id(index) else { return };
         self.window.clipboard().set_text(&workshop_url(id));
-        self.toasts.add_toast(adw::Toast::new("Copied the Workshop link"));
+        self.add_toast(adw::Toast::new("Copied the Workshop link"));
     }
 
     /// Offers to continue the last save in the Launch menu, if there is one.
@@ -157,7 +157,7 @@ impl Window {
             match glib::shell_parse_argv(&options.launch_args) {
                 Ok(args) => args.into_iter().map(|a| a.to_string_lossy().into_owned()).collect(),
                 Err(e) => {
-                    return self.toasts.add_toast(
+                    return self.add_toast(
                         adw::Toast::builder()
                             .title(format!("Check the game launch options in Preferences: {}", e.message()))
                             .timeout(0)
@@ -184,8 +184,7 @@ impl Window {
             let uri = if resume { format!("steam://run/{id}//{CONTINUE}/") } else { format!("steam://rungameid/{id}") };
             gtk::UriLauncher::new(&uri)
             .launch(Some(&self.window), None::<&gio::Cancellable>, |_| {});
-            self.toasts
-                .add_toast(adw::Toast::new("Starting Stellaris through Steam…"));
+            self.add_toast(adw::Toast::new("Starting Stellaris through Steam…"));
             if options.close_after_launch {
                 self.window.close();
             } else {
@@ -201,7 +200,7 @@ impl Window {
         let mut child = match game.launch(&extra) {
             Ok(child) => child,
             Err(e) => {
-                return self.toasts.add_toast(
+                return self.add_toast(
                     adw::Toast::builder()
                         .title(format!("Could not start Stellaris: {e}"))
                         .timeout(0)
@@ -214,8 +213,7 @@ impl Window {
             self.window.close();
             return;
         }
-        self.toasts
-            .add_toast(adw::Toast::new("Starting Stellaris…"));
+        self.add_toast(adw::Toast::new("Starting Stellaris…"));
         // When the game exits, point out errors it logged about the mods.
         let weak = Rc::downgrade(self);
         glib::spawn_future_local(async move {
@@ -289,7 +287,7 @@ impl Window {
         if fresh {
             toast = toast.button_label("Show").action_name("win.errors");
         }
-        self.toasts.add_toast(toast.build());
+        self.add_toast(toast.build());
     }
 
     /// The last session's error.log, credited to the enabled mods.
@@ -339,7 +337,7 @@ impl Window {
     pub(super) fn show_errors(self: &Rc<Self>) {
         let log = error_log::path(&self.paths.user_dir);
         if !log.is_file() {
-            return self.toasts.add_toast(adw::Toast::new(
+            return self.add_toast(adw::Toast::new(
                 "No error.log yet; it's written when the game runs",
             ));
         }

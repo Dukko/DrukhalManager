@@ -7,6 +7,7 @@ mod crash_hunt_ui;
 mod ignore_rules_ui;
 mod game_update_ui;
 mod launch;
+mod overview;
 mod list;
 mod persist;
 mod reload;
@@ -32,7 +33,7 @@ use state::State;
 
 use crate::conflicts_view::Analysis;
 use crate::merge::patch::{self, Patch};
-use crate::mods::{Mod, filter};
+use crate::mods::{Mod, checks, filter};
 use crate::mods::collections::Collections;
 use crate::paradox::game::GameInstall;
 use crate::preferences;
@@ -53,14 +54,29 @@ struct Window {
     paths: Paths,
     game: Option<GameInstall>,
     state: RefCell<State>,
-    status: gtk::Label,
     launch_menu: gio::Menu,
     /// Checked when every mod is enabled, mixed when some are.
     all_toggle: gtk::CheckButton,
     /// Set while `refresh` updates `all_toggle`, so it isn't taken as a click.
     syncing: Cell<bool>,
-    /// Shown when some mods load before mods they depend on.
-    sort_button: gtk::Button,
+    /// What's wrong with the load order, as buttons that show or fix it.
+    health: gtk::Box,
+    /// The sidebar's views, the one showing, and each one's count.
+    views_list: gtk::ListBox,
+    view: Rc<Cell<filter::View>>,
+    view_counts: Vec<(filter::View, gtk::Label)>,
+    /// The game version, achievements and last save, under the views.
+    game_info: gtk::Label,
+    enabled_section: gtk::Box,
+    disabled_section: gtk::Box,
+    /// The selected mod's details, and the panel it's in.
+    inspector: adw::Bin,
+    inspector_split: adw::OverlaySplitView,
+    /// The mod shown in the inspector, by index.
+    selected: Cell<Option<usize>>,
+    /// What the last refresh found, by mod index, for the inspector.
+    last_issues: RefCell<std::collections::HashMap<usize, Vec<checks::Issue>>>,
+    last_conflicts: RefCell<std::collections::HashMap<usize, usize>>,
     search: gtk::SearchEntry,
     /// What the search can match each listed mod on, by mod index.
     search_facts: SearchFacts,
@@ -124,6 +140,7 @@ pub fn build(
     found: io::Result<Vec<Mod>>,
 ) {
     thumbnails::add_css();
+    overview::add_css();
     crate::sandbox::load_host_stylesheet();
     let stack = adw::ViewStack::new();
     let switcher = adw::ViewSwitcher::builder()
@@ -139,8 +156,8 @@ pub fn build(
     let window = adw::ApplicationWindow::builder()
         .application(app)
         .title("DrukhalManager")
-        .default_width(960)
-        .default_height(720)
+        .default_width(1280)
+        .default_height(820)
         .content(&toasts)
         .build();
 
@@ -206,27 +223,20 @@ pub fn build(
         launch.set_tooltip_text(Some("Stellaris was not found in any Steam library"));
     }
 
-    let enabled_list = boxed_list("No mods enabled");
-    let disabled_list = boxed_list("Every mod is enabled");
+    let enabled_list = boxed_list("No mods match");
+    let disabled_list = boxed_list("No mods match");
+    for list in [&enabled_list, &disabled_list] {
+        // Clicking a row shows it in the inspector; its switch toggles it.
+        list.set_selection_mode(gtk::SelectionMode::Single);
+        list.add_css_class("mod-list");
+    }
     let missing_list = boxed_list("");
     let missing_heading = heading("Not Installed");
-    let status = gtk::Label::builder()
-        .xalign(0.0)
-        .wrap(true)
-        .css_classes(["dim-label"])
-        .build();
     let content = gtk::Box::new(gtk::Orientation::Vertical, 12);
     let all_toggle = gtk::CheckButton::builder()
         .label("Enable All")
         .tooltip_text("Enable or disable every mod")
-        .halign(gtk::Align::End)
-        .build();
-    let sort_button = gtk::Button::builder()
-        .label("Sort by Dependencies")
-        .tooltip_text("Move mods after the mods they depend on")
-        .css_classes(["pill", "suggested-action"])
         .valign(gtk::Align::Center)
-        .visible(false)
         .build();
     let sort_menu = gio::Menu::new();
     sort_menu.append(Some("Sort A–Z, Dependencies First"), Some("win.sort-alphabetically"));
@@ -235,15 +245,10 @@ pub fn build(
         .tooltip_text("Sort into sections by what each mod changes, keeping sub-mods below their mods and every mod after its dependencies")
         .dropdown_tooltip("More ways to sort")
         .menu_model(&sort_menu)
-        .css_classes(["flat"])
         .valign(gtk::Align::Center)
         .build();
-    let top = gtk::Box::new(gtk::Orientation::Horizontal, 12);
-    status.set_hexpand(true);
-    top.append(&status);
-    top.append(&sort_button);
-    top.append(&sort_alpha_button);
-    top.append(&all_toggle);
+    // What's wrong and what to do about it, at a glance; see `refresh_health`.
+    let health = gtk::Box::builder().spacing(8).homogeneous(true).build();
     let search = gtk::SearchEntry::builder()
         .placeholder_text("Search mods (Ctrl+F), or try source:local or enabled:no")
         .hexpand(true)
@@ -251,6 +256,8 @@ pub fn build(
     let search_row = gtk::Box::new(gtk::Orientation::Horizontal, 6);
     search_row.append(&search);
     search_row.append(&filter_button(&search));
+    search_row.append(&sort_alpha_button);
+    search_row.append(&all_toggle);
     // Banner titles are plain text: mod names can contain markup characters.
     let repair_banner = adw::Banner::builder()
         .button_label("Repair…")
@@ -267,20 +274,23 @@ pub fn build(
         .use_markup(false)
         .build();
     toolbar.add_top_bar(&hunt_banner);
-    content.append(&top);
+    content.append(&health);
     content.append(&search_row);
     let search_facts = SearchFacts::default();
     let query: Rc<RefCell<filter::Query>> = Rc::default();
+    let view: Rc<Cell<filter::View>> = Rc::default();
     for list in [&enabled_list, &disabled_list] {
-        let (query, facts) = (query.clone(), search_facts.clone());
+        let (query, facts, view) = (query.clone(), search_facts.clone(), view.clone());
         list.set_filter_func(move |row| {
             let query = query.borrow();
-            query.is_empty()
-                || row
-                    .widget_name()
-                    .strip_prefix("mod-")
-                    .and_then(|i| facts.borrow().get(&i.parse().ok()?).map(|f| query.matches(f)))
-                    .unwrap_or(true)
+            let view = view.get();
+            if query.is_empty() && view == filter::View::All {
+                return true;
+            }
+            row.widget_name()
+                .strip_prefix("mod-")
+                .and_then(|i| facts.borrow().get(&i.parse().ok()?).map(|f| view.matches(f) && query.matches(f)))
+                .unwrap_or(true)
         });
     }
     search.connect_search_changed(glib::clone!(
@@ -294,8 +304,10 @@ pub fn build(
             disabled_list.invalidate_filter();
         }
     ));
-    content.append(&heading("Load Order"));
-    content.append(&enabled_list);
+    let enabled_section = gtk::Box::new(gtk::Orientation::Vertical, 6);
+    enabled_section.append(&heading("Load Order"));
+    enabled_section.append(&enabled_list);
+    content.append(&enabled_section);
     content.append(&missing_heading);
     content.append(&missing_list);
     let disabled_order = gtk::DropDown::builder()
@@ -310,10 +322,44 @@ pub fn build(
     disabled_heading.append(&label);
     disabled_heading.append(&gtk::Label::builder().label("Sort by").css_classes(["dim-label"]).build());
     disabled_heading.append(&disabled_order);
-    content.append(&disabled_heading);
-    content.append(&disabled_list);
+    let disabled_section = gtk::Box::new(gtk::Orientation::Vertical, 6);
+    disabled_section.append(&disabled_heading);
+    disabled_section.append(&disabled_list);
+    content.append(&disabled_section);
+
+    // Views on the left, the list, and the selected mod on the right; the
+    // side panels fold away in a narrow window.
+    let (views_list, view_counts, game_info) = overview::views_sidebar();
+    let views_split = adw::OverlaySplitView::builder()
+        .sidebar(&overview::sidebar_page(&views_list, &game_info))
+        .css_classes(["load-order-split"])
+        .content(&scrolled_page(&content))
+        .min_sidebar_width(200.0)
+        .max_sidebar_width(240.0)
+        .build();
+    let inspector = adw::Bin::builder().css_classes(["side-panel"]).overflow(gtk::Overflow::Hidden).build();
+    let inspector_split = adw::OverlaySplitView::builder()
+        .sidebar(&inspector)
+        .css_classes(["load-order-split"])
+        .content(&views_split)
+        .sidebar_position(gtk::PackType::End)
+        .min_sidebar_width(300.0)
+        .max_sidebar_width(360.0)
+        .build();
+    let views_toggle = gtk::ToggleButton::builder()
+        .icon_name("sidebar-show-symbolic")
+        .tooltip_text("Show Views")
+        .build();
+    views_split.bind_property("show-sidebar", &views_toggle, "active").bidirectional().sync_create().build();
+    views_split.bind_property("collapsed", &views_toggle, "visible").sync_create().build();
+    header.pack_start(&views_toggle);
+    for (width, split) in [(1100.0, &inspector_split), (760.0, &views_split)] {
+        let breakpoint = adw::Breakpoint::new(adw::BreakpointCondition::new_length(adw::BreakpointConditionLengthType::MaxWidth, width, adw::LengthUnit::Sp));
+        breakpoint.add_setter(split, "collapsed", Some(&true.to_value()));
+        window.add_breakpoint(breakpoint);
+    }
     stack.add_titled_with_icon(
-        &scrolled_page(&content),
+        &inspector_split,
         Some("load-order"),
         "Load Order",
         "view-list-symbolic",
@@ -370,11 +416,21 @@ pub fn build(
         hunt_banner: hunt_banner.clone(),
         crash_hunt: RefCell::new(None),
         state: RefCell::new(State::new(found)),
-        status,
         launch_menu,
         all_toggle: all_toggle.clone(),
         syncing: Cell::new(false),
-        sort_button: sort_button.clone(),
+        health,
+        views_list,
+        view,
+        view_counts,
+        game_info,
+        enabled_section,
+        disabled_section,
+        inspector,
+        inspector_split,
+        selected: Cell::new(None),
+        last_issues: RefCell::default(),
+        last_conflicts: RefCell::default(),
         search: search.clone(),
         search_facts,
         requirements: RefCell::new(crate::mods::requirements::Cache::load(&crate::mods::requirements::Cache::path())),
@@ -453,7 +509,7 @@ pub fn build(
         Ok(p) => {
             ui.patch.replace(Some(p));
         }
-        Err(e) => ui.toasts.add_toast(
+        Err(e) => ui.add_toast(
             adw::Toast::builder()
                 .title(format!("Could not read the merged patch: {e}"))
                 .timeout(0)
@@ -468,12 +524,7 @@ pub fn build(
     });
     ui.update_repair_banner();
     ui.setup_collections();
-    let weak = Rc::downgrade(&ui);
-    sort_button.connect_clicked(move |_| {
-        if let Some(ui) = weak.upgrade() {
-            ui.sort_by_dependencies();
-        }
-    });
+    ui.setup_overview();
     disabled_order.set_selected(match ui.settings.borrow().disabled_order {
         settings::DisabledOrder::Name => 0,
         settings::DisabledOrder::RecentlyUpdated => 1,
@@ -727,9 +778,28 @@ impl Window {
         );
     }
 
+    /// Shows a toast. Its text is plain, never markup: titles hold mod
+    /// names and error messages, and one `&` would blank a markup title.
+    /// Long ones wrap instead of stretching across the window.
+    fn add_toast(&self, toast: adw::Toast) {
+        toast.set_use_markup(false);
+        let title = toast.title().unwrap_or_default();
+        if title.chars().count() > 60 && toast.custom_title().is_none() {
+            let label = gtk::Label::builder()
+                .label(title.as_str())
+                .wrap(true)
+                .wrap_mode(gtk::pango::WrapMode::WordChar)
+                .max_width_chars(60)
+                .justify(gtk::Justification::Center)
+                .build();
+            toast.set_custom_title(Some(&label));
+        }
+        self.toasts.add_toast(toast);
+    }
+
     fn save_settings(&self, what: &str) {
         if let Err(e) = self.settings.borrow().save(&settings::path()) {
-            self.toasts.add_toast(
+            self.add_toast(
                 adw::Toast::builder()
                     .title(format!("Could not save {what}: {e}"))
                     .timeout(0)
@@ -770,7 +840,7 @@ impl Window {
             ui.settings.borrow_mut().key_in_keyring = stored.is_ok();
             ui.save_settings("preferences");
             if let Err(e) = stored {
-                ui.toasts.add_toast(
+                ui.add_toast(
                     adw::Toast::builder()
                         .title(format!("{e}. The API key is saved in settings.json, readable only by you."))
                         .timeout(0)

@@ -15,15 +15,15 @@ use crate::paradox::dlc;
 impl Window {
     pub(super) fn show_dlcs(self: &Rc<Self>) {
         let Some(game) = &self.game else {
-            return self.toasts.add_toast(adw::Toast::new("Stellaris wasn't found, so its DLCs can't be listed"));
+            return self.add_toast(adw::Toast::new("Stellaris wasn't found, so its DLCs can't be listed"));
         };
         let dlcs = dlc::installed(&game.dir);
         if dlcs.is_empty() {
-            return self.toasts.add_toast(adw::Toast::new("No DLCs are installed"));
+            return self.add_toast(adw::Toast::new("No DLCs are installed"));
         }
         let before: BTreeSet<String> = match load_order::DlcLoad::read(&self.paths.user_dir) {
             Ok(load) => load.disabled_dlcs.into_iter().collect(),
-            Err(e) => return self.toasts.add_toast(adw::Toast::new(&format!("Could not read the DLC settings: {e}"))),
+            Err(e) => return self.add_toast(adw::Toast::new(&format!("Could not read the DLC settings: {e}"))),
         };
         let disabled = Rc::new(RefCell::new(before.clone()));
 
@@ -85,9 +85,9 @@ impl Window {
             }
             let list: Vec<String> = after.iter().cloned().collect();
             match load_order::save_disabled_dlcs(&ui.paths.user_dir, &ui.paths.backup_dir, &list) {
-                Ok(_) if list.is_empty() => ui.toasts.add_toast(adw::Toast::new("Every DLC is on")),
-                Ok(_) => ui.toasts.add_toast(adw::Toast::new(&format!("{} off", plural(list.len(), "DLC is", "DLCs are")))),
-                Err(e) => ui.toasts.add_toast(adw::Toast::builder().title(format!("Could not save the DLC settings: {e}")).timeout(0).build()),
+                Ok(_) if list.is_empty() => ui.add_toast(adw::Toast::new("Every DLC is on")),
+                Ok(_) => ui.add_toast(adw::Toast::new(&format!("{} off", plural(list.len(), "DLC is", "DLCs are")))),
+                Err(e) => ui.add_toast(adw::Toast::builder().title(format!("Could not save the DLC settings: {e}")).timeout(0).build()),
             }
         });
         dialog.present(Some(&self.window));

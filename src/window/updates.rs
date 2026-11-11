@@ -92,7 +92,7 @@ impl Window {
         // how to get one.
         let installable = crate::sandbox::is_flatpak() && !release.is_some_and(|r| r.prerelease);
         let (label, action) = if installable { ("Update", "win.install-update") } else { ("Details", "win.show-update") };
-        self.toasts.add_toast(adw::Toast::builder().title(title).button_label(label).action_name(action).timeout(0).build());
+        self.add_toast(adw::Toast::builder().title(title).button_label(label).action_name(action).timeout(0).build());
     }
 
     /// Flatpak's update monitor, created on first use.
@@ -103,7 +103,7 @@ impl Window {
         let monitor = match update::Monitor::new().await {
             Ok(m) => Rc::new(m),
             Err(e) => {
-                self.toasts.add_toast(adw::Toast::builder().title(format!("Could not reach Flatpak to update: {}", e.message())).timeout(0).build());
+                self.add_toast(adw::Toast::builder().title(format!("Could not reach Flatpak to update: {}", e.message())).timeout(0).build());
                 return None;
             }
         };
@@ -152,7 +152,7 @@ impl Window {
         let toast = current.unwrap_or_else(|| {
             let toast = adw::Toast::builder().timeout(0).build();
             self.update_toast.replace(Some(toast.clone()));
-            self.toasts.add_toast(toast.clone());
+            self.add_toast(toast.clone());
             toast
         });
         match progress {
@@ -174,7 +174,7 @@ impl Window {
         // Finished: the next update starts a new toast. Re-adding shows the
         // finished state even if the user dismissed the progress toast.
         self.update_toast.replace(None);
-        self.toasts.add_toast(toast);
+        self.add_toast(toast);
     }
 
     /// Starts the updated version and quits.
@@ -192,7 +192,7 @@ impl Window {
                         app.quit();
                     }
                 }
-                Err(e) => ui.toasts.add_toast(
+                Err(e) => ui.add_toast(
                     adw::Toast::builder()
                         .title(format!("Could not restart: {}. Close DrukhalManager and open it again.", e.message()))
                         .timeout(0)

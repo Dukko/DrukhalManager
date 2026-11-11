@@ -137,7 +137,7 @@ impl Window {
                 settings.ignore_rules = rules;
                 settings.show_dependency_conflicts = !hide_dependencies.is_active();
                 if let Err(e) = settings.save(&settings::path()) {
-                    ui.toasts.add_toast(adw::Toast::builder().title(format!("Could not save the ignore rules: {e}")).timeout(0).build());
+                    ui.add_toast(adw::Toast::builder().title(format!("Could not save the ignore rules: {e}")).timeout(0).build());
                     return;
                 }
             }

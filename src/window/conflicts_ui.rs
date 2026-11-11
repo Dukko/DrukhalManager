@@ -167,8 +167,7 @@ impl Window {
                     .object
                     .as_ref()
                     .map_or(stale.path.as_str(), |(_, k)| k.as_str());
-                self.toasts
-                    .add_toast(adw::Toast::new(&format!("Removed {what} from the patch")));
+                self.add_toast(adw::Toast::new(&format!("Removed {what} from the patch")));
             }
             Err(e) => self.toast_error_message(&e),
         }
@@ -228,7 +227,7 @@ impl Window {
                 Ok(()) => {
                     ui.check_stale();
                     ui.render_conflicts();
-                    ui.toasts.add_toast(adw::Toast::new(&format!("Kept {what}; changes to its mods will be noticed from now on")));
+                    ui.add_toast(adw::Toast::new(&format!("Kept {what}; changes to its mods will be noticed from now on")));
                 }
                 Err(e) => ui.toast_error_message(&e),
             }
@@ -236,8 +235,7 @@ impl Window {
     }
 
     pub(super) fn toast_error_message(&self, message: &str) {
-        self.toasts
-            .add_toast(adw::Toast::builder().title(message).timeout(0).build());
+        self.add_toast(adw::Toast::builder().title(message).timeout(0).build());
     }
 
     /// Rebuilds the Conflicts page from the current analysis.
@@ -269,7 +267,7 @@ impl Window {
                 settings.ignored.remove(key);
             }
             if let Err(e) = settings.save(&settings::path()) {
-                self.toasts.add_toast(
+                self.add_toast(
                     adw::Toast::builder()
                         .title(format!("Could not save ignored conflicts: {e}"))
                         .timeout(0)
@@ -404,7 +402,7 @@ impl Window {
         let weak = Rc::downgrade(self);
         let toast = Box::new(move |message: &str| {
             if let Some(ui) = weak.upgrade() {
-                ui.toasts.add_toast(adw::Toast::new(message));
+                ui.add_toast(adw::Toast::new(message));
             }
         });
         Rc::new(MergeHooks {
@@ -724,7 +722,7 @@ impl Window {
                 .action_name("win.save"),
             None => toast,
         };
-        self.toasts.add_toast(toast.build());
+        self.add_toast(toast.build());
     }
 
     pub(super) fn rescan_button(self: &Rc<Self>) -> gtk::Button {
