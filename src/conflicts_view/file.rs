@@ -342,7 +342,7 @@ impl FileView {
             let command = (page.hooks.merge_tool)();
             if command.is_empty() {
                 (page.hooks.toast)("Choose a merge tool in Preferences first");
-                return (page.hooks.open_preferences)();
+                return (page.hooks.open_merge_tool_settings)();
             }
             let tool = super::merge_tool_name(&command);
             let sides = (super::ToolSide { label: left.0.clone(), text: left.1.clone() }, super::ToolSide { label: right.0.clone(), text: right.1.clone() });

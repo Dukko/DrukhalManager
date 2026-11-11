@@ -625,7 +625,7 @@ impl ObjectView {
             let command = (page.hooks.merge_tool)();
             if command.is_empty() {
                 (page.hooks.toast)("Choose a merge tool in Preferences first");
-                return (page.hooks.open_preferences)();
+                return (page.hooks.open_merge_tool_settings)();
             }
             let tool = super::merge_tool_name(&command);
             let (left, right) = (super::ToolSide { label: left_label.clone(), text: left.clone() }, super::ToolSide { label: right_label.clone(), text: right.clone() });
