@@ -291,11 +291,14 @@ pub fn to_text(shared: &Shared) -> String {
     text
 }
 
-/// Reads a load order from pasted text: a collection file's JSON, or the
-/// list `to_text` writes. Lines that aren't numbered are skipped, so a
-/// list quoted with chat around it still reads.
+/// Reads a load order from pasted text: a collection file's JSON, a
+/// launcher playset's, or the list `to_text` writes. Lines that aren't
+/// numbered are skipped, so a list quoted with chat around it still reads.
 pub fn from_text(text: &str) -> Option<Shared> {
     if let Ok(shared) = serde_json::from_str::<Shared>(text.trim()) {
+        return Some(shared);
+    }
+    if let Some(shared) = from_launcher_json(text) {
         return Some(shared);
     }
     let mut name = "Pasted".to_owned();
@@ -328,8 +331,133 @@ pub fn from_text(text: &str) -> Option<Shared> {
     (!mods.is_empty()).then_some(Shared { format: 1, name, mods })
 }
 
+/// A Paradox Launcher playset file, as the launcher's Export Playset writes
+/// it (and Irony reads and writes): Workshop mods by Steam id, with their
+/// position in the load order.
+#[derive(Debug, Serialize, Deserialize)]
+struct LauncherPlayset {
+    #[serde(default = "stellaris")]
+    game: String,
+    #[serde(default)]
+    name: String,
+    mods: Vec<LauncherMod>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct LauncherMod {
+    #[serde(default)]
+    display_name: String,
+    #[serde(default = "yes")]
+    enabled: bool,
+    /// A number since the launcher's 2021.10 release; before it, a string
+    /// such as `"4097"`, also read here.
+    #[serde(default)]
+    position: serde_json::Value,
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "id_string")]
+    steam_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "id_string")]
+    pdx_id: Option<String>,
+}
+
+fn stellaris() -> String {
+    "stellaris".into()
+}
+
+fn yes() -> bool {
+    true
+}
+
+/// An id written as a string or a number.
+fn id_string<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<String>, D::Error> {
+    Ok(match serde_json::Value::deserialize(d)? {
+        serde_json::Value::String(s) if !s.is_empty() => Some(s),
+        serde_json::Value::Number(n) => Some(n.to_string()),
+        _ => None,
+    })
+}
+
+/// Reads a Paradox Launcher playset file, keeping its enabled mods in
+/// their positions.
+pub fn from_launcher_json(text: &str) -> Option<Shared> {
+    let playset: LauncherPlayset = serde_json::from_str(text.trim()).ok()?;
+    if !playset.game.eq_ignore_ascii_case("stellaris") {
+        return None;
+    }
+    let mut mods: Vec<(u64, LauncherMod)> = playset
+        .mods
+        .into_iter()
+        .filter(|m| m.enabled)
+        .enumerate()
+        .map(|(i, m)| {
+            let position = match &m.position {
+                serde_json::Value::Number(n) => n.as_u64(),
+                serde_json::Value::String(s) => s.trim().parse().ok(),
+                _ => None,
+            };
+            (position.unwrap_or(i as u64), m)
+        })
+        .collect();
+    // Stable, so mods without a position keep the file's order.
+    mods.sort_by_key(|(position, _)| *position);
+    let mods: Vec<SharedMod> = mods
+        .into_iter()
+        .filter_map(|(_, m)| {
+            let steam_id = m.steam_id.as_deref().and_then(|s| s.trim().parse().ok());
+            (steam_id.is_some() || !m.display_name.is_empty()).then(|| SharedMod { name: m.display_name, steam_id, id: String::new() })
+        })
+        .collect();
+    let name = if playset.name.trim().is_empty() { "Launcher Playset".to_owned() } else { playset.name.trim().to_owned() };
+    Some(Shared { format: 1, name, mods })
+}
+
+/// A shared collection as a Paradox Launcher playset file. The launcher
+/// only knows Workshop mods, so local ones are left out; their names are
+/// returned.
+pub fn to_launcher_json(shared: &Shared) -> (String, Vec<String>) {
+    let (workshop, local): (Vec<&SharedMod>, Vec<&SharedMod>) = shared.mods.iter().partition(|m| m.steam_id.is_some());
+    let mods = workshop
+        .into_iter()
+        .enumerate()
+        .map(|(position, m)| LauncherMod {
+            display_name: m.name.trim().to_owned(),
+            enabled: true,
+            position: position.into(),
+            steam_id: m.steam_id.map(|id| id.to_string()),
+            pdx_id: None,
+        })
+        .collect();
+    let playset = LauncherPlayset { game: stellaris(), name: shared.name.clone(), mods };
+    (serde_json::to_string_pretty(&playset).expect("plain data"), local.into_iter().map(|m| m.name.clone()).collect())
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn reads_and_writes_launcher_playsets() {
+        let new = r#"{"game":"stellaris","name":"Main","mods":[
+            {"displayName":"B","enabled":true,"position":1,"steamId":"222"},
+            {"displayName":"Off","enabled":false,"position":0,"steamId":"333"},
+            {"displayName":"A","enabled":true,"position":0,"steamId":"111"}]}"#;
+        let shared = from_launcher_json(new).unwrap();
+        assert_eq!(shared.name, "Main");
+        assert_eq!(shared.mods.iter().map(|m| (m.name.as_str(), m.steam_id)).collect::<Vec<_>>(), [("A", Some(111)), ("B", Some(222))]);
+
+        let old = r#"{"game":"stellaris","name":"Old","mods":[{"displayName":"X","enabled":true,"position":"4098","steamId":444},{"displayName":"Y","position":"4097","steamId":"555"}]}"#;
+        let shared = from_launcher_json(old).unwrap();
+        assert_eq!(shared.mods.iter().map(|m| m.steam_id).collect::<Vec<_>>(), [Some(555), Some(444)]);
+        assert!(from_launcher_json(r#"{"game":"hoi4","mods":[]}"#).is_none());
+        assert!(from_launcher_json(r#"{"format":1,"name":"x","mods":[]}"#).is_none_or(|s| s.mods.is_empty()));
+
+        let mut shared = from_launcher_json(new).unwrap();
+        shared.mods.insert(1, SharedMod { name: "Local".into(), steam_id: None, id: "mod/local.mod".into() });
+        let (json, skipped) = to_launcher_json(&shared);
+        assert_eq!(skipped, ["Local"]);
+        let back = from_launcher_json(&json).unwrap();
+        assert_eq!(back.mods.iter().map(|m| m.steam_id).collect::<Vec<_>>(), [Some(111), Some(222)]);
+        assert!(json.contains("\"steamId\": \"111\"") && json.contains("\"position\": 1"));
+    }
+
     #[test]
     fn copies_as_text_and_back() {
         let shared = Shared {
