@@ -330,6 +330,7 @@ impl Window {
             mods,
             game_dir: self.game.as_ref().map(|g| g.dir.clone()),
             game_version: self.game.as_ref().and_then(|g| g.version.clone()),
+            build: self.game.as_ref().map(|g| crate::multiplayer::Build::of(&g.exe)),
         };
         crate::multiplayer_dialog::present(&self.window, request);
     }

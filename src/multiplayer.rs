@@ -34,11 +34,42 @@ pub struct Report {
     /// checksummed folders.
     #[serde(default)]
     pub all_game_files: bool,
+    /// Which build of the game made it; `None` in reports from before
+    /// builds were recorded.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub build: Option<Build>,
     /// The base game's files: path -> hash.
     pub game: BTreeMap<String, String>,
     /// Enabled mods, in load order.
     pub mods: Vec<ModReport>,
 }
+
+/// A build of the game. On Linux, Steam installs either the native one or,
+/// when a Proton version is forced, the Windows one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Build {
+    Linux,
+    Windows,
+}
+
+impl Build {
+    /// The build whose executable is `exe`.
+    pub fn of(exe: &Path) -> Self {
+        if exe.extension().is_some_and(|e| e.eq_ignore_ascii_case("exe")) { Self::Windows } else { Self::Linux }
+    }
+
+    pub fn describe(self) -> &'static str {
+        match self {
+            Self::Linux => "Native Linux build",
+            Self::Windows => "Windows build",
+        }
+    }
+}
+
+/// Why players on different builds may not be able to play together, and
+/// what helps.
+pub const BUILDS_DIFFER: &str = "Players report that the native Linux build's checksum doesn't match the Windows build's, even with the same mods and files. Whoever runs the native Linux build can switch to the Windows build through Proton: in Steam, open Stellaris's Properties, and under Compatibility force a Proton version.";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ModReport {
@@ -183,6 +214,7 @@ pub fn report(game_dir: Option<&Path>, game_version: Option<&str>, all_game_file
         version: VERSION,
         game_version: game_version.map(str::to_owned),
         all_game_files,
+        build: None,
         game: game_dir.map(|dir| hash_tree(dir, game_files, progress, cache)).unwrap_or_default(),
         mods: mods
             .iter()
@@ -254,6 +286,8 @@ pub struct ModDiff {
 pub struct Comparison {
     /// `(mine, theirs)`, if the game versions differ.
     pub game_version: Option<(String, String)>,
+    /// `(mine, theirs)`, if the reports come from different builds.
+    pub builds: Option<(Build, Build)>,
     pub game_files: Vec<FileDiff>,
     pub only_mine: Vec<String>,
     pub only_theirs: Vec<String>,
@@ -296,6 +330,11 @@ pub fn compare(mine: &Report, theirs: &Report) -> Comparison {
     {
         c.game_version = Some((a.clone(), b.clone()));
     }
+    if let (Some(a), Some(b)) = (mine.build, theirs.build)
+        && a != b
+    {
+        c.builds = Some((a, b));
+    }
     // A report without game files (game not found) can't be compared there.
     if !mine.game.is_empty() && !theirs.game.is_empty() {
         // Only what both reports cover.
@@ -335,6 +374,19 @@ pub fn compare(mine: &Report, theirs: &Report) -> Comparison {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tells_builds_apart() {
+        assert_eq!(Build::of(Path::new("/g/stellaris")), Build::Linux);
+        assert_eq!(Build::of(Path::new("/g/stellaris.exe")), Build::Windows);
+        let base = Report { format: FORMAT.into(), version: VERSION, game_version: None, all_game_files: false, build: Some(Build::Linux), game: BTreeMap::new(), mods: vec![] };
+        let proton = Report { build: Some(Build::Windows), ..base.clone() };
+        assert_eq!(compare(&base, &proton).builds, Some((Build::Linux, Build::Windows)));
+        assert!(compare(&base, &Report { build: None, ..base.clone() }).matches(), "older reports don't say");
+        let json = proton.to_json();
+        assert!(json.contains("\"build\": \"windows\""));
+        assert_eq!(Report::from_json(&json).unwrap().build, Some(Build::Windows));
+    }
 
     fn write(root: &Path, files: &[(&str, &str)]) {
         for (path, body) in files {
