@@ -16,6 +16,7 @@ use crate::paradox::steam::ItemState;
 impl Window {
     pub(super) fn refresh(self: &Rc<Self>) {
         let state = self.state.borrow();
+        self.search_facts.borrow_mut().clear();
         self.enabled_list.remove_all();
         self.disabled_list.remove_all();
         // Conflict counts are only shown while they match the load order.
@@ -334,7 +335,22 @@ impl Window {
                 .build();
             row.add_suffix(&badge);
         }
-        if changes_checksum(m) {
+        let no_achievements = changes_checksum(m);
+        let mut text = vec![name.to_owned(), display_name(m).to_owned(), source.to_owned(), d.tags.join(" ")];
+        text.extend(d.remote_file_id.map(|id| id.to_string()));
+        self.search_facts.borrow_mut().insert(
+            index,
+            mods::filter::Facts {
+                text: text.join(" ").to_lowercase(),
+                enabled: position.is_some(),
+                achievements: !no_achievements,
+                source: m.source,
+                version: d.game_version().to_owned(),
+                conflicts: conflicts > 0,
+            },
+        );
+        row.set_widget_name(&format!("mod-{index}"));
+        if no_achievements {
             let badge = gtk::Label::builder()
                 .label("No achievements")
                 .tooltip_text("Changes files the game checksums, so achievements are off while it's enabled")
