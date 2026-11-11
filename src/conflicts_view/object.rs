@@ -627,20 +627,10 @@ impl ObjectView {
                 (page.hooks.toast)("Choose a merge tool in Preferences first");
                 return (page.hooks.open_preferences)();
             }
-            let tool = gtk::glib::shell_parse_argv(&command).ok().and_then(|a| a.first().map(|p| std::path::Path::new(p).file_name().unwrap_or_default().to_string_lossy().into_owned())).unwrap_or_default();
-            button.set_sensitive(false);
-            button.set_label(&format!("Waiting for {tool}…"));
-            let (left_label, left, right_label, right, base, button) = (left_label.clone(), left.clone(), right_label.clone(), right.clone(), base.clone(), button.clone());
+            let tool = super::merge_tool_name(&command);
+            let (left, right) = (super::ToolSide { label: left_label.clone(), text: left.clone() }, super::ToolSide { label: right_label.clone(), text: right.clone() });
             let weak = Rc::downgrade(&view);
-            glib::spawn_future_local(async move {
-                let result = gio::spawn_blocking(move || {
-                    use crate::merge::external::{Side, run};
-                    run(&command, Side { label: &left_label, text: &left }, Side { label: &right_label, text: &right }, base.as_deref())
-                })
-                .await
-                .unwrap_or_else(|_| Err("The merge tool failed".into()));
-                button.set_label("Merge Tool…");
-                button.set_sensitive(true);
+            super::run_merge_tool(button, command, left, right, base.clone(), move |result| {
                 let Some(view) = weak.upgrade() else { return };
                 let Some(page) = view.page.upgrade() else { return };
                 match result {

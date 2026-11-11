@@ -246,6 +246,7 @@ impl FileView {
                 }
             }
         };
+        bar.extra.append(&self.merge_tool_button(page, left, right, base.and_then(|b| b.text.clone().ok())));
         if has_base {
             bar.extra.append(&option_toggle(&page.hooks, "Base Game", "Mark what each copy changed from the base game, instead of the differences between the two", |s| s.compare_base, |s, v| s.compare_base = v, rerender.clone()));
         }
@@ -330,9 +331,51 @@ impl FileView {
         body.upcast()
     }
 
+    /// Opens the two copies in the external merge tool, and saves what's
+    /// saved there to the patch.
+    fn merge_tool_button(self: &Rc<Self>, page: &Rc<Page>, left: &Version, right: &Version, base: Option<String>) -> gtk::Button {
+        let button = gtk::Button::builder().label("Merge Tool…").tooltip_text(format!("Merge these two copies in your merge tool; what you save there goes into {}", patch::NAME)).css_classes(["flat"]).build();
+        let (left, right) = ((left.label.clone(), left.text.clone().unwrap_or_default()), (right.label.clone(), right.text.clone().unwrap_or_default()));
+        let (weak, page_ref) = (Rc::downgrade(self), Rc::downgrade(page));
+        button.connect_clicked(move |button| {
+            let (Some(view), Some(page)) = (weak.upgrade(), page_ref.upgrade()) else { return };
+            let command = (page.hooks.merge_tool)();
+            if command.is_empty() {
+                (page.hooks.toast)("Choose a merge tool in Preferences first");
+                return (page.hooks.open_preferences)();
+            }
+            let tool = super::merge_tool_name(&command);
+            let sides = (super::ToolSide { label: left.0.clone(), text: left.1.clone() }, super::ToolSide { label: right.0.clone(), text: right.1.clone() });
+            let weak = Rc::downgrade(&view);
+            super::run_merge_tool(button, command, sides.0, sides.1, base.clone(), move |result| {
+                let Some(view) = weak.upgrade() else { return };
+                let Some(page) = view.page.upgrade() else { return };
+                match result {
+                    Ok(Some(merged)) => {
+                        let name = file_name(&page.analysis.report.files[view.index].path).to_owned();
+                        view.save_copy(merged.as_bytes(), &format!("Saved your merge of {name}"));
+                    }
+                    Ok(None) => (page.hooks.toast)(&format!("{tool} was closed without saving, so nothing changed")),
+                    Err(message) => {
+                        view.error.replace(Some(message));
+                        view.render();
+                    }
+                }
+            });
+        });
+        button
+    }
+
     /// Saves one mod's copy to the patch, so it's used instead of the last
     /// mod's.
     fn use_version(self: &Rc<Self>, position: usize, contents: &[u8]) {
+        let Some(page) = self.page.upgrade() else { return };
+        let message = format!("Using {}'s copy of {}", page.analysis.name(position), file_name(&page.analysis.report.files[self.index].path));
+        self.save_copy(contents, &message);
+    }
+
+    /// Saves `contents` to the patch at this file's path.
+    fn save_copy(self: &Rc<Self>, contents: &[u8], message: &str) {
         let Some(page) = self.page.upgrade() else { return };
         let analysis = &page.analysis;
         let c = &analysis.report.files[self.index];
@@ -342,7 +385,7 @@ impl FileView {
             Ok(()) => {
                 self.error.replace(None);
                 page.hooks.saved();
-                (page.hooks.toast)(&format!("Using {}'s copy of {}", analysis.name(position), file_name(&c.path)));
+                (page.hooks.toast)(message);
                 page.update_status(self.item);
                 self.render();
             }

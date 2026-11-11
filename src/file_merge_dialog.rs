@@ -24,6 +24,8 @@ pub struct Request {
     /// Whether the patch already holds a merge of this file.
     pub merged_before: bool,
     pub save: Box<dyn Fn(&str, Vec<Print>) -> Result<(), String>>,
+    /// The external merge tool's command; empty for none.
+    pub merge_tool: Box<dyn Fn() -> String>,
     pub open_preferences: Box<dyn Fn()>,
     pub on_saved: Box<dyn Fn()>,
 }
@@ -40,9 +42,14 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
     header.pack_end(&save_button);
     header.pack_end(&merge_button);
     let banner = adw::Banner::builder().use_markup(false).build();
+    let editor = gtk::TextView::builder().monospace(true).wrap_mode(gtk::WrapMode::None).top_margin(8).bottom_margin(8).left_margin(8).right_margin(8).build();
+    let tool_button = merge_tool_menu(&request, &editor, &banner);
+    // Usable whenever saving is: once the copies are read, and not while
+    // the AI is merging.
+    save_button.bind_property("sensitive", &tool_button, "sensitive").sync_create().build();
+    header.pack_start(&tool_button);
 
     let summary = adw::PreferencesGroup::builder().title("Objects").description("Reading each mod's copy…").build();
-    let editor = gtk::TextView::builder().monospace(true).wrap_mode(gtk::WrapMode::None).top_margin(8).bottom_margin(8).left_margin(8).right_margin(8).build();
     let editor_scroll = gtk::ScrolledWindow::builder().child(&editor).min_content_height(320).css_classes(["card"]).build();
     let result = adw::PreferencesGroup::builder()
         .title("Merged File")
@@ -350,6 +357,51 @@ pub fn describe(p: &Plan) -> String {
     }
     parts.push(if conflicts == 0 { "no conflicts".to_owned() } else { format!("{} to merge", plural(conflicts, "conflict", "conflicts")) });
     parts.join(" · ")
+}
+
+/// Merge Tool…: merges the file as it stands in the editor with one mod's
+/// copy in the external merge tool, the base game's copy as the base, and
+/// puts what's saved there in the editor.
+fn merge_tool_menu(request: &Rc<Request>, editor: &gtk::TextView, banner: &adw::Banner) -> gtk::MenuButton {
+    let list = gtk::Box::builder().orientation(gtk::Orientation::Vertical).build();
+    list.append(&gtk::Label::builder().label("Merge the file below with").xalign(0.0).margin_start(10).margin_end(10).margin_top(6).margin_bottom(6).css_classes(["dim-label", "caption-heading"]).build());
+    let popover = gtk::Popover::builder().child(&list).build();
+    let button = gtk::MenuButton::builder().label("Merge Tool…").popover(&popover).tooltip_text("Merge the file below with a mod's copy in your merge tool; what you save there replaces it").build();
+    for (_, name, folder) in &request.origins {
+        let item = gtk::Button::builder().label(format!("{name}'s Copy")).css_classes(["flat"]).build();
+        if let Some(label) = item.child().and_downcast::<gtk::Label>() {
+            label.set_xalign(0.0);
+        }
+        list.append(&item);
+        let (name, copy) = (name.clone(), folder.join(&request.path));
+        let (request, editor, banner, button, popover) = (request.clone(), editor.clone(), banner.clone(), button.clone(), popover.clone());
+        item.connect_clicked(move |_| {
+            popover.popdown();
+            let command = (request.merge_tool)();
+            if command.is_empty() {
+                return show(&banner, "Choose a merge tool in Preferences, under External Merge Tool, first.", true);
+            }
+            let Ok(theirs) = std::fs::read(&copy) else {
+                return show(&banner, &format!("Could not read {name}'s copy."), true);
+            };
+            let base = request.game_dir.as_ref().and_then(|dir| std::fs::read(dir.join(&request.path)).ok()).map(|b| String::from_utf8_lossy(&b).into_owned());
+            let buffer = editor.buffer();
+            let ours = buffer.text(&buffer.start_iter(), &buffer.end_iter(), false).to_string();
+            let tool = crate::conflicts_view::merge_tool_name(&command);
+            let left = crate::conflicts_view::ToolSide { label: "Merged file".into(), text: ours };
+            let right = crate::conflicts_view::ToolSide { label: name.clone(), text: String::from_utf8_lossy(&theirs).into_owned() };
+            let (editor, banner) = (editor.clone(), banner.clone());
+            crate::conflicts_view::run_merge_tool(&button, command, left, right, base, move |result| match result {
+                Ok(Some(merged)) => {
+                    editor.buffer().set_text(&merged);
+                    show(&banner, "The merge tool's result is below. Review it, then save it to the patch.", false);
+                }
+                Ok(None) => show(&banner, &format!("{tool} was closed without saving, so nothing changed."), false),
+                Err(message) => show(&banner, &message, true),
+            });
+        });
+    }
+    button
 }
 
 fn show(banner: &adw::Banner, message: &str, error: bool) {
