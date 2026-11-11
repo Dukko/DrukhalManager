@@ -14,14 +14,17 @@ impl Window {
     /// Takes a snapshot of the patch before a change, reporting a failure.
     /// Returns whether the change may go ahead.
     pub(super) fn snapshot_patch(&self, reason: &str) -> Result<(), String> {
-        snapshot::take(&self.paths.user_dir, &self.paths.backup_dir, reason)
+        snapshot::take(&self.paths.user_dir, &self.patch_target(), &self.paths.backup_dir, reason)
             .map(|_| ())
             .map_err(|e| format!("Could not back up the merged patch first, so nothing was changed: {e}"))
     }
 
     pub(super) fn show_patch_backups(self: &Rc<Self>) {
-        let snapshots = snapshot::list(&self.paths.backup_dir);
+        let target = self.patch_target();
+        let snapshots = snapshot::list(&self.paths.backup_dir, &target);
         let header = adw::HeaderBar::new();
+        // Each collection's patch has its own backups.
+        header.set_title_widget(Some(&adw::WindowTitle::new("Merged Patch Backups", &target.name)));
         let toolbar = adw::ToolbarView::new();
         toolbar.add_top_bar(&header);
         let dialog = adw::Dialog::builder().title("Merged Patch Backups").content_width(620).content_height(560).child(&toolbar).build();
@@ -89,8 +92,9 @@ impl Window {
     fn restore_patch(self: &Rc<Self>, snapshot: &Snapshot) {
         // Dropped first: it would otherwise write its old records back.
         self.patch.replace(None);
-        let result = snapshot::restore(&self.paths.user_dir, &self.paths.backup_dir, snapshot);
-        match Patch::open(&self.paths.user_dir) {
+        let target = self.patch_target();
+        let result = snapshot::restore(&self.paths.user_dir, &target, &self.paths.backup_dir, snapshot);
+        match Patch::open(&self.paths.user_dir, &target) {
             Ok(p) => {
                 self.patch.replace(Some(p));
             }

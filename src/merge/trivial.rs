@@ -152,7 +152,7 @@ mod tests {
         let user = crate::paradox::steam::stellaris_user_dir();
         let workshop = crate::paradox::steam::workshop_dirs(&home, 281990);
         let mods = crate::mods::discover(&user, &workshop).unwrap();
-        let enabled: Vec<_> = mods.iter().filter(|m| m.load_position.is_some() && m.id != crate::merge::patch::ID).collect();
+        let enabled: Vec<_> = mods.iter().filter(|m| m.load_position.is_some() && !crate::merge::patch::is_patch(&m.id)).collect();
         let mut inputs: Vec<_> = enabled.iter().map(|m| crate::merge::conflicts::ModInput { root: m.content.clone(), replace_path: m.descriptor.replace_path.clone() }).collect();
         // As the scan does: zipped mods are read from an unpacked copy.
         for input in &mut inputs {

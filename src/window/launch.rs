@@ -306,7 +306,7 @@ impl Window {
                     name: display_name(m).to_owned(),
                     root: m.content.as_deref().and_then(|c| archive::files(c).ok()),
                     steam_id: m.descriptor.remote_file_id,
-                    is_patch: m.id == patch::ID,
+                    is_patch: patch::is_patch(&m.id),
                 }
             })
             .collect();
@@ -322,7 +322,7 @@ impl Window {
                 .enabled
                 .iter()
                 .map(|&i| &state.mods[i])
-                .filter(|m| m.id != patch::ID)
+                .filter(|m| !patch::is_patch(&m.id))
                 .map(|m| (display_name(m).to_owned(), m.descriptor.remote_file_id, m.content.clone()))
                 .collect()
         };

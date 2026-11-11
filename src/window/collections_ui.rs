@@ -136,9 +136,13 @@ impl Window {
         }
     }
 
+    /// Saves the collections, and opens the active one's merged patch.
     pub(super) fn save_collections(&self) {
         if let Err(e) = self.collections.borrow().save(&collections::path()) {
             self.toast_error(&format!("Could not save collections: {e}"));
+        }
+        if let Err(e) = self.sync_patch() {
+            self.toast_error(&e);
         }
     }
 
@@ -244,7 +248,8 @@ impl Window {
         let suggested = if duplicate { self.collections.borrow().unique_name(&format!("{active} copy")) } else { self.collections.borrow().unique_name("New Collection") };
         let title = if duplicate { "Duplicate Collection" } else { "New Collection" };
         self.ask_name(title, &suggested, "_Create", move |ui, name| {
-            let mods = if duplicate { ui.state.borrow().enabled_ids() } else { Vec::new() };
+            // A copy gets its own patch once something is merged in it.
+            let mods: Vec<String> = if duplicate { ui.state.borrow().enabled_ids().into_iter().filter(|id| !crate::merge::patch::is_patch(id)).collect() } else { Vec::new() };
             let name = ui.collections.borrow_mut().add(&name, mods.clone());
             ui.collections.borrow_mut().active = name.clone();
             ui.save_collections();
@@ -271,19 +276,30 @@ impl Window {
 
     fn delete_collection(self: &Rc<Self>) {
         let active = self.collections.borrow().active.clone();
-        let dialog = adw::AlertDialog::new(
-            Some(&format!("Delete “{active}”?")),
-            Some("The collection's load order is forgotten. Its playset stays in the Paradox Launcher, and your mods aren't touched."),
-        );
+        let patch = self.collections.borrow().active().patch.clone().map(|folder| crate::merge::patch::Target::new(&folder, &active)).filter(|t| t.root(&self.paths.user_dir).is_dir());
+        let body = if patch.is_some() {
+            "The collection's load order and its merged patch are deleted; the patch is kept in DrukhalManager's backups folder. Its playset stays in the Paradox Launcher, and your mods aren't touched."
+        } else {
+            "The collection's load order is forgotten. Its playset stays in the Paradox Launcher, and your mods aren't touched."
+        };
+        let dialog = adw::AlertDialog::new(Some(&format!("Delete “{active}”?")), Some(body));
         dialog.add_responses(&[("cancel", "_Cancel"), ("delete", "_Delete")]);
         dialog.set_response_appearance("delete", adw::ResponseAppearance::Destructive);
         dialog.set_close_response("cancel");
         let weak = Rc::downgrade(self);
         dialog.connect_response(None, move |_, response| {
             let Some(ui) = weak.upgrade() else { return };
-            if response != "delete" || !ui.collections.borrow_mut().remove(&active) {
+            if response != "delete" || ui.collections.borrow().list.len() <= 1 {
                 return;
             }
+            if let Some(target) = &patch {
+                // Backed up first; if that fails, nothing is deleted.
+                let deleted = crate::merge::snapshot::take(&ui.paths.user_dir, target, &ui.paths.backup_dir, crate::merge::snapshot::BEFORE_DELETING).and_then(|_| crate::merge::patch::delete(&ui.paths.user_dir, target));
+                if let Err(e) = deleted {
+                    return ui.toast_error(&format!("Could not delete “{active}”'s merged patch, so the collection was kept: {e}"));
+                }
+            }
+            ui.collections.borrow_mut().remove(&active);
             let mods = ui.collections.borrow().active().mods.clone();
             ui.save_collections();
             ui.rebuild_collection_menu();
@@ -624,7 +640,7 @@ impl Window {
             let (Some(ui), Ok(file)) = (weak.upgrade(), file) else { return };
             let Some(path) = file.path() else { return };
             let shared = ui.shared_collection(&name, false);
-            match bundle::export(&path, &shared, &ui.paths.user_dir) {
+            match bundle::export(&path, &shared, &ui.paths.user_dir, &ui.patch_target()) {
                 Ok(0) => ui.add_toast(adw::Toast::new(&format!("Exported “{name}” with {}; there's no merged patch yet", plural(shared.mods.len(), "mod", "mods")))),
                 Ok(files) => ui.add_toast(adw::Toast::new(&format!("Exported “{name}” with {} and the merged patch ({})", plural(shared.mods.len(), "mod", "mods"), plural(files, "file", "files")))),
                 Err(e) => ui.toast_error(&format!("Could not export: {e}")),
@@ -639,18 +655,13 @@ impl Window {
             Ok(b) => b,
             Err(e) => return self.toast_error(&format!("Could not import: {e}")),
         };
-        let has_patch = crate::merge::patch::Patch::root(&self.paths.user_dir).join("descriptor.mod").is_file();
         if bundle.patch_files == 0 {
-            return self.import_shared(&bundle.collection);
+            return self.import_shared(&bundle.collection, None);
         }
         let name = bundle.collection.name.clone();
-        let body = if has_patch {
-            format!("“{name}” comes with its merged patch. It replaces yours, which is backed up first, so Merged Patch Backups in the main menu can bring it back.")
-        } else {
-            format!("“{name}” comes with its merged patch, which is installed with it.")
-        };
-        let dialog = adw::AlertDialog::new(Some(if has_patch { "Replace Your Merged Patch?" } else { "Install the Merged Patch?" }), Some(&body));
-        dialog.add_responses(&[("cancel", "_Cancel"), ("order", "Load Order _Only"), ("patch", if has_patch { "_Replace" } else { "_Install" })]);
+        let body = format!("“{name}” comes with its merged patch, which becomes the new collection's. Your other collections' patches aren't touched.");
+        let dialog = adw::AlertDialog::new(Some("Install the Merged Patch?"), Some(&body));
+        dialog.add_responses(&[("cancel", "_Cancel"), ("order", "Load Order _Only"), ("patch", "_Install")]);
         dialog.set_response_appearance("patch", adw::ResponseAppearance::Suggested);
         dialog.set_default_response(Some("patch"));
         dialog.set_close_response("cancel");
@@ -658,19 +669,32 @@ impl Window {
         dialog.connect_response(None, move |_, response| {
             let Some(ui) = weak.upgrade() else { return };
             match response {
-                "order" => ui.import_shared(&bundle.collection),
+                "order" => ui.import_shared(&bundle.collection, None),
                 "patch" => {
-                    // Dropped first: it would otherwise write its old records back.
-                    ui.patch.replace(None);
-                    let installed = bundle::install_patch(&bundle, &ui.paths.user_dir, &ui.paths.backup_dir);
-                    ui.patch.replace(crate::merge::patch::Patch::open(&ui.paths.user_dir).ok());
-                    if let Err(e) = installed {
+                    // Installed as the new collection's patch, in a folder
+                    // of its own.
+                    let (name, folder) = {
+                        let collections = ui.collections.borrow();
+                        let name = collections.unique_name(&bundle.collection.name);
+                        let user_dir = &ui.paths.user_dir;
+                        let folder = crate::merge::patch::folder_for(&name, |f| user_dir.join("mod").join(f).exists() || collections.list.iter().any(|c| c.patch.as_deref() == Some(f)));
+                        (name, folder)
+                    };
+                    let target = crate::merge::patch::Target::new(&folder, &name);
+                    if let Err(e) = bundle::install_patch(&bundle, &ui.paths.user_dir, &target, &ui.paths.backup_dir) {
                         return ui.toast_error(&format!("Could not install the merged patch, so nothing was imported: {e}"));
                     }
-                    ui.patch_saved();
+                    // The sharer's patch stands for this one in the load order.
+                    let mut shared = bundle.collection.clone();
+                    for m in shared.mods.iter_mut().filter(|m| crate::merge::patch::is_patch(&m.id)) {
+                        m.id = target.id();
+                        m.name = target.name.clone();
+                    }
                     // The patch's descriptor shows up once the mods are read again.
-                    let shared = bundle.collection.clone();
-                    ui.reload(move |ui| ui.import_shared(&shared));
+                    ui.reload(move |ui| {
+                        ui.import_shared(&shared, Some(folder));
+                        ui.patch_saved();
+                    });
                 }
                 _ => {}
             }
@@ -678,8 +702,15 @@ impl Window {
         dialog.present(Some(&self.window));
     }
 
-    fn import_shared(self: &Rc<Self>, shared: &collections::Shared) {
-        let (collection, missing) = collections::import(shared, &self.state.borrow().mods);
+    /// Adds `shared` as a collection, with the patch in `patch` if it came
+    /// with one. Without one, the sharer's patch is left out.
+    fn import_shared(self: &Rc<Self>, shared: &collections::Shared, patch: Option<String>) {
+        let mut shared = shared.clone();
+        if patch.is_none() {
+            shared.mods.retain(|m| !crate::merge::patch::is_patch(&m.id));
+        }
+        let (mut collection, missing) = collections::import(&shared, &self.state.borrow().mods);
+        collection.patch = patch;
         self.add_and_switch(collection, missing);
     }
 
@@ -714,7 +745,7 @@ impl Window {
         let mut c = self.collections.borrow().get(name).cloned().unwrap_or_else(|| collections::Collection::new(name, Vec::new()));
         c.update(state.enabled_ids(), &state.mods);
         if without_patch {
-            c.mods.retain(|id| id != crate::merge::patch::ID);
+            c.mods.retain(|id| !crate::merge::patch::is_patch(id));
         }
         collections::export(name, &c.mods, &state.mods, &c.names)
     }

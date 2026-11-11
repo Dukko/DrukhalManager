@@ -414,7 +414,7 @@ impl Window {
                 .build();
             row.add_suffix(&badge);
         }
-        let is_patch = m.id == patch::ID;
+        let is_patch = patch::is_patch(&m.id);
         // One icon for everything wrong with this mod, worst first.
         let mut problems = self.extra_problems(m);
         problems.extend(issues.iter().map(|i| (i.severity, i.message.clone())));
@@ -489,7 +489,7 @@ impl Window {
         if let Some(error) = &m.error {
             problems.push((checks::Severity::Warning, error.clone()));
         }
-        let is_patch = m.id == patch::ID;
+        let is_patch = patch::is_patch(&m.id);
         let (outdated, untracked) = if is_patch {
             let stale = self.stale.borrow();
             let untracked = stale.iter().filter(|s| s.untracked).count();
@@ -522,7 +522,7 @@ impl Window {
     /// The row's menu, opened by right-clicking it: the same actions as the
     /// inspector, for when it's out of the way.
     fn row_menu(self: &Rc<Self>, row: &adw::ActionRow, m: &Mod, index: usize, position: Option<usize>, conflicts: usize, issues: &[checks::Issue]) {
-        let is_patch = m.id == patch::ID;
+        let is_patch = patch::is_patch(&m.id);
         let menu = gio::Menu::new();
         let index_variant = (index as u32).to_variant();
         if position.is_some() && !is_patch {

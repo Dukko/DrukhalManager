@@ -17,11 +17,59 @@ use serde::{Deserialize, Serialize};
 
 use super::conflicts;
 
-pub const NAME: &str = "DrukhalManager Merged Patch";
-const FOLDER: &str = "drukhal_merged_patch";
-/// How `dlc_load.json` refers to the patch.
-pub const ID: &str = "mod/drukhal_merged_patch.mod";
+/// The folder of the one patch older versions shared between every
+/// collection; it becomes the active collection's.
+pub const LEGACY_FOLDER: &str = "drukhal_merged_patch";
+/// Other collections' patches are in folders named with this.
+const FOLDER_PREFIX: &str = "drukhal_patch_";
 const MANIFEST: &str = "drukhal_merges.json";
+
+/// Which patch: each collection has its own.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Target {
+    /// Its folder in the user's `mod` folder, and the name of its
+    /// descriptor there.
+    pub folder: String,
+    /// The name the launcher and the mod list show.
+    pub name: String,
+}
+
+impl Target {
+    /// The patch of the collection `collection`, kept in `folder`.
+    pub fn new(folder: &str, collection: &str) -> Self {
+        Self { folder: folder.to_owned(), name: format!("{collection} (Patch)") }
+    }
+
+    /// How `dlc_load.json` and the mod list refer to it.
+    pub fn id(&self) -> String {
+        format!("mod/{}.mod", self.folder)
+    }
+
+    pub fn root(&self, user_dir: &Path) -> PathBuf {
+        user_dir.join("mod").join(&self.folder)
+    }
+}
+
+/// A collection's patch, for tests.
+#[cfg(test)]
+pub fn test_target() -> Target {
+    Target::new("drukhal_patch_main", "Main")
+}
+
+/// Whether the mod `id` is one of DrukhalManager's merged patches.
+pub fn is_patch(id: &str) -> bool {
+    id.strip_prefix("mod/").and_then(|f| f.strip_suffix(".mod")).is_some_and(|f| f == LEGACY_FOLDER || f.starts_with(FOLDER_PREFIX))
+}
+
+/// A folder for a new patch of the collection `collection`, unlike any
+/// `taken` says is in use.
+pub fn folder_for(collection: &str, taken: impl Fn(&str) -> bool) -> String {
+    let slug: String = collection.to_lowercase().chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '_' }).collect();
+    let slug = slug.split('_').filter(|w| !w.is_empty()).collect::<Vec<_>>().join("_");
+    let slug: String = if slug.is_empty() { "collection".into() } else { slug.chars().take(40).collect() };
+    let base = format!("{FOLDER_PREFIX}{slug}");
+    (1..).map(|n| if n == 1 { base.clone() } else { format!("{base}_{n}") }).find(|f| !taken(f)).unwrap()
+}
 
 /// UTF-8 sorts after every ASCII name, including `zzz_` and `~` prefixes
 /// and Irony's own `伞伞zzz_` patches.
@@ -153,23 +201,20 @@ struct Manifest {
 #[derive(Debug, Clone)]
 pub struct Patch {
     root: PathBuf,
+    target: Target,
     manifest: Manifest,
 }
 
 impl Patch {
-    pub fn root(user_dir: &Path) -> PathBuf {
-        user_dir.join("mod").join(FOLDER)
-    }
-
     /// Reads the patch, or starts an empty one if it doesn't exist yet.
-    pub fn open(user_dir: &Path) -> io::Result<Self> {
-        let root = Self::root(user_dir);
+    pub fn open(user_dir: &Path, target: &Target) -> io::Result<Self> {
+        let root = target.root(user_dir);
         let manifest = match std::fs::read_to_string(root.join(MANIFEST)) {
             Ok(src) => serde_json::from_str(&src).map_err(io::Error::other)?,
             Err(e) if e.kind() == io::ErrorKind::NotFound => Manifest::default(),
             Err(e) => return Err(e),
         };
-        let mut patch = Self { root, manifest };
+        let mut patch = Self { root, target: target.clone(), manifest };
         patch.rename_misplaced()?;
         Ok(patch)
     }
@@ -192,6 +237,10 @@ impl Patch {
             moved = true;
         }
         if moved { self.write_manifest() } else { Ok(()) }
+    }
+
+    pub fn target(&self) -> &Target {
+        &self.target
     }
 
     pub fn get(&self, category: &str, key: &str) -> Option<&Merge> {
@@ -404,26 +453,46 @@ impl Patch {
     fn write_descriptors(&self, user_dir: &Path, game_version: Option<&str>) -> io::Result<()> {
         std::fs::create_dir_all(&self.root)?;
         let version = supported_version(game_version);
-        let inner = format!("name=\"{NAME}\"\ntags={{\n\t\"Fixes\"\n}}\nsupported_version=\"{version}\"\n");
+        let inner = format!("name=\"{}\"\ntags={{\n\t\"Fixes\"\n}}\nsupported_version=\"{version}\"\n", descriptor_text(&self.target.name));
         write_atomic(&self.root.join("descriptor.mod"), inner.as_bytes())?;
-        write_outer(user_dir, &self.root, &inner)
-    }
-
-    /// Writes the descriptor the launcher finds the patch by from the one
-    /// in its folder, as after restoring the folder from a backup.
-    pub fn link(user_dir: &Path) -> io::Result<()> {
-        let root = Self::root(user_dir);
-        match std::fs::read_to_string(root.join("descriptor.mod")) {
-            Ok(inner) => write_outer(user_dir, &root, &inner),
-            Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(()),
-            Err(e) => Err(e),
-        }
+        write_outer(user_dir, &self.target, &inner)
     }
 }
 
-fn write_outer(user_dir: &Path, root: &Path, inner: &str) -> io::Result<()> {
-    let outer = format!("{}\npath=\"{}\"\n", inner.trim_end(), root.display());
-    write_atomic(&user_dir.join(ID), outer.as_bytes())
+/// Writes the descriptor the launcher finds the patch by from the one in
+/// its folder, as after restoring or importing it, named for its
+/// collection.
+pub fn link(user_dir: &Path, target: &Target) -> io::Result<()> {
+    let root = target.root(user_dir);
+    match std::fs::read_to_string(root.join("descriptor.mod")) {
+        Ok(inner) => {
+            let named = format!("name=\"{}\"", descriptor_text(&target.name));
+            let inner: String = inner.lines().map(|l| if l.trim_start().starts_with("name=") || l.trim_start().starts_with("name =") { named.as_str() } else { l }).collect::<Vec<_>>().join("\n") + "\n";
+            write_atomic(&root.join("descriptor.mod"), inner.as_bytes())?;
+            write_outer(user_dir, target, &inner)
+        }
+        Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(e),
+    }
+}
+
+/// Deletes the patch `target` and the descriptor the launcher finds it by.
+pub fn delete(user_dir: &Path, target: &Target) -> io::Result<()> {
+    remove_if_present(&user_dir.join(target.id()))?;
+    match std::fs::remove_dir_all(target.root(user_dir)) {
+        Err(e) if e.kind() != io::ErrorKind::NotFound => Err(e),
+        _ => Ok(()),
+    }
+}
+
+/// `text` as a descriptor's quoted value.
+fn descriptor_text(text: &str) -> String {
+    text.replace('"', "'")
+}
+
+fn write_outer(user_dir: &Path, target: &Target, inner: &str) -> io::Result<()> {
+    let outer = format!("{}\npath=\"{}\"\n", inner.trim_end(), target.root(user_dir).display());
+    write_atomic(&user_dir.join(target.id()), outer.as_bytes())
 }
 
 /// How many merged objects and files the patch copy at `dir` holds.
@@ -536,24 +605,35 @@ mod tests {
     use super::*;
 
     #[test]
+    fn names_each_collections_patch() {
+        assert_eq!(folder_for("Main Campaign!", |_| false), "drukhal_patch_main_campaign");
+        assert_eq!(folder_for("Main Campaign", |f| f == "drukhal_patch_main_campaign"), "drukhal_patch_main_campaign_2");
+        assert_eq!(folder_for("Ψ", |_| false), "drukhal_patch_collection");
+        let t = Target::new("drukhal_patch_main", "Main");
+        assert_eq!((t.id().as_str(), t.name.as_str()), ("mod/drukhal_patch_main.mod", "Main (Patch)"));
+        assert!(is_patch(&t.id()) && is_patch("mod/drukhal_merged_patch.mod"));
+        assert!(!is_patch("mod/ugc_1.mod") && !is_patch("mod/drukhal_merged_patch_fork.mod"));
+    }
+
+    #[test]
     fn moves_merges_saved_under_a_name_that_loses() {
         let user = std::env::temp_dir().join(format!("drukhal-misplaced-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&user);
         std::fs::create_dir_all(user.join("mod")).unwrap();
-        let mut patch = Patch::open(&user).unwrap();
+        let mut patch = Patch::open(&user, &test_target()).unwrap();
         patch.save(&user, None, "common/component_templates", "c", "c = {}", vec![]).unwrap();
         // As an older version saved it: sorting last, where the first wins.
         let old = "common/component_templates/伞伞伞_drukhal_c.txt";
-        let root = Patch::root(&user);
+        let root = test_target().root(&user);
         std::fs::rename(root.join(file_for("common/component_templates", "c")), root.join(old)).unwrap();
         patch.manifest.merges[0].file = old.into();
         patch.write_manifest().unwrap();
 
-        let patch = Patch::open(&user).unwrap();
+        let patch = Patch::open(&user, &test_target()).unwrap();
         let wanted = file_for("common/component_templates", "c");
         assert_eq!(patch.get("common/component_templates", "c").unwrap().file, wanted);
         assert!(root.join(&wanted).is_file() && !root.join(old).exists());
-        assert_eq!(Patch::open(&user).unwrap().get("common/component_templates", "c").unwrap().file, wanted, "saved");
+        assert_eq!(Patch::open(&user, &test_target()).unwrap().get("common/component_templates", "c").unwrap().file, wanted, "saved");
         std::fs::remove_dir_all(user).unwrap();
     }
 
@@ -566,7 +646,7 @@ mod tests {
             std::fs::write(dir.join(file), text).unwrap();
         }
         std::fs::create_dir_all(user.join("mod")).unwrap();
-        let mut patch = Patch::open(&user).unwrap();
+        let mut patch = Patch::open(&user, &test_target()).unwrap();
         let prints = vec![
             Print::new(VANILLA, "Vanilla", "common/buildings/00.txt", "lab = { cost = 0 }"),
             Print::new("mod/a.mod", "A", "common/buildings/a.txt", "lab = {\n\tcost = 1\n}"),
@@ -585,8 +665,8 @@ mod tests {
         assert_eq!(stale[0].reasons, ["The base game no longer defines it", "A isn't enabled any more", "B changed it"]);
 
         patch.remove("common/buildings", "lab").unwrap();
-        assert!(Patch::open(&user).unwrap().get("common/buildings", "lab").is_none());
-        assert!(!Patch::root(&user).join(file_for("common/buildings", "lab")).exists());
+        assert!(Patch::open(&user, &test_target()).unwrap().get("common/buildings", "lab").is_none());
+        assert!(!test_target().root(&user).join(file_for("common/buildings", "lab")).exists());
         std::fs::remove_dir_all(root).unwrap();
     }
 
@@ -601,12 +681,12 @@ mod tests {
         std::fs::write(a.join("common/buildings/shared.txt"), "farm = {}").unwrap();
         std::fs::write(b.join("common/buildings/shared.txt"), "farm = { cost = 1 }").unwrap();
         // As written before fingerprints existed: sources, but no prints.
-        let dir = Patch::root(&user);
+        let dir = test_target().root(&user);
         std::fs::create_dir_all(&dir).unwrap();
         let legacy = r#"{"merges":[{"category":"common/buildings","key":"lab","script":"lab = { cost = 3 }","sources":["A","B"],"file":"common/buildings/伞伞伞_drukhal_lab.txt"}],
                          "files":[{"path":"common/buildings/shared.txt","sources":["A","B"]}]}"#;
         std::fs::write(dir.join(MANIFEST), legacy).unwrap();
-        let mut patch = Patch::open(&user).unwrap();
+        let mut patch = Patch::open(&user, &test_target()).unwrap();
         let mut roots: std::collections::HashMap<String, PathBuf> = [("mod/a.mod".to_owned(), a.clone()), ("mod/b.mod".to_owned(), b.clone()), (VANILLA.to_owned(), game.clone())].into();
 
         let stale = patch.recheck(&roots, None);
@@ -620,7 +700,7 @@ mod tests {
         assert_eq!(prints.iter().map(|p| p.mod_id.as_str()).collect::<Vec<_>>(), [VANILLA, "mod/a.mod", "mod/b.mod"]);
         patch.track(stale[0].object.as_ref(), &stale[0].path, prints, None).unwrap();
         patch.track(None, "common/buildings/shared.txt", file_prints("common/buildings/shared.txt", Some(&game), &[ma, mb]), None).unwrap();
-        let mut patch = Patch::open(&user).unwrap();
+        let mut patch = Patch::open(&user, &test_target()).unwrap();
         assert!(patch.recheck(&roots, None).is_empty(), "tracked and unchanged");
 
         // From now on, changes are noticed.
@@ -650,7 +730,7 @@ mod tests {
         write(&game, "common/buildings/00.txt", "lab = { cost = 0 }");
         std::fs::create_dir_all(user.join("mod")).unwrap();
         let mods = [(("mod/a.mod".to_owned(), "A".to_owned(), a.clone()), "common/buildings/m.txt".to_owned()), (("mod/b.mod".to_owned(), "B".to_owned(), b.clone()), "common/buildings/m.txt".to_owned())];
-        let mut patch = Patch::open(&user).unwrap();
+        let mut patch = Patch::open(&user, &test_target()).unwrap();
         for key in ["lab", "farm", "mine"] {
             let prints = object_prints("common/buildings", key, Some(&game), &mods);
             patch.save(&user, Some("v4.5.3"), "common/buildings", key, &format!("{key} = {{}}"), prints).unwrap();
@@ -677,7 +757,7 @@ mod tests {
 
         // The unchanged merges count as checked against the new version,
         // and lab's fingerprint follows it to its new file.
-        let mut patch = Patch::open(&user).unwrap();
+        let mut patch = Patch::open(&user, &test_target()).unwrap();
         assert_eq!(patch.get("common/buildings", "lab").unwrap().game_version.as_deref(), Some("v4.6.0"));
         assert_eq!(patch.get("common/buildings", "lab").unwrap().prints[0].file, "common/buildings/01.txt");
         assert_eq!(patch.get("common/buildings", "mine").unwrap().game_version.as_deref(), Some("v4.6.0"));
@@ -712,28 +792,28 @@ mod tests {
     fn saves_and_reopens() {
         let user = std::env::temp_dir().join(format!("drukhal-patch-{}", std::process::id()));
         std::fs::create_dir_all(user.join("mod")).unwrap();
-        let mut patch = Patch::open(&user).unwrap();
+        let mut patch = Patch::open(&user, &test_target()).unwrap();
         patch.save(&user, Some("v4.5.3"), "events", "ns.1", "country_event = { id = ns.1 }", vec![Print::new("mod/a.mod", "A", "events/a.txt", "x"), Print::new("mod/b.mod", "B", "events/b.txt", "y")]).unwrap();
         patch.save(&user, Some("v4.5.3"), "localisation", "l_english:lab", "lab:0 \"Lab\"", vec![]).unwrap();
         patch.save(&user, Some("v4.5.3"), "events", "ns.1", "country_event = { id = ns.1 hide_window = yes }", vec![Print::new("mod/a.mod", "A", "events/a.txt", "x")]).unwrap();
 
-        let patch = Patch::open(&user).unwrap();
+        let patch = Patch::open(&user, &test_target()).unwrap();
         assert_eq!(patch.get("events", "ns.1").unwrap().sources, ["A"]);
-        let event = std::fs::read_to_string(Patch::root(&user).join("events/!!!!!!_drukhal_ns.1.txt")).unwrap();
+        let event = std::fs::read_to_string(test_target().root(&user).join("events/!!!!!!_drukhal_ns.1.txt")).unwrap();
         assert!(event.contains("namespace = ns\n\ncountry_event = { id = ns.1 hide_window = yes }"));
-        let loc = std::fs::read_to_string(Patch::root(&user).join("localisation/replace/english/drukhal_lab_l_english.yml")).unwrap();
+        let loc = std::fs::read_to_string(test_target().root(&user).join("localisation/replace/english/drukhal_lab_l_english.yml")).unwrap();
         assert_eq!(loc, "\u{feff}l_english:\n lab:0 \"Lab\"\n");
-        let descriptor = std::fs::read_to_string(user.join(ID)).unwrap();
+        let descriptor = std::fs::read_to_string(user.join(test_target().id())).unwrap();
         assert!(descriptor.contains("supported_version=\"v4.5.*\"") && descriptor.contains("path=\""));
         let parsed = crate::mods::Descriptor::parse(&descriptor).unwrap();
-        assert_eq!(parsed.name, NAME);
+        assert_eq!(parsed.name, "Main (Patch)");
 
-        let mut patch = Patch::open(&user).unwrap();
+        let mut patch = Patch::open(&user, &test_target()).unwrap();
         patch.save_file(&user, None, "common/buildings/00_x.txt", "a = {}\n", vec![Print::new("mod/a.mod", "A", "common/buildings/00_x.txt", "a"), Print::new("mod/b.mod", "B", "common/buildings/00_x.txt", "b")]).unwrap();
-        let patch = Patch::open(&user).unwrap();
+        let patch = Patch::open(&user, &test_target()).unwrap();
         assert!(patch.get("events", "ns.1").is_some(), "object merges survive");
         assert_eq!(patch.get_file("common/buildings/00_X.txt").unwrap().sources, ["A", "B"]);
-        assert_eq!(std::fs::read_to_string(Patch::root(&user).join("common/buildings/00_x.txt")).unwrap(), "a = {}\n");
+        assert_eq!(std::fs::read_to_string(test_target().root(&user).join("common/buildings/00_x.txt")).unwrap(), "a = {}\n");
 
         std::fs::remove_dir_all(user).unwrap();
     }

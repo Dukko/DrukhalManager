@@ -176,10 +176,10 @@ pub struct Placement {
 }
 
 /// The enabled mods in smart order, each with where it went and why. The
-/// mod with id `pinned` (the merged patch), if enabled, stays last.
+/// mod `pinned` picks (the merged patch), if enabled, stays last.
 /// `profiles` holds each enabled mod's folders, `overrides` the categories
 /// the user chose, by mod id.
-pub fn plan(mods: &[Mod], enabled: &[usize], profiles: &HashMap<usize, Profile>, overrides: &HashMap<String, Category>, pinned: &str) -> Vec<Placement> {
+pub fn plan(mods: &[Mod], enabled: &[usize], profiles: &HashMap<usize, Profile>, overrides: &HashMap<String, Category>, pinned: &dyn Fn(&str) -> bool) -> Vec<Placement> {
     let by_name: HashMap<String, usize> = enabled.iter().map(|&i| (mods[i].descriptor.name.trim().to_lowercase(), i)).collect();
     let deps_of = |i: usize| -> Vec<usize> {
         let mut deps: Vec<usize> = Vec::new();
@@ -198,7 +198,7 @@ pub fn plan(mods: &[Mod], enabled: &[usize], profiles: &HashMap<usize, Profile>,
 
     let mut placed: Vec<Placement> = Vec::new();
     for &i in enabled {
-        if mods[i].id == pinned {
+        if pinned(&mods[i].id) {
             continue;
         }
         if let Some(&category) = overrides.get(&mods[i].id) {
@@ -282,7 +282,7 @@ pub fn plan(mods: &[Mod], enabled: &[usize], profiles: &HashMap<usize, Profile>,
     rest.sort_by_cached_key(|&i| key(i));
     order.extend(rest);
     let mut order = checks::sort_by_dependencies(mods, &order);
-    if let Some(&p) = enabled.iter().find(|&&i| mods[i].id == pinned) {
+    if let Some(&p) = enabled.iter().find(|&&i| pinned(&mods[i].id)) {
         order.push(p);
     }
 
@@ -290,7 +290,7 @@ pub fn plan(mods: &[Mod], enabled: &[usize], profiles: &HashMap<usize, Profile>,
     order
         .into_iter()
         .filter_map(|i| {
-            by_index.remove(&i).or_else(|| (mods[i].id == pinned).then(|| Placement { index: i, category: Category::Universal, parent: None, reason: "The merged patch always loads last".into(), chosen: false }))
+            by_index.remove(&i).or_else(|| pinned(&mods[i].id).then(|| Placement { index: i, category: Category::Universal, parent: None, reason: "The merged patch always loads last".into(), chosen: false }))
         })
         .collect()
 }
@@ -432,7 +432,7 @@ mod tests {
         let (mods, profiles): (Vec<Mod>, Vec<Profile>) = mods.into_iter().unzip();
         let enabled: Vec<usize> = (0..mods.len()).collect();
         let profiles: HashMap<usize, Profile> = profiles.into_iter().enumerate().collect();
-        let pinned = "mod/drukhalmanager_merged_patch.mod";
+        let pinned = &|id: &str| id == "mod/drukhalmanager_merged_patch.mod";
         let names = |placed: &[Placement]| placed.iter().map(|p| mods[p.index].descriptor.name.as_str()).collect::<Vec<_>>();
         let placed = plan(&mods, &enabled, &profiles, &HashMap::new(), pinned);
         assert_eq!(names(&placed), [
