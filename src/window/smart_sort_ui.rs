@@ -99,7 +99,7 @@ impl Window {
                     if members.is_empty() {
                         continue;
                     }
-                    let group = adw::PreferencesGroup::builder().title(format!("{} · {}", category.title(), members.len())).description(category.description()).build();
+                    let group = adw::PreferencesGroup::builder().title(glib::markup_escape_text(&format!("{} · {}", category.title(), members.len())).as_str()).description(category.description()).build();
                     for p in members {
                         position += 1;
                         let m = &input.mods[p.index];
