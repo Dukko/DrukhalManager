@@ -52,7 +52,30 @@ pub fn present(parent: &impl IsA<gtk::Widget>, settings: Settings, page: Option<
             f(Settings { provider, parallel_merges, game: read_game(), updates: read_updates(), merge_tool: read_tool(), new_steam_key: read_steam_key(), ..base.clone() });
         }
     });
+    // Sections appear once the dialog has opened: animating it in with
+    // them drops frames, however few each page holds.
+    let mut shown = Vec::new();
+    for page in [&game_page, &merging_page, &ai_page, &steam_page, &updates_page] {
+        collect_groups(page.upcast_ref(), &mut shown);
+    }
+    shown.retain(|g| g.is_visible());
+    shown.iter().for_each(|g| g.set_visible(false));
     dialog.present(Some(parent));
+    glib::timeout_add_local_once(OPEN_ANIMATION, move || shown.iter().for_each(|g| g.set_visible(true)));
+}
+
+/// How long `AdwDialog` takes to animate in.
+const OPEN_ANIMATION: std::time::Duration = std::time::Duration::from_millis(450);
+
+fn collect_groups(widget: &gtk::Widget, out: &mut Vec<adw::PreferencesGroup>) {
+    if let Some(group) = widget.downcast_ref::<adw::PreferencesGroup>() {
+        return out.push(group.clone());
+    }
+    let mut child = widget.first_child();
+    while let Some(c) = child {
+        collect_groups(&c, out);
+        child = c.next_sibling();
+    }
 }
 
 /// The Steam Web API key, which lets DrukhalManager read mods' Workshop
