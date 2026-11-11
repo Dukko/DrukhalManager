@@ -52,6 +52,14 @@ impl Window {
             });
         let game_version = self.game.as_ref().and_then(|g| g.version.as_deref());
         let issues = checks::check(&state.mods, &state.enabled, game_version);
+        {
+            let mut conflicts = self.last_conflicts.borrow_mut();
+            conflicts.clear();
+            if let Some(counts) = &counts {
+                conflicts.extend(state.enabled.iter().zip(counts).map(|(&i, &n)| (i, n)));
+            }
+        }
+        self.last_issues.replace(issues.clone());
         let none = Vec::new();
         let no_achievements: Vec<String> = state
             .enabled
@@ -76,8 +84,9 @@ impl Window {
         }
         self.missing_list.remove_all();
         let placeholders = self.collections.borrow().active().placeholders(&state.mods);
-        self.missing_heading.set_visible(!placeholders.is_empty());
-        self.missing_list.set_visible(!placeholders.is_empty());
+        let show_missing = !placeholders.is_empty() && self.view.get() == mods::filter::View::All;
+        self.missing_heading.set_visible(show_missing);
+        self.missing_list.set_visible(show_missing);
         for p in placeholders {
             self.missing_list.append(&self.placeholder_row(p));
         }
@@ -99,33 +108,31 @@ impl Window {
             .flatten()
             .filter(|i| i.fixed_by_sorting)
             .count();
-        self.sort_button.set_visible(misordered > 0);
-
-        let mut subtitle = Vec::new();
-        if let Some(version) = self.game.as_ref().and_then(|g| g.version.as_deref()) {
-            subtitle.push(format!("Stellaris {version}"));
-        }
-        subtitle.push(format!(
-            "{} of {} mods enabled",
-            state.enabled.len(),
-            state.mods.len()
-        ));
-        if !state.enabled.is_empty() {
-            subtitle.push(if no_achievements.is_empty() { "Achievements on" } else { "Achievements off" }.to_owned());
-        }
-        if state.dirty {
-            subtitle.push("Unsaved changes".to_owned());
-        }
-        self.status.set_label(&subtitle.join(" · "));
-        self.status.set_tooltip_text(Some(&if no_achievements.is_empty() {
-            "No enabled mod changes the files the game checksums, so achievements stay on".to_owned()
-        } else {
-            format!(
-                "Achievements are off because {} the files the game checksums:\n{}",
-                if no_achievements.len() == 1 { "this mod changes" } else { "these mods change" },
-                no_achievements.join("\n")
-            )
-        }));
+        let missing_required: std::collections::HashSet<&str> = state
+            .enabled
+            .iter()
+            .filter_map(|i| issues.get(i))
+            .flatten()
+            .filter(|i| super::overview::is_missing_requirement(i))
+            .map(|i| i.message.as_str())
+            .collect();
+        let outdated = game_version.map_or(0, |game| {
+            state.enabled.iter().filter(|&&i| {
+                let v = state.mods[i].descriptor.game_version();
+                !v.is_empty() && !checks::version_matches(v, game)
+            }).count()
+        });
+        let health = super::overview::Health {
+            enabled: state.enabled.len(),
+            total: state.mods.len(),
+            dirty: state.dirty,
+            version: game_version.map(str::to_owned),
+            outdated,
+            missing_required: missing_required.len(),
+            misordered,
+            no_achievements,
+            stale_merges: self.stale.borrow().len(),
+        };
         let (enabled, total) = (state.enabled.len(), state.mods.len());
         self.syncing.set(true);
         self.all_toggle.set_active(total > 0 && enabled == total);
@@ -135,6 +142,26 @@ impl Window {
         self.syncing.set(false);
         let (can_undo, can_redo) = (state.can_undo(), state.can_redo());
         drop(state);
+        self.refresh_health(health);
+        self.refresh_view_counts(enabled);
+        // Keep showing the selected mod, in its new place.
+        if let Some(index) = self.selected.get() {
+            let name = format!("mod-{index}");
+            let found = [&self.enabled_list, &self.disabled_list].into_iter().find_map(|list| {
+                let mut child = list.first_child();
+                while let Some(c) = child {
+                    if c.widget_name() == name {
+                        return Some((list, c.downcast::<gtk::ListBoxRow>().ok()?));
+                    }
+                    child = c.next_sibling();
+                }
+                None
+            });
+            if let Some((list, row)) = found {
+                list.select_row(Some(&row));
+            }
+            self.show_inspector();
+        }
         self.undo_action.set_enabled(can_undo);
         self.redo_action.set_enabled(can_redo);
         self.scan_if_stale();
@@ -304,36 +331,50 @@ impl Window {
             mods::Source::Workshop => "Workshop",
             mods::Source::Local => "Local",
         };
-        let mut subtitle = Vec::new();
+        let mut tooltip = Vec::new();
         if alias.is_some() {
             // The real name, which search also matches.
-            subtitle.push(display_name(m).trim().to_owned());
+            tooltip.push(display_name(m).trim().to_owned());
         }
-        subtitle.push(source.to_owned());
-        if !d.game_version().is_empty() {
-            subtitle.push(format!("Stellaris {}", d.game_version()));
-        }
+        tooltip.push(source.to_owned());
         if !d.tags.is_empty() {
-            subtitle.push(d.tags.join(", "));
+            tooltip.push(d.tags.join(", "));
+        }
+        let mut tooltip = tooltip.join(" · ");
+        if let Some(content) = &m.content {
+            tooltip.push('\n');
+            tooltip.push_str(&content.display().to_string());
         }
 
         let row = adw::ActionRow::builder()
             .title(name)
-            .subtitle(subtitle.join(" · "))
+            .title_lines(1)
+            .tooltip_text(tooltip)
             .use_markup(false)
+            .css_classes(["mod-row"])
             .build();
-        if let Some(content) = &m.content {
-            row.set_tooltip_text(Some(&content.display().to_string()));
-        }
         // First, so it ends up nearest the name: later prefixes go before it.
-        row.add_prefix(&self.thumbnail(m));
+        row.add_prefix(&self.thumbnail_sized(m, 28));
 
+        let game = self.game.as_ref().and_then(|g| g.version.as_deref());
+        let outdated = game.is_some_and(|game| !d.game_version().is_empty() && !checks::version_matches(d.game_version(), game));
+        if !d.game_version().is_empty() {
+            let version = gtk::Label::builder()
+                .label(d.game_version())
+                .width_chars(7)
+                .xalign(0.0)
+                .valign(gtk::Align::Center)
+                .tooltip_text(if outdated { "Doesn't say it supports this game version" } else { "The game version it supports" })
+                .css_classes(["caption", "numeric", if outdated { "warning" } else { "dim-label" }])
+                .build();
+            row.add_suffix(&version);
+        }
         if conflicts > 0 {
             let badge = gtk::Label::builder()
-                .label(conflicts_view::plural(conflicts, "conflict", "conflicts"))
-                .tooltip_text("See the Conflicts page (Alt+2) for details")
+                .label(conflicts.to_string())
+                .tooltip_text(format!("{}; see the Conflicts page (Alt+2)", conflicts_view::plural(conflicts, "conflict", "conflicts")))
                 .valign(gtk::Align::Center)
-                .css_classes(["dim-label", "caption"])
+                .css_classes(["caption", "numeric", "conflict-count"])
                 .build();
             row.add_suffix(&badge);
         }
@@ -349,17 +390,20 @@ impl Window {
                 source: m.source,
                 version: d.game_version().to_owned(),
                 conflicts: conflicts > 0,
+                outdated,
+                // Set below, once the problems are known.
+                attention: false,
             },
         );
         row.set_widget_name(&format!("mod-{index}"));
         if no_achievements {
-            let badge = gtk::Label::builder()
-                .label("No achievements")
-                .tooltip_text("Changes files the game checksums, so achievements are off while it's enabled")
-                .valign(gtk::Align::Center)
-                .css_classes(["dim-label", "caption"])
-                .build();
-            row.add_suffix(&badge);
+            row.add_suffix(
+                &gtk::Image::builder()
+                    .icon_name("action-unavailable-symbolic")
+                    .tooltip_text("Turns off achievements: it changes files the game checksums")
+                    .css_classes(["dim-label"])
+                    .build(),
+            );
         }
         if let Some((label, tooltip, class)) = steam_badge(m.steam) {
             let badge = gtk::Label::builder()
@@ -372,10 +416,80 @@ impl Window {
         }
         let is_patch = m.id == patch::ID;
         // One icon for everything wrong with this mod, worst first.
-        let mut problems: Vec<(checks::Severity, String)> = Vec::new();
+        let mut problems = self.extra_problems(m);
+        problems.extend(issues.iter().map(|i| (i.severity, i.message.clone())));
+        problems.sort_by(|a, b| b.0.cmp(&a.0));
+        if let Some(f) = self.search_facts.borrow_mut().get_mut(&index) {
+            f.attention = problems.iter().any(|(s, _)| *s == checks::Severity::Warning);
+        }
+        if let Some((worst, _)) = problems.first() {
+            let (icon, class) = match worst {
+                checks::Severity::Warning => ("dialog-warning-symbolic", "warning"),
+                checks::Severity::Info => ("dialog-information-symbolic", "dim-label"),
+            };
+            let tooltip = problems
+                .iter()
+                .map(|(_, m)| m.as_str())
+                .collect::<Vec<_>>()
+                .join("\n");
+            row.add_suffix(
+                &gtk::Image::builder()
+                    .icon_name(icon)
+                    .tooltip_text(tooltip)
+                    .css_classes([class])
+                    .build(),
+            );
+        }
+        self.row_menu(&row, m, index, position, conflicts, issues);
+
+        let toggle = gtk::Switch::builder()
+            .active(position.is_some())
+            .valign(gtk::Align::Center)
+            .build();
+        let weak = Rc::downgrade(self);
+        toggle.connect_active_notify(move |toggle| {
+            let on = toggle.is_active();
+            if let Some(ui) = weak.upgrade() {
+                ui.update(move |state| state.set_enabled(index, on));
+            }
+        });
+        row.add_suffix(&toggle);
+
+        if let (Some(position), true) = (position, is_patch) {
+            // Pinned: no handle, no editable position.
+            let lock = gtk::Image::builder()
+                .icon_name("changes-prevent-symbolic")
+                .tooltip_text("Always loads last, so its merges and fixes win")
+                .css_classes(["dim-label"])
+                .build();
+            let number = gtk::Label::builder()
+                .label((position + 1).to_string())
+                .width_chars(3)
+                .xalign(1.0)
+                .css_classes(["dim-label", "numeric"])
+                .build();
+            row.add_prefix(&lock);
+            row.add_prefix(&number);
+        } else if let Some(position) = position {
+            let handle = gtk::Image::builder()
+                .icon_name("list-drag-handle-symbolic")
+                .css_classes(["dim-label"])
+                .build();
+            row.add_prefix(&handle);
+            row.add_prefix(&self.position_entry(position));
+            self.make_reorderable(&row, position);
+        }
+        row
+    }
+
+    /// Problems with the mod that aren't load order checks: an unreadable
+    /// descriptor, and for the merged patch, merges that need a look.
+    pub(super) fn extra_problems(&self, m: &Mod) -> Vec<(checks::Severity, String)> {
+        let mut problems = Vec::new();
         if let Some(error) = &m.error {
             problems.push((checks::Severity::Warning, error.clone()));
         }
+        let is_patch = m.id == patch::ID;
         let (outdated, untracked) = if is_patch {
             let stale = self.stale.borrow();
             let untracked = stale.iter().filter(|s| s.untracked).count();
@@ -402,27 +516,13 @@ impl Window {
                 ),
             ));
         }
-        problems.extend(issues.iter().map(|i| (i.severity, i.message.clone())));
-        problems.sort_by(|a, b| b.0.cmp(&a.0));
-        if let Some((worst, _)) = problems.first() {
-            let (icon, class) = match worst {
-                checks::Severity::Warning => ("dialog-warning-symbolic", "warning"),
-                checks::Severity::Info => ("dialog-information-symbolic", "dim-label"),
-            };
-            let tooltip = problems
-                .iter()
-                .map(|(_, m)| m.as_str())
-                .collect::<Vec<_>>()
-                .join("\n");
-            row.add_suffix(
-                &gtk::Image::builder()
-                    .icon_name(icon)
-                    .tooltip_text(tooltip)
-                    .css_classes([class])
-                    .build(),
-            );
-        }
+        problems
+    }
 
+    /// The row's menu, opened by right-clicking it: the same actions as the
+    /// inspector, for when it's out of the way.
+    fn row_menu(self: &Rc<Self>, row: &adw::ActionRow, m: &Mod, index: usize, position: Option<usize>, conflicts: usize, issues: &[checks::Issue]) {
+        let is_patch = m.id == patch::ID;
         let menu = gio::Menu::new();
         let index_variant = (index as u32).to_variant();
         if position.is_some() && !is_patch {
@@ -441,16 +541,6 @@ impl Window {
             let item = gio::MenuItem::new(Some("_Get Required Mods"), None);
             item.set_action_and_target_value(Some("win.get-requirements"), Some(&index_variant));
             menu.append_item(&item);
-            // Some authors "require" things that aren't mods, or aren't
-            // really needed.
-            for r in &m.requires {
-                let quoted = format!("“{}”", r.name);
-                if issues.iter().any(|i| i.message.starts_with("Requires “") && i.message.contains(&quoted)) {
-                    let item = gio::MenuItem::new(Some(&format!("{quoted} Isn't Really Required")), None);
-                    item.set_action_and_target_value(Some("win.ignore-requirement"), Some(&r.steam_id.to_variant()));
-                    menu.append_item(&item);
-                }
-            }
         }
         let item = gio::MenuItem::new(Some("_Rename…"), None);
         item.set_action_and_target_value(Some("win.rename-mod"), Some(&index_variant));
@@ -482,61 +572,22 @@ impl Window {
             }
             menu.append_section(None, &workshop);
         }
-
-        let toggle = gtk::Switch::builder()
-            .active(position.is_some())
-            .valign(gtk::Align::Center)
-            .build();
-        let weak = Rc::downgrade(self);
-        toggle.connect_active_notify(move |toggle| {
-            let on = toggle.is_active();
-            if let Some(ui) = weak.upgrade() {
-                ui.update(move |state| state.set_enabled(index, on));
-            }
+        let click = gtk::GestureClick::builder().button(gdk::BUTTON_SECONDARY).build();
+        let row_weak = row.downgrade();
+        click.connect_pressed(move |_, _, x, y| {
+            let Some(row) = row_weak.upgrade() else { return };
+            let popover = gtk::PopoverMenu::from_model(Some(&menu));
+            popover.set_parent(&row);
+            popover.set_has_arrow(false);
+            popover.set_halign(gtk::Align::Start);
+            popover.set_pointing_to(Some(&gdk::Rectangle::new(x as i32, y as i32, 1, 1)));
+            popover.connect_closed(|p| {
+                let p = p.clone();
+                glib::idle_add_local_once(move || p.unparent());
+            });
+            popover.popup();
         });
-        row.add_suffix(&toggle);
-        row.set_activatable_widget(Some(&toggle));
-        if menu.n_items() > 0 {
-            row.add_suffix(
-                &gtk::MenuButton::builder()
-                    .icon_name("view-more-symbolic")
-                    .menu_model(&menu)
-                    .valign(gtk::Align::Center)
-                    .tooltip_text("More")
-                    .css_classes(["flat"])
-                    .build(),
-            );
-        }
-
-        if let (Some(position), true) = (position, is_patch) {
-            // Pinned: no handle, no editable position.
-            let lock = gtk::Image::builder()
-                .icon_name("changes-prevent-symbolic")
-                .tooltip_text("Always loads last, so its merges and fixes win")
-                .css_classes(["dim-label"])
-                .build();
-            let number = gtk::Label::builder()
-                .label((position + 1).to_string())
-                .width_chars(3)
-                .xalign(1.0)
-                .css_classes(["dim-label", "numeric"])
-                .build();
-            row.add_prefix(&lock);
-            row.add_prefix(&number);
-            row.set_subtitle(&format!(
-                "{} · Always loads last",
-                row.subtitle().unwrap_or_default()
-            ));
-        } else if let Some(position) = position {
-            let handle = gtk::Image::builder()
-                .icon_name("list-drag-handle-symbolic")
-                .css_classes(["dim-label"])
-                .build();
-            row.add_prefix(&handle);
-            row.add_prefix(&self.position_entry(position));
-            self.make_reorderable(&row, position);
-        }
-        row
+        row.add_controller(click);
     }
 
     /// The load position as an editable number: type a position and press

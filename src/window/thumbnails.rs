@@ -14,9 +14,9 @@ use crate::merge::patch;
 use crate::mods::{Mod, archive};
 use crate::paradox::workshop;
 
-const SIZE: i32 = 40;
-/// Stored at twice the size shown, for high-density screens.
-const STORED: i32 = SIZE * 2;
+/// Stored at this size, enough for the inspector's thumbnail and for
+/// the list's on high-density screens.
+const STORED: i32 = 80;
 
 const CSS: &str = "
 .mod-thumbnail { border-radius: 6px; }
@@ -75,12 +75,13 @@ fn find(dir: &Path, name: &str) -> Option<PathBuf> {
 }
 
 impl Window {
-    /// A square thumbnail for the mod, filled in once the image is read.
-    pub(super) fn thumbnail(self: &Rc<Self>, m: &Mod) -> gtk::Image {
+    /// A thumbnail for the mod, `size` pixels square, filled in once the
+    /// image is read.
+    pub(super) fn thumbnail_sized(self: &Rc<Self>, m: &Mod, size: i32) -> gtk::Image {
         let picture = gtk::Image::builder()
-            .pixel_size(SIZE)
-            .width_request(SIZE)
-            .height_request(SIZE)
+            .pixel_size(size)
+            .width_request(size)
+            .height_request(size)
             .valign(gtk::Align::Center)
             .overflow(gtk::Overflow::Hidden)
             .css_classes(["mod-thumbnail", "placeholder"])
@@ -200,7 +201,8 @@ fn load(path: &std::path::Path) -> Option<gdk::Texture> {
 fn show(picture: &gtk::Image, texture: Option<&gdk::Texture>) {
     if let Some(texture) = texture {
         picture.set_paintable(Some(texture));
-        picture.set_pixel_size(SIZE);
+        // The size it was made at.
+        picture.set_pixel_size(picture.width_request());
         picture.remove_css_class("placeholder");
     }
 }
