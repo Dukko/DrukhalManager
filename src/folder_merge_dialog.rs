@@ -3,6 +3,11 @@
 //! several at once if Preferences say so, saving each to the merged patch,
 //! and reports the tokens and money actually used. A result the checks
 //! reject goes back to the model once for a correction.
+//!
+//! The same works for a folder of overridden files: each file is planned
+//! object by object as in the file merge dialog, its conflicting objects
+//! are merged one AI call each, and the combined file is saved. Files are
+//! merged several at once; the objects within one file, one after another.
 
 use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
@@ -12,8 +17,11 @@ use std::rc::Rc;
 use adw::prelude::*;
 use gtk::{gio, glib};
 
+use crate::conflicts_view::plural;
+use crate::file_merge_dialog;
 use crate::merge::ai::{self, Estimate, Price, Provider, Usage};
-use crate::merge::patch::Print;
+use crate::merge::file_merge::{self, Plan, Status};
+use crate::merge::patch::{Print, SourceMod};
 use crate::merge::source;
 use crate::merge::trivial::{self, Resolved};
 use crate::merge_dialog::{self, Loaded};
@@ -30,19 +38,68 @@ pub struct Item {
     pub saved: Option<String>,
 }
 
+/// One overridden file.
+pub struct FileItem {
+    pub path: String,
+    /// (mod id, name, folder) for each mod shipping it, in load order.
+    pub origins: Vec<(String, String, PathBuf)>,
+    /// Already merged into the patch and still up to date.
+    pub merged: bool,
+}
+
+pub enum Items {
+    /// Object conflicts in `category`, e.g. `common/buildings`.
+    Objects { category: String, items: Vec<Item> },
+    /// Files several mods ship, all in one folder.
+    Files { folder: String, files: Vec<FileItem> },
+}
+
 pub struct Request {
-    /// The objects' category, e.g. `common/buildings`.
-    pub category: String,
-    pub items: Vec<Item>,
+    pub items: Items,
     pub game_dir: Option<PathBuf>,
     pub provider: Option<Provider>,
-    /// How many objects to merge at once.
+    /// How many objects (or files) to merge at once.
     pub parallel: usize,
-    /// Saves one merged object: key, script, fingerprints.
+    /// Saves one merged object (key, script, fingerprints) or file (path,
+    /// contents, fingerprints).
     pub save: Box<dyn Fn(&str, &str, Vec<Print>) -> Result<(), String>>,
     pub open_preferences: Box<dyn Fn()>,
     /// Called once at the end with how many objects were saved.
     pub on_done: Box<dyn Fn(usize)>,
+}
+
+impl Request {
+    fn title(&self) -> &str {
+        match &self.items {
+            Items::Objects { category, .. } => category,
+            Items::Files { folder, .. } => folder,
+        }
+    }
+
+    /// The name row `i` is shown and saved under: the object's key, or the
+    /// file's path.
+    fn name(&self, i: usize) -> &str {
+        match &self.items {
+            Items::Objects { items, .. } => &items[i].key,
+            Items::Files { files, .. } => &files[i].path,
+        }
+    }
+
+    /// The objects' category; for files, as their objects are prompted.
+    fn category(&self, i: usize) -> String {
+        match &self.items {
+            Items::Objects { category, .. } => category.clone(),
+            Items::Files { files, .. } => file_merge::category(&files[i].path),
+        }
+    }
+}
+
+/// What was read for one row.
+enum Unit {
+    Object { loaded: Loaded, resolved: Option<Resolved> },
+    File { plan: Plan, prints: Vec<Print> },
+    /// Nothing that can be merged.
+    None,
 }
 
 struct Row {
@@ -55,8 +112,10 @@ struct Row {
     /// Shows or hides the merged script.
     show: gtk::ToggleButton,
     result: gtk::Label,
-    /// Set when one version can be used as it is, without the AI.
-    resolved: Option<Resolved>,
+    /// Whether it can be saved without the AI.
+    free: bool,
+    /// How many AI calls it takes.
+    calls: usize,
 }
 
 impl Row {
@@ -73,7 +132,7 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
     let start = gtk::Button::builder().label("Merge").css_classes(["suggested-action"]).sensitive(false).build();
     let stop = gtk::Button::builder().label("Stop").visible(false).tooltip_text("Stop after the object being merged").build();
     let header = adw::HeaderBar::new();
-    header.set_title_widget(Some(&adw::WindowTitle::new(&format!("Merge {}", request.category), model.as_deref().map_or("No AI provider set up".to_owned(), |m| format!("with {m}")).as_str())));
+    header.set_title_widget(Some(&adw::WindowTitle::new(&format!("Merge {}", request.title()), model.as_deref().map_or("No AI provider set up".to_owned(), |m| format!("with {m}")).as_str())));
     header.pack_end(&start);
     header.pack_end(&stop);
 
@@ -86,9 +145,14 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
     top.append(&progress);
     let overview = adw::PreferencesGroup::new();
     overview.add(&top);
+    let files = matches!(request.items, Items::Files { .. });
     let objects = adw::PreferencesGroup::builder()
-        .title("Objects")
-        .description("Each merge is saved to the patch as soon as it's done. Review any of them later with Edit Merge.")
+        .title(if files { "Files" } else { "Objects" })
+        .description(if files {
+            "Each file is saved to the patch as soon as its conflicting objects are merged. Review any of them later from its conflict."
+        } else {
+            "Each merge is saved to the patch as soon as it's done. Review any of them later with Edit Merge."
+        })
         .build();
 
     let page = adw::PreferencesPage::new();
@@ -100,7 +164,7 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
     let dialog = adw::Dialog::builder().content_width(760).content_height(700).child(&toolbar).build();
 
     let rows: Rc<RefCell<Vec<Row>>> = Rc::default();
-    let loaded: Rc<RefCell<Vec<Loaded>>> = Rc::default();
+    let units: Rc<RefCell<Vec<Unit>>> = Rc::default();
     let price: Rc<Cell<Option<Price>>> = Rc::default();
     let price_known = Rc::new(Cell::new(false));
     let running = Rc::new(Cell::new(false));
@@ -122,9 +186,10 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
                 total += r.estimate;
             }
             let n = chosen.len();
-            let free = chosen.iter().filter(|r| r.resolved.is_some()).count();
-            let calls = n - free;
-            start.set_label(&if n == 0 { "Merge".to_owned() } else { format!("Merge {}", crate::conflicts_view::plural(n, "Object", "Objects")) });
+            let free = chosen.iter().filter(|r| r.free).count();
+            let calls = chosen.iter().map(|r| r.calls).sum::<usize>();
+            let (one, many) = if files { ("File", "Files") } else { ("Object", "Objects") };
+            start.set_label(&if n == 0 { "Merge".to_owned() } else { format!("Merge {}", plural(n, one, many)) });
             start.set_sensitive(n > 0);
             if calls > 0 && !has_provider {
                 start.set_label("Set Up AI…");
@@ -136,13 +201,18 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
             }
             let without_ai = if free > 0 { format!(" · {free} without AI") } else { String::new() };
             if calls == 0 {
-                summary.set_label(&format!("No AI calls needed · {} can be used as they are", crate::conflicts_view::plural(free, "version", "versions")));
-                detail.set_label("Each of these was changed by only one mod, or is the same in every mod.");
+                if files {
+                    summary.set_label(&format!("No AI calls needed · {} can be combined as they are", plural(free, "file", "files")));
+                    detail.set_label("In each of these, every object is the same in every copy, only in some of them, or changed by only one mod.");
+                } else {
+                    summary.set_label(&format!("No AI calls needed · {} can be used as they are", plural(free, "version", "versions")));
+                    detail.set_label("Each of these was changed by only one mod, or is the same in every mod.");
+                }
                 return;
             }
             summary.set_label(&format!(
                 "{}{without_ai} · about {} tokens in, {}–{} out",
-                crate::conflicts_view::plural(calls, "AI call", "AI calls"),
+                plural(calls, "AI call", "AI calls"),
                 tokens(total.input),
                 tokens(total.output_low),
                 tokens(total.output_high)
@@ -164,25 +234,55 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
     // Read every version, and the price, off the main thread.
     {
         let request = request.clone();
-        let (rows, loaded, objects, update) = (rows.clone(), loaded.clone(), objects.clone(), update.clone());
-        let keys: Vec<String> = request.items.iter().map(|i| i.key.clone()).collect();
-        let origins: Vec<_> = request.items.iter().map(|i| i.origins.clone()).collect();
-        let (category, game_dir) = (request.category.clone(), request.game_dir.clone());
+        let (rows, units, objects, update) = (rows.clone(), units.clone(), objects.clone(), update.clone());
+        enum Job {
+            Objects(String, Vec<String>, Vec<Vec<(String, String, PathBuf, String)>>),
+            Files(Vec<(String, Vec<SourceMod>)>),
+        }
+        let job = match &request.items {
+            Items::Objects { category, items } => Job::Objects(category.clone(), items.iter().map(|i| i.key.clone()).collect(), items.iter().map(|i| i.origins.clone()).collect()),
+            Items::Files { files, .. } => Job::Files(files.iter().map(|f| (f.path.clone(), f.origins.clone())).collect()),
+        };
+        let game_dir = request.game_dir.clone();
         glib::spawn_future_local(async move {
-            let result = gio::spawn_blocking(move || {
-                let vanilla = game_dir.as_deref().map(|d| source::vanilla_many(d, &category, &keys)).unwrap_or_default();
-                keys.iter()
-                    .zip(origins)
-                    .map(|(key, origins)| merge_dialog::load_with(&category, key, vanilla.get(key).cloned(), origins))
-                    .collect::<Vec<_>>()
+            let read = gio::spawn_blocking(move || match job {
+                Job::Objects(category, keys, origins) => {
+                    let vanilla = game_dir.as_deref().map(|d| source::vanilla_many(d, &category, &keys)).unwrap_or_default();
+                    keys.iter()
+                        .zip(origins)
+                        .map(|(key, origins)| {
+                            let loaded = merge_dialog::load_with(&category, key, vanilla.get(key).cloned(), origins);
+                            let resolved = loaded.mergeable().then(|| trivial::resolve(loaded.vanilla.as_ref(), &loaded.sources)).flatten();
+                            Ok(Unit::Object { loaded, resolved })
+                        })
+                        .collect::<Vec<Result<Unit, String>>>()
+                }
+                Job::Files(files) => files
+                    .iter()
+                    .map(|(path, origins)| {
+                        if !file_merge::mergeable(path) {
+                            return Err("This kind of file can't be merged object by object".to_owned());
+                        }
+                        file_merge_dialog::load(path, origins, game_dir.as_deref()).map(|(plan, prints)| Unit::File { plan, prints })
+                    })
+                    .collect(),
             })
             .await
             .unwrap_or_default();
             let mut built = Vec::new();
-            for (item, l) in request.items.iter().zip(&result) {
-                let names: Vec<&str> = l.sources.iter().map(|s| s.label.as_str()).collect();
-                let row = adw::ExpanderRow::builder().title(&item.key).use_markup(false).subtitle_lines(3).build();
-                let check = gtk::CheckButton::builder().valign(gtk::Align::Center).tooltip_text("Merge this object").build();
+            let mut kept = Vec::new();
+            for (i, unit) in read.into_iter().enumerate() {
+                let (merged, saved) = match &request.items {
+                    Items::Objects { items, .. } => (items[i].merged, items[i].saved.clone()),
+                    Items::Files { files, .. } => (files[i].merged, None),
+                };
+                let name = request.name(i);
+                let title = match &request.items {
+                    Items::Objects { .. } => name,
+                    Items::Files { .. } => name.rsplit_once('/').map_or(name, |(_, f)| f),
+                };
+                let row = adw::ExpanderRow::builder().title(title).use_markup(false).subtitle_lines(3).build();
+                let check = gtk::CheckButton::builder().valign(gtk::Align::Center).tooltip_text(if files { "Merge this file" } else { "Merge this object" }).build();
                 row.add_prefix(&check);
                 let state = gtk::Stack::builder().valign(gtk::Align::Center).build();
                 row.add_suffix(&state);
@@ -229,31 +329,59 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
                         }
                     }
                 ));
-                let resolved = l.mergeable().then(|| trivial::resolve(l.vanilla.as_ref(), &l.sources)).flatten();
-                let estimate = if l.mergeable() {
-                    check.set_active(!item.merged);
-                    let mut subtitle = names.join(" · ");
-                    if let Some(r) = &resolved {
-                        subtitle = format!("No AI needed: {} · {subtitle}", r.reason);
+                let already = |subtitle: String| if merged { format!("Already merged · {subtitle}") } else { subtitle };
+                let mut estimate = Estimate::default();
+                let (unit, free, calls) = match unit {
+                    Ok(Unit::Object { loaded, resolved }) if loaded.mergeable() => {
+                        let names: Vec<&str> = loaded.sources.iter().map(|s| s.label.as_str()).collect();
+                        let mut subtitle = names.join(" · ");
+                        if let Some(r) = &resolved {
+                            subtitle = format!("No AI needed: {} · {subtitle}", r.reason);
+                        } else {
+                            estimate = ai::estimate(&request.category(i), name, loaded.vanilla.as_ref(), &loaded.sources);
+                        }
+                        row.set_subtitle(&already(subtitle));
+                        let free = resolved.is_some();
+                        (Unit::Object { loaded, resolved }, free, usize::from(!free))
                     }
-                    row.set_subtitle(&if item.merged { format!("Already merged · {subtitle}") } else { subtitle });
-                    if resolved.is_some() { Estimate::default() } else { ai::estimate(&request.category, &item.key, l.vanilla.as_ref(), &l.sources) }
-                } else {
-                    check.set_sensitive(false);
-                    row.set_subtitle(&if l.missing.is_empty() { "Nothing to merge".to_owned() } else { format!("Could not find it in: {}", l.missing.join(", ")) });
-                    Estimate::default()
+                    Ok(Unit::Object { loaded, .. }) => {
+                        row.set_subtitle(&if loaded.missing.is_empty() { "Nothing to merge".to_owned() } else { format!("Could not find it in: {}", loaded.missing.join(", ")) });
+                        (Unit::None, false, 0)
+                    }
+                    Ok(Unit::File { plan, prints }) => {
+                        let category = request.category(i);
+                        for (_, item) in plan.conflicts() {
+                            if let Status::Conflict { sources, vanilla } = &item.status {
+                                estimate += ai::estimate(&category, &item.key, vanilla.as_ref(), sources);
+                            }
+                        }
+                        let calls = plan.conflicts().count();
+                        row.set_subtitle(&already(file_merge_dialog::describe(&plan)));
+                        (Unit::File { plan, prints }, calls == 0, calls)
+                    }
+                    Ok(Unit::None) => (Unit::None, false, 0),
+                    Err(e) => {
+                        row.set_subtitle(&e);
+                        (Unit::None, false, 0)
+                    }
                 };
+                if matches!(unit, Unit::None) {
+                    check.set_sensitive(false);
+                } else {
+                    check.set_active(!merged);
+                }
                 let update = update.clone();
                 check.connect_active_notify(move |_| update());
                 objects.add(&row);
-                let r = Row { check, row, state, estimate, thinking, show, result, resolved };
-                if let Some(saved) = &item.saved {
+                let r = Row { check, row, state, estimate, thinking, show, result, free, calls };
+                if let Some(saved) = &saved {
                     r.set_result(saved);
                 }
                 built.push(r);
+                kept.push(unit);
             }
             rows.replace(built);
-            loaded.replace(result);
+            units.replace(kept);
             update();
         });
     }
@@ -290,7 +418,7 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
         #[strong]
         rows,
         #[strong]
-        loaded,
+        units,
         #[strong]
         running,
         #[strong]
@@ -310,7 +438,7 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
             if chosen.is_empty() {
                 return;
             }
-            let needs_ai = chosen.iter().any(|&i| rows.borrow()[i].resolved.is_none());
+            let needs_ai = chosen.iter().any(|&i| rows.borrow()[i].calls > 0);
             let provider = request.provider.clone();
             if needs_ai && provider.is_none() {
                 dialog.close();
@@ -324,7 +452,7 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
             for r in rows.borrow().iter() {
                 r.check.set_sensitive(false);
             }
-            let (request, rows, loaded, running, cancelled) = (request.clone(), rows.clone(), loaded.clone(), running.clone(), cancelled.clone());
+            let (request, rows, units, running, cancelled) = (request.clone(), rows.clone(), units.clone(), running.clone(), cancelled.clone());
             glib::spawn_future_local(async move {
                 let total = chosen.len();
                 let totals: Rc<RefCell<Totals>> = Rc::default();
@@ -336,7 +464,7 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
                         let run = Run {
                             request: request.clone(),
                             rows: rows.clone(),
-                            loaded: loaded.clone(),
+                            units: units.clone(),
                             provider: provider.clone(),
                             totals: totals.clone(),
                             queue: queue.clone(),
@@ -350,7 +478,7 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
                 for worker in workers {
                     let _ = worker.await;
                 }
-                let Totals { saved, failed, used, counted, without_ai, ai_calls, .. } = totals.take();
+                let Totals { saved, failed, partial, used, counted, without_ai, ai_calls, .. } = totals.take();
                 running.set(false);
                 progress.set_fraction(1.0);
                 let skipped = total - saved - failed;
@@ -359,6 +487,9 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
                 let mut line = format!("Merged {saved} of {total}");
                 if without_ai > 0 {
                     line.push_str(&format!(" · {without_ai} without AI"));
+                }
+                if partial > 0 {
+                    line.push_str(&format!(" · {partial} with objects left unmerged"));
                 }
                 if failed > 0 {
                     line.push_str(&format!(" · {failed} failed"));
@@ -386,7 +517,7 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
 struct Run {
     request: Rc<Request>,
     rows: Rc<RefCell<Vec<Row>>>,
-    loaded: Rc<RefCell<Vec<Loaded>>>,
+    units: Rc<RefCell<Vec<Unit>>>,
     provider: Option<Provider>,
     totals: Rc<RefCell<Totals>>,
     /// Objects not started yet, by index.
@@ -400,6 +531,8 @@ struct Run {
 struct Totals {
     saved: usize,
     failed: usize,
+    /// Files saved with some conflicting objects left unmerged.
+    partial: usize,
     without_ai: usize,
     ai_calls: usize,
     used: Usage,
@@ -419,7 +552,7 @@ impl Run {
                 break;
             }
             let Some(i) = self.queue.borrow_mut().pop_front() else { break };
-            let key = self.request.items[i].key.clone();
+            let key = self.request.name(i).to_owned();
             self.totals.borrow_mut().active.push(key.clone());
             self.show_progress();
             self.merge(i, key.clone()).await;
@@ -437,107 +570,192 @@ impl Run {
         self.progress.set_fraction(totals.finished as f64 / self.total as f64);
         let text = match totals.active.as_slice() {
             [] => format!("{} of {} done", totals.finished, self.total),
-            [key] => format!("Merging {} of {}: {key}", totals.finished + 1, self.total),
+            [key] => format!("Merging {} of {}: {}", totals.finished + 1, self.total, key.rsplit_once('/').map_or(key.as_str(), |(_, f)| f)),
             keys => format!("{} of {} done · merging {} at once", totals.finished, self.total, keys.len()),
         };
         self.progress.set_text(Some(&text));
     }
 
-    /// Merges object `i` and saves it, showing the outcome in its row.
+    /// Merges row `i` and saves it, showing the outcome in it.
     async fn merge(&self, i: usize, key: String) {
+        let file = matches!(self.units.borrow()[i], Unit::File { .. });
+        if file {
+            self.merge_file(i, key).await;
+        } else {
+            self.merge_object(i, key).await;
+        }
+    }
+
+    /// Shows how row `i` ended: saved (with a note for its subtitle),
+    /// saved with a warning, or failed.
+    fn finish(&self, i: usize, outcome: Outcome) {
+        let rows = self.rows.borrow();
+        let r = &rows[i];
+        r.row.set_expanded(false);
+        let mut totals = self.totals.borrow_mut();
+        let (icon, class, tooltip, subtitle) = match outcome {
+            Outcome::Saved { note, tooltip } => {
+                totals.saved += 1;
+                ("emblem-ok-symbolic", "success", tooltip, note)
+            }
+            Outcome::Partial(note) => {
+                totals.saved += 1;
+                totals.partial += 1;
+                ("dialog-warning-symbolic", "warning", note.clone(), note)
+            }
+            Outcome::Failed(e) => {
+                totals.failed += 1;
+                ("dialog-warning-symbolic", "warning", e.clone(), e)
+            }
+        };
+        if !subtitle.is_empty() {
+            r.row.set_subtitle(&subtitle);
+        }
+        let icon = gtk::Image::builder().icon_name(icon).css_classes([class]).tooltip_text(tooltip).build();
+        r.state.add_child(&icon);
+        r.state.set_visible_child(&icon);
+    }
+
+    /// Opens row `i` to show the model thinking, returning its view.
+    fn start_thinking(&self, i: usize) -> Rc<ThinkingView> {
+        let rows = self.rows.borrow();
+        let r = &rows[i];
+        let spinner = adw::Spinner::new();
+        r.state.add_child(&spinner);
+        r.state.set_visible_child(&spinner);
+        r.row.set_enable_expansion(true);
+        r.row.set_expanded(true);
+        r.thinking.widget.set_expanded(true);
+        r.show.set_active(false);
+        r.thinking.clone()
+    }
+
+    /// Counts what one AI merge used.
+    fn count(&self, checked: &ai::Checked) {
+        let mut totals = self.totals.borrow_mut();
+        totals.ai_calls += 1 + usize::from(checked.retried);
+        if let Some(u) = checked.merged.usage {
+            totals.used += u;
+            totals.counted = true;
+        }
+    }
+
+    async fn merge_object(&self, i: usize, key: String) {
+        let category = self.request.category(i);
+        let (vanilla, sources, prints, resolved) = match &self.units.borrow()[i] {
+            Unit::Object { loaded, resolved } => (loaded.vanilla.clone(), loaded.sources.clone(), loaded.prints.clone(), resolved.clone()),
+            _ => return,
+        };
         // One version keeps every change: save it without asking.
-        let resolved = self.rows.borrow()[i].resolved.clone();
         if let Some(resolved) = resolved {
-            let (text, prints) = {
-                let l = &self.loaded.borrow()[i];
-                (l.sources[resolved.index].text.clone(), l.prints.clone())
-            };
-            let outcome = merge_dialog::validate(&self.request.category, &key, &text).and_then(|script| (self.request.save)(&key, &script, prints));
-            let rows = self.rows.borrow();
-            let r = &rows[i];
-            r.set_result(&text);
-            let icon = match outcome {
-                Ok(()) => {
-                    self.totals.borrow_mut().saved += 1;
-                    self.totals.borrow_mut().without_ai += 1;
-                    r.row.set_subtitle(&format!("Used as it is: {}", resolved.reason));
-                    gtk::Image::builder().icon_name("emblem-ok-symbolic").css_classes(["success"]).tooltip_text("Saved to the patch without AI").build()
-                }
-                Err(e) => {
-                    self.totals.borrow_mut().failed += 1;
-                    r.row.set_subtitle(&e);
-                    gtk::Image::builder().icon_name("dialog-warning-symbolic").css_classes(["warning"]).tooltip_text(e.as_str()).build()
-                }
-            };
-            r.state.add_child(&icon);
-            r.state.set_visible_child(&icon);
-            return;
+            let text = sources[resolved.index].text.clone();
+            let outcome = merge_dialog::validate(&category, &key, &text).and_then(|script| (self.request.save)(&key, &script, prints));
+            self.rows.borrow()[i].set_result(&text);
+            if outcome.is_ok() {
+                self.totals.borrow_mut().without_ai += 1;
+            }
+            return self.finish(i, match outcome {
+                Ok(()) => Outcome::Saved { note: format!("Used as it is: {}", resolved.reason), tooltip: "Saved to the patch without AI".into() },
+                Err(e) => Outcome::Failed(e),
+            });
         }
         let Some(provider) = self.provider.clone() else { return };
-        self.totals.borrow_mut().ai_calls += 1;
-        // The row being merged opens to show the model thinking.
-        let thinking = {
-            let rows = self.rows.borrow();
-            let r = &rows[i];
-            let spinner = adw::Spinner::new();
-            r.state.add_child(&spinner);
-            r.state.set_visible_child(&spinner);
-            r.row.set_enable_expansion(true);
-            r.row.set_expanded(true);
-            r.thinking.widget.set_expanded(true);
-            r.show.set_active(false);
-            r.thinking.clone()
-        };
-        let (vanilla, sources, prints) = {
-            let l = &self.loaded.borrow()[i];
-            (l.vanilla.clone(), l.sources.clone(), l.prints.clone())
-        };
-        let (category, key2, provider) = (self.request.category.clone(), key.clone(), provider.clone());
+        let thinking = self.start_thinking(i);
+        let (c, k) = (category.clone(), key.clone());
         let result = thinking_view::run(&thinking, None, move |on| {
-            let check = |text: &str| merge_dialog::validate(&category, &key2, text);
-            ai::merge_checked(&provider, &category, &key2, vanilla.as_ref(), &sources, &check, on)
+            let check = |text: &str| merge_dialog::validate(&c, &k, text);
+            ai::merge_checked(&provider, &c, &k, vanilla.as_ref(), &sources, &check, on)
         })
         .await
         .unwrap_or_else(|| Err("The merge failed unexpectedly".into()));
         // Keep the reasoning, but folded, once the object is done.
         thinking.widget.set_expanded(false);
         let outcome = result.and_then(|checked| {
-            if let Some(u) = checked.merged.usage {
-                let mut totals = self.totals.borrow_mut();
-                totals.used += u;
-                totals.counted = true;
-            }
-            if checked.retried {
-                self.totals.borrow_mut().ai_calls += 1;
-            }
-            let rows = self.rows.borrow();
+            self.count(&checked);
             // Shown even when rejected, to see what went wrong.
-            rows[i].set_result(&checked.merged.script);
+            self.rows.borrow()[i].set_result(&checked.merged.script);
             let script = checked.script.map_err(|e| format!("The model's result was rejected, even after a correction: {e}"))?;
             (self.request.save)(&key, &script, prints)?;
             let notes = checked.merged.notes;
             Ok(if checked.retried { format!("Corrected after a rejected first try. {notes}").trim_end().to_owned() } else { notes })
         });
-        let rows = self.rows.borrow();
-        let r = &rows[i];
-        r.row.set_expanded(false);
-        let icon = match &outcome {
-            Ok(notes) => {
-                self.totals.borrow_mut().saved += 1;
-                if !notes.is_empty() {
-                    r.row.set_subtitle(notes);
-                }
-                gtk::Image::builder().icon_name("emblem-ok-symbolic").css_classes(["success"]).tooltip_text("Merged into the patch").build()
-            }
-            Err(e) => {
-                self.totals.borrow_mut().failed += 1;
-                r.row.set_subtitle(e);
-                gtk::Image::builder().icon_name("dialog-warning-symbolic").css_classes(["warning"]).tooltip_text(e.as_str()).build()
-            }
-        };
-        r.state.add_child(&icon);
-        r.state.set_visible_child(&icon);
+        self.finish(i, match outcome {
+            Ok(note) => Outcome::Saved { note, tooltip: "Merged into the patch".into() },
+            Err(e) => Outcome::Failed(e),
+        });
     }
+
+    /// Merges a file's conflicting objects one after another, then saves the
+    /// file. Objects that fail, or aren't reached because the run was
+    /// stopped, keep the last mod's version, as they do in the game today.
+    async fn merge_file(&self, i: usize, path: String) {
+        let (mut plan, prints) = match &self.units.borrow()[i] {
+            Unit::File { plan, prints } => (plan.clone(), prints.clone()),
+            _ => return,
+        };
+        let conflicts: Vec<usize> = plan.conflicts().filter(|(_, item)| !item.resolved).map(|(c, _)| c).collect();
+        let thinking = (!conflicts.is_empty()).then(|| self.start_thinking(i));
+        let mut problems: Vec<String> = Vec::new();
+        let mut merged = 0;
+        for &c in &conflicts {
+            let (Some(thinking), Some(provider)) = (&thinking, self.provider.clone()) else { break };
+            if self.cancelled.get() {
+                problems.push(format!("{}: not reached before the run was stopped", plan.items[c].key));
+                continue;
+            }
+            let Status::Conflict { sources, vanilla } = plan.items[c].status.clone() else { continue };
+            let (category, key) = (plan.category.clone(), plan.items[c].key.clone());
+            let (cat, k) = (category.clone(), key.clone());
+            let result = thinking_view::run(thinking, Some(&key), move |on| {
+                let check = |text: &str| merge_dialog::validate(&cat, &k, text);
+                ai::merge_checked(&provider, &cat, &k, vanilla.as_ref(), &sources, &check, on)
+            })
+            .await
+            .unwrap_or_else(|| Err("failed unexpectedly".into()));
+            let text = result.and_then(|checked| {
+                self.count(&checked);
+                checked.script.map_err(|e| format!("rejected, even after a correction: {e}"))?;
+                plan.validate_item(c, &checked.merged.script)
+            });
+            match text {
+                Ok(text) => {
+                    plan.items[c].text = text;
+                    plan.items[c].resolved = true;
+                    merged += 1;
+                }
+                Err(e) => problems.push(format!("{key}: {e}")),
+            }
+        }
+        if let Some(thinking) = &thinking {
+            thinking.widget.set_expanded(false);
+        }
+        let contents = plan.render();
+        self.rows.borrow()[i].set_result(&contents);
+        let saved = file_merge::validate(&plan.category, &contents).and_then(|()| (self.request.save)(&path, &contents, prints));
+        if conflicts.is_empty() && saved.is_ok() {
+            self.totals.borrow_mut().without_ai += 1;
+        }
+        self.finish(i, match saved {
+            Err(e) => Outcome::Failed(e),
+            Ok(()) if problems.is_empty() => Outcome::Saved {
+                note: if conflicts.is_empty() { "Combined without AI".to_owned() } else { format!("Merged {}", plural(merged, "conflicting object", "conflicting objects")) },
+                tooltip: "Merged into the patch".into(),
+            },
+            Ok(()) => Outcome::Partial(format!(
+                "Saved, but {} the last mod's version: {}",
+                if problems.len() == 1 { "1 object keeps".to_owned() } else { format!("{} objects keep", problems.len()) },
+                problems.join("; ")
+            )),
+        });
+    }
+}
+
+/// How merging one row ended.
+enum Outcome {
+    Saved { note: String, tooltip: String },
+    /// A file saved with some objects left unmerged, and why.
+    Partial(String),
+    Failed(String),
 }
 
 fn tokens(n: u64) -> String {

@@ -327,6 +327,13 @@ impl Window {
             }
         });
         let weak = Rc::downgrade(self);
+        let folder_files = analysis.clone();
+        let merge_files = Box::new(move |indices: Vec<usize>| {
+            if let Some(ui) = weak.upgrade() {
+                ui.open_files_merge(&folder_files, indices);
+            }
+        });
+        let weak = Rc::downgrade(self);
         let errors = analysis.clone();
         let open_fix = Box::new(move |index: usize, mark_fixed: Box<dyn Fn()>| {
             if let Some(ui) = weak.upgrade() {
@@ -407,6 +414,7 @@ impl Window {
             is_file_merged,
             open_file,
             merge_folder,
+            merge_files,
             open_fix,
             is_ignored,
             set_ignored,
@@ -453,19 +461,56 @@ impl Window {
                 })
                 .collect()
         };
+        let save_category = category.clone();
+        let items = folder_merge_dialog::Items::Objects { category: category.clone(), items };
+        self.present_merge_all(items, &category, move |ui, key, script, prints| ui.save_merge(&save_category, key, script, prints));
+    }
+
+    /// Opens the AI merge of the overridden files at `indices`, which are
+    /// all in one folder.
+    pub(super) fn open_files_merge(self: &Rc<Self>, analysis: &Rc<Analysis>, indices: Vec<usize>) {
+        let Some(folder) = indices.first().map(|&i| conflicts_view::file_folder(&analysis.report.files[i].path).to_owned()) else { return };
+        let files = {
+            let patch = self.patch.borrow();
+            let stale = self.stale.borrow();
+            indices
+                .iter()
+                .map(|&i| {
+                    let c = &analysis.report.files[i];
+                    let origins = c.mods.iter().filter_map(|&m| Some((analysis.ids[m].clone(), analysis.name(m).to_owned(), analysis.roots[m].clone()?))).collect();
+                    let is_stale = stale.iter().any(|s| s.object.is_none() && s.path.eq_ignore_ascii_case(&c.path));
+                    let merged = patch.as_ref().is_some_and(|p| p.get_file(&c.path).is_some()) && !is_stale;
+                    folder_merge_dialog::FileItem { path: c.path.clone(), origins, merged }
+                })
+                .collect()
+        };
+        let items = folder_merge_dialog::Items::Files { folder: folder.clone(), files };
+        self.present_merge_all(items, &folder, |ui, path, contents, prints| {
+            ui.with_patch(|patch, user_dir, version| patch.save_file(user_dir, version, path, contents, prints))
+        });
+    }
+
+    /// Opens Merge All for `items` from `folder`, saving each result with
+    /// `save` once the patch has been backed up.
+    fn present_merge_all(
+        self: &Rc<Self>,
+        items: folder_merge_dialog::Items,
+        folder: &str,
+        save: impl Fn(&Rc<Self>, &str, &str, Vec<patch::Print>) -> Result<(), String> + 'static,
+    ) {
         let weak = Rc::downgrade(self);
         let save = {
-            let category = category.clone();
+            let reason = snapshot::before_merge_all(folder);
             // The patch is backed up before the run's first save, so runs
             // that save nothing leave no backup behind.
             let backed_up = std::cell::Cell::new(false);
-            Box::new(move |key: &str, script: &str, prints: Vec<patch::Print>| {
+            Box::new(move |name: &str, text: &str, prints: Vec<patch::Print>| {
                 let ui = weak.upgrade().ok_or("The window was closed")?;
                 if !backed_up.get() {
-                    ui.snapshot_patch(&snapshot::before_merge_all(&category))?;
+                    ui.snapshot_patch(&reason)?;
                     backed_up.set(true);
                 }
-                ui.save_merge(&category, key, script, prints)
+                save(&ui, name, text, prints)
             })
         };
         let weak = Rc::downgrade(self);
@@ -482,7 +527,6 @@ impl Window {
             }
         });
         let request = folder_merge_dialog::Request {
-            category,
             items,
             game_dir: self.game.as_ref().map(|g| g.dir.clone()),
             provider: self.settings.borrow().ready_provider(),
