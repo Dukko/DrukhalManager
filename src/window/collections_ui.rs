@@ -1,5 +1,5 @@
 //! The collection switcher and its actions: new, duplicate, rename, delete,
-//! import from a launcher playset or a file, and export.
+//! import from the game, a launcher playset or a file, and export.
 
 use std::rc::Rc;
 
@@ -11,6 +11,7 @@ use crate::conflicts_view::plural;
 use crate::merge::collection;
 use crate::mods::archive;
 use crate::mods::collections::{self, Collections};
+use crate::mods::load_order::DlcLoad;
 use crate::paradox::{launcher_db, workshop};
 
 impl Window {
@@ -53,11 +54,13 @@ impl Window {
         action("collection-duplicate", |ui| ui.new_collection(true));
         action("collection-rename", Window::rename_collection);
         action("collection-delete", Window::delete_collection);
+        action("collection-import-game", Window::import_game);
         action("collection-import-playset", Window::import_playset);
         action("collection-import-file", Window::import_file);
         action("collection-import-workshop", Window::import_workshop);
         action("collection-merge", Window::merge_collection);
         action("collection-export", Window::export_collection);
+        action("collection-export-launcher", Window::export_launcher);
         action("collection-copy", Window::copy_collection);
         action("collection-paste", Window::paste_collection);
 
@@ -109,10 +112,16 @@ impl Window {
         }
         menu.append_section(None, &manage);
         let share = gio::Menu::new();
-        share.append(Some("Import from Launcher _Playset…"), Some("win.collection-import-playset"));
-        share.append(Some("_Import from File…"), Some("win.collection-import-file"));
-        share.append(Some("Import _Workshop Collection…"), Some("win.collection-import-workshop"));
-        share.append(Some("_Export to File…"), Some("win.collection-export"));
+        let import = gio::Menu::new();
+        import.append(Some("From the _Game's Load Order"), Some("win.collection-import-game"));
+        import.append(Some("From a Launcher _Playset…"), Some("win.collection-import-playset"));
+        import.append(Some("From a _File…"), Some("win.collection-import-file"));
+        import.append(Some("From a _Workshop Collection…"), Some("win.collection-import-workshop"));
+        share.append_submenu(Some("_Import"), &import);
+        let export = gio::Menu::new();
+        export.append(Some("To a DrukhalManager _File…"), Some("win.collection-export"));
+        export.append(Some("To a Paradox _Launcher File…"), Some("win.collection-export-launcher"));
+        share.append_submenu(Some("_Export"), &export);
         share.append(Some("_Copy Load Order"), Some("win.collection-copy"));
         share.append(Some("_Paste Load Order"), Some("win.collection-paste"));
         share.append(Some("_Merge into One Mod…"), Some("win.collection-merge"));
@@ -282,6 +291,21 @@ impl Window {
         dialog.present(Some(&self.window));
     }
 
+    /// Makes a collection of the load order in the game's `dlc_load.json`,
+    /// e.g. after the Paradox Launcher or another tool set it.
+    fn import_game(self: &Rc<Self>) {
+        let ids = match DlcLoad::read(&self.paths.user_dir) {
+            Ok(d) if !d.enabled_mods.is_empty() => d.enabled_mods,
+            Ok(_) => return self.toast_error("The game's load order has no mods"),
+            Err(e) => return self.toast_error(&format!("Could not read the game's load order: {e}")),
+        };
+        let missing = {
+            let state = self.state.borrow();
+            ids.iter().filter(|id| !state.mods.iter().any(|m| &m.id == *id)).cloned().collect()
+        };
+        self.add_and_switch(collections::Collection::new("Game Load Order", ids), missing);
+    }
+
     fn import_playset(self: &Rc<Self>) {
         let playsets = match launcher_db::playsets(&self.paths.user_dir) {
             Ok(p) if !p.is_empty() => p,
@@ -437,7 +461,7 @@ impl Window {
 
     fn import_file(self: &Rc<Self>) {
         let filter = gtk::FileFilter::new();
-        filter.set_name(Some("DrukhalManager collections"));
+        filter.set_name(Some("Collections (DrukhalManager or Paradox Launcher)"));
         filter.add_pattern("*.json");
         let filters = gio::ListStore::new::<gtk::FileFilter>();
         filters.append(&filter);
@@ -446,9 +470,16 @@ impl Window {
         dialog.open(Some(&self.window), None::<&gio::Cancellable>, move |file| {
             let (Some(ui), Ok(file)) = (weak.upgrade(), file) else { return };
             let Some(path) = file.path() else { return };
-            let shared: collections::Shared = match std::fs::read_to_string(&path).map_err(|e| e.to_string()).and_then(|s| serde_json::from_str(&s).map_err(|e| e.to_string())) {
+            let text = match std::fs::read_to_string(&path) {
+                Ok(t) => t,
+                Err(e) => return ui.toast_error(&format!("Could not read the file: {e}")),
+            };
+            let shared = match serde_json::from_str::<collections::Shared>(&text) {
                 Ok(s) => s,
-                Err(e) => return ui.toast_error(&format!("Not a collection file: {e}")),
+                Err(e) => match collections::from_launcher_json(&text) {
+                    Some(s) => s,
+                    None => return ui.toast_error(&format!("Not a collection or playset file: {e}")),
+                },
             };
             let (collection, missing) = collections::import(&shared, &ui.state.borrow().mods);
             ui.add_and_switch(collection, missing);
@@ -563,6 +594,29 @@ impl Window {
 }
 
 impl Window {
+    /// Exports the load order as a Paradox Launcher playset file, for
+    /// players who don't use DrukhalManager.
+    fn export_launcher(self: &Rc<Self>) {
+        let name = self.collections.borrow().active.clone();
+        let dialog = gtk::FileDialog::builder().title("Export for the Paradox Launcher").initial_name(format!("{name} (launcher).json")).modal(true).build();
+        let weak = Rc::downgrade(self);
+        dialog.save(Some(&self.window), None::<&gio::Cancellable>, move |file| {
+            let (Some(ui), Ok(file)) = (weak.upgrade(), file) else { return };
+            let Some(path) = file.path() else { return };
+            let shared = ui.shared_collection(&name, true);
+            let (json, skipped) = collections::to_launcher_json(&shared);
+            if let Err(e) = std::fs::write(&path, json) {
+                return ui.toast_error(&format!("Could not export: {e}"));
+            }
+            let exported = format!("Exported “{name}” with {}", plural(shared.mods.len() - skipped.len(), "mod", "mods"));
+            if skipped.is_empty() {
+                ui.toasts.add_toast(adw::Toast::new(&exported));
+            } else {
+                ui.toast_error(&format!("{exported}. The launcher only knows Workshop mods, so {} left out: {}", if skipped.len() == 1 { "this local mod was" } else { "these local mods were" }, skipped.join(", ")));
+            }
+        });
+    }
+
     /// The current load order to share as the collection `name`, with its
     /// mods that aren't installed in their places. `without_patch` leaves
     /// out the merged patch, which only exists on this machine.
