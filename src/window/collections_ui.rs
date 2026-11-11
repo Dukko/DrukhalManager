@@ -58,6 +58,8 @@ impl Window {
         action("collection-import-workshop", Window::import_workshop);
         action("collection-merge", Window::merge_collection);
         action("collection-export", Window::export_collection);
+        action("collection-copy", Window::copy_collection);
+        action("collection-paste", Window::paste_collection);
 
         let active = self.collections.borrow().active.clone();
         let switch = gio::SimpleAction::new_stateful("collection", Some(glib::VariantTy::STRING), &active.to_variant());
@@ -111,6 +113,8 @@ impl Window {
         share.append(Some("_Import from File…"), Some("win.collection-import-file"));
         share.append(Some("Import _Workshop Collection…"), Some("win.collection-import-workshop"));
         share.append(Some("_Export to File…"), Some("win.collection-export"));
+        share.append(Some("_Copy Load Order"), Some("win.collection-copy"));
+        share.append(Some("_Paste Load Order"), Some("win.collection-paste"));
         share.append(Some("_Merge into One Mod…"), Some("win.collection-merge"));
         menu.append_section(None, &share);
 
@@ -534,6 +538,40 @@ impl Window {
                 Ok(()) => ui.toasts.add_toast(adw::Toast::new(&format!("Exported “{name}” with {}", plural(shared.mods.len(), "mod", "mods")))),
                 Err(e) => ui.toast_error(&format!("Could not export: {e}")),
             }
+        });
+    }
+}
+
+impl Window {
+    /// Copies the load order as a numbered list with Workshop links, for
+    /// pasting in a chat or forum post.
+    fn copy_collection(self: &Rc<Self>) {
+        let name = self.collections.borrow().active.clone();
+        let shared = {
+            let state = self.state.borrow();
+            let ids: Vec<String> = state.enabled_ids().into_iter().filter(|id| id != crate::merge::patch::ID).collect();
+            collections::export(&name, &ids, &state.mods)
+        };
+        if shared.mods.is_empty() {
+            return self.toast_error("No mods are enabled");
+        }
+        self.window.clipboard().set_text(&collections::to_text(&shared));
+        self.toasts.add_toast(adw::Toast::new(&format!("Copied “{name}” with {}", plural(shared.mods.len(), "mod", "mods"))));
+    }
+
+    /// Imports a load order from the clipboard as a new collection, like
+    /// Import from File.
+    fn paste_collection(self: &Rc<Self>) {
+        let clipboard = self.window.clipboard();
+        let weak = Rc::downgrade(self);
+        glib::spawn_future_local(async move {
+            let text = clipboard.read_text_future().await;
+            let Some(ui) = weak.upgrade() else { return };
+            let Some(shared) = text.ok().flatten().and_then(|t| collections::from_text(&t)) else {
+                return ui.toast_error("The clipboard doesn't hold a load order");
+            };
+            let (mods, missing) = collections::resolve(&shared, &ui.state.borrow().mods);
+            ui.add_and_switch(&shared.name, mods, missing);
         });
     }
 }
