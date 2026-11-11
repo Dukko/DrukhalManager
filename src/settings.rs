@@ -72,6 +72,21 @@ pub struct GameOptions {
     pub merged_name: Option<String>,
     /// Merge into One Mod writes one zip instead of a folder.
     pub merge_to_zip: bool,
+    /// Another folder to load mods from.
+    pub extra_mod_dir: Option<PathBuf>,
+    /// Merge into One Mod writes into `extra_mod_dir` instead of the game's
+    /// mod folder.
+    pub merge_to_extra: bool,
+}
+
+impl GameOptions {
+    /// Where Merge into One Mod writes the merged mod.
+    pub fn merge_dir(&self, user_dir: &Path) -> PathBuf {
+        match &self.extra_mod_dir {
+            Some(dir) if self.merge_to_extra => dir.clone(),
+            _ => user_dir.join("mod"),
+        }
+    }
 }
 
 impl GameOptions {
