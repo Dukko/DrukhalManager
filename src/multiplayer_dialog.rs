@@ -11,7 +11,7 @@ use gtk::{gio, glib};
 
 use crate::conflicts_view::plural;
 use crate::mods::archive;
-use crate::multiplayer::{self, Comparison, FileDiff, ModInput, Progress, Report};
+use crate::multiplayer::{self, Comparison, FileDiff, HashCache, ModInput, Progress, Report};
 
 /// Files listed per mod; the rest are summarised.
 const ROWS_PER_MOD: usize = 200;
@@ -27,13 +27,18 @@ pub struct Request {
 
 impl Request {
     /// Reads everything; call off the main thread.
-    fn report(&self, progress: &Progress) -> Report {
+    fn report(&self, all_game_files: bool, progress: &Progress) -> Report {
         let mods: Vec<ModInput> = self
             .mods
             .iter()
             .map(|(name, steam_id, content)| ModInput { name: name.clone(), steam_id: *steam_id, root: content.as_deref().and_then(|c| archive::files(c).ok()) })
             .collect();
-        multiplayer::report(self.game_dir.as_deref(), self.game_version.as_deref(), &mods, progress)
+        let path = HashCache::path();
+        let mut cache = HashCache::load(&path);
+        let report = multiplayer::report(self.game_dir.as_deref(), self.game_version.as_deref(), all_game_files, &mods, progress, &mut cache);
+        // Only a speed-up, so failing to keep it doesn't matter.
+        let _ = cache.save(&path);
+        report
     }
 }
 
@@ -42,7 +47,7 @@ impl Request {
 #[derive(Clone)]
 struct Busy {
     bar: gtk::ProgressBar,
-    rows: [adw::ActionRow; 2],
+    rows: [adw::PreferencesRow; 3],
 }
 
 impl Busy {
@@ -85,16 +90,21 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
     let intro = adw::PreferencesGroup::builder()
         .description("Playing together needs the same game version, mods, load order and mod files. Save your report and send it to the other players, or open one of theirs to see what differs.")
         .build();
-    let save = adw::ActionRow::builder().title("Save My Report…").subtitle(format!("{} and the game's checksummed files", plural(request.mods.len(), "enabled mod", "enabled mods"))).activatable(true).build();
+    let save = adw::ActionRow::builder().title("Save My Report…").subtitle(format!("{} and the game's files", plural(request.mods.len(), "enabled mod", "enabled mods"))).activatable(true).build();
     save.add_suffix(&gtk::Image::from_icon_name("document-save-symbolic"));
     let open = adw::ActionRow::builder().title("Compare With a Report…").subtitle("Open the report another player sent you").activatable(true).build();
     open.add_suffix(&gtk::Image::from_icon_name("document-open-symbolic"));
+    let all_files = adw::SwitchRow::builder()
+        .title("Include All Game Files")
+        .subtitle("Also localisation, interface and graphics, to find modified or damaged game files outside the multiplayer checksum. Slow the first time.")
+        .build();
     intro.add(&save);
     intro.add(&open);
+    intro.add(&all_files);
     let bar = gtk::ProgressBar::builder().show_text(true).pulse_step(0.1).margin_top(12).visible(false).build();
     intro.add(&bar);
     page.add(&intro);
-    let busy = Busy { bar, rows: [save.clone(), open.clone()] };
+    let busy = Busy { bar, rows: [save.clone().upcast(), open.clone().upcast(), all_files.clone().upcast()] };
 
     let results: Rc<std::cell::RefCell<Vec<adw::PreferencesGroup>>> = Rc::default();
     let toasts = adw::ToastOverlay::new();
@@ -124,7 +134,10 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
         request,
         #[strong]
         busy,
+        #[weak]
+        all_files,
         move |_| {
+            let all_game_files = all_files.is_active();
             let chooser = gtk::FileDialog::builder().title("Save Multiplayer Report").initial_name(DEFAULT_NAME).filters(&json_filter()).build();
             let window = dialog.root().and_downcast::<gtk::Window>();
             let (busy, request) = (busy.clone(), request.clone());
@@ -132,7 +145,7 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
                 let Some(path) = file.ok().and_then(|f| f.path()) else { return };
                 let (progress, done) = busy.start("Reading");
                 glib::spawn_future_local(async move {
-                    let written = gio::spawn_blocking(move || std::fs::write(&path, request.report(&progress).to_json()).map(|()| path)).await;
+                    let written = gio::spawn_blocking(move || std::fs::write(&path, request.report(all_game_files, &progress).to_json()).map(|()| path)).await;
                     done();
                     let message = match written {
                         Ok(Ok(path)) => format!("Saved {}; send it to the other players", path.file_name().unwrap_or_default().to_string_lossy()),
@@ -171,7 +184,8 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
                         let src = std::fs::read_to_string(&path).map_err(|e| format!("Could not read {}: {e}", path.display()))?;
                         // Check theirs first, so a wrong file fails at once.
                         let theirs = Report::from_json(&src)?;
-                        Ok::<_, String>(multiplayer::compare(&request.report(&progress), &theirs))
+                        // Mine covers what theirs does, so nothing goes unchecked.
+                        Ok::<_, String>(multiplayer::compare(&request.report(theirs.all_game_files, &progress), &theirs))
                     })
                     .await
                     .unwrap_or_else(|_| Err("The comparison failed".into()));
@@ -250,7 +264,7 @@ fn render(c: &Comparison, theirs: &str) -> Vec<adw::PreferencesGroup> {
             g.add(&label_row("Different game version", &format!("Yours: {mine} · Theirs: {theirs}")));
         }
         if !c.game_files.is_empty() {
-            g.add(&files_expander("Base game files", &c.game_files));
+            g.add(&files_expander("Game files", &c.game_files));
         }
         out.push(g);
     }

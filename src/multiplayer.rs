@@ -16,6 +16,11 @@ use sha2::{Digest, Sha256};
 
 /// Folders the game's multiplayer checksum covers.
 pub const CHECKSUM_FOLDERS: &[&str] = &["common", "events", "map", "localisation_synced"];
+/// Every folder of game content, for a report of all the game's files:
+/// a modified or corrupted file outside the checksum still shows.
+pub const CONTENT_FOLDERS: &[&str] = &[
+    "common", "events", "map", "localisation_synced", "localisation", "interface", "gfx", "fonts", "flags", "prescripted_countries", "sound", "music",
+];
 
 const FORMAT: &str = "drukhal-multiplayer-report";
 const VERSION: u32 = 1;
@@ -25,7 +30,11 @@ pub struct Report {
     format: String,
     version: u32,
     pub game_version: Option<String>,
-    /// The base game's checksummed files: path -> hash.
+    /// Whether `game` covers all the game's content, not just the
+    /// checksummed folders.
+    #[serde(default)]
+    pub all_game_files: bool,
+    /// The base game's files: path -> hash.
     pub game: BTreeMap<String, String>,
     /// Enabled mods, in load order.
     pub mods: Vec<ModReport>,
@@ -46,6 +55,54 @@ pub struct ModInput {
     pub steam_id: Option<u64>,
     /// Its folder (a zipped mod's unpacked copy), if found.
     pub root: Option<PathBuf>,
+}
+
+/// Hashes of files already read, by path, size and modification time, so
+/// reading tens of thousands of game files is slow only once.
+#[derive(Debug, Default, Serialize, Deserialize)]
+pub struct HashCache {
+    files: HashMap<PathBuf, (u64, u128, String)>,
+    #[serde(skip)]
+    changed: bool,
+}
+
+impl HashCache {
+    pub fn path() -> PathBuf {
+        gtk::glib::user_cache_dir().join("DrukhalManager/file-hashes.json")
+    }
+
+    /// The cache at `path`; empty if there is none or it can't be read.
+    pub fn load(path: &Path) -> Self {
+        std::fs::read(path).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default()
+    }
+
+    /// Writes the cache, if it changed, dropping files that are gone.
+    pub fn save(&mut self, path: &Path) -> std::io::Result<()> {
+        if !self.changed {
+            return Ok(());
+        }
+        self.files.retain(|p, _| p.exists());
+        if let Some(dir) = path.parent() {
+            std::fs::create_dir_all(dir)?;
+        }
+        let tmp = path.with_extension("json.tmp");
+        std::fs::write(&tmp, serde_json::to_vec(self).map_err(std::io::Error::other)?)?;
+        std::fs::rename(tmp, path)
+    }
+
+    fn hash(&mut self, path: &Path) -> std::io::Result<String> {
+        let meta = std::fs::metadata(path)?;
+        let modified = meta.modified()?.duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos());
+        if let Some((size, time, hash)) = self.files.get(path)
+            && (*size, *time) == (meta.len(), modified)
+        {
+            return Ok(hash.clone());
+        }
+        let hash = hash_file(path)?;
+        self.files.insert(path.to_owned(), (meta.len(), modified, hash.clone()));
+        self.changed = true;
+        Ok(hash)
+    }
 }
 
 fn hash_file(path: &Path) -> std::io::Result<String> {
@@ -98,11 +155,11 @@ fn list_tree(root: &Path, folders: Option<&[&str]>) -> Vec<String> {
     files
 }
 
-fn hash_tree(root: &Path, files: Vec<String>, progress: &Progress) -> BTreeMap<String, String> {
+fn hash_tree(root: &Path, files: Vec<String>, progress: &Progress, cache: &mut HashCache) -> BTreeMap<String, String> {
     files
         .into_iter()
         .filter_map(|f| {
-            let hash = hash_file(&root.join(&f));
+            let hash = cache.hash(&root.join(&f));
             progress.done.fetch_add(1, Ordering::Relaxed);
             // Paths compare case-insensitively, as the game loads them.
             Some((f.to_lowercase(), hash.ok()?))
@@ -110,10 +167,13 @@ fn hash_tree(root: &Path, files: Vec<String>, progress: &Progress) -> BTreeMap<S
         .collect()
 }
 
-/// Builds the report. Reads every file, so call off the main thread.
-pub fn report(game_dir: Option<&Path>, game_version: Option<&str>, mods: &[ModInput], progress: &Progress) -> Report {
+/// Builds the report, with all the game's content files or only the
+/// checksummed ones. Reads every file not in `cache`, so call off the main
+/// thread.
+pub fn report(game_dir: Option<&Path>, game_version: Option<&str>, all_game_files: bool, mods: &[ModInput], progress: &Progress, cache: &mut HashCache) -> Report {
     // Count every file first, so progress has a total.
-    let game_files = game_dir.map(|dir| list_tree(dir, Some(CHECKSUM_FOLDERS))).unwrap_or_default();
+    let folders = if all_game_files { CONTENT_FOLDERS } else { CHECKSUM_FOLDERS };
+    let game_files = game_dir.map(|dir| list_tree(dir, Some(folders))).unwrap_or_default();
     let mod_files: Vec<Vec<String>> = mods.iter().map(|m| m.root.as_deref().map(|r| list_tree(r, None)).unwrap_or_default()).collect();
     let total = game_files.len() + mod_files.iter().map(Vec::len).sum::<usize>();
     progress.total.store(total.max(1), Ordering::Relaxed);
@@ -122,11 +182,12 @@ pub fn report(game_dir: Option<&Path>, game_version: Option<&str>, mods: &[ModIn
         format: FORMAT.into(),
         version: VERSION,
         game_version: game_version.map(str::to_owned),
-        game: game_dir.map(|dir| hash_tree(dir, game_files, progress)).unwrap_or_default(),
+        all_game_files,
+        game: game_dir.map(|dir| hash_tree(dir, game_files, progress, cache)).unwrap_or_default(),
         mods: mods
             .iter()
             .zip(mod_files)
-            .map(|(m, files)| ModReport { name: m.name.clone(), steam_id: m.steam_id, files: m.root.as_deref().map(|r| hash_tree(r, files, progress)).unwrap_or_default() })
+            .map(|(m, files)| ModReport { name: m.name.clone(), steam_id: m.steam_id, files: m.root.as_deref().map(|r| hash_tree(r, files, progress, cache)).unwrap_or_default() })
             .collect(),
     }
 }
@@ -237,7 +298,13 @@ pub fn compare(mine: &Report, theirs: &Report) -> Comparison {
     }
     // A report without game files (game not found) can't be compared there.
     if !mine.game.is_empty() && !theirs.game.is_empty() {
-        c.game_files = diff_files(&mine.game, &theirs.game);
+        // Only what both reports cover.
+        if mine.all_game_files == theirs.all_game_files {
+            c.game_files = diff_files(&mine.game, &theirs.game);
+        } else {
+            let checksummed = |r: &Report| r.game.iter().filter(|(p, _)| in_checksum(p)).map(|(p, h)| (p.clone(), h.clone())).collect::<BTreeMap<_, _>>();
+            c.game_files = diff_files(&checksummed(mine), &checksummed(theirs));
+        }
     }
 
     let mut shared = Vec::new();
@@ -290,7 +357,8 @@ mod tests {
         let input = |name: &str, id: Option<u64>, root: &Path| ModInput { name: name.into(), steam_id: id, root: Some(root.to_path_buf()) };
         let progress = Progress::default();
         assert_eq!(progress.fraction(), None, "still counting");
-        let mine = report(Some(&game), Some("v4.5.3"), &[input("A", Some(1), &a), input("B", Some(2), &b), input("Mine Only", None, &a)], &progress);
+        let mut cache = HashCache::default();
+        let mine = report(Some(&game), Some("v4.5.3"), false, &[input("A", Some(1), &a), input("B", Some(2), &b), input("Mine Only", None, &a)], &progress, &mut cache);
         // 2 game files, then A's 2, B's 2 and A's 2 again.
         assert_eq!((progress.done.load(Ordering::Relaxed), progress.total.load(Ordering::Relaxed)), (8, 8));
         assert_eq!(progress.fraction(), Some(1.0));
@@ -302,7 +370,7 @@ mod tests {
 
         // They renamed A (same Workshop id), load B first, have another mod
         // and a different game version.
-        let mut theirs = report(Some(&game), Some("v4.5.4"), &[input("B", Some(2), &b2), input("A renamed", Some(1), &a), input("Theirs Only", Some(9), &a)], &Progress::default());
+        let mut theirs = report(Some(&game), Some("v4.5.4"), false, &[input("B", Some(2), &b2), input("A renamed", Some(1), &a), input("Theirs Only", Some(9), &a)], &Progress::default(), &mut cache);
         theirs.game.insert("map/setup.txt".into(), "h".into());
         let c = compare(&mine, &theirs);
         assert!(!c.matches());
@@ -314,6 +382,26 @@ mod tests {
         assert_eq!(c.mods.len(), 1);
         assert_eq!(c.mods[0].name, "B");
         assert_eq!(c.mods[0].files, [FileDiff::OnlyTheirs("common/new.txt".into()), FileDiff::Changed("events/b.txt".into()), FileDiff::Changed("gfx/b.dds".into())]);
+
+        // All the game's files: graphics too, compared with a report that
+        // has them, and only the checksummed ones against one that hasn't.
+        let full = report(Some(&game), Some("v4.5.3"), true, &[], &Progress::default(), &mut cache);
+        assert_eq!(full.game.keys().collect::<Vec<_>>(), ["common/x.txt", "events/e.txt", "gfx/big.dds"]);
+        let mut modified = full.clone();
+        modified.game.insert("gfx/big.dds".into(), "other".into());
+        assert_eq!(compare(&full, &modified).game_files, [FileDiff::Changed("gfx/big.dds".into())]);
+        let checksum_only = Report { mods: vec![], ..mine.clone() };
+        assert!(compare(&modified, &checksum_only).game_files.is_empty(), "gfx isn't in theirs to compare");
+
+        // Cached hashes are used while a file's size and time are unchanged.
+        let path = root.join("cache.json");
+        cache.save(&path).unwrap();
+        let mut loaded = HashCache::load(&path);
+        assert_eq!(loaded.files.len(), cache.files.len());
+        let file = game.join("common/x.txt");
+        let first = loaded.hash(&file).unwrap();
+        std::fs::write(&file, "changed!").unwrap();
+        assert_ne!(loaded.hash(&file).unwrap(), first, "a new size is read again");
 
         assert!(changes_checksum(&a) && changes_checksum(&b) && !changes_checksum(&root.join("missing")));
         write(&root.join("gfx_only"), &[("gfx/x.dds", "x"), ("descriptor.mod", "d")]);
