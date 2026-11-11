@@ -1,0 +1,26 @@
+name: Watch game updates
+
+# Weekly, and by hand: opens an issue to review the conflict rules when
+# Stellaris is patched or Irony Mod Manager's Stellaris rules change.
+on:
+  schedule:
+    - cron: "17 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Make sure the label exists
+        run: gh label create game-update --color FBCA04 --description "A Stellaris update to review" --force
+        env:
+          GH_TOKEN: ${{ github.token }}
+      - name: Look for updates
+        run: python3 .github/scripts/watch_game_updates.py
+        env:
+          GH_TOKEN: ${{ github.token }}
