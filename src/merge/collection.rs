@@ -96,10 +96,11 @@ pub enum Output {
 }
 
 /// Writes `mods` (in load order) as one mod for `collection`, named `name`,
-/// into `<user_dir>/mod`, replacing an earlier merge of the same collection
-/// in either form. Blocks; call off the main thread.
-pub fn write(user_dir: &Path, collection: &str, name: &str, supported_version: &str, mods: &[Input], output: Output) -> io::Result<Merged> {
-    let mod_dir = user_dir.join("mod");
+/// into `out_dir` (usually `<user_dir>/mod`), replacing an earlier merge of
+/// the same collection in either form and in either place. Its descriptor
+/// goes in `<user_dir>/mod`. Blocks; call off the main thread.
+pub fn write(user_dir: &Path, out_dir: &Path, collection: &str, name: &str, supported_version: &str, mods: &[Input], output: Output) -> io::Result<Merged> {
+    let mod_dir = out_dir.to_path_buf();
     let target = mod_dir.join(folder(collection));
     let zip = mod_dir.join(format!("{}.zip", folder(collection)));
     if target.exists() && !target.join(MARKER).exists() {
@@ -145,7 +146,19 @@ pub fn write(user_dir: &Path, collection: &str, name: &str, supported_version: &
             }
         }
     }
-        std::fs::write(user_dir.join(id(collection)), format!("{inner}{location}\n"))?;
+    // As would an earlier merge written to another folder.
+    let descriptor = user_dir.join(id(collection));
+    if let Some(old) = std::fs::read_to_string(&descriptor).ok().and_then(|s| crate::mods::Descriptor::parse(&s).ok()).and_then(|d| d.path).map(PathBuf::from)
+        && old != target
+        && old != zip
+    {
+        if old.join(MARKER).is_file() {
+            let _ = std::fs::remove_dir_all(&old);
+        } else if old.is_file() && is_merged_zip(&old) {
+            let _ = std::fs::remove_file(&old);
+        }
+    }
+    std::fs::write(&descriptor, format!("{inner}{location}\n"))?;
     Ok(Merged { id: id(collection), files: files.len() })
 }
 
@@ -253,7 +266,7 @@ mod tests {
         std::fs::create_dir_all(user.join("mod")).unwrap();
         let mods = [input(&a, &[]), input(&b, &[]), input(&c, &["common/ethics"])];
 
-        let merged = write(&user, "My Game!", &mod_name("My Game!", None), "v4.5.*", &mods, Output::Folder).unwrap();
+        let merged = write(&user, &user.join("mod"), "My Game!", &mod_name("My Game!", None), "v4.5.*", &mods, Output::Folder).unwrap();
         assert_eq!(merged, Merged { id: "mod/drukhal_merged_my_game.mod".into(), files: 5 });
         let out = user.join("mod/drukhal_merged_my_game");
         let read = |p: &str| std::fs::read_to_string(out.join(p)).ok();
@@ -272,18 +285,18 @@ mod tests {
         assert_eq!(parsed.path.as_deref(), Some(out.to_str().unwrap()));
 
         // Merging again replaces the earlier merge.
-        let merged = write(&user, "My Game!", &mod_name("My Game!", None), "v4.5.*", &mods[..1], Output::Folder).unwrap();
+        let merged = write(&user, &user.join("mod"), "My Game!", &mod_name("My Game!", None), "v4.5.*", &mods[..1], Output::Folder).unwrap();
         assert_eq!(merged.files, 3);
         assert_eq!(read("events/b.txt"), None);
         assert!(!user.join("mod/drukhal_merged_my_game.drukhal-tmp").exists());
 
         // A folder that isn't a merge is never replaced.
         std::fs::create_dir_all(user.join("mod/drukhal_merged_other")).unwrap();
-        let err = write(&user, "Other", "Other", "*", &mods, Output::Folder).unwrap_err();
+        let err = write(&user, &user.join("mod"), "Other", "Other", "*", &mods, Output::Folder).unwrap_err();
         assert_eq!(err.kind(), io::ErrorKind::AlreadyExists);
 
         // As a zip, which replaces the folder, and is read like any zipped mod.
-        let merged = write(&user, "My Game!", &mod_name("My Game!", None), "v4.5.*", &mods, Output::Zip).unwrap();
+        let merged = write(&user, &user.join("mod"), "My Game!", &mod_name("My Game!", None), "v4.5.*", &mods, Output::Zip).unwrap();
         assert_eq!(merged.files, 5);
         assert!(!out.exists(), "the folder form is removed");
         let descriptor = crate::mods::Descriptor::parse(&std::fs::read_to_string(user.join(&merged.id)).unwrap()).unwrap();
@@ -294,12 +307,19 @@ mod tests {
         assert_eq!(std::fs::read_to_string(files.join("Common/Buildings/x.txt")).unwrap(), "b");
         assert_eq!(std::fs::read_to_string(files.join("descriptor.mod")).unwrap().lines().next(), Some("name=\"My Game! (Merged)\""));
         // And back to a folder, which removes the zip.
-        write(&user, "My Game!", &mod_name("My Game!", None), "v4.5.*", &mods, Output::Folder).unwrap();
+        write(&user, &user.join("mod"), "My Game!", &mod_name("My Game!", None), "v4.5.*", &mods, Output::Folder).unwrap();
         assert!(out.exists() && !zip.exists());
 
         // A zip that isn't a merge is never replaced.
+        // Merging into another folder removes the earlier merge.
+        let elsewhere = root.join("elsewhere");
+        let merged = write(&user, &elsewhere, "My Game!", &mod_name("My Game!", None), "v4.5.*", &mods, Output::Folder).unwrap();
+        assert!(!out.exists() && elsewhere.join("drukhal_merged_my_game/descriptor.mod").exists());
+        let descriptor = crate::mods::Descriptor::parse(&std::fs::read_to_string(user.join(&merged.id)).unwrap()).unwrap();
+        assert_eq!(descriptor.path.as_deref(), Some(elsewhere.join("drukhal_merged_my_game").to_str().unwrap()));
+
         std::fs::write(user.join("mod/drukhal_merged_other2.zip"), "not ours").unwrap();
-        assert!(write(&user, "Other2", "Other2", "*", &mods, Output::Zip).is_err());
+        assert!(write(&user, &user.join("mod"), "Other2", "Other2", "*", &mods, Output::Zip).is_err());
         std::fs::remove_dir_all(&root).unwrap();
     }
 }

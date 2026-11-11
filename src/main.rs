@@ -54,6 +54,9 @@ fn build_ui(app: &adw::Application) {
     for error in mods::sync::sync(&user_dir, &workshop_dirs).errors {
         eprintln!("{error}");
     }
+    for error in mods::extra::link(&user_dir, options.extra_mod_dir.as_deref()).errors {
+        eprintln!("{error}");
+    }
     let found = mods::discover(&user_dir, &workshop_dirs);
     let paths = window::Paths { user_dir, backup_dir: sandbox::data_dir().join("DrukhalManager/backups") };
     let game = match &options.executable {

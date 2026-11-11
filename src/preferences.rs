@@ -55,9 +55,9 @@ fn icon_button(icon: &str, tooltip: &str) -> gtk::Button {
 
 /// A row showing a path that is detected unless the user picks another.
 /// Returns the row and the chosen path (`None` = detected).
-fn path_row(title: &str, detected: Option<PathBuf>, chosen: Option<PathBuf>, folder: bool) -> (adw::ActionRow, Rc<RefCell<Option<PathBuf>>>) {
+fn path_row(title: &str, detected: Option<PathBuf>, chosen: Option<PathBuf>, folder: bool, unset: &'static str) -> (adw::ActionRow, Rc<RefCell<Option<PathBuf>>>) {
     let row = adw::ActionRow::builder().title(title).subtitle_selectable(true).build();
-    let reset = icon_button("edit-undo-symbolic", "Use the detected location");
+    let reset = icon_button("edit-undo-symbolic", if detected.is_some() { "Use the detected location" } else { "Don't use a folder" });
     let choose = icon_button("document-open-symbolic", if folder { "Choose a folder" } else { "Choose a file" });
     row.add_suffix(&reset);
     row.add_suffix(&choose);
@@ -69,7 +69,7 @@ fn path_row(title: &str, detected: Option<PathBuf>, chosen: Option<PathBuf>, fol
             let subtitle = match (&*chosen.borrow(), &detected) {
                 (Some(p), _) => p.display().to_string(),
                 (None, Some(p)) => format!("{} (detected)", p.display()),
-                (None, None) => "Not found".to_owned(),
+                (None, None) => unset.to_owned(),
             };
             row.set_subtitle(&glib::markup_escape_text(&subtitle));
             reset.set_visible(chosen.borrow().is_some());
@@ -112,13 +112,29 @@ fn game_page(options: &GameOptions) -> (adw::PreferencesPage, impl Fn() -> GameO
 
     let folders = adw::PreferencesGroup::builder()
         .title("Locations")
-        .description("Changes take effect the next time DrukhalManager starts.")
+        .description("A new game executable or data directory takes effect the next time DrukhalManager starts.")
         .build();
-    let (exe_row, exe) = path_row("Game Executable", detected_exe, options.executable.clone(), false);
-    let (data_row, data_dir) = path_row("Data Directory", Some(steam::stellaris_user_dir()), options.data_dir.clone(), true);
+    let (exe_row, exe) = path_row("Game Executable", detected_exe, options.executable.clone(), false, "Not found");
+    let (data_row, data_dir) = path_row("Data Directory", Some(steam::stellaris_user_dir()), options.data_dir.clone(), true, "Not found");
     data_row.set_tooltip_text(Some("Where Stellaris keeps mod descriptors, saves and the load order"));
+    let (extra_row, extra_dir) = path_row("Extra Mod Folder", None, options.extra_mod_dir.clone(), true, "None");
+    extra_row.set_tooltip_text(Some("Mods in this folder's subfolders are listed and loaded like the rest, e.g. local mods on another drive or in a git checkout"));
+    let merge_extra_row = adw::SwitchRow::builder()
+        .title("Write Merged Mods There")
+        .subtitle("Merge into One Mod writes into the extra mod folder instead of the game's")
+        .active(options.merge_to_extra)
+        .build();
     folders.add(&exe_row);
     folders.add(&data_row);
+    folders.add(&extra_row);
+    folders.add(&merge_extra_row);
+    // Only meaningful with a folder chosen.
+    let sync_merge_row = {
+        let (row, dir) = (merge_extra_row.clone(), extra_dir.clone());
+        move || row.set_sensitive(dir.borrow().is_some())
+    };
+    sync_merge_row();
+    extra_row.connect_subtitle_notify(move |_| sync_merge_row());
 
     let launching = adw::PreferencesGroup::builder().title("Launching").build();
     let args_row = adw::EntryRow::builder().title("Game Launch Options").text(&options.launch_args).build();
@@ -250,6 +266,8 @@ fn game_page(options: &GameOptions) -> (adw::PreferencesPage, impl Fn() -> GameO
             (collection::is_template(&text) && text != collection::DEFAULT_TEMPLATE).then_some(text)
         },
         merge_to_zip,
+        extra_mod_dir: extra_dir.borrow().clone(),
+        merge_to_extra: merge_extra_row.is_active(),
     };
     (page, read)
 }

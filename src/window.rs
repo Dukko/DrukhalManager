@@ -622,7 +622,12 @@ impl Window {
                     return;
                 }
                 let languages_changed = ui.settings.borrow().game.languages(&ui.paths.user_dir) != settings.game.languages(&ui.paths.user_dir);
+                let extra_changed = ui.settings.borrow().game.extra_mod_dir != settings.game.extra_mod_dir;
                 ui.settings.replace(settings);
+                if extra_changed {
+                    // Lists the new folder's mods, and drops the old one's.
+                    ui.reload(|_| {});
+                }
                 if languages_changed && ui.analysis.borrow().is_some() {
                     ui.scan();
                 }

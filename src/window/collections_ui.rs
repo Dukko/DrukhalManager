@@ -550,6 +550,7 @@ impl Window {
             let toast = adw::Toast::builder().title(format!("Merging into “{name}”…")).timeout(0).build();
             ui.toasts.add_toast(toast.clone());
             let user_dir = ui.paths.user_dir.clone();
+            let out_dir = ui.settings.borrow().game.merge_dir(&user_dir);
             let version = crate::merge::patch::supported_version(ui.game.as_ref().and_then(|g| g.version.as_deref()));
             let (active, inputs, name) = (active.clone(), inputs.clone(), name.clone());
             let mod_name = name.clone();
@@ -561,7 +562,7 @@ impl Window {
                         .into_iter()
                         .map(|(content, replace_path)| Ok(collection::Input { root: archive::files(&content)?, replace_path }))
                         .collect::<std::io::Result<Vec<_>>>()?;
-                    collection::write(&user_dir, &active, &mod_name, &version, &inputs, output)
+                    collection::write(&user_dir, &out_dir, &active, &mod_name, &version, &inputs, output)
                 })
                 .await
                 .unwrap_or_else(|_| Err(std::io::Error::other("the merge failed")));

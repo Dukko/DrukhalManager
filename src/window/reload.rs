@@ -34,9 +34,12 @@ impl Window {
         }
         action.set_enabled(false);
         let user_dir = self.paths.user_dir.clone();
+        let extra = self.settings.borrow().game.extra_mod_dir.clone();
         let weak = Rc::downgrade(self);
         glib::spawn_future_local(async move {
             let found = gio::spawn_blocking(move || {
+                // Mods added to or removed from the extra mod folder.
+                let linked = mods::extra::link(&user_dir, extra.as_deref());
                 // Libraries may have been added since startup.
                 let workshop_dirs = steam::workshop_dirs(&glib::home_dir(), steam::STELLARIS_APP_ID);
                 // Registers mods Steam downloaded since, as the launcher would.
@@ -44,16 +47,19 @@ impl Window {
                 for error in &synced.errors {
                     eprintln!("{error}");
                 }
-                mods::discover(&user_dir, &workshop_dirs).map(|found| (found, synced.updated)).map_err(|e| e.to_string())
+                mods::discover(&user_dir, &workshop_dirs).map(|found| (found, synced.updated, linked.errors)).map_err(|e| e.to_string())
             })
             .await
             .unwrap_or_else(|_| Err("the reload failed".to_owned()));
             action.set_enabled(true);
             let Some(ui) = weak.upgrade() else { return };
-            let (found, updated) = match found {
+            let (found, updated, extra_errors) = match found {
                 Ok(found) => found,
                 Err(e) => return ui.toast_error_message(&format!("Could not reload mods: {e}")),
             };
+            if let Some(error) = extra_errors.first() {
+                ui.toast_error_message(error);
+            }
             let before: std::collections::HashSet<String> = ui.state.borrow().mods.iter().map(|m| m.id.clone()).collect();
             let (added, removed) = ui.state.borrow_mut().reload(found);
             // Mods the collection kept a place for go back in it.
