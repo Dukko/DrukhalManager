@@ -104,15 +104,7 @@ jobs:
           else
             # The notes the app shows when offering this update, from the
             # <release> written for it in the metainfo.
-            python3 - "${TAG#v}" > "$RUNNER_TEMP/notes.md" <<'EOF'
-          import sys, xml.etree.ElementTree as ET
-          root = ET.parse("data/io.github.dukko.DrukhalManager.metainfo.xml").getroot()
-          for release in root.iter("release"):
-              if release.get("version") == sys.argv[1]:
-                  for el in release.iter():
-                      if el.tag in ("p", "li") and el.text:
-                          print(("- " if el.tag == "li" else "") + " ".join(el.text.split()))
-          EOF
+            python3 .github/scripts/release_notes.py "${TAG#v}" > "$RUNNER_TEMP/notes.md"
             kind=()
             if [ "$PRERELEASE" = true ]; then kind=(--prerelease); fi
             if [ -s "$RUNNER_TEMP/notes.md" ]; then

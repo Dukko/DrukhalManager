@@ -38,12 +38,12 @@
   <releases>
     <release version="0.7.0" date="2026-11-11">
       <description>
-        <p>The load order is redesigned. A health strip above the list shows what needs attention: mods not updated for the game, required mods that are missing, mods loading before ones they need, out-of-date merges and achievements, each with a button to show or fix it. A sidebar of views lists the mods that need attention, aren't updated, have conflicts, turn off achievements or are disabled. Rows take one line each, and selecting a mod shows its problems, needs and actions in a panel beside the list.</p>
-        <p>With your own Steam Web API key, set in Preferences, mods' Workshop “Required items” are checked like dependencies: missing, disabled or late ones are pointed out, sorting puts them first, and Get Required Mods enables or opens them. Items that aren't really mods, such as “Stellaris 101: How to Read”, are left out, and any other can be dismissed.</p>
-        <p>After a game update, DrukhalManager lists the enabled mods that don't support the new version yet, and can set them aside in a collection until they do.</p>
-        <p>Each campaign remembers the mods it was played with. Launching it with different mods asks first, and offers to switch back to its collection. Saves… lists campaigns and their mods.</p>
-        <p>Find the Crashing Mod… narrows down the mod that crashes the game by halving the enabled mods between launches, keeping dependencies together, and puts your load order back at the end.</p>
-        <p>Messages no longer go blank when a name contains “&amp;”, and long ones wrap.</p>
+        <p><em>A redesigned load order.</em> A health strip above the list shows what needs attention: mods not updated for the game, required mods that are missing, mods loading before ones they need, out-of-date merges and achievements, each with a button to show or fix it. A sidebar of views lists the mods that need attention, aren't updated, have conflicts, turn off achievements or are disabled. Rows take one line each, and selecting a mod shows its problems, needs and actions in a panel beside the list.</p>
+        <p><em>Workshop required items.</em> With your own Steam Web API key, set in Preferences, mods' Workshop “Required items” are checked like dependencies: missing, disabled or late ones are pointed out, sorting puts them first, and Get Required Mods enables or opens them. Items that aren't really mods, such as “Stellaris 101: How to Read”, are left out, and any other can be dismissed.</p>
+        <p><em>Mods not updated yet.</em> After a game update, DrukhalManager lists the enabled mods that don't support the new version yet, and can set them aside in a collection until they do.</p>
+        <p><em>Campaigns remember their mods.</em> Each campaign remembers the mods it was played with. Launching it with different mods asks first, and offers to switch back to its collection. Saves… lists campaigns and their mods.</p>
+        <p><em>Find the Crashing Mod…</em> narrows down the mod that crashes the game by halving the enabled mods between launches, keeping dependencies together, and puts your load order back at the end.</p>
+        <p><em>Fixes.</em> Messages no longer go blank when a name contains “&amp;”, and long ones wrap.</p>
       </description>
     </release>
     <release version="0.6.0" date="2026-11-11">
