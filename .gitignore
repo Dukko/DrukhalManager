@@ -3,3 +3,4 @@
 /flatpak/repo
 /flatpak/.flatpak-builder
 /flatpak/*.flatpak
+__pycache__/
