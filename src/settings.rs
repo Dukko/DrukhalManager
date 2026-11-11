@@ -35,6 +35,9 @@ pub struct Settings {
     /// `mods::smart_sort::Category::key`.
     #[serde(default)]
     pub sort_categories: std::collections::BTreeMap<String, String>,
+    /// How the Disabled list is ordered.
+    #[serde(default)]
+    pub disabled_order: DisabledOrder,
     /// The provider's API key lives in the keyring, so the file leaves it
     /// out.
     #[serde(skip)]
@@ -125,8 +128,17 @@ fn default_provider() -> Provider {
 
 impl Default for Settings {
     fn default() -> Self {
-        Self { provider: default_provider(), ignored: Default::default(), ignore_rules: String::new(), parallel_merges: None, show_dependency_conflicts: false, game: Default::default(), updates: Default::default(), sort_categories: Default::default(), key_in_keyring: false }
+        Self { provider: default_provider(), ignored: Default::default(), ignore_rules: String::new(), parallel_merges: None, show_dependency_conflicts: false, game: Default::default(), updates: Default::default(), sort_categories: Default::default(), disabled_order: Default::default(), key_in_keyring: false }
     }
+}
+
+/// The order of the Disabled list, where order doesn't affect the game.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DisabledOrder {
+    #[default]
+    Name,
+    RecentlyUpdated,
 }
 
 pub fn path() -> PathBuf {
@@ -213,7 +225,7 @@ mod tests {
     fn saves_privately_and_loads() {
         let path = std::env::temp_dir().join(format!("drukhal-settings-{}/settings.json", std::process::id()));
         assert_eq!(Settings::load(&path), Settings::default());
-        let s = Settings { provider: Provider::OpenAiCompatible { base_url: "http://localhost:11434/v1".into(), model: "qwen".into(), api_key: String::new() }, ignored: ["file:x".to_owned()].into(), ignore_rules: "gfx/**".into(), parallel_merges: Some(3), show_dependency_conflicts: true, game: GameOptions { launch_args: "-debug".into(), close_after_launch: true, ..Default::default() }, updates: UpdateOptions { check_at_startup: true, skipped_version: Some("0.2.0".into()) }, sort_categories: [("mod/ugc_1.mod".to_owned(), "ui".to_owned())].into(), key_in_keyring: false };
+        let s = Settings { provider: Provider::OpenAiCompatible { base_url: "http://localhost:11434/v1".into(), model: "qwen".into(), api_key: String::new() }, ignored: ["file:x".to_owned()].into(), ignore_rules: "gfx/**".into(), parallel_merges: Some(3), show_dependency_conflicts: true, game: GameOptions { launch_args: "-debug".into(), close_after_launch: true, ..Default::default() }, updates: UpdateOptions { check_at_startup: true, skipped_version: Some("0.2.0".into()) }, sort_categories: [("mod/ugc_1.mod".to_owned(), "ui".to_owned())].into(), disabled_order: DisabledOrder::RecentlyUpdated, key_in_keyring: false };
         s.save(&path).unwrap();
         assert_eq!(Settings::load(&path), s);
         assert!(s.ready_provider().is_some());
