@@ -1,4 +1,5 @@
 mod conflicts_view;
+mod dds;
 mod diff;
 mod diff_view;
 mod error_report_dialog;

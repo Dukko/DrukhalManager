@@ -202,13 +202,14 @@ impl Patch {
         self.manifest.files.iter().find(|f| f.path.eq_ignore_ascii_case(path))
     }
 
-    /// Adds or replaces a merged copy of `path`.
-    pub fn save_file(&mut self, user_dir: &Path, game_version: Option<&str>, path: &str, contents: &str, prints: Vec<Print>) -> io::Result<()> {
+    /// Adds or replaces a merged copy of `path`, or a chosen copy of an
+    /// image or other binary file.
+    pub fn save_file(&mut self, user_dir: &Path, game_version: Option<&str>, path: &str, contents: impl AsRef<[u8]>, prints: Vec<Print>) -> io::Result<()> {
         let sources = prints.iter().filter(|p| p.mod_id != VANILLA).map(|p| p.name.clone()).collect();
         self.write_descriptors(user_dir, game_version)?;
         let target = self.root.join(path);
         std::fs::create_dir_all(target.parent().unwrap())?;
-        write_atomic(&target, contents.as_bytes())?;
+        write_atomic(&target, contents.as_ref())?;
         let merge = FileMerge { path: path.to_owned(), sources, prints, game_version: game_version.map(str::to_owned) };
         match self.manifest.files.iter_mut().find(|f| f.path.eq_ignore_ascii_case(path)) {
             Some(existing) => *existing = merge,

@@ -67,7 +67,7 @@ pub struct MergeHooks {
     /// fingerprints of its sources.
     pub save_object: Box<dyn Fn(&str, &str, &str, Vec<Print>) -> Result<(), String>>,
     /// Saves a whole file to the patch at `path`.
-    pub save_file: Box<dyn Fn(&str, &str, Vec<Print>) -> Result<(), String>>,
+    pub save_file: Box<dyn Fn(&str, &[u8], Vec<Print>) -> Result<(), String>>,
     /// Called after anything was saved to the patch.
     pub patch_saved: Box<dyn Fn()>,
     /// Whether the patch already holds a merged copy of a file.

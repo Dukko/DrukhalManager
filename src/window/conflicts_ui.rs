@@ -296,7 +296,7 @@ impl Window {
             ui.save_merge(category, key, script, prints)
         });
         let weak = Rc::downgrade(self);
-        let save_file = Box::new(move |path: &str, contents: &str, prints: Vec<patch::Print>| {
+        let save_file = Box::new(move |path: &str, contents: &[u8], prints: Vec<patch::Print>| {
             let ui = weak.upgrade().ok_or("The window was closed")?;
             ui.with_patch(|patch, user_dir, version| patch.save_file(user_dir, version, path, contents, prints))
         });
