@@ -22,6 +22,7 @@ use gtk::{gio, glib};
 use crate::diff_view::{self, Pair};
 use crate::merge::ai::Provider;
 use crate::merge::conflicts::Report;
+use crate::merge::file_merge;
 use crate::merge::ignore_rules::Rules;
 use crate::merge::patch::{Merge, Print, Stale};
 
@@ -76,6 +77,8 @@ pub struct MergeHooks {
     pub open_file: Box<dyn Fn(usize, Box<dyn Fn()>)>,
     /// Opens the AI merge of several object conflicts in one folder.
     pub merge_folder: Box<dyn Fn(Vec<usize>)>,
+    /// Opens the AI merge of several overridden files in one folder.
+    pub merge_files: Box<dyn Fn(Vec<usize>)>,
     /// Opens the fix dialog for a file that failed to parse.
     pub open_fix: Box<dyn Fn(usize, Box<dyn Fn()>)>,
     pub is_ignored: Box<dyn Fn(&str) -> bool>,
@@ -164,7 +167,7 @@ pub fn objects_folder_key(category: &str) -> String {
     format!("objects-in:{category}")
 }
 
-fn file_folder(path: &str) -> &str {
+pub fn file_folder(path: &str) -> &str {
     path.rsplit_once('/').map_or("", |(dir, _)| dir)
 }
 
@@ -326,7 +329,8 @@ pub fn build(analysis: &Rc<Analysis>, rescan: gtk::Button, hooks: Rc<MergeHooks>
     }
     for (folder, items) in by_folder {
         let title = if folder.is_empty() { "overridden files".to_owned() } else { format!("overridden files · {folder}") };
-        groups.push(Group { title, folder_key: Some(files_folder_key(folder)), merge_all: false, items });
+        let merge_all = items.iter().any(|i| matches!(i, Item::File(f) if file_merge::mergeable(&report.files[*f].path)));
+        groups.push(Group { title, folder_key: Some(files_folder_key(folder)), merge_all, items });
     }
 
     // The sidebar.
@@ -709,8 +713,14 @@ impl Page {
                 let (weak, items) = (Rc::downgrade(self), group.items.clone());
                 action.connect_activate(move |_, _| {
                     if let Some(page) = weak.upgrade() {
-                        let indices = items.iter().filter(|&&i| !page.is_ignored(i)).filter_map(|i| if let Item::Object(i) = i { Some(*i) } else { None }).collect();
-                        (page.hooks.merge_folder)(indices);
+                        let shown: Vec<Item> = items.iter().copied().filter(|&i| !page.is_ignored(i)).collect();
+                        let objects: Vec<usize> = shown.iter().filter_map(|i| if let Item::Object(i) = i { Some(*i) } else { None }).collect();
+                        let files: Vec<usize> = shown.iter().filter_map(|i| if let Item::File(i) = i { Some(*i) } else { None }).collect();
+                        if !objects.is_empty() {
+                            (page.hooks.merge_folder)(objects);
+                        } else if !files.is_empty() {
+                            (page.hooks.merge_files)(files);
+                        }
                     }
                 });
                 actions.add_action(&action);

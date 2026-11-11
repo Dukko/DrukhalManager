@@ -93,7 +93,7 @@ Every file and object that more than one enabled mod changes is listed by folder
 
 **Merge with AI** sends both versions, plus the base game's when it can be found, to the model you choose. The result stays on the left while the next mod's version slides in on the right, until one result is left to review and **Save to Patch**.
 
-- **Merge All** merges a whole folder, several objects at once, with an estimate of the calls and cost first.
+- **Merge All** merges a whole folder, several objects at once, with an estimate of the calls and cost first. It works on folders of overridden files too, with one AI call per object the copies disagree on.
 - A result that comes back broken is sent back to the model once with the error, before it counts as failed.
 - **Overridden files** are split into their objects. Objects the copies agree on, or that only one mod changed, are combined directly, and the AI is only asked about real disagreements.
 - **Broken braces** are listed under **Problems**. **Fix…** repairs them automatically, and **Fix with AI** restores the intended nesting.

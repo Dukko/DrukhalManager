@@ -3,7 +3,7 @@
 //! saves the result into the merged patch at the same path.
 
 use std::cell::RefCell;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 use adw::prelude::*;
@@ -94,20 +94,7 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
         #[strong]
         request,
         async move {
-            let planned = gio::spawn_blocking(move || {
-                let versions: Vec<Version> = origins
-                    .iter()
-                    .map(|(_, label, root)| {
-                        let bytes = std::fs::read(root.join(&path)).map_err(|e| format!("Could not read {label}'s copy: {e}"))?;
-                        Ok(Version { label: label.clone(), text: String::from_utf8_lossy(&bytes).into_owned() })
-                    })
-                    .collect::<Result<_, String>>()?;
-                let vanilla = game_dir.and_then(|dir| std::fs::read(dir.join(&path)).ok()).map(|b| String::from_utf8_lossy(&b).into_owned());
-                let mut found: Vec<Print> = vanilla.iter().map(|v| Print::new(VANILLA, "Vanilla", &path, v)).collect();
-                found.extend(origins.iter().zip(&versions).map(|((id, label, _), v)| Print::new(id, label, &path, &v.text)));
-                file_merge::plan(&path, vanilla.as_deref(), &versions).map(|plan| (plan, found))
-            })
-            .await;
+            let planned = gio::spawn_blocking(move || load(&path, &origins, game_dir.as_deref())).await;
             let p = match planned {
                 Ok(Ok((p, found))) => {
                     prints.replace(found);
@@ -124,22 +111,8 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
                 }
             };
 
-            let count = |f: fn(&Status) -> bool| p.items.iter().filter(|i| f(&i.status)).count();
-            let (same, recovered, one, conflicts) = (
-                count(|s| *s == Status::Same),
-                count(|s| matches!(s, Status::Recovered(_))),
-                count(|s| matches!(s, Status::OneChange(_))),
-                count(|s| matches!(s, Status::Conflict { .. })),
-            );
-            let mut parts = vec![format!("{} kept as is", plural(same, "object", "objects"))];
-            if recovered > 0 {
-                parts.push(format!("{recovered} recovered from overridden copies"));
-            }
-            if one > 0 {
-                parts.push(format!("{one} taken from the only mod that changed them"));
-            }
-            parts.push(if conflicts == 0 { "no conflicts".to_owned() } else { format!("{} to merge", plural(conflicts, "conflict", "conflicts")) });
-            summary.set_description(Some(&parts.join(" · ")));
+            let conflicts = p.conflicts().count();
+            summary.set_description(Some(&describe(&p)));
 
             for (index, item) in p.items.iter().enumerate() {
                 let subtitle = match &item.status {
@@ -339,6 +312,44 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
     ));
 
     dialog.present(Some(parent));
+}
+
+/// Reads each copy of the file at `path` from `origins` (descriptor id, mod
+/// name, folder; in load order) and the base game's, and plans merging them
+/// object by object. Also returns the fingerprints of what was read.
+pub fn load(path: &str, origins: &[(String, String, PathBuf)], game_dir: Option<&Path>) -> Result<(Plan, Vec<Print>), String> {
+    let versions: Vec<Version> = origins
+        .iter()
+        .map(|(_, label, root)| {
+            let bytes = std::fs::read(root.join(path)).map_err(|e| format!("Could not read {label}'s copy: {e}"))?;
+            Ok(Version { label: label.clone(), text: String::from_utf8_lossy(&bytes).into_owned() })
+        })
+        .collect::<Result<_, String>>()?;
+    let vanilla = game_dir.and_then(|dir| std::fs::read(dir.join(path)).ok()).map(|b| String::from_utf8_lossy(&b).into_owned());
+    let mut found: Vec<Print> = vanilla.iter().map(|v| Print::new(VANILLA, "Vanilla", path, v)).collect();
+    found.extend(origins.iter().zip(&versions).map(|((id, label, _), v)| Print::new(id, label, path, &v.text)));
+    file_merge::plan(path, vanilla.as_deref(), &versions).map(|plan| (plan, found))
+}
+
+/// How a plan combines the copies' objects, e.g. "12 objects kept as is ·
+/// 2 conflicts to merge".
+pub fn describe(p: &Plan) -> String {
+    let count = |f: fn(&Status) -> bool| p.items.iter().filter(|i| f(&i.status)).count();
+    let (same, recovered, one, conflicts) = (
+        count(|s| *s == Status::Same),
+        count(|s| matches!(s, Status::Recovered(_))),
+        count(|s| matches!(s, Status::OneChange(_))),
+        count(|s| matches!(s, Status::Conflict { .. })),
+    );
+    let mut parts = vec![format!("{} kept as is", plural(same, "object", "objects"))];
+    if recovered > 0 {
+        parts.push(format!("{recovered} recovered from overridden copies"));
+    }
+    if one > 0 {
+        parts.push(format!("{one} taken from the only mod that changed them"));
+    }
+    parts.push(if conflicts == 0 { "no conflicts".to_owned() } else { format!("{} to merge", plural(conflicts, "conflict", "conflicts")) });
+    parts.join(" · ")
 }
 
 fn show(banner: &adw::Banner, message: &str, error: bool) {
