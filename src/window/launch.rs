@@ -141,6 +141,10 @@ impl Window {
         if self.game.is_none() {
             return;
         }
+        if self.hunting() {
+            // Tests don't continue saves, and change the mods on purpose.
+            return self.start_game(resume);
+        }
         self.check_save_mods(move |ui| ui.start_game(resume));
     }
 
@@ -254,7 +258,10 @@ impl Window {
 
     /// After a session that started at `started`, points out errors the
     /// game logged about the mods, and that it crashed.
-    fn report_session(&self, started: std::time::SystemTime, crashed: bool) {
+    fn report_session(self: &Rc<Self>, started: std::time::SystemTime, crashed: bool) {
+        if self.hunting() {
+            return self.ask_hunt_result(crashed);
+        }
         let log = error_log::path(&self.paths.user_dir);
         let fresh = std::fs::metadata(&log)
             .and_then(|m| m.modified())

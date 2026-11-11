@@ -3,6 +3,7 @@
 pub mod archive;
 pub mod checks;
 pub mod collections;
+pub mod crash_hunt;
 pub mod extra;
 pub mod filter;
 mod descriptor;

@@ -43,6 +43,18 @@ pub fn version_matches(supported: &str, game: &str) -> bool {
     true
 }
 
+/// The mods `i` names as dependencies or Workshop required items, among
+/// the installed ones.
+pub fn dependencies_of(mods: &[Mod], i: usize) -> Vec<usize> {
+    let (names, steam_ids) = (by_name(mods), by_steam_id(mods));
+    let deps = mods[i].descriptor.dependencies.iter().filter_map(|d| names.get(&d.trim().to_lowercase()));
+    let required = mods[i].requires.iter().filter_map(|r| steam_ids.get(&r.steam_id));
+    let mut all: Vec<usize> = deps.chain(required).copied().filter(|&d| d != i).collect();
+    all.sort_unstable();
+    all.dedup();
+    all
+}
+
 /// Installed mods by Workshop id.
 fn by_steam_id(mods: &[Mod]) -> HashMap<u64, usize> {
     mods.iter().enumerate().filter_map(|(i, m)| Some((m.descriptor.remote_file_id?, i))).collect()

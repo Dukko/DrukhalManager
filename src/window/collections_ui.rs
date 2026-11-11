@@ -144,7 +144,7 @@ impl Window {
 
     /// Makes `mods` the load order and saves it everywhere. Mods that
     /// aren't installed keep their place in the collection.
-    fn apply_collection_mods(self: &Rc<Self>, mods: &[String]) {
+    pub(super) fn apply_collection_mods(self: &Rc<Self>, mods: &[String]) {
         let missing = self.state.borrow_mut().set_enabled_ids(mods);
         self.restore_banner.set_revealed(false);
         if self.save() && !missing.is_empty() {

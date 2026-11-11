@@ -24,7 +24,8 @@ impl Window {
     /// saved, if it saved one.
     pub(super) fn record_session(&self, started: std::time::SystemTime, mut played: Played) {
         let user_dir = &self.paths.user_dir;
-        if !session::saved_since(user_dir, started) {
+        // A crash hunt's tests aren't how the campaign is played.
+        if self.hunting() || !session::saved_since(user_dir, started) {
             return;
         }
         let Some(last) = session::last_save(user_dir) else { return };
