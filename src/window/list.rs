@@ -187,6 +187,14 @@ impl Window {
         self.offer_undo("Sorted mods after their dependencies");
     }
 
+    pub(super) fn sort_alphabetically(self: &Rc<Self>) {
+        if !self.state.borrow_mut().sort_alphabetically() {
+            return self.toasts.add_toast(adw::Toast::new("Already in alphabetical order"));
+        }
+        self.refresh();
+        self.offer_undo("Sorted mods alphabetically, after their dependencies");
+    }
+
     /// Shows `title` with an Undo button that undoes the last change.
     pub(super) fn offer_undo(self: &Rc<Self>, title: &str) {
         let toast = adw::Toast::builder()

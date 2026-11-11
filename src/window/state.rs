@@ -200,6 +200,19 @@ impl State {
     /// order changed.
     pub(crate) fn sort_by_dependencies(&mut self) -> bool {
         let sorted = checks::sort_by_dependencies(&self.mods, &self.enabled);
+        self.reorder(sorted)
+    }
+
+    /// Sorts the enabled mods by name, keeping each after the mods it
+    /// depends on. Returns whether the order changed.
+    pub(crate) fn sort_alphabetically(&mut self) -> bool {
+        let sorted = checks::sort_alphabetically(&self.mods, &self.enabled);
+        self.reorder(sorted)
+    }
+
+    /// Puts the enabled mods in `sorted` order, as one undoable change.
+    /// Returns whether the order changed.
+    pub(crate) fn reorder(&mut self, sorted: Vec<usize>) -> bool {
         if sorted == self.enabled {
             return false;
         }

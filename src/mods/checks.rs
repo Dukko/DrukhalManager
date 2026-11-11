@@ -108,6 +108,15 @@ pub fn sort_by_dependencies(mods: &[Mod], enabled: &[usize]) -> Vec<usize> {
     placed
 }
 
+/// `enabled` in alphabetical order by name, ignoring case, except that
+/// every mod still comes after the enabled mods it depends on: those are
+/// moved up to just before the first mod needing them.
+pub fn sort_alphabetically(mods: &[Mod], enabled: &[usize]) -> Vec<usize> {
+    let mut order = enabled.to_vec();
+    order.sort_by_cached_key(|&i| (mods[i].descriptor.name.to_lowercase(), mods[i].id.clone()));
+    sort_by_dependencies(mods, &order)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -151,6 +160,13 @@ mod tests {
         let sorted = sort_by_dependencies(&mods, &enabled);
         assert_eq!(sorted, [1, 2, 0, 4]);
         assert!(check(&mods, &sorted, None).get(&0).is_none(), "sorting fixes the order issues");
+    }
+
+    #[test]
+    fn sorts_alphabetically_after_dependencies() {
+        let mods = vec![m("zeta", &[], ""), m("Alpha Patch", &["Zeta", "Mid"], ""), m("!First", &[], ""), m("Mid", &[], ""), m("beta", &[], ""), m("Off", &[], "")];
+        let names = |order: Vec<usize>| order.into_iter().map(|i| mods[i].descriptor.name.as_str()).collect::<Vec<_>>();
+        assert_eq!(names(sort_alphabetically(&mods, &[0, 1, 2, 3, 4])), ["!First", "zeta", "Mid", "Alpha Patch", "beta"]);
     }
 
     #[test]
