@@ -46,7 +46,7 @@ impl ThinkingView {
             .css_classes(["dim-label"])
             .build();
         let scroll = gtk::ScrolledWindow::builder().child(&view).hscrollbar_policy(gtk::PolicyType::Never).min_content_height(80).max_content_height(260).propagate_natural_height(true).css_classes(["card"]).margin_top(6).build();
-        let widget = gtk::Expander::builder().label_widget(&header).child(&scroll).visible(false).build();
+        let widget = gtk::Expander::builder().label_widget(&header).child(&crate::resize_grip::resizable(&scroll)).visible(false).build();
         widget.set_tooltip_text(Some("What the model is thinking. Click to expand."));
         Rc::new(Self { widget, title, spinner, view, buffer, words: Cell::new(0), output: Cell::new(0), reasoned: Cell::new(false) })
     }

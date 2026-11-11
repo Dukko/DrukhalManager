@@ -309,7 +309,7 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
                     .margin_end(10)
                     .build();
                 let scroll = gtk::ScrolledWindow::builder().child(&result).hscrollbar_policy(gtk::PolicyType::Never).max_content_height(360).propagate_natural_height(true).css_classes(["card"]).build();
-                let revealer = gtk::Revealer::builder().child(&scroll).transition_type(gtk::RevealerTransitionType::SlideDown).build();
+                let revealer = gtk::Revealer::builder().child(&crate::resize_grip::resizable(&scroll)).transition_type(gtk::RevealerTransitionType::SlideDown).build();
                 let content = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(8).margin_top(8).margin_bottom(8).margin_start(12).margin_end(12).build();
                 content.append(&thinking.widget);
                 content.append(&revealer);

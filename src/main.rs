@@ -14,6 +14,7 @@ mod paradox;
 mod sandbox;
 mod secrets;
 mod preferences;
+mod resize_grip;
 mod settings;
 mod thinking_view;
 mod update;
