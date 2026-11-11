@@ -24,6 +24,8 @@ pub const CONTENT_FOLDERS: &[&str] = &[
 
 const FORMAT: &str = "drukhal-multiplayer-report";
 const VERSION: u32 = 1;
+/// The hash cache's format: 1 added hashes without CRs.
+const CACHE_VERSION: u32 = 1;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Report {
@@ -40,6 +42,13 @@ pub struct Report {
     pub build: Option<Build>,
     /// The base game's files: path -> hash.
     pub game: BTreeMap<String, String>,
+    /// Whether the report has `game_lf` and each mod's `lf`; older ones
+    /// don't, so line endings can't be told apart in them.
+    #[serde(default)]
+    pub line_endings: bool,
+    /// Game files with Windows line endings: path -> hash without the CRs.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub game_lf: BTreeMap<String, String>,
     /// Enabled mods, in load order.
     pub mods: Vec<ModReport>,
 }
@@ -71,13 +80,21 @@ impl Build {
 /// what helps.
 pub const BUILDS_DIFFER: &str = "Players report that the native Linux build's checksum doesn't match the Windows build's, even with the same mods and files. Whoever runs the native Linux build can switch to the Windows build through Proton: in Steam, open Stellaris's Properties, and under Compatibility force a Proton version.";
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ModReport {
     pub name: String,
     /// Workshop id, which identifies the mod better than its name.
     pub steam_id: Option<u64>,
     /// Content files: path -> hash.
     pub files: BTreeMap<String, String>,
+    /// Files with Windows line endings: path -> hash without the CRs.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub lf: BTreeMap<String, String>,
+    /// Checksummed files, as named, the native Linux build may not read: in
+    /// a folder the game looks for (`common/`, `common/traits/`…) whose name
+    /// isn't lowercase, or named like another file but for case.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub case: Vec<String>,
 }
 
 /// One enabled mod to report.
@@ -92,7 +109,13 @@ pub struct ModInput {
 /// reading tens of thousands of game files is slow only once.
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct HashCache {
+    /// Caches older than `CACHE_VERSION` are started again.
+    #[serde(default)]
+    version: u32,
     files: HashMap<PathBuf, (u64, u128, String)>,
+    /// Hashes without CRs, of the files that have them.
+    #[serde(default)]
+    lf: HashMap<PathBuf, String>,
     #[serde(skip)]
     changed: bool,
 }
@@ -104,7 +127,8 @@ impl HashCache {
 
     /// The cache at `path`; empty if there is none or it can't be read.
     pub fn load(path: &Path) -> Self {
-        std::fs::read(path).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default()
+        let cache: Self = std::fs::read(path).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
+        if cache.version == CACHE_VERSION { cache } else { Self { version: CACHE_VERSION, changed: true, ..Self::default() } }
     }
 
     /// Writes the cache, if it changed, dropping files that are gone.
@@ -113,32 +137,42 @@ impl HashCache {
             return Ok(());
         }
         self.files.retain(|p, _| p.exists());
+        let files = &self.files;
+        self.lf.retain(|p, _| files.contains_key(p));
         if let Some(dir) = path.parent() {
             std::fs::create_dir_all(dir)?;
         }
+        self.version = CACHE_VERSION;
         let tmp = path.with_extension("json.tmp");
         std::fs::write(&tmp, serde_json::to_vec(self).map_err(std::io::Error::other)?)?;
         std::fs::rename(tmp, path)
     }
 
-    fn hash(&mut self, path: &Path) -> std::io::Result<String> {
+    /// The file's hash, and its hash without CRs if it has any.
+    fn hash(&mut self, path: &Path) -> std::io::Result<(String, Option<String>)> {
         let meta = std::fs::metadata(path)?;
         let modified = meta.modified()?.duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos());
         if let Some((size, time, hash)) = self.files.get(path)
             && (*size, *time) == (meta.len(), modified)
         {
-            return Ok(hash.clone());
+            return Ok((hash.clone(), self.lf.get(path).cloned()));
         }
-        let hash = hash_file(path)?;
+        let (hash, lf) = hash_file(path)?;
         self.files.insert(path.to_owned(), (meta.len(), modified, hash.clone()));
+        match &lf {
+            Some(h) => self.lf.insert(path.to_owned(), h.clone()),
+            None => self.lf.remove(path),
+        };
         self.changed = true;
-        Ok(hash)
+        Ok((hash, lf))
     }
 }
 
-fn hash_file(path: &Path) -> std::io::Result<String> {
+/// A file's hash, and its hash without CRs if it has any, so files that
+/// differ only in line endings can be told apart.
+fn hash_file(path: &Path) -> std::io::Result<(String, Option<String>)> {
     use std::io::Read;
-    let mut hasher = Sha256::new();
+    let (mut hasher, mut lf, mut has_cr) = (Sha256::new(), Sha256::new(), false);
     let mut file = std::fs::File::open(path)?;
     let mut buf = vec![0; 64 * 1024];
     loop {
@@ -147,8 +181,13 @@ fn hash_file(path: &Path) -> std::io::Result<String> {
             break;
         }
         hasher.update(&buf[..n]);
+        for chunk in buf[..n].split(|&b| b == b'\r') {
+            lf.update(chunk);
+        }
+        has_cr |= buf[..n].contains(&b'\r');
     }
-    Ok(hasher.finalize().iter().map(|b| format!("{b:02x}")).collect())
+    let hex = |h: Sha256| h.finalize().iter().map(|b| format!("{b:02x}")).collect::<String>();
+    Ok((hex(hasher), has_cr.then(|| hex(lf))))
 }
 
 /// How far building a report has got, for a progress bar: files hashed
@@ -186,16 +225,52 @@ fn list_tree(root: &Path, folders: Option<&[&str]>) -> Vec<String> {
     files
 }
 
-fn hash_tree(root: &Path, files: Vec<String>, progress: &Progress, cache: &mut HashCache) -> BTreeMap<String, String> {
-    files
-        .into_iter()
-        .filter_map(|f| {
-            let hash = cache.hash(&root.join(&f));
-            progress.done.fetch_add(1, Ordering::Relaxed);
-            // Paths compare case-insensitively, as the game loads them.
-            Some((f.to_lowercase(), hash.ok()?))
-        })
-        .collect()
+/// The files' hashes, the hashes without CRs of those that have them, and
+/// the files the native Linux build may not read (see `ModReport::case`).
+struct Tree {
+    files: BTreeMap<String, String>,
+    lf: BTreeMap<String, String>,
+    case: Vec<String>,
+}
+
+/// Whether a folder the game looks for by name, a top one or a category in
+/// `common/`, isn't lowercase in `path`. Folders below those are named by
+/// mods, which refer to them as they are.
+fn misnamed_folder(path: &str) -> bool {
+    let folders: Vec<&str> = path.split('/').collect::<Vec<_>>().split_last().map_or(vec![], |(_, dirs)| dirs.to_vec());
+    let named = match folders.as_slice() {
+        [top, category, ..] if top.eq_ignore_ascii_case("common") => &[*top, *category][..],
+        [top, ..] => &[*top][..],
+        [] => &[][..],
+    };
+    named.iter().any(|f| *f != f.to_lowercase())
+}
+
+fn hash_tree(root: &Path, files: Vec<String>, progress: &Progress, cache: &mut HashCache) -> Tree {
+    let mut tree = Tree { files: BTreeMap::new(), lf: BTreeMap::new(), case: Vec::new() };
+    let mut named: HashMap<String, String> = HashMap::new();
+    for f in files {
+        let hash = cache.hash(&root.join(&f));
+        progress.done.fetch_add(1, Ordering::Relaxed);
+        // Paths compare case-insensitively, as Windows loads them.
+        let key = f.to_lowercase();
+        if in_checksum(&key) {
+            if misnamed_folder(&f) {
+                tree.case.push(f.clone());
+            }
+            if let Some(other) = named.insert(key.clone(), f.clone()) {
+                tree.case.extend([other, f.clone()]);
+            }
+        }
+        let Ok((hash, lf)) = hash else { continue };
+        if let Some(lf) = lf {
+            tree.lf.insert(key.clone(), lf);
+        }
+        tree.files.insert(key, hash);
+    }
+    tree.case.sort();
+    tree.case.dedup();
+    tree
 }
 
 /// Builds the report, with all the game's content files or only the
@@ -209,17 +284,24 @@ pub fn report(game_dir: Option<&Path>, game_version: Option<&str>, all_game_file
     let total = game_files.len() + mod_files.iter().map(Vec::len).sum::<usize>();
     progress.total.store(total.max(1), Ordering::Relaxed);
 
+    let game = game_dir.map(|dir| hash_tree(dir, game_files, progress, cache));
     Report {
         format: FORMAT.into(),
         version: VERSION,
         game_version: game_version.map(str::to_owned),
         all_game_files,
         build: None,
-        game: game_dir.map(|dir| hash_tree(dir, game_files, progress, cache)).unwrap_or_default(),
+        line_endings: true,
+        game_lf: game.as_ref().map(|t| t.lf.clone()).unwrap_or_default(),
+        game: game.map(|t| t.files).unwrap_or_default(),
         mods: mods
             .iter()
             .zip(mod_files)
-            .map(|(m, files)| ModReport { name: m.name.clone(), steam_id: m.steam_id, files: m.root.as_deref().map(|r| hash_tree(r, files, progress, cache)).unwrap_or_default() })
+            .map(|(m, files)| {
+                let tree = m.root.as_deref().map(|r| hash_tree(r, files, progress, cache));
+                let (files, lf, case) = tree.map(|t| (t.files, t.lf, t.case)).unwrap_or_default();
+                ModReport { name: m.name.clone(), steam_id: m.steam_id, files, lf, case }
+            })
             .collect(),
     }
 }
@@ -264,6 +346,8 @@ fn has_files(dir: &Path) -> bool {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FileDiff {
     Changed(String),
+    /// Changed only in line endings: one copy has Windows ones (CRLF).
+    LineEndings(String),
     OnlyMine(String),
     OnlyTheirs(String),
 }
@@ -271,7 +355,7 @@ pub enum FileDiff {
 impl FileDiff {
     pub fn path(&self) -> &str {
         match self {
-            Self::Changed(p) | Self::OnlyMine(p) | Self::OnlyTheirs(p) => p,
+            Self::Changed(p) | Self::LineEndings(p) | Self::OnlyMine(p) | Self::OnlyTheirs(p) => p,
         }
     }
 }
@@ -295,6 +379,9 @@ pub struct Comparison {
     /// their position (1-based) in each list.
     pub order: Vec<(String, usize, usize)>,
     pub mods: Vec<ModDiff>,
+    /// When one player runs the native Linux build and the other the
+    /// Windows one: mods with files the Linux build may not read, as named.
+    pub case: Vec<(String, Vec<String>)>,
 }
 
 impl Comparison {
@@ -303,12 +390,20 @@ impl Comparison {
     }
 }
 
-fn diff_files(mine: &BTreeMap<String, String>, theirs: &BTreeMap<String, String>) -> Vec<FileDiff> {
+/// One side of a file comparison: hashes, and hashes without CRs if
+/// the report has them.
+type Side<'a> = (&'a BTreeMap<String, String>, Option<&'a BTreeMap<String, String>>);
+
+fn diff_files((mine, mine_lf): Side, (theirs, theirs_lf): Side) -> Vec<FileDiff> {
     let mut out = Vec::new();
     for (path, hash) in mine {
         match theirs.get(path) {
             None => out.push(FileDiff::OnlyMine(path.clone())),
-            Some(h) if h != hash => out.push(FileDiff::Changed(path.clone())),
+            Some(h) if h != hash => {
+                let lf = |hash: &String, lf: Option<&BTreeMap<String, String>>| lf.map(|lf| lf.get(path).unwrap_or(hash).clone());
+                let same_text = matches!((lf(hash, mine_lf), lf(h, theirs_lf)), (Some(a), Some(b)) if a == b);
+                out.push(if same_text { FileDiff::LineEndings(path.clone()) } else { FileDiff::Changed(path.clone()) });
+            }
             Some(_) => {}
         }
     }
@@ -338,21 +433,25 @@ pub fn compare(mine: &Report, theirs: &Report) -> Comparison {
     // A report without game files (game not found) can't be compared there.
     if !mine.game.is_empty() && !theirs.game.is_empty() {
         // Only what both reports cover.
+        fn lf(r: &Report) -> Option<&BTreeMap<String, String>> {
+            r.line_endings.then_some(&r.game_lf)
+        }
         if mine.all_game_files == theirs.all_game_files {
-            c.game_files = diff_files(&mine.game, &theirs.game);
+            c.game_files = diff_files((&mine.game, lf(mine)), (&theirs.game, lf(theirs)));
         } else {
             let checksummed = |r: &Report| r.game.iter().filter(|(p, _)| in_checksum(p)).map(|(p, h)| (p.clone(), h.clone())).collect::<BTreeMap<_, _>>();
-            c.game_files = diff_files(&checksummed(mine), &checksummed(theirs));
+            c.game_files = diff_files((&checksummed(mine), lf(mine)), (&checksummed(theirs), lf(theirs)));
         }
     }
 
+    let (mine_lf, theirs_lf) = (mine.line_endings, theirs.line_endings);
     let mut shared = Vec::new();
     for m in &mine.mods {
         match their_mods.get(&key(m)) {
             None => c.only_mine.push(m.name.clone()),
             Some((their_pos, theirs)) => {
                 shared.push((m.name.clone(), *their_pos));
-                let files = diff_files(&m.files, &theirs.files);
+                let files = diff_files((&m.files, mine_lf.then_some(&m.lf)), (&theirs.files, theirs_lf.then_some(&theirs.lf)));
                 if !files.is_empty() {
                     c.mods.push(ModDiff { name: m.name.clone(), files });
                 }
@@ -360,6 +459,11 @@ pub fn compare(mine: &Report, theirs: &Report) -> Comparison {
         }
     }
     c.only_theirs = theirs.mods.iter().filter(|m| !my_keys.contains(&key(m))).map(|m| m.name.clone()).collect();
+    if c.builds.is_some() {
+        // Both players have the same mods' files, so either report shows them.
+        let their_only = theirs.mods.iter().filter(|m| !my_keys.contains(&key(m)));
+        c.case = mine.mods.iter().chain(their_only).filter(|m| !m.case.is_empty()).map(|m| (m.name.clone(), m.case.clone())).collect();
+    }
 
     // Order among the mods both have.
     let mut their_order: Vec<usize> = shared.iter().map(|(_, p)| *p).collect();
@@ -379,13 +483,42 @@ mod tests {
     fn tells_builds_apart() {
         assert_eq!(Build::of(Path::new("/g/stellaris")), Build::Linux);
         assert_eq!(Build::of(Path::new("/g/stellaris.exe")), Build::Windows);
-        let base = Report { format: FORMAT.into(), version: VERSION, game_version: None, all_game_files: false, build: Some(Build::Linux), game: BTreeMap::new(), mods: vec![] };
+        let base = Report { format: FORMAT.into(), version: VERSION, game_version: None, all_game_files: false, build: Some(Build::Linux), game: BTreeMap::new(), line_endings: true, game_lf: BTreeMap::new(), mods: vec![] };
         let proton = Report { build: Some(Build::Windows), ..base.clone() };
         assert_eq!(compare(&base, &proton).builds, Some((Build::Linux, Build::Windows)));
         assert!(compare(&base, &Report { build: None, ..base.clone() }).matches(), "older reports don't say");
         let json = proton.to_json();
         assert!(json.contains("\"build\": \"windows\""));
         assert_eq!(Report::from_json(&json).unwrap().build, Some(Build::Windows));
+    }
+
+    #[test]
+    fn finds_line_endings_and_case() {
+        let root = std::env::temp_dir().join(format!("drukhal-mp-case-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let (crlf, lf) = (root.join("crlf"), root.join("lf"));
+        write(&crlf, &[("common/a.txt", "a = {\r\n\tb = 1\r\n}\r\n"), ("common/c.txt", "c\r\n"), ("Common/Traits/t.txt", "t"), ("events/E.txt", "e"), ("events/e.txt", "e2"), ("common/inline_scripts/MECR/x.txt", "x"), ("gfx/Icons/i.dds", "i")]);
+        write(&lf, &[("common/a.txt", "a = {\n\tb = 1\n}\n"), ("common/c.txt", "other\n")]);
+        let mut cache = HashCache::default();
+        let input = |name: &str, dir: &Path| ModInput { name: name.into(), steam_id: Some(1), root: Some(dir.to_owned()) };
+        let windows = Report { build: Some(Build::Windows), ..report(None, None, false, &[input("M", &crlf)], &Progress::default(), &mut cache) };
+        let linux = Report { build: Some(Build::Linux), ..report(None, None, false, &[input("M", &lf)], &Progress::default(), &mut cache) };
+
+        let files = &compare(&windows, &linux).mods[0].files;
+        assert!(files.contains(&FileDiff::LineEndings("common/a.txt".into())), "{files:?}");
+        assert!(files.contains(&FileDiff::Changed("common/c.txt".into())), "more than line endings");
+        assert_eq!(windows.mods[0].case, ["Common/Traits/t.txt", "events/E.txt", "events/e.txt"]);
+        assert!(misnamed_folder("common/Traits/t.txt") && !misnamed_folder("common/inline_scripts/MECR/x.txt") && !misnamed_folder("common/T.txt"));
+        assert_eq!(compare(&windows, &linux).case, [("M".to_owned(), windows.mods[0].case.clone())]);
+        assert!(compare(&windows, &Report { build: Some(Build::Windows), ..linux.clone() }).case.is_empty(), "same build");
+
+        // A report from before line endings were recorded can't tell.
+        let old = Report { line_endings: false, ..linux.clone() };
+        assert!(compare(&windows, &old).mods[0].files.contains(&FileDiff::Changed("common/a.txt".into())));
+        let json = windows.to_json();
+        assert!(json.contains("\"lf\"") && json.contains("\"case\""));
+        assert_eq!(Report::from_json(&json).unwrap(), windows);
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     fn write(root: &Path, files: &[(&str, &str)]) {

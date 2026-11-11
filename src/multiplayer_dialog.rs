@@ -224,6 +224,7 @@ fn label_row(title: &str, subtitle: &str) -> adw::ActionRow {
 fn file_row(f: &FileDiff) -> adw::ActionRow {
     let what = match f {
         FileDiff::Changed(_) => "Different",
+        FileDiff::LineEndings(_) => "Only line endings differ (Windows CRLF or Linux LF)",
         FileDiff::OnlyMine(_) => "Only in yours",
         FileDiff::OnlyTheirs(_) => "Only in theirs",
     };
@@ -298,6 +299,21 @@ fn render(c: &Comparison, theirs: &str) -> Vec<adw::PreferencesGroup> {
     if !c.mods.is_empty() {
         let g = group("Different Mod Files", "Usually a different version of the mod: resubscribe or update so you have the same");
         c.mods.iter().for_each(|m| g.add(&files_expander(&m.name, &m.files)));
+        out.push(g);
+    }
+    if !c.case.is_empty() {
+        let g = group(
+            "Files the Linux Build May Skip",
+            "The native Linux build reads file and folder names exactly, unlike Windows, so it may skip these files: they're in a game folder whose name isn't lowercase, such as Common or common/Traits, or named like another file but for case. Its checksum then doesn't match. The mod's author can rename them, or whoever runs the native Linux build can switch to the Windows build through Proton.",
+        );
+        for (name, files) in &c.case {
+            let row = adw::ExpanderRow::builder().title(name).subtitle(plural(files.len(), "file", "files")).use_markup(false).build();
+            files.iter().take(ROWS_PER_MOD).for_each(|f| row.add_row(&label_row(f, "")));
+            if files.len() > ROWS_PER_MOD {
+                row.add_row(&label_row(&format!("…and {} more", files.len() - ROWS_PER_MOD), ""));
+            }
+            g.add(&row);
+        }
         out.push(g);
     }
     out
