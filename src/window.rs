@@ -780,8 +780,20 @@ impl Window {
 
     /// Shows a toast. Its text is plain, never markup: titles hold mod
     /// names and error messages, and one `&` would blank a markup title.
+    /// Long ones wrap instead of stretching across the window.
     fn add_toast(&self, toast: adw::Toast) {
         toast.set_use_markup(false);
+        let title = toast.title().unwrap_or_default();
+        if title.chars().count() > 60 && toast.custom_title().is_none() {
+            let label = gtk::Label::builder()
+                .label(title.as_str())
+                .wrap(true)
+                .wrap_mode(gtk::pango::WrapMode::WordChar)
+                .max_width_chars(60)
+                .justify(gtk::Justification::Center)
+                .build();
+            toast.set_custom_title(Some(&label));
+        }
         self.toasts.add_toast(toast);
     }
 
