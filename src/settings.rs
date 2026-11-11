@@ -70,6 +70,8 @@ pub struct GameOptions {
     /// The name Merge into One Mod gives the merged mod, with `{Name}` for
     /// the collection's; `None` for `collection::DEFAULT_TEMPLATE`.
     pub merged_name: Option<String>,
+    /// Merge into One Mod writes one zip instead of a folder.
+    pub merge_to_zip: bool,
 }
 
 impl GameOptions {

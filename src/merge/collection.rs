@@ -88,48 +88,135 @@ fn plan(mods: &[Input]) -> io::Result<(Files, Vec<String>)> {
     Ok((files, replace_paths))
 }
 
-/// Writes `mods` (in load order) as one mod named after `collection` into
-/// `<user_dir>/mod`, replacing an earlier merge of the same collection.
-/// Blocks; call off the main thread.
-/// Writes the merged mod for `collection`, named `name`.
-pub fn write(user_dir: &Path, collection: &str, name: &str, supported_version: &str, mods: &[Input]) -> io::Result<Merged> {
+/// Whether the merged mod is written as a folder or as one zip.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Output {
+    Folder,
+    Zip,
+}
+
+/// Writes `mods` (in load order) as one mod for `collection`, named `name`,
+/// into `<user_dir>/mod`, replacing an earlier merge of the same collection
+/// in either form. Blocks; call off the main thread.
+pub fn write(user_dir: &Path, collection: &str, name: &str, supported_version: &str, mods: &[Input], output: Output) -> io::Result<Merged> {
     let mod_dir = user_dir.join("mod");
     let target = mod_dir.join(folder(collection));
+    let zip = mod_dir.join(format!("{}.zip", folder(collection)));
     if target.exists() && !target.join(MARKER).exists() {
         return Err(io::Error::new(io::ErrorKind::AlreadyExists, format!("{} already exists and isn't a merged collection", target.display())));
     }
+    if zip.exists() && !is_merged_zip(&zip) {
+        return Err(io::Error::new(io::ErrorKind::AlreadyExists, format!("{} already exists and isn't a merged collection", zip.display())));
+    }
     let (files, replace_paths) = plan(mods)?;
+    let needed: u64 = files.values().filter_map(|(_, source)| std::fs::metadata(source).ok()).map(|m| m.len()).sum();
+    if let Some(free) = free_space(&mod_dir)
+        && free < needed + (64 << 20)
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::StorageFull,
+            format!("the merge needs about {} but only {} is free", gtk::glib::format_size(needed), gtk::glib::format_size(free)),
+        ));
+    }
 
+    let name = name.replace('"', "'");
+    let mut inner = format!("name=\"{name}\"\nversion=\"1\"\ntags={{\n\t\"Merged\"\n}}\nsupported_version=\"{supported_version}\"\n");
+    for r in &replace_paths {
+        inner.push_str(&format!("replace_path=\"{r}\"\n"));
+    }
     // Built next to the target and swapped in at the end, so a failed merge
     // leaves the previous one intact.
+    let location = match output {
+        Output::Folder => {
+            write_folder(&mod_dir, collection, &files, &inner)?;
+            format!("path=\"{}\"", target.display())
+        }
+        Output::Zip => {
+            write_zip(&mod_dir, collection, &files, &inner)?;
+            format!("archive=\"{}\"", zip.display())
+        }
+    };
+    // The other form of an earlier merge would be left behind.
+    match output {
+        Output::Folder => remove_if_present(&zip)?,
+        Output::Zip => {
+            if target.exists() {
+                std::fs::remove_dir_all(&target)?;
+            }
+        }
+    }
+        std::fs::write(user_dir.join(id(collection)), format!("{inner}{location}\n"))?;
+    Ok(Merged { id: id(collection), files: files.len() })
+}
+
+fn write_folder(mod_dir: &Path, collection: &str, files: &Files, descriptor: &str) -> io::Result<()> {
+    let target = mod_dir.join(folder(collection));
     let building = mod_dir.join(format!("{}.drukhal-tmp", folder(collection)));
     if building.exists() {
         std::fs::remove_dir_all(&building)?;
     }
     let result = (|| {
+        std::fs::create_dir_all(&building)?;
+        std::fs::write(building.join(MARKER), collection)?;
         for (path, source) in files.values() {
             let dest = building.join(path);
             std::fs::create_dir_all(dest.parent().unwrap())?;
             std::fs::copy(source, &dest)?;
         }
-        std::fs::create_dir_all(&building)?;
-        std::fs::write(building.join(MARKER), collection)?;
-        let name = name.replace('"', "'");
-        let mut inner = format!("name=\"{name}\"\nversion=\"1\"\ntags={{\n\t\"Merged\"\n}}\nsupported_version=\"{supported_version}\"\n");
-        for r in &replace_paths {
-            inner.push_str(&format!("replace_path=\"{r}\"\n"));
-        }
-        std::fs::write(building.join("descriptor.mod"), &inner)?;
+        std::fs::write(building.join("descriptor.mod"), descriptor)?;
         if target.exists() {
             std::fs::remove_dir_all(&target)?;
         }
-        std::fs::rename(&building, &target)?;
-        std::fs::write(user_dir.join(id(collection)), format!("{inner}path=\"{}\"\n", target.display()))
+        std::fs::rename(&building, &target)
     })();
     if result.is_err() {
         let _ = std::fs::remove_dir_all(&building);
     }
-    result.map(|()| Merged { id: id(collection), files: files.len() })
+    result
+}
+
+fn write_zip(mod_dir: &Path, collection: &str, files: &Files, descriptor: &str) -> io::Result<()> {
+    use zip::write::SimpleFileOptions;
+    let target = mod_dir.join(format!("{}.zip", folder(collection)));
+    let building = mod_dir.join(format!("{}.zip.drukhal-tmp", folder(collection)));
+    let result = (|| {
+        std::fs::create_dir_all(mod_dir)?;
+        let mut zip = zip::ZipWriter::new(std::fs::File::create(&building)?);
+        let options = SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated).large_file(false);
+        zip.start_file(MARKER, options).map_err(io::Error::other)?;
+        io::Write::write_all(&mut zip, collection.as_bytes())?;
+        for (path, source) in files.values() {
+            zip.start_file(path.as_str(), options.large_file(std::fs::metadata(source)?.len() >= u32::MAX as u64)).map_err(io::Error::other)?;
+            io::copy(&mut std::fs::File::open(source)?, &mut zip)?;
+        }
+        zip.start_file("descriptor.mod", options).map_err(io::Error::other)?;
+        io::Write::write_all(&mut zip, descriptor.as_bytes())?;
+        zip.finish().map_err(io::Error::other)?.sync_all()?;
+        std::fs::rename(&building, &target)
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_file(&building);
+    }
+    result
+}
+
+/// Whether the zip at `path` is a merged collection's.
+fn is_merged_zip(path: &Path) -> bool {
+    std::fs::File::open(path).ok().and_then(|f| zip::ZipArchive::new(f).ok()).is_some_and(|mut z| z.by_name(MARKER).is_ok())
+}
+
+fn remove_if_present(path: &Path) -> io::Result<()> {
+    match std::fs::remove_file(path) {
+        Err(e) if e.kind() != io::ErrorKind::NotFound => Err(e),
+        _ => Ok(()),
+    }
+}
+
+/// Free bytes on the filesystem holding `dir`, if it can be told.
+fn free_space(dir: &Path) -> Option<u64> {
+    use gtk::gio::prelude::*;
+    let info = gtk::gio::File::for_path(dir).query_filesystem_info("filesystem::free", None::<&gtk::gio::Cancellable>).ok()?;
+    info.has_attribute("filesystem::free").then(|| info.attribute_uint64("filesystem::free"))
 }
 
 #[cfg(test)]
@@ -166,7 +253,7 @@ mod tests {
         std::fs::create_dir_all(user.join("mod")).unwrap();
         let mods = [input(&a, &[]), input(&b, &[]), input(&c, &["common/ethics"])];
 
-        let merged = write(&user, "My Game!", &mod_name("My Game!", None), "v4.5.*", &mods).unwrap();
+        let merged = write(&user, "My Game!", &mod_name("My Game!", None), "v4.5.*", &mods, Output::Folder).unwrap();
         assert_eq!(merged, Merged { id: "mod/drukhal_merged_my_game.mod".into(), files: 5 });
         let out = user.join("mod/drukhal_merged_my_game");
         let read = |p: &str| std::fs::read_to_string(out.join(p)).ok();
@@ -185,15 +272,34 @@ mod tests {
         assert_eq!(parsed.path.as_deref(), Some(out.to_str().unwrap()));
 
         // Merging again replaces the earlier merge.
-        let merged = write(&user, "My Game!", &mod_name("My Game!", None), "v4.5.*", &mods[..1]).unwrap();
+        let merged = write(&user, "My Game!", &mod_name("My Game!", None), "v4.5.*", &mods[..1], Output::Folder).unwrap();
         assert_eq!(merged.files, 3);
         assert_eq!(read("events/b.txt"), None);
         assert!(!user.join("mod/drukhal_merged_my_game.drukhal-tmp").exists());
 
         // A folder that isn't a merge is never replaced.
         std::fs::create_dir_all(user.join("mod/drukhal_merged_other")).unwrap();
-        let err = write(&user, "Other", "Other", "*", &mods).unwrap_err();
+        let err = write(&user, "Other", "Other", "*", &mods, Output::Folder).unwrap_err();
         assert_eq!(err.kind(), io::ErrorKind::AlreadyExists);
+
+        // As a zip, which replaces the folder, and is read like any zipped mod.
+        let merged = write(&user, "My Game!", &mod_name("My Game!", None), "v4.5.*", &mods, Output::Zip).unwrap();
+        assert_eq!(merged.files, 5);
+        assert!(!out.exists(), "the folder form is removed");
+        let descriptor = crate::mods::Descriptor::parse(&std::fs::read_to_string(user.join(&merged.id)).unwrap()).unwrap();
+        assert!(descriptor.is_archive);
+        let zip = user.join("mod/drukhal_merged_my_game.zip");
+        assert_eq!(descriptor.path.as_deref(), Some(zip.to_str().unwrap()));
+        let files = crate::mods::archive::files_in(&zip, &root.join("cache")).unwrap();
+        assert_eq!(std::fs::read_to_string(files.join("Common/Buildings/x.txt")).unwrap(), "b");
+        assert_eq!(std::fs::read_to_string(files.join("descriptor.mod")).unwrap().lines().next(), Some("name=\"My Game! (Merged)\""));
+        // And back to a folder, which removes the zip.
+        write(&user, "My Game!", &mod_name("My Game!", None), "v4.5.*", &mods, Output::Folder).unwrap();
+        assert!(out.exists() && !zip.exists());
+
+        // A zip that isn't a merge is never replaced.
+        std::fs::write(user.join("mod/drukhal_merged_other2.zip"), "not ours").unwrap();
+        assert!(write(&user, "Other2", "Other2", "*", &mods, Output::Zip).is_err());
         std::fs::remove_dir_all(&root).unwrap();
     }
 }
