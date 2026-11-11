@@ -3,6 +3,7 @@
 mod backups_ui;
 mod collections_ui;
 mod conflicts_ui;
+mod crash_hunt_ui;
 mod ignore_rules_ui;
 mod game_update_ui;
 mod launch;
@@ -101,6 +102,9 @@ struct Window {
     /// Offers to restore the active collection when the game's load order
     /// was changed elsewhere.
     restore_banner: adw::Banner,
+    /// Shown while looking for the crashing mod, with what to test.
+    hunt_banner: adw::Banner,
+    crash_hunt: RefCell<Option<crash_hunt_ui::Running>>,
     /// Disabled when there is nothing to undo or redo; kept in sync by
     /// `refresh`.
     undo_action: gio::SimpleAction,
@@ -180,6 +184,7 @@ pub fn build(
     menu.append(Some("_Multiplayer Check…"), Some("win.multiplayer"));
     menu.append(Some("Mods _Not Updated for This Game…"), Some("win.outdated-mods"));
     menu.append(Some("_Saves…"), Some("win.saves"));
+    menu.append(Some("_Find the Crashing Mod…"), Some("win.crash-hunt"));
     menu.append(Some("Merged Patch _Backups…"), Some("win.patch-backups"));
     menu.append(Some("_Preferences"), Some("win.preferences"));
     menu.append(Some("_Keyboard Shortcuts"), Some("win.shortcuts"));
@@ -257,6 +262,11 @@ pub fn build(
         .use_markup(false)
         .build();
     toolbar.add_top_bar(&restore_banner);
+    let hunt_banner = adw::Banner::builder()
+        .button_label("Launch")
+        .use_markup(false)
+        .build();
+    toolbar.add_top_bar(&hunt_banner);
     content.append(&top);
     content.append(&search_row);
     let search_facts = SearchFacts::default();
@@ -357,6 +367,8 @@ pub fn build(
         collections: RefCell::new(Collections::starting_with(Vec::new())),
         collection_button,
         restore_banner,
+        hunt_banner: hunt_banner.clone(),
+        crash_hunt: RefCell::new(None),
         state: RefCell::new(State::new(found)),
         status,
         launch_menu,
@@ -566,6 +578,20 @@ pub fn build(
         }
     });
     window.add_action(&errors);
+    let crash_hunt = gio::SimpleAction::new("crash-hunt", None);
+    let weak = Rc::downgrade(&ui);
+    crash_hunt.connect_activate(move |_, _| {
+        if let Some(ui) = weak.upgrade() {
+            ui.crash_hunt_menu();
+        }
+    });
+    window.add_action(&crash_hunt);
+    let weak = Rc::downgrade(&ui);
+    hunt_banner.connect_button_clicked(move |_| {
+        if let Some(ui) = weak.upgrade() {
+            ui.launch(false);
+        }
+    });
     let saves = gio::SimpleAction::new("saves", None);
     let weak = Rc::downgrade(&ui);
     saves.connect_activate(move |_, _| {
