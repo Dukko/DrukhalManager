@@ -17,6 +17,7 @@ mod saves_ui;
 mod shortcuts;
 mod smart_sort_ui;
 mod dlc_ui;
+mod freeze_ui;
 mod state;
 mod thumbnails;
 mod updates;

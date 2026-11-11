@@ -17,6 +17,7 @@ impl Window {
     pub(super) fn refresh(self: &Rc<Self>) {
         self.apply_requirements();
         self.fetch_requirements();
+        let frozen_updates = self.frozen_updates();
         let state = self.state.borrow();
         self.search_facts.borrow_mut().clear();
         self.enabled_list.remove_all();
@@ -132,6 +133,7 @@ impl Window {
             misordered,
             no_achievements,
             stale_merges: self.stale.borrow().len(),
+            frozen_updates,
         };
         let (enabled, total) = (state.enabled.len(), state.mods.len());
         self.syncing.set(true);

@@ -59,6 +59,8 @@ impl Window {
         action("collection-import-file", Window::import_file);
         action("collection-import-workshop", Window::import_workshop);
         action("collection-merge", Window::merge_collection);
+        action("collection-freeze", Window::freeze_collection);
+        action("collection-unfreeze", Window::unfreeze_collection);
         action("collection-export", Window::export_collection);
         action("collection-export-launcher", Window::export_launcher);
         action("collection-export-bundle", Window::export_bundle);
@@ -127,6 +129,11 @@ impl Window {
         share.append(Some("_Copy Load Order"), Some("win.collection-copy"));
         share.append(Some("_Paste Load Order"), Some("win.collection-paste"));
         share.append(Some("_Merge into One Mod…"), Some("win.collection-merge"));
+        if collections.active().frozen.is_empty() {
+            share.append(Some("_Freeze This Collection…"), Some("win.collection-freeze"));
+        } else {
+            share.append(Some("Un_freeze This Collection…"), Some("win.collection-unfreeze"));
+        }
         menu.append_section(None, &share);
 
         self.collection_button.set_menu_model(Some(&menu));
