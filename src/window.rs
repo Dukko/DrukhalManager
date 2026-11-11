@@ -75,6 +75,10 @@ struct Window {
     patch: RefCell<Option<Patch>>,
     enabled_list: gtk::ListBox,
     disabled_list: gtk::ListBox,
+    /// The active collection's mods that aren't installed, and its heading;
+    /// hidden when there are none.
+    missing_list: gtk::ListBox,
+    missing_heading: gtk::Label,
     toasts: adw::ToastOverlay,
     collections: RefCell<Collections>,
     collection_button: gtk::MenuButton,
@@ -180,6 +184,8 @@ pub fn build(
 
     let enabled_list = boxed_list("No mods enabled");
     let disabled_list = boxed_list("Every mod is enabled");
+    let missing_list = boxed_list("");
+    let missing_heading = heading("Not Installed");
     let status = gtk::Label::builder()
         .xalign(0.0)
         .wrap(true)
@@ -256,6 +262,8 @@ pub fn build(
     ));
     content.append(&heading("Load Order"));
     content.append(&enabled_list);
+    content.append(&missing_heading);
+    content.append(&missing_list);
     let disabled_order = gtk::DropDown::builder()
         .model(&gtk::StringList::new(&["Name", "Recently Updated"]))
         .tooltip_text("Order of the disabled mods")
@@ -346,6 +354,8 @@ pub fn build(
         patch: RefCell::new(None),
         enabled_list,
         disabled_list,
+        missing_list,
+        missing_heading,
         toasts,
         undo_action: undo_action.clone(),
         redo_action: redo_action.clone(),

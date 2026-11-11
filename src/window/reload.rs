@@ -54,7 +54,12 @@ impl Window {
                 Ok(found) => found,
                 Err(e) => return ui.toast_error_message(&format!("Could not reload mods: {e}")),
             };
+            let before: std::collections::HashSet<String> = ui.state.borrow().mods.iter().map(|m| m.id.clone()).collect();
             let (added, removed) = ui.state.borrow_mut().reload(found);
+            // Mods the collection kept a place for go back in it.
+            let returned: std::collections::HashSet<String> = ui.state.borrow().mods.iter().map(|m| m.id.clone()).filter(|id| !before.contains(id)).collect();
+            let collection = ui.collections.borrow().active().mods.clone();
+            let restored = ui.state.borrow_mut().restore_returned(&collection, &returned);
             // Updated mods may have new thumbnails and files.
             *ui.thumbnails.borrow_mut() = Default::default();
             ui.check_stale();
@@ -64,7 +69,11 @@ impl Window {
             if rescan {
                 ui.scan();
             }
-            ui.toasts.add_toast(adw::Toast::builder().title(summary(&added, &updated, &removed)).timeout(8).build());
+            let mut title = summary(&added, &updated, &removed);
+            if !restored.is_empty() {
+                title.push_str(&format!(" · back in the load order: {}", names(&restored)));
+            }
+            ui.toasts.add_toast(adw::Toast::builder().title(title).timeout(8).build());
             then(&ui);
         });
     }

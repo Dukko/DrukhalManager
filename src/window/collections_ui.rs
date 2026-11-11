@@ -78,7 +78,7 @@ impl Window {
                 ui.apply_collection_mods(&mods);
             }
         });
-        let saved = self.collections.borrow().active().mods.clone();
+        let saved = self.collections.borrow().active().installed(&self.state.borrow().mods);
         if saved != current && !saved.is_empty() {
             self.restore_banner.set_title(&format!("The game's load order doesn't match the collection “{active}”. Something else changed it, like the Paradox Launcher."));
             self.restore_banner.set_revealed(true);
@@ -131,13 +131,28 @@ impl Window {
         }
     }
 
-    /// Makes `mods` the load order and saves it everywhere.
+    /// Makes `mods` the load order and saves it everywhere. Mods that
+    /// aren't installed keep their place in the collection.
     fn apply_collection_mods(self: &Rc<Self>, mods: &[String]) {
         let missing = self.state.borrow_mut().set_enabled_ids(mods);
         self.restore_banner.set_revealed(false);
         if self.save() && !missing.is_empty() {
-            self.toast_error(&format!("{} in this collection aren't installed: {}", plural(missing.len(), "mod", "mods"), missing.join(", ")));
+            self.toast_error(&format!("{} in this collection {} installed; {} kept under Not Installed", plural(missing.len(), "mod", "mods"), if missing.len() == 1 { "isn't" } else { "aren't" }, if missing.len() == 1 { "it's" } else { "they're" }));
         }
+    }
+
+    /// Takes a mod that isn't installed out of the active collection.
+    pub(super) fn remove_placeholder(self: &Rc<Self>, id: &str) {
+        {
+            let mut collections = self.collections.borrow_mut();
+            let active = collections.active.clone();
+            if let Some(c) = collections.get_mut(&active) {
+                c.mods.retain(|m| m != id);
+                c.names.remove(id);
+            }
+        }
+        self.save_collections();
+        self.refresh();
     }
 
     fn switch_collection(self: &Rc<Self>, name: String) {
@@ -286,29 +301,34 @@ impl Window {
             let (Some(ui), "import") = (weak.upgrade(), response) else { return };
             let Some((name, mods)) = playsets.get(choice.selected() as usize) else { return };
             let name = name.strip_prefix("DrukhalManager – ").unwrap_or(name);
-            ui.add_and_switch(name, mods.clone(), Vec::new());
+            ui.add_and_switch(collections::Collection::new(name, mods.clone()), Vec::new());
         });
         dialog.present(Some(&self.window));
     }
 
     /// Adds a collection, switches to it, and reports mods that weren't
     /// found. Returns the name it was added under.
-    fn add_and_switch(self: &Rc<Self>, name: &str, mods: Vec<String>, missing: Vec<String>) -> Option<String> {
+    fn add_and_switch(self: &Rc<Self>, collection: collections::Collection, missing: Vec<String>) -> Option<String> {
         if self.state.borrow().dirty {
             // Unsaved edits belong to the current collection; keep them.
             if !self.save() {
                 return None;
             }
         }
-        let name = self.collections.borrow_mut().add(name, mods.clone());
+        let mods = collection.mods.clone();
+        let name = self.collections.borrow_mut().add_collection(collection);
         self.collections.borrow_mut().active = name.clone();
         self.save_collections();
         self.rebuild_collection_menu();
-        self.apply_collection_mods(&mods);
-        if missing.is_empty() {
+        let installed = self.state.borrow_mut().set_enabled_ids(&mods).is_empty();
+        self.restore_banner.set_revealed(false);
+        if !self.save() {
+            return Some(name);
+        }
+        if missing.is_empty() && installed {
             self.toasts.add_toast(adw::Toast::new(&format!("Imported “{name}”")));
-        } else {
-            self.toast_error(&format!("Imported “{name}”. {} aren't installed: {}", plural(missing.len(), "mod", "mods"), missing.join(", ")));
+        } else if !missing.is_empty() {
+            self.toast_error(&format!("Imported “{name}”. {} {} installed, so {} under Not Installed: {}", plural(missing.len(), "mod", "mods"), if missing.len() == 1 { "isn't" } else { "aren't" }, if missing.len() == 1 { "it's listed" } else { "they're listed" }, missing.join(", ")));
         }
         Some(name)
     }
@@ -329,11 +349,11 @@ impl Window {
                     Ok(shared) => shared,
                     Err(e) => return ui.toast_error(&format!("Could not import the collection: {e}")),
                 };
-                let (mods, missing) = collections::resolve(&shared, &ui.state.borrow().mods);
-                if mods.is_empty() && missing.is_empty() {
+                let (collection, missing) = collections::import(&shared, &ui.state.borrow().mods);
+                if collection.mods.is_empty() {
                     return ui.toast_error(&format!("“{}” has no mods", shared.name));
                 }
-                if let Some(name) = ui.add_and_switch(&shared.name, mods, Vec::new())
+                if let Some(name) = ui.add_and_switch(collection, Vec::new())
                     && !missing.is_empty()
                 {
                     ui.offer_missing(id, name, shared);
@@ -393,8 +413,11 @@ impl Window {
         if self.collections.borrow().get(&name).is_none() {
             return; // deleted meanwhile
         }
-        let (mods, missing) = collections::resolve(&shared, &self.state.borrow().mods);
-        self.collections.borrow_mut().set_mods(&name, mods.clone());
+        let (fresh, missing) = collections::import(&shared, &self.state.borrow().mods);
+        let mods = fresh.mods.clone();
+        if let Some(c) = self.collections.borrow_mut().get_mut(&name) {
+            (c.mods, c.names) = (fresh.mods, fresh.names);
+        }
         self.save_collections();
         if self.collections.borrow().active == name {
             if self.state.borrow().dirty {
@@ -427,8 +450,8 @@ impl Window {
                 Ok(s) => s,
                 Err(e) => return ui.toast_error(&format!("Not a collection file: {e}")),
             };
-            let (mods, missing) = collections::resolve(&shared, &ui.state.borrow().mods);
-            ui.add_and_switch(&shared.name, mods, missing);
+            let (collection, missing) = collections::import(&shared, &ui.state.borrow().mods);
+            ui.add_and_switch(collection, missing);
         });
     }
 
@@ -530,10 +553,7 @@ impl Window {
         dialog.save(Some(&self.window), None::<&gio::Cancellable>, move |file| {
             let (Some(ui), Ok(file)) = (weak.upgrade(), file) else { return };
             let Some(path) = file.path() else { return };
-            let shared = {
-                let state = ui.state.borrow();
-                collections::export(&name, &state.enabled_ids(), &state.mods)
-            };
+            let shared = ui.shared_collection(&name, false);
             match serde_json::to_vec_pretty(&shared).map_err(|e| e.to_string()).and_then(|json| std::fs::write(&path, json).map_err(|e| e.to_string())) {
                 Ok(()) => ui.toasts.add_toast(adw::Toast::new(&format!("Exported “{name}” with {}", plural(shared.mods.len(), "mod", "mods")))),
                 Err(e) => ui.toast_error(&format!("Could not export: {e}")),
@@ -543,15 +563,24 @@ impl Window {
 }
 
 impl Window {
+    /// The current load order to share as the collection `name`, with its
+    /// mods that aren't installed in their places. `without_patch` leaves
+    /// out the merged patch, which only exists on this machine.
+    fn shared_collection(&self, name: &str, without_patch: bool) -> collections::Shared {
+        let state = self.state.borrow();
+        let mut c = self.collections.borrow().get(name).cloned().unwrap_or_else(|| collections::Collection::new(name, Vec::new()));
+        c.update(state.enabled_ids(), &state.mods);
+        if without_patch {
+            c.mods.retain(|id| id != crate::merge::patch::ID);
+        }
+        collections::export(name, &c.mods, &state.mods, &c.names)
+    }
+
     /// Copies the load order as a numbered list with Workshop links, for
     /// pasting in a chat or forum post.
     fn copy_collection(self: &Rc<Self>) {
         let name = self.collections.borrow().active.clone();
-        let shared = {
-            let state = self.state.borrow();
-            let ids: Vec<String> = state.enabled_ids().into_iter().filter(|id| id != crate::merge::patch::ID).collect();
-            collections::export(&name, &ids, &state.mods)
-        };
+        let shared = self.shared_collection(&name, true);
         if shared.mods.is_empty() {
             return self.toast_error("No mods are enabled");
         }
@@ -570,8 +599,8 @@ impl Window {
             let Some(shared) = text.ok().flatten().and_then(|t| collections::from_text(&t)) else {
                 return ui.toast_error("The clipboard doesn't hold a load order");
             };
-            let (mods, missing) = collections::resolve(&shared, &ui.state.borrow().mods);
-            ui.add_and_switch(&shared.name, mods, missing);
+            let (collection, missing) = collections::import(&shared, &ui.state.borrow().mods);
+            ui.add_and_switch(collection, missing);
         });
     }
 }
