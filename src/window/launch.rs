@@ -135,8 +135,16 @@ impl Window {
         self.launch_menu.append(Some(&label), Some("win.launch-continue"));
     }
 
-    /// Starts the game; `resume` loads the last save straight away.
+    /// Starts the game; `resume` loads the last save straight away. Asks
+    /// first if the last save was played with other mods.
     pub(super) fn launch(self: &Rc<Self>, resume: bool) {
+        if self.game.is_none() {
+            return;
+        }
+        self.check_save_mods(move |ui| ui.start_game(resume));
+    }
+
+    fn start_game(self: &Rc<Self>, resume: bool) {
         let Some(game) = &self.game else { return };
         let options = self.settings.borrow().game.clone();
         let extra = if options.launch_args.is_empty() {
@@ -163,6 +171,7 @@ impl Window {
         if self.state.borrow().dirty && !self.save() {
             return;
         }
+        let played = self.playing();
         if crate::sandbox::is_flatpak() {
             // A sandboxed app can't start the game itself; Steam can, and
             // the launcher playset carries the load order.
@@ -176,7 +185,7 @@ impl Window {
             if options.close_after_launch {
                 self.window.close();
             } else {
-                self.follow_session(std::time::SystemTime::now());
+                self.follow_session(std::time::SystemTime::now(), played);
             }
             return;
         }
@@ -208,6 +217,7 @@ impl Window {
         glib::spawn_future_local(async move {
             let _ = gio::spawn_blocking(move || child.wait()).await;
             if let Some(ui) = weak.upgrade() {
+                ui.record_session(started, played);
                 let crashed = session::ended(&ui.paths.user_dir, started) == Some(session::Ended::Crashed);
                 ui.report_session(started, crashed);
             }
@@ -217,7 +227,7 @@ impl Window {
     /// Watches the game's files for a session started through Steam to end,
     /// since the sandbox can't wait on the game. Gives up if it doesn't
     /// start within half an hour (the launch was cancelled).
-    fn follow_session(self: &Rc<Self>, launched: std::time::SystemTime) {
+    fn follow_session(self: &Rc<Self>, launched: std::time::SystemTime, played: crate::mods::saves::Played) {
         const GIVE_UP: std::time::Duration = std::time::Duration::from_secs(30 * 60);
         let weak = Rc::downgrade(self);
         let mut running = false;
@@ -233,6 +243,7 @@ impl Window {
             }
             match session::ended(user_dir, launched) {
                 Some(how) => {
+                    ui.record_session(launched, played.clone());
                     ui.report_session(launched, how == session::Ended::Crashed);
                     glib::ControlFlow::Break
                 }

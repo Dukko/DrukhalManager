@@ -11,6 +11,7 @@ mod persist;
 mod reload;
 mod repair_ui;
 mod requirements_ui;
+mod saves_ui;
 mod shortcuts;
 mod smart_sort_ui;
 mod dlc_ui;
@@ -178,6 +179,7 @@ pub fn build(
     menu.append(Some("_DLC…"), Some("win.dlc"));
     menu.append(Some("_Multiplayer Check…"), Some("win.multiplayer"));
     menu.append(Some("Mods _Not Updated for This Game…"), Some("win.outdated-mods"));
+    menu.append(Some("_Saves…"), Some("win.saves"));
     menu.append(Some("Merged Patch _Backups…"), Some("win.patch-backups"));
     menu.append(Some("_Preferences"), Some("win.preferences"));
     menu.append(Some("_Keyboard Shortcuts"), Some("win.shortcuts"));
@@ -564,6 +566,14 @@ pub fn build(
         }
     });
     window.add_action(&errors);
+    let saves = gio::SimpleAction::new("saves", None);
+    let weak = Rc::downgrade(&ui);
+    saves.connect_activate(move |_, _| {
+        if let Some(ui) = weak.upgrade() {
+            ui.show_saves();
+        }
+    });
+    window.add_action(&saves);
     let outdated_mods = gio::SimpleAction::new("outdated-mods", None);
     let weak = Rc::downgrade(&ui);
     outdated_mods.connect_activate(move |_, _| {
