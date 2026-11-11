@@ -4,6 +4,7 @@ mod backups_ui;
 mod collections_ui;
 mod conflicts_ui;
 mod ignore_rules_ui;
+mod game_update_ui;
 mod launch;
 mod list;
 mod persist;
@@ -176,6 +177,7 @@ pub fn build(
     menu.append(Some("Last Game's _Errors…"), Some("win.errors"));
     menu.append(Some("_DLC…"), Some("win.dlc"));
     menu.append(Some("_Multiplayer Check…"), Some("win.multiplayer"));
+    menu.append(Some("Mods _Not Updated for This Game…"), Some("win.outdated-mods"));
     menu.append(Some("Merged Patch _Backups…"), Some("win.patch-backups"));
     menu.append(Some("_Preferences"), Some("win.preferences"));
     menu.append(Some("_Keyboard Shortcuts"), Some("win.shortcuts"));
@@ -562,6 +564,14 @@ pub fn build(
         }
     });
     window.add_action(&errors);
+    let outdated_mods = gio::SimpleAction::new("outdated-mods", None);
+    let weak = Rc::downgrade(&ui);
+    outdated_mods.connect_activate(move |_, _| {
+        if let Some(ui) = weak.upgrade() {
+            ui.show_outdated_mods(false);
+        }
+    });
+    window.add_action(&outdated_mods);
     let multiplayer = gio::SimpleAction::new("multiplayer", None);
     let weak = Rc::downgrade(&ui);
     multiplayer.connect_activate(move |_, _| {
@@ -618,6 +628,13 @@ pub fn build(
         }
     });
     ui.refresh();
+    // Once the window is up, so the dialog has a parent to show over.
+    let weak = Rc::downgrade(&ui);
+    glib::idle_add_local_once(move || {
+        if let Some(ui) = weak.upgrade() {
+            ui.check_game_update();
+        }
+    });
     // The window owns the only strong reference through this handler; every
     // other closure holds a weak one. Destroying the window drops it.
     let owner = ui.clone();
