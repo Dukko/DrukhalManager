@@ -642,6 +642,10 @@ impl Window {
             provider: self.settings.borrow().ready_provider(),
             merged_before,
             save,
+            merge_tool: {
+                let weak = Rc::downgrade(self);
+                Box::new(move || weak.upgrade().map(|ui| ui.settings.borrow().merge_tool.clone()).unwrap_or_default())
+            },
             open_preferences,
             on_saved,
         };

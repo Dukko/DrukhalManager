@@ -85,7 +85,7 @@ fn steam_key_group() -> (adw::PreferencesGroup, impl Fn() -> Option<String> + us
 /// The external merge tool's command, with presets for common tools.
 fn merge_tool_group(command: &str) -> (adw::PreferencesGroup, impl Fn() -> String + use<>) {
     use crate::merge::external;
-    let mut description = "Merge Tool… on the Conflicts page opens the two versions in this program, and uses what you save. {left}, {right}, {base} and {output} stand for the files.".to_owned();
+    let mut description = "Merge Tool…, on the Conflicts page and when merging a file, opens two versions in this program, and uses what you save. {left}, {right}, {base} and {output} stand for the files.".to_owned();
     if crate::sandbox::is_flatpak() {
         description.push_str(&format!(" The Flatpak needs permission to start it, given once in a terminal with: {}", external::FLATPAK_OVERRIDE));
     }

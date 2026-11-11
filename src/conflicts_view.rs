@@ -1207,6 +1207,39 @@ fn note(text: &str, class: Option<&str>) -> gtk::Label {
     label
 }
 
+/// The program a merge tool command starts, for messages ("meld").
+pub fn merge_tool_name(command: &str) -> String {
+    glib::shell_parse_argv(command).ok().and_then(|a| a.first().map(|p| std::path::Path::new(p).file_name().unwrap_or_default().to_string_lossy().into_owned())).unwrap_or_default()
+}
+
+/// One version for the merge tool: where it's from, and its text.
+pub struct ToolSide {
+    pub label: String,
+    pub text: String,
+}
+
+/// Runs the external merge tool on `left` and `right` off the main thread.
+/// `button` (a Button or MenuButton) says it's waiting until the tool
+/// exits; then `done` gets what was saved, `None` if nothing was, or why
+/// it failed.
+pub fn run_merge_tool(button: &impl IsA<gtk::Widget>, command: String, left: ToolSide, right: ToolSide, base: Option<String>, done: impl FnOnce(Result<Option<String>, String>) + 'static) {
+    let button = button.clone().upcast::<gtk::Widget>();
+    let label: Option<String> = button.property("label");
+    button.set_sensitive(false);
+    button.set_property("label", format!("Waiting for {}…", merge_tool_name(&command)));
+    glib::spawn_future_local(async move {
+        let result = gio::spawn_blocking(move || {
+            use crate::merge::external::{Side, run};
+            run(&command, Side { label: &left.label, text: &left.text }, Side { label: &right.label, text: &right.text }, base.as_deref())
+        })
+        .await
+        .unwrap_or_else(|_| Err("The merge tool failed".into()));
+        button.set_property("label", label);
+        button.set_sensitive(true);
+        done(result);
+    });
+}
+
 pub fn plural(n: usize, one: &str, many: &str) -> String {
     format!("{n} {}", if n == 1 { one } else { many })
 }
