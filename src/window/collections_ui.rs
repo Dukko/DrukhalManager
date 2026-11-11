@@ -510,7 +510,7 @@ impl Window {
         if inputs.is_empty() {
             return self.toast_error("Enable some mods to merge first");
         }
-        let name = collection::mod_name(&active);
+        let name = collection::mod_name(&active, self.settings.borrow().game.merged_name.as_deref());
         let mut body = format!(
             "Copies the files of the {} in the load order into a new local mod, “{name}”, the way the game would load them, and switches to a collection holding just that mod. Your mods and “{active}” aren't changed. The merge takes as much disk space as the mods.",
             plural(inputs.len(), "mod", "mods")
@@ -534,6 +534,7 @@ impl Window {
             let user_dir = ui.paths.user_dir.clone();
             let version = crate::merge::patch::supported_version(ui.game.as_ref().and_then(|g| g.version.as_deref()));
             let (active, inputs, name) = (active.clone(), inputs.clone(), name.clone());
+            let mod_name = name.clone();
             let weak = Rc::downgrade(&ui);
             glib::spawn_future_local(async move {
                 let merged = gio::spawn_blocking(move || {
@@ -542,7 +543,7 @@ impl Window {
                         .into_iter()
                         .map(|(content, replace_path)| Ok(collection::Input { root: archive::files(&content)?, replace_path }))
                         .collect::<std::io::Result<Vec<_>>>()?;
-                    collection::write(&user_dir, &active, &version, &inputs)
+                    collection::write(&user_dir, &active, &mod_name, &version, &inputs)
                 })
                 .await
                 .unwrap_or_else(|_| Err(std::io::Error::other("the merge failed")));

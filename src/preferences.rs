@@ -9,6 +9,7 @@ use adw::prelude::*;
 use gtk::{gio, glib};
 
 use crate::merge::ai::{CLAUDE_MODEL, OPENROUTER_URL, Provider};
+use crate::merge::collection;
 use crate::merge::conflicts::LANGUAGES;
 use crate::paradox::{game, steam};
 use crate::settings::{self, GameOptions, Settings, UpdateOptions};
@@ -192,10 +193,44 @@ fn game_page(options: &GameOptions) -> (adw::PreferencesPage, impl Fn() -> GameO
     localisation.connect_enable_expansion_notify(move |_| summarize());
     scan.add(&localisation);
 
+    let merging = adw::PreferencesGroup::builder()
+        .title("Merge into One Mod")
+        .description("{Name} stands for the collection's name. Applies to the next merge.")
+        .build();
+    let template = options.merged_name.clone().unwrap_or_else(|| collection::DEFAULT_TEMPLATE.to_owned());
+    let name_row = adw::EntryRow::builder().title("Merged Mod Name").text(&template).build();
+    let reset_name = icon_button("edit-undo-symbolic", "Use the default name");
+    name_row.add_suffix(&reset_name);
+    let check_name = |row: &adw::EntryRow, reset: &gtk::Button| {
+        let text = row.text();
+        // Without {Name}, the default is used instead.
+        if collection::is_template(&text) {
+            row.remove_css_class("error");
+            row.set_tooltip_text(None);
+        } else {
+            row.add_css_class("error");
+            row.set_tooltip_text(Some("Needs {Name}, or every collection's merge gets the same name"));
+        }
+        reset.set_visible(text.trim() != collection::DEFAULT_TEMPLATE);
+    };
+    check_name(&name_row, &reset_name);
+    name_row.connect_changed(glib::clone!(
+        #[weak]
+        reset_name,
+        move |row| check_name(row, &reset_name)
+    ));
+    reset_name.connect_clicked(glib::clone!(
+        #[weak]
+        name_row,
+        move |_| name_row.set_text(collection::DEFAULT_TEMPLATE)
+    ));
+    merging.add(&name_row);
+
     let page = page("Game", "game", "input-gaming-symbolic");
     page.add(&folders);
     page.add(&launching);
     page.add(&scan);
+    page.add(&merging);
     let read = move || GameOptions {
         executable: exe.borrow().clone(),
         data_dir: data_dir.borrow().clone(),
@@ -208,6 +243,10 @@ fn game_page(options: &GameOptions) -> (adw::PreferencesPage, impl Fn() -> GameO
             (picked != [game_language.as_str()]).then_some(picked)
         },
         skip_localisation: !localisation.enables_expansion(),
+        merged_name: {
+            let text = name_row.text().trim().to_owned();
+            (collection::is_template(&text) && text != collection::DEFAULT_TEMPLATE).then_some(text)
+        },
     };
     (page, read)
 }

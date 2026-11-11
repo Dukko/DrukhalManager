@@ -34,9 +34,20 @@ pub struct Merged {
     pub files: usize,
 }
 
-/// The mod's name for a collection.
-pub fn mod_name(collection: &str) -> String {
-    format!("{} (Merged)", collection.trim())
+/// The merged mod's name when no other is chosen.
+pub const DEFAULT_TEMPLATE: &str = "{Name} (Merged)";
+
+/// The mod's name for a collection, from a template in which `{Name}`
+/// stands for the collection's name. A template without `{Name}` would
+/// give every collection's merge the same name, so the default is used.
+pub fn mod_name(collection: &str, template: Option<&str>) -> String {
+    let template = template.map(str::trim).filter(|t| is_template(t)).unwrap_or(DEFAULT_TEMPLATE);
+    template.replace("{Name}", collection.trim())
+}
+
+/// Whether `template` can name merged mods.
+pub fn is_template(template: &str) -> bool {
+    template.contains("{Name}")
 }
 
 /// The merged mod's folder and descriptor name, e.g.
@@ -80,7 +91,8 @@ fn plan(mods: &[Input]) -> io::Result<(Files, Vec<String>)> {
 /// Writes `mods` (in load order) as one mod named after `collection` into
 /// `<user_dir>/mod`, replacing an earlier merge of the same collection.
 /// Blocks; call off the main thread.
-pub fn write(user_dir: &Path, collection: &str, supported_version: &str, mods: &[Input]) -> io::Result<Merged> {
+/// Writes the merged mod for `collection`, named `name`.
+pub fn write(user_dir: &Path, collection: &str, name: &str, supported_version: &str, mods: &[Input]) -> io::Result<Merged> {
     let mod_dir = user_dir.join("mod");
     let target = mod_dir.join(folder(collection));
     if target.exists() && !target.join(MARKER).exists() {
@@ -102,7 +114,7 @@ pub fn write(user_dir: &Path, collection: &str, supported_version: &str, mods: &
         }
         std::fs::create_dir_all(&building)?;
         std::fs::write(building.join(MARKER), collection)?;
-        let name = mod_name(collection).replace('"', "'");
+        let name = name.replace('"', "'");
         let mut inner = format!("name=\"{name}\"\nversion=\"1\"\ntags={{\n\t\"Merged\"\n}}\nsupported_version=\"{supported_version}\"\n");
         for r in &replace_paths {
             inner.push_str(&format!("replace_path=\"{r}\"\n"));
@@ -123,6 +135,13 @@ pub fn write(user_dir: &Path, collection: &str, supported_version: &str, mods: &
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn names_from_templates() {
+        assert_eq!(mod_name(" Main ", None), "Main (Merged)");
+        assert_eq!(mod_name("Main", Some("[Merged] {Name}")), "[Merged] Main");
+        assert_eq!(mod_name("Main", Some("No placeholder")), "Main (Merged)");
+    }
 
     fn put(root: &Path, files: &[(&str, &str)]) {
         for (path, text) in files {
@@ -147,7 +166,7 @@ mod tests {
         std::fs::create_dir_all(user.join("mod")).unwrap();
         let mods = [input(&a, &[]), input(&b, &[]), input(&c, &["common/ethics"])];
 
-        let merged = write(&user, "My Game!", "v4.5.*", &mods).unwrap();
+        let merged = write(&user, "My Game!", &mod_name("My Game!", None), "v4.5.*", &mods).unwrap();
         assert_eq!(merged, Merged { id: "mod/drukhal_merged_my_game.mod".into(), files: 5 });
         let out = user.join("mod/drukhal_merged_my_game");
         let read = |p: &str| std::fs::read_to_string(out.join(p)).ok();
@@ -166,14 +185,14 @@ mod tests {
         assert_eq!(parsed.path.as_deref(), Some(out.to_str().unwrap()));
 
         // Merging again replaces the earlier merge.
-        let merged = write(&user, "My Game!", "v4.5.*", &mods[..1]).unwrap();
+        let merged = write(&user, "My Game!", &mod_name("My Game!", None), "v4.5.*", &mods[..1]).unwrap();
         assert_eq!(merged.files, 3);
         assert_eq!(read("events/b.txt"), None);
         assert!(!user.join("mod/drukhal_merged_my_game.drukhal-tmp").exists());
 
         // A folder that isn't a merge is never replaced.
         std::fs::create_dir_all(user.join("mod/drukhal_merged_other")).unwrap();
-        let err = write(&user, "Other", "*", &mods).unwrap_err();
+        let err = write(&user, "Other", "Other", "*", &mods).unwrap_err();
         assert_eq!(err.kind(), io::ErrorKind::AlreadyExists);
         std::fs::remove_dir_all(&root).unwrap();
     }

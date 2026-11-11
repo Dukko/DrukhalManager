@@ -67,6 +67,9 @@ pub struct GameOptions {
     pub scan_languages: Option<Vec<String>>,
     /// Leaves localisation out of the conflict scan altogether.
     pub skip_localisation: bool,
+    /// The name Merge into One Mod gives the merged mod, with `{Name}` for
+    /// the collection's; `None` for `collection::DEFAULT_TEMPLATE`.
+    pub merged_name: Option<String>,
 }
 
 impl GameOptions {
