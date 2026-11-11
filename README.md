@@ -13,7 +13,7 @@
 
 Built with Rust, GTK 4 and libadwaita · A fork of [Irony Mod Manager](https://github.com/bcssov/IronyModManager)
 
-<img src="docs/screenshots/hero.png" alt="The load order: every enabled mod with its thumbnail, game version and tags" width="860">
+<img src="docs/screenshots/hero.png" alt="The load order after Smart Sort: graphics mods first, each with its thumbnail, game version and tags, and the Smart Sort button in the header" width="860">
 
 </div>
 
@@ -25,6 +25,7 @@ Built with Rust, GTK 4 and libadwaita · A fork of [Irony Mod Manager](https://g
 - ⚡ **Skips the AI when it can.** Conflicts where only one mod changed anything are merged directly, at no cost.
 - 🧹 **Hides the noise.** Ignore one conflict, a whole folder, or anything matching a rule like `gfx/**`.
 - 🗂️ **Keeps your load orders.** Named collections that sync to Paradox Launcher playsets, with Workshop collection import, dependency checks and descriptor repair.
+- 🧭 **Sorts them for you.** Smart Sort orders your mods the way the Stellaris community's load order guides suggest, keeping sub-mods below their mods and every mod after its dependencies.
 
 ## Installing
 
@@ -72,8 +73,10 @@ This installs `drukhal-manager` with a desktop entry and icon.
 
 ### 🗂️ Your load order
 
-Drag mods into order, type a position, or use **Sort by Dependencies**. Thumbnails come from each mod's folder, or from its Workshop preview. Each mod is marked when it turns off achievements, is waiting on a Steam update, or was unsubscribed in Steam.
+Drag mods into order, type a position, or let DrukhalManager sort them. Thumbnails come from each mod's folder, or from its Workshop preview. Each mod is marked when it turns off achievements, is waiting on a Steam update, or was unsubscribed in Steam.
 
+- **Smart Sort** groups your mods into sections, following the community's load order guides: unofficial patches (`~`) first, then graphics, flavor, shipsets, galaxy generation, gameplay and large overhauls, then compatibility patches, UI mods such as UI Overhaul Dynamic and their patches, and universal patches (`!`) last. Sub-mods go directly below the mod they need, and every mod still loads after its dependencies. A mod's section comes from its name, its dependencies and the folders it ships, not its often-wrong tags. A preview shows where each mod goes and why, and you can move any mod to another section; your choice is remembered. Applying it can be undone.
+- **Other sorts:** **Sort A–Z, Dependencies First** (in Smart Sort's drop-down) sorts by name, and **Sort by Dependencies** appears when a mod loads before one it needs.
 - **Collections:** several named load orders, switched from the header, each synced to its own Paradox Launcher playset. Import a launcher playset (Irony's, for example), a shared file, or a **Workshop collection** from its link. Mods you don't have yet are listed with links to subscribe.
 - **Checks:** warns when a mod loads before one it depends on, and notes missing dependencies and mods made for an older game version.
 - **Descriptor repair:** fixes `.mod` files that point at folders that no longer exist, and removes those whose mod is gone. Everything is backed up first.
@@ -110,6 +113,8 @@ Everything is saved to **DrukhalManager Merged Patch**, a local mod that loads l
 <td><b>Ignore rules</b> hide conflicts by path, like <code>gfx/**</code>, optionally only for an exact set of mods, with a live count of what each rule hides.</td>
 </tr>
 </table>
+
+Text boxes, such as the model's reasoning, merged results and the file editors, can be made taller or shorter by dragging the grip below them.
 
 API keys are kept in your system keyring, or in a settings file only you can read when there's no keyring. Merging sends only the conflicting definitions to the provider you choose.
 
