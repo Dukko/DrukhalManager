@@ -11,6 +11,7 @@ mod reload;
 mod repair_ui;
 mod shortcuts;
 mod smart_sort_ui;
+mod dlc_ui;
 mod state;
 mod thumbnails;
 mod updates;
@@ -160,6 +161,7 @@ pub fn build(
     menu.append(Some("_Redo"), Some("win.redo"));
     menu.append(Some("Re_load Mods"), Some("win.reload"));
     menu.append(Some("Last Game's _Errors…"), Some("win.errors"));
+    menu.append(Some("_DLC…"), Some("win.dlc"));
     menu.append(Some("_Multiplayer Check…"), Some("win.multiplayer"));
     menu.append(Some("Merged Patch _Backups…"), Some("win.patch-backups"));
     menu.append(Some("_Preferences"), Some("win.preferences"));
@@ -528,6 +530,14 @@ pub fn build(
         }
     });
     window.add_action(&multiplayer);
+    let dlc = gio::SimpleAction::new("dlc", None);
+    let weak = Rc::downgrade(&ui);
+    dlc.connect_activate(move |_, _| {
+        if let Some(ui) = weak.upgrade() {
+            ui.show_dlcs();
+        }
+    });
+    window.add_action(&dlc);
     let backups = gio::SimpleAction::new("patch-backups", None);
     let weak = Rc::downgrade(&ui);
     backups.connect_activate(move |_, _| {
