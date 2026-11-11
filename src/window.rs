@@ -9,6 +9,7 @@ mod list;
 mod persist;
 mod reload;
 mod repair_ui;
+mod requirements_ui;
 mod shortcuts;
 mod smart_sort_ui;
 mod dlc_ui;
@@ -60,6 +61,13 @@ struct Window {
     search: gtk::SearchEntry,
     /// What the search can match each listed mod on, by mod index.
     search_facts: SearchFacts,
+    /// Workshop required items, by Workshop id.
+    requirements: RefCell<crate::mods::requirements::Cache>,
+    /// Set while requirements are being fetched.
+    fetching_requirements: Cell<bool>,
+    /// No requirements are fetched before this: between batches, and for a
+    /// while after Steam refused or couldn't be reached.
+    requirements_not_before: Cell<Option<std::time::Instant>>,
     /// Offers to repair descriptors with stale paths or no mod behind them.
     repair_banner: adw::Banner,
     stack: adw::ViewStack,
@@ -353,6 +361,9 @@ pub fn build(
         sort_button: sort_button.clone(),
         search: search.clone(),
         search_facts,
+        requirements: RefCell::new(crate::mods::requirements::Cache::load(&crate::mods::requirements::Cache::path())),
+        fetching_requirements: Cell::new(false),
+        requirements_not_before: Cell::new(None),
         repair_banner: repair_banner.clone(),
         stack: stack.clone(),
         conflicts_page,
@@ -500,6 +511,24 @@ pub fn build(
         }
     });
     window.add_action(&rename_mod);
+    let get_requirements = gio::SimpleAction::new("get-requirements", Some(glib::VariantTy::UINT32));
+    let weak = Rc::downgrade(&ui);
+    get_requirements.connect_activate(move |_, index| {
+        if let (Some(ui), Some(index)) = (weak.upgrade(), index.and_then(|i| i.get::<u32>())) {
+            ui.get_requirements(index as usize);
+        }
+    });
+    window.add_action(&get_requirements);
+    for (name, ignore) in [("ignore-requirement", true), ("unignore-requirement", false)] {
+        let action = gio::SimpleAction::new(name, Some(glib::VariantTy::UINT64));
+        let weak = Rc::downgrade(&ui);
+        action.connect_activate(move |_, id| {
+            if let (Some(ui), Some(id)) = (weak.upgrade(), id.and_then(|i| i.get::<u64>())) {
+                ui.ignore_requirement(id, ignore);
+            }
+        });
+        window.add_action(&action);
+    }
     let show_conflicts = gio::SimpleAction::new("show-conflicts", Some(glib::VariantTy::UINT32));
     let weak = Rc::downgrade(&ui);
     show_conflicts.connect_activate(move |_, index| {
@@ -623,6 +652,10 @@ impl Window {
                 }
                 let languages_changed = ui.settings.borrow().game.languages(&ui.paths.user_dir) != settings.game.languages(&ui.paths.user_dir);
                 let extra_changed = ui.settings.borrow().game.extra_mod_dir != settings.game.extra_mod_dir;
+                let mut settings = settings;
+                if let Some(key) = settings.new_steam_key.take() {
+                    ui.store_steam_key(key);
+                }
                 ui.settings.replace(settings);
                 if extra_changed {
                     // Lists the new folder's mods, and drops the old one's.

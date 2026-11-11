@@ -9,6 +9,9 @@ use futures_lite::future::block_on;
 
 use crate::merge::ai::Provider;
 
+/// The Steam Web API key's kind, for reading Workshop required items.
+pub const STEAM: &str = "steam";
+
 /// Which provider a key belongs to, as stored in the keyring.
 pub fn kind(provider: &Provider) -> &'static str {
     match provider {
@@ -18,7 +21,11 @@ pub fn kind(provider: &Provider) -> &'static str {
 }
 
 fn label(kind: &str) -> String {
-    let name = if kind == "anthropic" { "Claude" } else { "OpenAI-compatible" };
+    let name = match kind {
+        "anthropic" => "Claude",
+        STEAM => "Steam Web",
+        _ => "OpenAI-compatible",
+    };
     format!("DrukhalManager {name} API key")
 }
 

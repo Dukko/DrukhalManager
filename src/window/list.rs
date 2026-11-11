@@ -15,6 +15,8 @@ use crate::paradox::steam::ItemState;
 
 impl Window {
     pub(super) fn refresh(self: &Rc<Self>) {
+        self.apply_requirements();
+        self.fetch_requirements();
         let state = self.state.borrow();
         self.search_facts.borrow_mut().clear();
         self.enabled_list.remove_all();
@@ -434,6 +436,21 @@ impl Window {
                 moves.append_item(&item);
             }
             menu.append_section(None, &moves);
+        }
+        if position.is_some() && issues.iter().any(|i| i.message.starts_with("Requires “")) {
+            let item = gio::MenuItem::new(Some("_Get Required Mods"), None);
+            item.set_action_and_target_value(Some("win.get-requirements"), Some(&index_variant));
+            menu.append_item(&item);
+            // Some authors "require" things that aren't mods, or aren't
+            // really needed.
+            for r in &m.requires {
+                let quoted = format!("“{}”", r.name);
+                if issues.iter().any(|i| i.message.starts_with("Requires “") && i.message.contains(&quoted)) {
+                    let item = gio::MenuItem::new(Some(&format!("{quoted} Isn't Really Required")), None);
+                    item.set_action_and_target_value(Some("win.ignore-requirement"), Some(&r.steam_id.to_variant()));
+                    menu.append_item(&item);
+                }
+            }
         }
         let item = gio::MenuItem::new(Some("_Rename…"), None);
         item.set_action_and_target_value(Some("win.rename-mod"), Some(&index_variant));

@@ -372,6 +372,7 @@ mod tests {
                 load_position: enabled.iter().position(|&e| e == i),
                 error: None,
                 steam: None,
+                requires: Vec::new(),
             })
             .collect();
         State::new(mods)
@@ -442,6 +443,7 @@ mod tests {
             load_position: None,
             error: None,
             steam: None,
+            requires: Vec::new(),
         });
         s.set_enabled(4, true);
         s.set_enabled(2, true);
@@ -481,6 +483,7 @@ mod tests {
                 load_position: Some(0),
                 error: None,
                 steam: None,
+                requires: Vec::new(),
             },
             Mod {
                 id: "mod/a.mod".into(),
@@ -490,6 +493,7 @@ mod tests {
                 load_position: Some(1),
                 error: None,
                 steam: None,
+                requires: Vec::new(),
             },
         ];
         let s = State::new(mods);

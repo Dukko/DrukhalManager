@@ -699,6 +699,7 @@ impl Window {
                         load_position: None,
                         error: None,
                         steam: None,
+                        requires: Vec::new(),
                     });
                     state.mods.len() - 1
                 }
