@@ -13,7 +13,7 @@
 
 Built with Rust, GTK 4 and libadwaita · A fork of [Irony Mod Manager](https://github.com/bcssov/IronyModManager)
 
-<img src="docs/screenshots/hero.png" alt="The load order: every enabled mod with its thumbnail, game version and tags" width="860">
+<img src="docs/screenshots/hero.png" alt="The load order after Smart Sort: graphics mods first, each with its thumbnail, game version and tags, and the Smart Sort button in the header" width="860">
 
 </div>
 
