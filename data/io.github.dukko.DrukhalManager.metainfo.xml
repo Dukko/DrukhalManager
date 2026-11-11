@@ -36,6 +36,16 @@
     <control>keyboard</control>
   </supports>
   <releases>
+    <release version="0.4.0" date="2026-11-10">
+      <description>
+        <p>Copy Load Order and Paste Load Order, in the collection menu, share a load order as a numbered list with Workshop links, ready for a chat or forum post. Pasting one, or a collection file, makes a new collection.</p>
+        <p>Mods can be renamed with names only DrukhalManager shows, such as "UIOD" for a long Workshop title. Search finds both names.</p>
+        <p>A collection keeps the mods it lists that aren't installed, under Not Installed, with a Workshop link. When one is installed and the mods are reloaded, it goes back into its place.</p>
+        <p>DLC… in the main menu turns DLCs on and off.</p>
+        <p>The Disabled list can be sorted by name or by when mods were last updated.</p>
+        <p>Include Test Versions, in Preferences, offers betas and release candidates as well.</p>
+      </description>
+    </release>
     <release version="0.3.10" date="2026-11-10">
       <description>
         <p>Smart Sort arranges the load order the way the Stellaris community's guides suggest: unofficial patches first, then graphics, flavor, shipsets, galaxy generation, gameplay and large overhauls, compatibility patches, UI mods and their patches, and universal patches last. Sub-mods go directly below the mod they need, and every mod still loads after its dependencies. A preview shows where each mod goes and why, and any mod can be moved to another section; the choice is remembered.</p>
