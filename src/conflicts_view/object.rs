@@ -596,6 +596,7 @@ impl ObjectView {
             });
         }
         bar.extra.append(&take);
+        bar.extra.append(&self.merge_tool_button(page, &left.label, &left.text, &steps.right_source(), steps.loaded.vanilla.as_ref().map(|v| v.text.as_str()), busy));
         self.view_options(page, &bar.extra, steps.loaded.vanilla.is_some());
 
         let session = page.hooks.session.borrow();
@@ -611,6 +612,53 @@ impl ObjectView {
         // The pair lives as long as its widgets.
         keep_alive(&body, pair);
         body.upcast()
+    }
+
+    /// Opens both versions in the external merge tool; what it saves
+    /// replaces the right card's version, to keep or edit further.
+    fn merge_tool_button(self: &Rc<Self>, page: &Rc<Page>, left_label: &str, left: &str, right: &Source, base: Option<&str>, busy: bool) -> gtk::Button {
+        let button = gtk::Button::builder().label("Merge Tool…").tooltip_text("Merge these two versions in your merge tool; what you save there replaces the right one").sensitive(!busy).css_classes(["flat"]).build();
+        let (weak, page_ref) = (Rc::downgrade(self), Rc::downgrade(page));
+        let (left_label, left, right_label, right, base) = (left_label.to_owned(), left.to_owned(), right.label.clone(), right.text.clone(), base.map(str::to_owned));
+        button.connect_clicked(move |button| {
+            let (Some(view), Some(page)) = (weak.upgrade(), page_ref.upgrade()) else { return };
+            let command = (page.hooks.merge_tool)();
+            if command.is_empty() {
+                (page.hooks.toast)("Choose a merge tool in Preferences first");
+                return (page.hooks.open_preferences)();
+            }
+            let tool = gtk::glib::shell_parse_argv(&command).ok().and_then(|a| a.first().map(|p| std::path::Path::new(p).file_name().unwrap_or_default().to_string_lossy().into_owned())).unwrap_or_default();
+            button.set_sensitive(false);
+            button.set_label(&format!("Waiting for {tool}…"));
+            let (left_label, left, right_label, right, base, button) = (left_label.clone(), left.clone(), right_label.clone(), right.clone(), base.clone(), button.clone());
+            let weak = Rc::downgrade(&view);
+            glib::spawn_future_local(async move {
+                let result = gio::spawn_blocking(move || {
+                    use crate::merge::external::{Side, run};
+                    run(&command, Side { label: &left_label, text: &left }, Side { label: &right_label, text: &right }, base.as_deref())
+                })
+                .await
+                .unwrap_or_else(|_| Err("The merge tool failed".into()));
+                button.set_label("Merge Tool…");
+                button.set_sensitive(true);
+                let Some(view) = weak.upgrade() else { return };
+                let Some(page) = view.page.upgrade() else { return };
+                match result {
+                    Ok(Some(merged)) => {
+                        view.error.replace(None);
+                        view.with_steps(|s| s.edit_right(&merged));
+                        view.render(gtk::StackTransitionType::None);
+                        (page.hooks.toast)("The merge tool's result is on the right; keep it with Use This Version");
+                    }
+                    Ok(None) => (page.hooks.toast)(&format!("{tool} was closed without saving, so nothing changed")),
+                    Err(message) => {
+                        view.error.replace(Some(message));
+                        view.render(gtk::StackTransitionType::None);
+                    }
+                }
+            });
+        });
+        button
     }
 
     /// Toggles for comparing with the base game and ignoring spacing.
