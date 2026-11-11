@@ -28,6 +28,9 @@ pub struct Collection {
     /// The folder of its merged patch, once it has one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub patch: Option<String>,
+    /// Its frozen copies of Workshop mods, by the copies' ids.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub frozen: BTreeMap<String, super::freeze::Frozen>,
 }
 
 /// A mod in a collection that isn't installed.
@@ -42,7 +45,7 @@ pub struct Placeholder {
 
 impl Collection {
     pub fn new(name: &str, mods: Vec<String>) -> Self {
-        Self { name: name.to_owned(), mods, names: BTreeMap::new(), patch: None }
+        Self { name: name.to_owned(), mods, names: BTreeMap::new(), patch: None, frozen: BTreeMap::new() }
     }
 
     /// Makes `enabled`, the load order being saved, the collection's mods.

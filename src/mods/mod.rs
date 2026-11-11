@@ -6,6 +6,7 @@ pub mod collections;
 pub mod crash_hunt;
 pub mod extra;
 pub mod filter;
+pub mod freeze;
 mod descriptor;
 pub mod repair;
 pub mod game_update;

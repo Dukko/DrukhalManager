@@ -223,6 +223,23 @@ pub fn item_states(content_dirs: &[PathBuf]) -> Option<HashMap<u64, ItemState>> 
     read_any.then_some(states)
 }
 
+/// When Steam last updated each installed Workshop item (Unix time), for
+/// the app whose content folders are `content_dirs`.
+pub fn updated_times(content_dirs: &[PathBuf]) -> HashMap<u64, u64> {
+    let mut times = HashMap::new();
+    for dir in content_dirs {
+        let (Some(app), Some(workshop)) = (dir.file_name().and_then(|a| a.to_str()), dir.parent().and_then(Path::parent)) else { continue };
+        let Ok(src) = std::fs::read_to_string(workshop.join(format!("appworkshop_{app}.acf"))) else { continue };
+        for (id, details) in items_in(&vdf_tokens(&src), "WorkshopItemsInstalled") {
+            if let Some(t) = details.get("timeupdated").and_then(|t| t.parse::<u64>().ok()) {
+                let entry = times.entry(id).or_insert(t);
+                *entry = (*entry).max(t);
+            }
+        }
+    }
+    times
+}
+
 fn states_in(src: &str) -> HashMap<u64, ItemState> {
     let tokens = vdf_tokens(src);
     let installed: HashMap<u64, HashMap<String, String>> = items_in(&tokens, "WorkshopItemsInstalled").into_iter().collect();
