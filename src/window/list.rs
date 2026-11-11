@@ -71,6 +71,13 @@ impl Window {
                 issues.get(&index).unwrap_or(&none),
             ));
         }
+        self.missing_list.remove_all();
+        let placeholders = self.collections.borrow().active().placeholders(&state.mods);
+        self.missing_heading.set_visible(!placeholders.is_empty());
+        self.missing_list.set_visible(!placeholders.is_empty());
+        for p in placeholders {
+            self.missing_list.append(&self.placeholder_row(p));
+        }
         let disabled = {
             let settings = self.settings.borrow();
             state.disabled_in(settings.disabled_order, &settings.aliases)
@@ -225,6 +232,35 @@ impl Window {
                 ui.refresh();
             }
         });
+    }
+
+    /// A mod in the collection that isn't installed: where it would load,
+    /// a link to get it, and a button to drop it from the collection.
+    fn placeholder_row(self: &Rc<Self>, p: mods::collections::Placeholder) -> adw::ActionRow {
+        let subtitle = match &p.after {
+            Some(after) => format!("Loads after {after} once it's installed"),
+            None => "Loads first once it's installed".to_owned(),
+        };
+        let row = adw::ActionRow::builder().title(&p.name).subtitle(subtitle).use_markup(false).css_classes(["dim-label"]).build();
+        row.add_prefix(&gtk::Image::builder().icon_name("action-unavailable-symbolic").tooltip_text("Not installed, so it's left out of the game's load order").build());
+        if let Some(steam_id) = p.steam_id {
+            let open = gtk::Button::builder().icon_name("adw-external-link-symbolic").tooltip_text("Open on the Steam Workshop to subscribe").valign(gtk::Align::Center).css_classes(["flat"]).build();
+            let window = self.window.downgrade();
+            open.connect_clicked(move |_| {
+                gtk::UriLauncher::new(&crate::paradox::workshop::page_url(steam_id)).launch(window.upgrade().as_ref(), None::<&gio::Cancellable>, |_| {});
+            });
+            row.add_suffix(&open);
+        }
+        let remove = gtk::Button::builder().icon_name("user-trash-symbolic").tooltip_text("Remove from Collection").valign(gtk::Align::Center).css_classes(["flat"]).build();
+        let weak = Rc::downgrade(self);
+        let id = p.id.clone();
+        remove.connect_clicked(move |_| {
+            if let Some(ui) = weak.upgrade() {
+                ui.remove_placeholder(&id);
+            }
+        });
+        row.add_suffix(&remove);
+        row
     }
 
     /// Asks for a name to show for the mod at `index` instead of its own.

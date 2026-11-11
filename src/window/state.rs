@@ -288,6 +288,29 @@ impl State {
         missing
     }
 
+    /// Enables the mods in `returned`, which just became installed, each
+    /// after the mod before it in `collection`, the saved order that kept
+    /// their places. Returns their names.
+    pub(crate) fn restore_returned(&mut self, collection: &[String], returned: &std::collections::HashSet<String>) -> Vec<String> {
+        let index = |id: &str| self.mods.iter().position(|m| m.id == id);
+        let mut names = Vec::new();
+        let mut enabled = self.enabled.clone();
+        for (at, id) in collection.iter().enumerate() {
+            let Some(i) = index(id).filter(|i| returned.contains(id) && !enabled.contains(i)) else { continue };
+            let slot = collection[..at].iter().rev().find_map(|before| index(before).and_then(|b| enabled.iter().position(|&e| e == b))).map_or(0, |p| p + 1);
+            enabled.insert(slot, i);
+            names.push(super::display_name(&self.mods[i]).to_owned());
+        }
+        if !names.is_empty() {
+            self.checkpoint();
+            self.enabled = enabled;
+            self.pin_patch();
+            self.dirty = true;
+            self.revision += 1;
+        }
+        names
+    }
+
     /// Swaps in a freshly discovered mod list, keeping the current load
     /// order and unsaved changes. New mods start disabled. Returns the
     /// names of mods that appeared, and of those that went away (or whose
@@ -495,6 +518,17 @@ mod tests {
         let aliases = [("mod/3.mod".to_owned(), "0 first".to_owned())].into();
         assert_eq!(s.disabled_in(DisabledOrder::Name, &aliases), [3, 1, 2], "by the name the user gave");
         std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn puts_returned_mods_back_in_place() {
+        let mut s = state(&[0, 2]);
+        let collection: Vec<String> = ["mod/0.mod", "mod/1.mod", "mod/2.mod", "mod/3.mod"].map(String::from).to_vec();
+        let returned = ["mod/1.mod".to_owned(), "mod/3.mod".to_owned()].into();
+        assert_eq!(s.restore_returned(&collection, &returned), ["1", "3"]);
+        assert_eq!(s.enabled, [0, 1, 2, 3]);
+        assert!(s.dirty);
+        assert!(s.restore_returned(&collection, &returned).is_empty(), "already enabled");
     }
 
     #[test]

@@ -4,6 +4,7 @@
 //! exported to a file to share and imported from one, with mods matched by
 //! Steam id so the file works on other machines.
 
+use std::collections::{BTreeMap, HashSet};
 use std::io;
 use std::path::{Path, PathBuf};
 
@@ -16,8 +17,81 @@ pub const DEFAULT: &str = "Default";
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Collection {
     pub name: String,
-    /// Descriptor ids (`mod/ugc_1.mod`) in load order.
+    /// Descriptor ids (`mod/ugc_1.mod`) in load order, including mods that
+    /// aren't installed, which keep their place until they're back.
     pub mods: Vec<String>,
+    /// The mods' names, so ones that aren't installed can still be shown.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub names: BTreeMap<String, String>,
+}
+
+/// A mod in a collection that isn't installed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Placeholder {
+    pub id: String,
+    pub name: String,
+    /// The installed mod it loads after, if any.
+    pub after: Option<String>,
+    pub steam_id: Option<u64>,
+}
+
+impl Collection {
+    pub fn new(name: &str, mods: Vec<String>) -> Self {
+        Self { name: name.to_owned(), mods, names: BTreeMap::new() }
+    }
+
+    /// Makes `enabled`, the load order being saved, the collection's mods.
+    /// Mods that aren't installed stay after the mod they followed, and
+    /// every mod's name is remembered.
+    pub fn update(&mut self, enabled: Vec<String>, installed: &[Mod]) {
+        let known: HashSet<&str> = installed.iter().map(|m| m.id.as_str()).collect();
+        let mut mods = enabled;
+        for (at, id) in self.mods.iter().enumerate() {
+            if known.contains(id.as_str()) || mods.contains(id) {
+                continue;
+            }
+            // After the nearest earlier mod that's still in the list.
+            let slot = self.mods[..at].iter().rev().find_map(|before| mods.iter().position(|m| m == before)).map_or(0, |p| p + 1);
+            mods.insert(slot, id.clone());
+        }
+        let mut names: BTreeMap<String, String> = BTreeMap::new();
+        for id in &mods {
+            let name = installed.iter().find(|m| &m.id == id).map(|m| m.descriptor.name.trim().to_owned()).filter(|n| !n.is_empty()).or_else(|| self.names.get(id).cloned());
+            if let Some(name) = name {
+                names.insert(id.clone(), name);
+            }
+        }
+        self.mods = mods;
+        self.names = names;
+    }
+
+    /// The collection's mods that aren't installed, in load order.
+    pub fn placeholders(&self, installed: &[Mod]) -> Vec<Placeholder> {
+        let mut after = None;
+        let mut found = Vec::new();
+        for id in &self.mods {
+            if let Some(m) = installed.iter().find(|m| &m.id == id) {
+                after = Some(if m.descriptor.name.trim().is_empty() { id.clone() } else { m.descriptor.name.trim().to_owned() });
+                continue;
+            }
+            let steam_id = steam_id_of(id);
+            let name = self.names.get(id).cloned().unwrap_or_else(|| steam_id.map_or_else(|| id.clone(), |sid| format!("Workshop mod {sid}")));
+            found.push(Placeholder { id: id.clone(), name, after: after.clone(), steam_id });
+        }
+        found
+    }
+
+    /// The installed mods, in order, as the load order to apply.
+    pub fn installed(&self, installed: &[Mod]) -> Vec<String> {
+        let known: HashSet<&str> = installed.iter().map(|m| m.id.as_str()).collect();
+        self.mods.iter().filter(|id| known.contains(id.as_str())).cloned().collect()
+    }
+}
+
+/// The Workshop id in a descriptor id like `mod/ugc_123.mod`, as Steam and
+/// the launcher name them.
+pub fn steam_id_of(id: &str) -> Option<u64> {
+    id.strip_prefix("mod/ugc_")?.strip_suffix(".mod")?.parse().ok()
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -33,7 +107,7 @@ pub fn path() -> PathBuf {
 impl Collections {
     /// A fresh set with one collection holding the current load order.
     pub fn starting_with(mods: Vec<String>) -> Self {
-        Self { active: DEFAULT.into(), list: vec![Collection { name: DEFAULT.into(), mods }] }
+        Self { active: DEFAULT.into(), list: vec![Collection::new(DEFAULT, mods)] }
     }
 
     pub fn load(path: &Path) -> io::Result<Option<Self>> {
@@ -41,7 +115,7 @@ impl Collections {
             Ok(src) => {
                 let mut c: Self = serde_json::from_str(&src).map_err(io::Error::other)?;
                 if c.list.is_empty() {
-                    c.list.push(Collection { name: DEFAULT.into(), mods: Vec::new() });
+                    c.list.push(Collection::new(DEFAULT, Vec::new()));
                 }
                 if c.get(&c.active.clone()).is_none() {
                     c.active = c.list[0].name.clone();
@@ -68,8 +142,12 @@ impl Collections {
         self.get(&self.active).unwrap_or(&self.list[0])
     }
 
+    pub fn get_mut(&mut self, name: &str) -> Option<&mut Collection> {
+        self.list.iter_mut().find(|c| c.name == name)
+    }
+
     pub fn set_mods(&mut self, name: &str, mods: Vec<String>) {
-        if let Some(c) = self.list.iter_mut().find(|c| c.name == name) {
+        if let Some(c) = self.get_mut(name) {
             c.mods = mods;
         }
     }
@@ -86,8 +164,14 @@ impl Collections {
 
     /// Adds a collection under a unique name and returns that name.
     pub fn add(&mut self, name: &str, mods: Vec<String>) -> String {
-        let name = self.unique_name(name);
-        self.list.push(Collection { name: name.clone(), mods });
+        self.add_collection(Collection::new(name, mods))
+    }
+
+    /// Adds `c` under a unique name based on its own, and returns that name.
+    pub fn add_collection(&mut self, mut c: Collection) -> String {
+        c.name = self.unique_name(&c.name);
+        let name = c.name.clone();
+        self.list.push(c);
         name
     }
 
@@ -138,30 +222,47 @@ pub struct SharedMod {
     pub id: String,
 }
 
-pub fn export(name: &str, ids: &[String], mods: &[Mod]) -> Shared {
+/// The mods with `ids`, in order, to share; mods that aren't installed are
+/// named from `names`.
+pub fn export(name: &str, ids: &[String], mods: &[Mod], names: &BTreeMap<String, String>) -> Shared {
     let shared = ids
         .iter()
         .map(|id| {
             let m = mods.iter().find(|m| m.id == *id);
-            SharedMod { name: m.map_or_else(|| id.clone(), |m| m.descriptor.name.clone()), steam_id: m.and_then(|m| m.descriptor.remote_file_id), id: id.clone() }
+            let name = m.map(|m| m.descriptor.name.clone()).or_else(|| names.get(id).cloned()).unwrap_or_else(|| id.clone());
+            SharedMod { name, steam_id: m.and_then(|m| m.descriptor.remote_file_id).or_else(|| steam_id_of(id)), id: id.clone() }
         })
         .collect();
     Shared { format: 1, name: name.to_owned(), mods: shared }
 }
 
-/// Matches a shared collection's mods to installed ones: by Steam id first
-/// (descriptor ids differ between machines), then descriptor id, then name.
-/// Returns the matched ids in order and the names that weren't found.
-pub fn resolve(shared: &Shared, mods: &[Mod]) -> (Vec<String>, Vec<String>) {
-    let (mut found, mut missing) = (Vec::new(), Vec::new());
+/// A shared collection as a collection: mods matched to installed ones (by
+/// Steam id first, as descriptor ids differ between machines, then
+/// descriptor id, then name) by their ids here, and
+/// the rest kept as placeholders under the id Steam would give them.
+/// Returns it and the names of the mods that aren't installed; mods with
+/// neither a Steam id nor a descriptor id can't be kept.
+pub fn import(shared: &Shared, mods: &[Mod]) -> (Collection, Vec<String>) {
+    let mut c = Collection::new(&shared.name, Vec::new());
+    let mut missing = Vec::new();
     for s in &shared.mods {
-        match find(s, mods) {
-            Some(m) if !found.contains(&m.id) => found.push(m.id.clone()),
-            Some(_) => {}
-            None => missing.push(s.name.clone()),
+        let id = match find(s, mods) {
+            Some(m) => m.id.clone(),
+            None => {
+                missing.push(s.name.clone());
+                match (s.steam_id, s.id.is_empty()) {
+                    (Some(sid), _) => format!("mod/ugc_{sid}.mod"),
+                    (None, false) => s.id.clone(),
+                    (None, true) => continue,
+                }
+            }
+        };
+        if !c.mods.contains(&id) {
+            c.names.insert(id.clone(), s.name.clone());
+            c.mods.push(id);
         }
     }
-    (found, missing)
+    (c, missing)
 }
 
 /// The installed mod a shared one stands for, as `resolve` matches them.
@@ -285,13 +386,37 @@ mod tests {
     #[test]
     fn shares_between_machines() {
         let here = [m("mod/ugc_1.mod", "One", Some(1)), m("mod/local.mod", "Local Thing", None)];
-        let shared = export("Mine", &["mod/ugc_1.mod".into(), "mod/local.mod".into(), "mod/gone.mod".into()], &here);
+        let shared = export("Mine", &["mod/ugc_1.mod".into(), "mod/local.mod".into(), "mod/gone.mod".into()], &here, &BTreeMap::new());
         let json = serde_json::to_string(&shared).unwrap();
         // A friend has the workshop mod under another descriptor name, the
         // local mod under another id, and lacks the third.
         let there = [m("mod/ugc_1_renamed.mod", "One (old name)", Some(1)), m("mod/my_local.mod", "local thing", None)];
-        let (found, missing) = resolve(&serde_json::from_str(&json).unwrap(), &there);
-        assert_eq!(found, ["mod/ugc_1_renamed.mod", "mod/my_local.mod"]);
+        let (c, missing) = import(&serde_json::from_str(&json).unwrap(), &there);
+        assert_eq!(c.mods, ["mod/ugc_1_renamed.mod", "mod/my_local.mod", "mod/gone.mod"], "kept as a placeholder");
         assert_eq!(missing, ["mod/gone.mod"]);
+    }
+
+    #[test]
+    fn keeps_missing_mods_in_place() {
+        let mut c = Collection::new("Main", ["mod/a.mod", "mod/ugc_9.mod", "mod/b.mod", "mod/c.mod"].map(String::from).to_vec());
+        c.names.insert("mod/ugc_9.mod".into(), "Nine".into());
+        let installed = [m("mod/a.mod", "A", None), m("mod/b.mod", "B", None), m("mod/c.mod", "C", None)];
+        assert_eq!(c.installed(&installed), ["mod/a.mod", "mod/b.mod", "mod/c.mod"]);
+        assert_eq!(
+            c.placeholders(&installed),
+            [Placeholder { id: "mod/ugc_9.mod".into(), name: "Nine".into(), after: Some("A".into()), steam_id: Some(9) }]
+        );
+        // A moves below B and C is disabled: Nine stays right after A.
+        c.update(["mod/b.mod", "mod/a.mod"].map(String::from).to_vec(), &installed);
+        assert_eq!(c.mods, ["mod/b.mod", "mod/a.mod", "mod/ugc_9.mod"]);
+        assert_eq!(c.names.get("mod/a.mod").map(String::as_str), Some("A"));
+        assert_eq!(c.names.get("mod/ugc_9.mod").map(String::as_str), Some("Nine"), "kept for the missing mod");
+        assert!(!c.names.contains_key("mod/c.mod"), "dropped with the mod");
+        assert_eq!(c.placeholders(&installed)[0].after.as_deref(), Some("A"));
+        // Removed from the front: it stays first.
+        let mut c = Collection::new("Main", ["mod/ugc_9.mod", "mod/a.mod"].map(String::from).to_vec());
+        c.update(vec!["mod/a.mod".into()], &installed);
+        assert_eq!(c.mods, ["mod/ugc_9.mod", "mod/a.mod"]);
+        assert_eq!(c.placeholders(&installed)[0].name, "Workshop mod 9");
     }
 }

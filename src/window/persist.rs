@@ -16,7 +16,9 @@ impl Window {
                 {
                     let mut collections = self.collections.borrow_mut();
                     let active = collections.active.clone();
-                    collections.set_mods(&active, ids);
+                    if let Some(c) = collections.get_mut(&active) {
+                        c.update(ids, &self.state.borrow().mods);
+                    }
                     if let Err(e) = collections.save(&mods::collections::path()) {
                         self.toasts.add_toast(
                             adw::Toast::builder()
