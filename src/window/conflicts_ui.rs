@@ -394,6 +394,8 @@ impl Window {
         let weak = Rc::downgrade(self);
         let provider = Box::new(move || weak.upgrade().and_then(|ui| ui.settings.borrow().ready_provider()));
         let weak = Rc::downgrade(self);
+        let merge_tool = Box::new(move || weak.upgrade().map(|ui| ui.settings.borrow().merge_tool.clone()).unwrap_or_default());
+        let weak = Rc::downgrade(self);
         let open_preferences = Box::new(move || {
             if let Some(ui) = weak.upgrade() {
                 ui.open_preferences(Some(crate::preferences::AI_PAGE));
@@ -433,6 +435,7 @@ impl Window {
             game_dir: self.game.as_ref().map(|g| g.dir.clone()),
             provider,
             open_preferences,
+            merge_tool,
             toast,
             session: self.conflict_session.clone(),
         })

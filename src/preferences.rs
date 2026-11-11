@@ -25,6 +25,8 @@ pub fn present(parent: &impl IsA<gtk::Widget>, settings: Settings, page: Option<
     let (game_page, read_game) = game_page(&settings.game);
     let (ai_page, read_provider, read_parallel) = ai_page(&settings.provider, settings.parallel_merges);
     let (updates_page, read_updates) = updates_page(&settings.updates);
+    let (tool_group, read_tool) = merge_tool_group(&settings.merge_tool);
+    ai_page.add(&tool_group);
     dialog.add(&game_page);
     dialog.add(&ai_page);
     dialog.add(&updates_page);
@@ -39,10 +41,45 @@ pub fn present(parent: &impl IsA<gtk::Widget>, settings: Settings, page: Option<
         if let Some(f) = on_close.borrow_mut().take() {
             let provider = read_provider();
             let parallel_merges = read_parallel(&provider);
-            f(Settings { provider, parallel_merges, game: read_game(), updates: read_updates(), ..base.clone() });
+            f(Settings { provider, parallel_merges, game: read_game(), updates: read_updates(), merge_tool: read_tool(), ..base.clone() });
         }
     });
     dialog.present(Some(parent));
+}
+
+/// The external merge tool's command, with presets for common tools.
+fn merge_tool_group(command: &str) -> (adw::PreferencesGroup, impl Fn() -> String + use<>) {
+    use crate::merge::external;
+    let mut description = "Merge Tool… on the Conflicts page opens the two versions in this program, and uses what you save. {left}, {right}, {base} and {output} stand for the files.".to_owned();
+    if crate::sandbox::is_flatpak() {
+        description.push_str(&format!(" The Flatpak needs permission to start it, given once in a terminal with: {}", external::FLATPAK_OVERRIDE));
+    }
+    let group = adw::PreferencesGroup::builder().title("External Merge Tool").description(glib::markup_escape_text(&description).as_str()).build();
+    let initial = if command.is_empty() { external::detect().unwrap_or_default() } else { command };
+    let row = adw::EntryRow::builder().title("Command").text(initial).build();
+    let presets = gio::Menu::new();
+    for (i, (name, _)) in external::PRESETS.iter().enumerate() {
+        let item = gio::MenuItem::new(Some(name), None);
+        item.set_action_and_target_value(Some("tool.preset"), Some(&(i as u32).to_variant()));
+        presets.append_item(&item);
+    }
+    let button = gtk::MenuButton::builder().icon_name("view-more-symbolic").tooltip_text("Use a common tool").menu_model(&presets).valign(gtk::Align::Center).css_classes(["flat"]).build();
+    row.add_suffix(&button);
+    let actions = gio::SimpleActionGroup::new();
+    let preset = gio::SimpleAction::new("preset", Some(glib::VariantTy::UINT32));
+    preset.connect_activate(glib::clone!(
+        #[weak]
+        row,
+        move |_, i| {
+            if let Some((_, command)) = i.and_then(|v| v.get::<u32>()).and_then(|i| external::PRESETS.get(i as usize)) {
+                row.set_text(command);
+            }
+        }
+    ));
+    actions.add_action(&preset);
+    row.insert_action_group("tool", Some(&actions));
+    group.add(&row);
+    (group, move || row.text().trim().to_owned())
 }
 
 fn page(title: &str, name: &str, icon: &str) -> adw::PreferencesPage {
