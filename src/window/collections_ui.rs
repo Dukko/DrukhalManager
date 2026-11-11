@@ -8,7 +8,7 @@ use gtk::{gio, glib};
 
 use super::Window;
 use crate::conflicts_view::plural;
-use crate::merge::collection;
+use crate::merge::{bundle, collection};
 use crate::mods::archive;
 use crate::mods::collections::{self, Collections};
 use crate::mods::load_order::DlcLoad;
@@ -61,6 +61,7 @@ impl Window {
         action("collection-merge", Window::merge_collection);
         action("collection-export", Window::export_collection);
         action("collection-export-launcher", Window::export_launcher);
+        action("collection-export-bundle", Window::export_bundle);
         action("collection-copy", Window::copy_collection);
         action("collection-paste", Window::paste_collection);
 
@@ -120,6 +121,7 @@ impl Window {
         share.append_submenu(Some("_Import"), &import);
         let export = gio::Menu::new();
         export.append(Some("To a DrukhalManager _File…"), Some("win.collection-export"));
+        export.append(Some("With the Merged _Patch…"), Some("win.collection-export-bundle"));
         export.append(Some("To a Paradox _Launcher File…"), Some("win.collection-export-launcher"));
         share.append_submenu(Some("_Export"), &export);
         share.append(Some("_Copy Load Order"), Some("win.collection-copy"));
@@ -463,6 +465,7 @@ impl Window {
         let filter = gtk::FileFilter::new();
         filter.set_name(Some("Collections (DrukhalManager or Paradox Launcher)"));
         filter.add_pattern("*.json");
+        filter.add_pattern("*.zip");
         let filters = gio::ListStore::new::<gtk::FileFilter>();
         filters.append(&filter);
         let dialog = gtk::FileDialog::builder().title("Import Collection").filters(&filters).modal(true).build();
@@ -470,6 +473,9 @@ impl Window {
         dialog.open(Some(&self.window), None::<&gio::Cancellable>, move |file| {
             let (Some(ui), Ok(file)) = (weak.upgrade(), file) else { return };
             let Some(path) = file.path() else { return };
+            if path.extension().is_some_and(|e| e.eq_ignore_ascii_case("zip")) {
+                return ui.import_bundle(&path);
+            }
             let text = match std::fs::read_to_string(&path) {
                 Ok(t) => t,
                 Err(e) => return ui.toast_error(&format!("Could not read the file: {e}")),
@@ -607,6 +613,75 @@ impl Window {
 }
 
 impl Window {
+    /// Exports the load order with the merged patch in one zip, so a friend
+    /// gets the same merges, e.g. to play together.
+    fn export_bundle(self: &Rc<Self>) {
+        let name = self.collections.borrow().active.clone();
+        let dialog = gtk::FileDialog::builder().title("Export with the Merged Patch").initial_name(format!("{name}.zip")).modal(true).build();
+        let weak = Rc::downgrade(self);
+        dialog.save(Some(&self.window), None::<&gio::Cancellable>, move |file| {
+            let (Some(ui), Ok(file)) = (weak.upgrade(), file) else { return };
+            let Some(path) = file.path() else { return };
+            let shared = ui.shared_collection(&name, false);
+            match bundle::export(&path, &shared, &ui.paths.user_dir) {
+                Ok(0) => ui.toasts.add_toast(adw::Toast::new(&format!("Exported “{name}” with {}; there's no merged patch yet", plural(shared.mods.len(), "mod", "mods")))),
+                Ok(files) => ui.toasts.add_toast(adw::Toast::new(&format!("Exported “{name}” with {} and the merged patch ({})", plural(shared.mods.len(), "mod", "mods"), plural(files, "file", "files")))),
+                Err(e) => ui.toast_error(&format!("Could not export: {e}")),
+            }
+        });
+    }
+
+    /// Imports a collection exported with its merged patch: asks before
+    /// replacing the patch, then imports the load order.
+    fn import_bundle(self: &Rc<Self>, path: &std::path::Path) {
+        let bundle = match bundle::read(path) {
+            Ok(b) => b,
+            Err(e) => return self.toast_error(&format!("Could not import: {e}")),
+        };
+        let has_patch = crate::merge::patch::Patch::root(&self.paths.user_dir).join("descriptor.mod").is_file();
+        if bundle.patch_files == 0 {
+            return self.import_shared(&bundle.collection);
+        }
+        let name = bundle.collection.name.clone();
+        let body = if has_patch {
+            format!("“{name}” comes with its merged patch. It replaces yours, which is backed up first, so Merged Patch Backups in the main menu can bring it back.")
+        } else {
+            format!("“{name}” comes with its merged patch, which is installed with it.")
+        };
+        let dialog = adw::AlertDialog::new(Some(if has_patch { "Replace Your Merged Patch?" } else { "Install the Merged Patch?" }), Some(&body));
+        dialog.add_responses(&[("cancel", "_Cancel"), ("order", "Load Order _Only"), ("patch", if has_patch { "_Replace" } else { "_Install" })]);
+        dialog.set_response_appearance("patch", adw::ResponseAppearance::Suggested);
+        dialog.set_default_response(Some("patch"));
+        dialog.set_close_response("cancel");
+        let weak = Rc::downgrade(self);
+        dialog.connect_response(None, move |_, response| {
+            let Some(ui) = weak.upgrade() else { return };
+            match response {
+                "order" => ui.import_shared(&bundle.collection),
+                "patch" => {
+                    // Dropped first: it would otherwise write its old records back.
+                    ui.patch.replace(None);
+                    let installed = bundle::install_patch(&bundle, &ui.paths.user_dir, &ui.paths.backup_dir);
+                    ui.patch.replace(crate::merge::patch::Patch::open(&ui.paths.user_dir).ok());
+                    if let Err(e) = installed {
+                        return ui.toast_error(&format!("Could not install the merged patch, so nothing was imported: {e}"));
+                    }
+                    ui.patch_saved();
+                    // The patch's descriptor shows up once the mods are read again.
+                    let shared = bundle.collection.clone();
+                    ui.reload(move |ui| ui.import_shared(&shared));
+                }
+                _ => {}
+            }
+        });
+        dialog.present(Some(&self.window));
+    }
+
+    fn import_shared(self: &Rc<Self>, shared: &collections::Shared) {
+        let (collection, missing) = collections::import(shared, &self.state.borrow().mods);
+        self.add_and_switch(collection, missing);
+    }
+
     /// Exports the load order as a Paradox Launcher playset file, for
     /// players who don't use DrukhalManager.
     fn export_launcher(self: &Rc<Self>) {

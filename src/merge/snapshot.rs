@@ -23,6 +23,7 @@ const REMOVALS_SHARE: Duration = Duration::from_secs(5 * 60);
 
 pub const BEFORE_REMOVING: &str = "Before removing merges";
 pub const BEFORE_RESTORING: &str = "Before restoring a backup";
+pub const BEFORE_IMPORTING: &str = "Before importing a shared patch";
 
 /// Why a snapshot was taken before Merge All of `category`.
 pub fn before_merge_all(category: &str) -> String {
@@ -105,11 +106,18 @@ pub fn restore(user_dir: &Path, backup_dir: &Path, snapshot: &Snapshot) -> io::R
         return Err(io::Error::new(io::ErrorKind::NotFound, "The backup is gone"));
     }
     take(user_dir, backup_dir, BEFORE_RESTORING)?;
+    replace_patch(user_dir, &source)
+}
+
+/// Makes a copy of the patch folder at `source` the patch, swapping it in
+/// whole so a failure leaves the current one as it was. Take a snapshot
+/// first.
+pub fn replace_patch(user_dir: &Path, source: &Path) -> io::Result<()> {
     let root = Patch::root(user_dir);
     let staging = root.with_extension("drukhal-restore");
     let old = root.with_extension("drukhal-old");
     let _ = std::fs::remove_dir_all(&staging);
-    copy_dir(&source, &staging)?;
+    copy_dir(source, &staging)?;
     let _ = std::fs::remove_dir_all(&old);
     let had_patch = root.is_dir();
     if had_patch {
