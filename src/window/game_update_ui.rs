@@ -32,7 +32,7 @@ impl Window {
     pub(super) fn show_outdated_mods(self: &Rc<Self>, after_update: bool) {
         let Some(game) = self.game.clone() else { return };
         let Some(version) = game.version.clone() else {
-            return self.toasts.add_toast(adw::Toast::new("The game's version couldn't be read"));
+            return self.add_toast(adw::Toast::new("The game's version couldn't be read"));
         };
         // When Steam last updated the game.
         let game_updated = std::fs::metadata(&game.exe).and_then(|m| m.modified()).ok();
@@ -43,7 +43,7 @@ impl Window {
         let short = format!("v{}", game_update::major_minor(&version));
         if outdated.is_empty() {
             if !after_update {
-                self.toasts.add_toast(adw::Toast::new(&format!("Every enabled mod supports Stellaris {short}")));
+                self.add_toast(adw::Toast::new(&format!("Every enabled mod supports Stellaris {short}")));
             }
             return;
         }
@@ -115,7 +115,7 @@ impl Window {
             state.reorder(order);
         }
         if self.save() {
-            self.toasts.add_toast(adw::Toast::new(&format!("Disabled {}; “{kept}” has the full load order", plural(indices.len(), "mod", "mods"))));
+            self.add_toast(adw::Toast::new(&format!("Disabled {}; “{kept}” has the full load order", plural(indices.len(), "mod", "mods"))));
         }
     }
 }

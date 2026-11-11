@@ -6,7 +6,6 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 use adw::prelude::*;
-use gtk::glib;
 
 use super::{Window, display_name};
 use crate::conflicts_view::plural;
@@ -47,11 +46,11 @@ impl Window {
             return dialog.present(Some(&self.window));
         }
         if self.game.is_none() {
-            return self.toasts.add_toast(adw::Toast::new("Stellaris wasn't found, so it can't be launched for the tests"));
+            return self.add_toast(adw::Toast::new("Stellaris wasn't found, so it can't be launched for the tests"));
         }
         let count = self.state.borrow().enabled.len();
         if count == 0 {
-            return self.toasts.add_toast(adw::Toast::new("No mods are enabled"));
+            return self.add_toast(adw::Toast::new("No mods are enabled"));
         }
         let launches = Hunt::new((0..count).collect(), HashMap::new(), &[]).estimate();
         let dialog = adw::AlertDialog::builder()
@@ -166,7 +165,7 @@ impl Window {
         self.apply_collection_mods(&r.mods);
         let launches = plural(r.hunt.launches, "launch", "launches");
         let (heading, body) = match &result {
-            None => return self.toasts.add_toast(adw::Toast::new("Stopped; your load order is back")),
+            None => return self.add_toast(adw::Toast::new("Stopped; your load order is back")),
             Some(Step::Found(p)) => (
                 format!("Found It: {}", r.names[*p]),
                 format!("After {launches}: Stellaris crashed with “{}” on and didn't without it. It may only crash together with another of your mods, but turning it off avoids the crash.\n\nYour load order is back as it was.", r.names[*p]),
@@ -202,7 +201,7 @@ impl Window {
                 "disable" => {
                     ui.state.borrow_mut().set_enabled(index, false);
                     ui.refresh();
-                    ui.offer_undo(&format!("Turned off {}", glib::markup_escape_text(display_name(&ui.state.borrow().mods[index]))));
+                    ui.offer_undo(&format!("Turned off {}", display_name(&ui.state.borrow().mods[index])));
                 }
                 _ => {}
             }

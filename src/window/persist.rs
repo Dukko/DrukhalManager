@@ -20,7 +20,7 @@ impl Window {
                         c.update(ids, &self.state.borrow().mods);
                     }
                     if let Err(e) = collections.save(&mods::collections::path()) {
-                        self.toasts.add_toast(
+                        self.add_toast(
                             adw::Toast::builder()
                                 .title(format!("Could not save collections: {e}"))
                                 .timeout(0)
@@ -30,11 +30,11 @@ impl Window {
                 }
                 self.restore_banner.set_revealed(false);
                 self.refresh();
-                self.toasts.add_toast(self.sync_launcher());
+                self.add_toast(self.sync_launcher());
                 true
             }
             Err(e) => {
-                self.toasts.add_toast(
+                self.add_toast(
                     adw::Toast::builder()
                         .title(format!("Could not save load order: {e}"))
                         .timeout(0)

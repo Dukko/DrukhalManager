@@ -155,9 +155,9 @@ impl Window {
                     ))
                     .timeout(8)
                     .build();
-                self.toasts.add_toast(toast);
+                self.add_toast(toast);
             }
-            Err(e) => self.toasts.add_toast(
+            Err(e) => self.add_toast(
                 adw::Toast::builder()
                     .title(format!("Could not repair descriptors: {e}"))
                     .timeout(0)

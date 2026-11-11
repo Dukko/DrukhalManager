@@ -332,13 +332,15 @@ pub fn build(
     let (views_list, view_counts, game_info) = overview::views_sidebar();
     let views_split = adw::OverlaySplitView::builder()
         .sidebar(&overview::sidebar_page(&views_list, &game_info))
+        .css_classes(["load-order-split"])
         .content(&scrolled_page(&content))
         .min_sidebar_width(200.0)
         .max_sidebar_width(240.0)
         .build();
-    let inspector = adw::Bin::new();
+    let inspector = adw::Bin::builder().css_classes(["side-panel"]).overflow(gtk::Overflow::Hidden).build();
     let inspector_split = adw::OverlaySplitView::builder()
         .sidebar(&inspector)
+        .css_classes(["load-order-split"])
         .content(&views_split)
         .sidebar_position(gtk::PackType::End)
         .min_sidebar_width(300.0)
@@ -507,7 +509,7 @@ pub fn build(
         Ok(p) => {
             ui.patch.replace(Some(p));
         }
-        Err(e) => ui.toasts.add_toast(
+        Err(e) => ui.add_toast(
             adw::Toast::builder()
                 .title(format!("Could not read the merged patch: {e}"))
                 .timeout(0)
@@ -776,9 +778,16 @@ impl Window {
         );
     }
 
+    /// Shows a toast. Its text is plain, never markup: titles hold mod
+    /// names and error messages, and one `&` would blank a markup title.
+    fn add_toast(&self, toast: adw::Toast) {
+        toast.set_use_markup(false);
+        self.toasts.add_toast(toast);
+    }
+
     fn save_settings(&self, what: &str) {
         if let Err(e) = self.settings.borrow().save(&settings::path()) {
-            self.toasts.add_toast(
+            self.add_toast(
                 adw::Toast::builder()
                     .title(format!("Could not save {what}: {e}"))
                     .timeout(0)
@@ -819,7 +828,7 @@ impl Window {
             ui.settings.borrow_mut().key_in_keyring = stored.is_ok();
             ui.save_settings("preferences");
             if let Err(e) = stored {
-                ui.toasts.add_toast(
+                ui.add_toast(
                     adw::Toast::builder()
                         .title(format!("{e}. The API key is saved in settings.json, readable only by you."))
                         .timeout(0)

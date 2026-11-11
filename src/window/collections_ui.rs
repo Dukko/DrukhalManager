@@ -91,7 +91,7 @@ impl Window {
     }
 
     fn toast_error(&self, message: &str) {
-        self.toasts.add_toast(adw::Toast::builder().title(message).timeout(0).build());
+        self.add_toast(adw::Toast::builder().title(message).timeout(0).build());
     }
 
     pub(super) fn rebuild_collection_menu(&self) {
@@ -250,7 +250,7 @@ impl Window {
             ui.save_collections();
             ui.rebuild_collection_menu();
             ui.apply_collection_mods(&mods);
-            ui.toasts.add_toast(adw::Toast::new(&format!("Created “{name}”")));
+            ui.add_toast(adw::Toast::new(&format!("Created “{name}”")));
         });
     }
 
@@ -352,7 +352,7 @@ impl Window {
             return Some(name);
         }
         if missing.is_empty() && installed {
-            self.toasts.add_toast(adw::Toast::new(&format!("Imported “{name}”")));
+            self.add_toast(adw::Toast::new(&format!("Imported “{name}”")));
         } else if !missing.is_empty() {
             self.toast_error(&format!("Imported “{name}”. {} {} installed, so {} under Not Installed: {}", plural(missing.len(), "mod", "mods"), if missing.len() == 1 { "isn't" } else { "aren't" }, if missing.len() == 1 { "it's listed" } else { "they're listed" }, missing.join(", ")));
         }
@@ -365,7 +365,7 @@ impl Window {
                 return ui.toast_error("That isn't a Workshop collection link or ID");
             };
             let toast = adw::Toast::builder().title("Reading the collection from Steam…").timeout(0).build();
-            ui.toasts.add_toast(toast.clone());
+            ui.add_toast(toast.clone());
             let weak = Rc::downgrade(ui);
             glib::spawn_future_local(async move {
                 let fetched = gio::spawn_blocking(move || workshop::fetch(id)).await.unwrap_or_else(|_| Err("The request failed".to_owned()));
@@ -455,7 +455,7 @@ impl Window {
             }
         }
         if missing.is_empty() {
-            self.toasts.add_toast(adw::Toast::new(&format!("Every mod in “{name}” is installed")));
+            self.add_toast(adw::Toast::new(&format!("Every mod in “{name}” is installed")));
         } else {
             self.offer_missing(collection_id, name, shared);
         }
@@ -548,7 +548,7 @@ impl Window {
                 ui.save_settings("the merge format");
             }
             let toast = adw::Toast::builder().title(format!("Merging into “{name}”…")).timeout(0).build();
-            ui.toasts.add_toast(toast.clone());
+            ui.add_toast(toast.clone());
             let user_dir = ui.paths.user_dir.clone();
             let out_dir = ui.settings.borrow().game.merge_dir(&user_dir);
             let version = crate::merge::patch::supported_version(ui.game.as_ref().and_then(|g| g.version.as_deref()));
@@ -572,7 +572,7 @@ impl Window {
                     Ok(merged) => merged,
                     Err(e) => return ui.toast_error(&format!("Could not merge the collection: {e}")),
                 };
-                ui.toasts.add_toast(adw::Toast::new(&format!("Merged {} into “{name}”", plural(merged.files, "file", "files"))));
+                ui.add_toast(adw::Toast::new(&format!("Merged {} into “{name}”", plural(merged.files, "file", "files"))));
                 // The new mod shows up once the mod list is read again.
                 ui.reload(move |ui| ui.use_merged(name, merged.id));
             });
@@ -606,7 +606,7 @@ impl Window {
             let Some(path) = file.path() else { return };
             let shared = ui.shared_collection(&name, false);
             match serde_json::to_vec_pretty(&shared).map_err(|e| e.to_string()).and_then(|json| std::fs::write(&path, json).map_err(|e| e.to_string())) {
-                Ok(()) => ui.toasts.add_toast(adw::Toast::new(&format!("Exported “{name}” with {}", plural(shared.mods.len(), "mod", "mods")))),
+                Ok(()) => ui.add_toast(adw::Toast::new(&format!("Exported “{name}” with {}", plural(shared.mods.len(), "mod", "mods")))),
                 Err(e) => ui.toast_error(&format!("Could not export: {e}")),
             }
         });
@@ -625,8 +625,8 @@ impl Window {
             let Some(path) = file.path() else { return };
             let shared = ui.shared_collection(&name, false);
             match bundle::export(&path, &shared, &ui.paths.user_dir) {
-                Ok(0) => ui.toasts.add_toast(adw::Toast::new(&format!("Exported “{name}” with {}; there's no merged patch yet", plural(shared.mods.len(), "mod", "mods")))),
-                Ok(files) => ui.toasts.add_toast(adw::Toast::new(&format!("Exported “{name}” with {} and the merged patch ({})", plural(shared.mods.len(), "mod", "mods"), plural(files, "file", "files")))),
+                Ok(0) => ui.add_toast(adw::Toast::new(&format!("Exported “{name}” with {}; there's no merged patch yet", plural(shared.mods.len(), "mod", "mods")))),
+                Ok(files) => ui.add_toast(adw::Toast::new(&format!("Exported “{name}” with {} and the merged patch ({})", plural(shared.mods.len(), "mod", "mods"), plural(files, "file", "files")))),
                 Err(e) => ui.toast_error(&format!("Could not export: {e}")),
             }
         });
@@ -699,7 +699,7 @@ impl Window {
             }
             let exported = format!("Exported “{name}” with {}", plural(shared.mods.len() - skipped.len(), "mod", "mods"));
             if skipped.is_empty() {
-                ui.toasts.add_toast(adw::Toast::new(&exported));
+                ui.add_toast(adw::Toast::new(&exported));
             } else {
                 ui.toast_error(&format!("{exported}. The launcher only knows Workshop mods, so {} left out: {}", if skipped.len() == 1 { "this local mod was" } else { "these local mods were" }, skipped.join(", ")));
             }
@@ -728,7 +728,7 @@ impl Window {
             return self.toast_error("No mods are enabled");
         }
         self.window.clipboard().set_text(&collections::to_text(&shared));
-        self.toasts.add_toast(adw::Toast::new(&format!("Copied “{name}” with {}", plural(shared.mods.len(), "mod", "mods"))));
+        self.add_toast(adw::Toast::new(&format!("Copied “{name}” with {}", plural(shared.mods.len(), "mod", "mods"))));
     }
 
     /// Imports a load order from the clipboard as a new collection, like

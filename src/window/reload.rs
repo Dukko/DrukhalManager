@@ -79,7 +79,7 @@ impl Window {
             if !restored.is_empty() {
                 title.push_str(&format!(" · back in the load order: {}", names(&restored)));
             }
-            ui.toasts.add_toast(adw::Toast::builder().title(title).timeout(8).build());
+            ui.add_toast(adw::Toast::builder().title(title).timeout(8).build());
             then(&ui);
         });
     }

@@ -15,6 +15,11 @@ use crate::mods::filter::View;
 use crate::paradox::steam::ItemState;
 
 const CSS: &str = "
+/* The side panels float as rounded cards beside the list, rather than
+   filling the window's edges. */
+.load-order-split > .sidebar-pane { background: transparent; box-shadow: none; border: none; }
+.side-panel { background: @sidebar_bg_color; color: @sidebar_fg_color; border-radius: 12px; margin: 8px; box-shadow: 0 0 0 1px alpha(@borders, 0.6), 0 2px 6px alpha(black, 0.12); }
+.side-panel .navigation-sidebar { background: transparent; }
 .health-card { padding: 10px 14px; }
 .health-card .number { font-size: 20px; font-weight: 700; }
 .mod-list > row.mod-row { min-height: 0; }
@@ -58,7 +63,7 @@ pub(super) fn views_sidebar() -> (gtk::ListBox, Vec<(View, gtk::Label)>, gtk::La
 }
 
 pub(super) fn sidebar_page(list: &gtk::ListBox, info: &gtk::Label) -> gtk::Box {
-    let page = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    let page = gtk::Box::builder().orientation(gtk::Orientation::Vertical).css_classes(["side-panel"]).overflow(gtk::Overflow::Hidden).build();
     page.append(&gtk::Label::builder().label("Views").xalign(0.0).margin_start(18).margin_top(12).margin_bottom(4).css_classes(["heading", "dim-label"]).build());
     page.append(&gtk::ScrolledWindow::builder().child(list).vexpand(true).hscrollbar_policy(gtk::PolicyType::Never).build());
     page.append(info);

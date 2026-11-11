@@ -230,7 +230,7 @@ impl Window {
 
     pub(super) fn sort_alphabetically(self: &Rc<Self>) {
         if !self.state.borrow_mut().sort_alphabetically() {
-            return self.toasts.add_toast(adw::Toast::new("Already in alphabetical order"));
+            return self.add_toast(adw::Toast::new("Already in alphabetical order"));
         }
         self.refresh();
         self.offer_undo("Sorted mods alphabetically, after their dependencies");
@@ -249,7 +249,7 @@ impl Window {
                 ui.refresh();
             }
         });
-        self.toasts.add_toast(toast);
+        self.add_toast(toast);
     }
 
     /// Applies a state change after the current signal handler returns, since
