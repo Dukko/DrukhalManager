@@ -36,6 +36,14 @@
     <control>keyboard</control>
   </supports>
   <releases>
+    <release version="0.5.0" date="2026-11-11">
+      <description>
+        <p>The mod search understands filters: enabled:, source:, achievements:, conflicts: and version:, with -- to leave mods out, || for either, and quoted phrases. It also finds mods by Workshop ID. The Filters button next to the search box sets them for you.</p>
+        <p>Collections can be imported from the game's current load order and from Paradox Launcher playset files, and exported as a playset file for players who use the launcher. Import and export are now submenus of the collection menu.</p>
+        <p>The name Merge into One Mod gives the merged mod can be chosen in Preferences, with {Name} for the collection's name.</p>
+        <p>Overridden images, including DDS textures, are shown side by side on the Conflicts page with their sizes, and Use This Version puts the chosen copy in the merged patch.</p>
+      </description>
+    </release>
     <release version="0.4.0" date="2026-11-10">
       <description>
         <p>Copy Load Order and Paste Load Order, in the collection menu, share a load order as a numbered list with Workshop links, ready for a chat or forum post. Pasting one, or a collection file, makes a new collection.</p>
