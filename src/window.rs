@@ -256,7 +256,19 @@ pub fn build(
     ));
     content.append(&heading("Load Order"));
     content.append(&enabled_list);
-    content.append(&heading("Disabled"));
+    let disabled_order = gtk::DropDown::builder()
+        .model(&gtk::StringList::new(&["Name", "Recently Updated"]))
+        .tooltip_text("Order of the disabled mods")
+        .valign(gtk::Align::Center)
+        .css_classes(["flat"])
+        .build();
+    let disabled_heading = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+    let label = heading("Disabled");
+    label.set_hexpand(true);
+    disabled_heading.append(&label);
+    disabled_heading.append(&gtk::Label::builder().label("Sort by").css_classes(["dim-label"]).build());
+    disabled_heading.append(&disabled_order);
+    content.append(&disabled_heading);
     content.append(&disabled_list);
     stack.add_titled_with_icon(
         &scrolled_page(&content),
@@ -411,6 +423,21 @@ pub fn build(
         if let Some(ui) = weak.upgrade() {
             ui.sort_by_dependencies();
         }
+    });
+    disabled_order.set_selected(match ui.settings.borrow().disabled_order {
+        settings::DisabledOrder::Name => 0,
+        settings::DisabledOrder::RecentlyUpdated => 1,
+    });
+    let weak = Rc::downgrade(&ui);
+    disabled_order.connect_selected_notify(move |picker| {
+        let Some(ui) = weak.upgrade() else { return };
+        let order = if picker.selected() == 1 { settings::DisabledOrder::RecentlyUpdated } else { settings::DisabledOrder::Name };
+        if ui.settings.borrow().disabled_order == order {
+            return;
+        }
+        ui.settings.borrow_mut().disabled_order = order;
+        ui.save_settings("the Disabled list's order");
+        ui.refresh();
     });
     let weak = Rc::downgrade(&ui);
     sort_alpha_button.connect_clicked(move |_| {

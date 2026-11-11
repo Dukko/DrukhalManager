@@ -41,6 +41,15 @@ pub struct Mod {
     pub steam: Option<ItemState>,
 }
 
+impl Mod {
+    /// When the mod's files last changed, which for a Workshop mod is when
+    /// Steam last updated it.
+    pub fn updated(&self) -> Option<std::time::SystemTime> {
+        let content = self.content.as_ref()?;
+        [content.clone(), content.join("descriptor.mod")].iter().filter_map(|p| std::fs::metadata(p).and_then(|m| m.modified()).ok()).max()
+    }
+}
+
 /// Reads every descriptor in `<user_dir>/mod`, resolves where its files live,
 /// and annotates it with its position in `dlc_load.json`. Enabled mods come
 /// first in load order, then the rest by name.

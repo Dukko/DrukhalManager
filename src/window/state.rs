@@ -3,6 +3,7 @@
 use super::display_name;
 use crate::merge::patch;
 use crate::mods::{checks, Mod};
+use crate::settings::DisabledOrder;
 
 /// How many load order steps Ctrl+Z can go back.
 const MAX_HISTORY: usize = 100;
@@ -125,6 +126,17 @@ impl State {
             .filter(|i| !self.enabled.contains(i))
             .collect();
         disabled.sort_by_cached_key(|&i| self.mods[i].descriptor.name.to_lowercase());
+        disabled
+    }
+
+    /// The disabled mods in `order`. Ties, and mods whose files can't be
+    /// found, go by name.
+    pub(crate) fn disabled_in(&self, order: DisabledOrder) -> Vec<usize> {
+        let mut disabled = self.disabled();
+        if order == DisabledOrder::RecentlyUpdated {
+            // Stable, so equal times stay in name order.
+            disabled.sort_by_cached_key(|&i| std::cmp::Reverse(self.mods[i].updated()));
+        }
         disabled
     }
 
@@ -463,6 +475,22 @@ mod tests {
             "a saved order with the patch first is fixed on load"
         );
         assert!(s.dirty);
+    }
+
+    #[test]
+    fn orders_disabled_mods() {
+        let root = std::env::temp_dir().join(format!("drukhal-disabled-order-{}", std::process::id()));
+        let mut s = state(&[0]);
+        let old = std::time::SystemTime::now() - std::time::Duration::from_secs(3600);
+        for (i, age) in [(1, old), (3, std::time::SystemTime::now())] {
+            let dir = root.join(i.to_string());
+            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::File::open(&dir).unwrap().set_modified(age).unwrap();
+            s.mods[i].content = Some(dir);
+        }
+        assert_eq!(s.disabled_in(DisabledOrder::Name), [1, 2, 3]);
+        assert_eq!(s.disabled_in(DisabledOrder::RecentlyUpdated), [3, 1, 2], "newest first, missing files last");
+        std::fs::remove_dir_all(&root).unwrap();
     }
 
     #[test]

@@ -71,7 +71,8 @@ impl Window {
                 issues.get(&index).unwrap_or(&none),
             ));
         }
-        for index in state.disabled() {
+        let order = self.settings.borrow().disabled_order;
+        for index in state.disabled_in(order) {
             self.disabled_list.append(&self.row(
                 &state.mods[index],
                 index,
