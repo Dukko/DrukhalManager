@@ -210,7 +210,9 @@ impl State {
         self.reorder(sorted)
     }
 
-    fn reorder(&mut self, sorted: Vec<usize>) -> bool {
+    /// Puts the enabled mods in `sorted` order, as one undoable change.
+    /// Returns whether the order changed.
+    pub(crate) fn reorder(&mut self, sorted: Vec<usize>) -> bool {
         if sorted == self.enabled {
             return false;
         }

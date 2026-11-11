@@ -5,6 +5,7 @@ pub mod checks;
 pub mod collections;
 mod descriptor;
 pub mod repair;
+pub mod smart_sort;
 pub mod sync;
 pub mod load_order;
 

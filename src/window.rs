@@ -10,6 +10,7 @@ mod persist;
 mod reload;
 mod repair_ui;
 mod shortcuts;
+mod smart_sort_ui;
 mod state;
 mod thumbnails;
 mod updates;
@@ -197,9 +198,13 @@ pub fn build(
         .valign(gtk::Align::Center)
         .visible(false)
         .build();
-    let sort_alpha_button = gtk::Button::builder()
-        .child(&adw::ButtonContent::builder().icon_name("view-sort-ascending-symbolic").label("Sort A–Z, Dependencies First").build())
-        .tooltip_text("Sort alphabetically, keeping mods after the mods they depend on")
+    let sort_menu = gio::Menu::new();
+    sort_menu.append(Some("Sort A–Z, Dependencies First"), Some("win.sort-alphabetically"));
+    let sort_alpha_button = adw::SplitButton::builder()
+        .child(&adw::ButtonContent::builder().icon_name("view-sort-ascending-symbolic").label("Smart Sort…").build())
+        .tooltip_text("Sort into sections by what each mod changes, keeping sub-mods below their mods and every mod after its dependencies")
+        .dropdown_tooltip("More ways to sort")
+        .menu_model(&sort_menu)
         .css_classes(["flat"])
         .valign(gtk::Align::Center)
         .build();
@@ -410,9 +415,17 @@ pub fn build(
     let weak = Rc::downgrade(&ui);
     sort_alpha_button.connect_clicked(move |_| {
         if let Some(ui) = weak.upgrade() {
+            ui.open_smart_sort();
+        }
+    });
+    let sort_alphabetically = gio::SimpleAction::new("sort-alphabetically", None);
+    let weak = Rc::downgrade(&ui);
+    sort_alphabetically.connect_activate(move |_, _| {
+        if let Some(ui) = weak.upgrade() {
             ui.sort_alphabetically();
         }
     });
+    window.add_action(&sort_alphabetically);
     for (name, open) in [
         ("open-folder", Window::open_folder as fn(&Window, usize)),
         ("open-workshop", Window::open_workshop),
