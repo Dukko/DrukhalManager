@@ -197,10 +197,17 @@ pub fn build(
         .valign(gtk::Align::Center)
         .visible(false)
         .build();
+    let sort_alpha_button = gtk::Button::builder()
+        .icon_name("view-sort-ascending-symbolic")
+        .tooltip_text("Sort alphabetically, keeping mods after the mods they depend on")
+        .css_classes(["flat"])
+        .valign(gtk::Align::Center)
+        .build();
     let top = gtk::Box::new(gtk::Orientation::Horizontal, 12);
     status.set_hexpand(true);
     top.append(&status);
     top.append(&sort_button);
+    top.append(&sort_alpha_button);
     top.append(&all_toggle);
     let search = gtk::SearchEntry::builder()
         .placeholder_text("Search mods by name or tag (Ctrl+F)")
@@ -398,6 +405,12 @@ pub fn build(
     sort_button.connect_clicked(move |_| {
         if let Some(ui) = weak.upgrade() {
             ui.sort_by_dependencies();
+        }
+    });
+    let weak = Rc::downgrade(&ui);
+    sort_alpha_button.connect_clicked(move |_| {
+        if let Some(ui) = weak.upgrade() {
+            ui.sort_alphabetically();
         }
     });
     for (name, open) in [
