@@ -22,7 +22,9 @@ pub const MERGING_PAGE: &str = "merging";
 /// Edits a copy of `settings`, opening on `page` if given; `on_close`
 /// receives the result when the dialog closes.
 pub fn present(parent: &impl IsA<gtk::Widget>, settings: Settings, page: Option<&str>, on_close: impl Fn(Settings) + 'static) {
-    let dialog = adw::PreferencesDialog::new();
+    // A fixed size: it opens before its sections are shown (see below),
+    // and would otherwise size itself to an empty page.
+    let dialog = adw::PreferencesDialog::builder().content_width(640).content_height(720).build();
     let (game_page, merging_page, read_game) = game_page(&settings.game);
     let (ai_page, read_provider, read_parallel) = ai_page(&settings.provider, settings.parallel_merges);
     let (updates_page, read_updates) = updates_page(&settings.updates);
@@ -64,8 +66,9 @@ pub fn present(parent: &impl IsA<gtk::Widget>, settings: Settings, page: Option<
     glib::timeout_add_local_once(OPEN_ANIMATION, move || shown.iter().for_each(|g| g.set_visible(true)));
 }
 
-/// How long `AdwDialog` takes to animate in.
-const OPEN_ANIMATION: std::time::Duration = std::time::Duration::from_millis(450);
+/// When to show the sections: as `AdwDialog` finishes animating in (about
+/// 400 ms); sooner brings back slow frames.
+const OPEN_ANIMATION: std::time::Duration = std::time::Duration::from_millis(350);
 
 fn collect_groups(widget: &gtk::Widget, out: &mut Vec<adw::PreferencesGroup>) {
     if let Some(group) = widget.downcast_ref::<adw::PreferencesGroup>() {
