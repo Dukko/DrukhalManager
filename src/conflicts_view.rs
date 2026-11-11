@@ -386,7 +386,9 @@ pub fn build(analysis: &Rc<Analysis>, rescan: gtk::Button, hooks: Rc<MergeHooks>
     let content = adw::Bin::builder().hexpand(true).vexpand(true).build();
     let split = adw::NavigationSplitView::builder()
         .sidebar(&adw::NavigationPage::builder().title("Conflicts").child(&sidebar).build())
-        .content(&adw::NavigationPage::builder().title("Conflict").child(&content).build())
+        // Scrolls sideways when the window is too narrow for a conflict's
+        // toolbar and cards, instead of asking for more width than there is.
+        .content(&adw::NavigationPage::builder().title("Conflict").child(&gtk::ScrolledWindow::builder().child(&content).hscrollbar_policy(gtk::PolicyType::Automatic).vscrollbar_policy(gtk::PolicyType::Never).build()).build())
         .min_sidebar_width(260.0)
         .max_sidebar_width(380.0)
         .sidebar_width_fraction(0.24)

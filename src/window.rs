@@ -143,7 +143,10 @@ pub fn build(
     thumbnails::add_css();
     overview::add_css();
     crate::sandbox::load_host_stylesheet();
-    let stack = adw::ViewStack::new();
+    // Sized by the visible page only: measuring the Conflicts page's diff
+    // on every layout of the Mods page (as while a dialog animates) made
+    // the whole window slow.
+    let stack = adw::ViewStack::builder().hhomogeneous(false).vhomogeneous(false).build();
     let switcher = adw::ViewSwitcher::builder()
         .stack(&stack)
         .policy(adw::ViewSwitcherPolicy::Wide)
