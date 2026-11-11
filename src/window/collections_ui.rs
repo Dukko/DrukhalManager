@@ -522,6 +522,13 @@ impl Window {
             body.push_str(&format!("\n\nThese mods' files weren't found, so they're left out: {}", left_out.join(", ")));
         }
         let dialog = adw::AlertDialog::new(Some("Merge into One Mod?"), Some(&body));
+        let as_zip = gtk::CheckButton::builder()
+            .label("Write One Zip File")
+            .tooltip_text("Easier to move, back up and share than thousands of files. The game reads it like a folder.")
+            .active(self.settings.borrow().game.merge_to_zip)
+            .halign(gtk::Align::Center)
+            .build();
+        dialog.set_extra_child(Some(&as_zip));
         dialog.add_responses(&[("cancel", "_Cancel"), ("merge", "_Merge")]);
         dialog.set_response_appearance("merge", adw::ResponseAppearance::Suggested);
         dialog.set_default_response(Some("merge"));
@@ -529,6 +536,11 @@ impl Window {
         let weak = Rc::downgrade(self);
         dialog.connect_response(None, move |_, response| {
             let (Some(ui), "merge") = (weak.upgrade(), response) else { return };
+            let output = if as_zip.is_active() { collection::Output::Zip } else { collection::Output::Folder };
+            if ui.settings.borrow().game.merge_to_zip != as_zip.is_active() {
+                ui.settings.borrow_mut().game.merge_to_zip = as_zip.is_active();
+                ui.save_settings("the merge format");
+            }
             let toast = adw::Toast::builder().title(format!("Merging into “{name}”…")).timeout(0).build();
             ui.toasts.add_toast(toast.clone());
             let user_dir = ui.paths.user_dir.clone();
@@ -543,7 +555,7 @@ impl Window {
                         .into_iter()
                         .map(|(content, replace_path)| Ok(collection::Input { root: archive::files(&content)?, replace_path }))
                         .collect::<std::io::Result<Vec<_>>>()?;
-                    collection::write(&user_dir, &active, &mod_name, &version, &inputs)
+                    collection::write(&user_dir, &active, &mod_name, &version, &inputs, output)
                 })
                 .await
                 .unwrap_or_else(|_| Err(std::io::Error::other("the merge failed")));

@@ -231,6 +231,8 @@ fn game_page(options: &GameOptions) -> (adw::PreferencesPage, impl Fn() -> GameO
     page.add(&launching);
     page.add(&scan);
     page.add(&merging);
+    // Chosen in the merge dialog, not here.
+    let merge_to_zip = options.merge_to_zip;
     let read = move || GameOptions {
         executable: exe.borrow().clone(),
         data_dir: data_dir.borrow().clone(),
@@ -247,6 +249,7 @@ fn game_page(options: &GameOptions) -> (adw::PreferencesPage, impl Fn() -> GameO
             let text = name_row.text().trim().to_owned();
             (collection::is_template(&text) && text != collection::DEFAULT_TEMPLATE).then_some(text)
         },
+        merge_to_zip,
     };
     (page, read)
 }
