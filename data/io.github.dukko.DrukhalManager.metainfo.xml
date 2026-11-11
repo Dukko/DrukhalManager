@@ -36,6 +36,15 @@
     <control>keyboard</control>
   </supports>
   <releases>
+    <release version="0.8.0" date="2026-11-11">
+      <description>
+        <p><em>One merged patch per collection.</em> Merges only fit the load order they were made for, so each collection now has its own merged patch, named after it, and switching collections switches patches. The patch you had becomes the active collection's. Backups, exporting with the patch and importing work per collection: an imported patch goes to the new collection instead of replacing yours.</p>
+        <p><em>Freeze a collection.</em> Freeze This Collection…, in the collection menu, copies its Workshop mods into local mods, so Steam updating one can't break a campaign in progress. The health strip shows when Steam has newer versions, and Unfreeze switches back to the Workshop mods and deletes the copies.</p>
+        <p><em>Merge Tool… for whole files.</em> Overridden text files on the Conflicts page, and the file merge dialog, can be merged in Meld, KDiff3, VS Code or another tool too.</p>
+        <p><em>Multiplayer check.</em> The report says whether you run the native Linux build or the Windows one, as players report that their checksums never match. Comparing reports now points out files that differ only in line endings, and files the native Linux build may skip because of how their names are capitalised.</p>
+        <p><em>Smoother Preferences.</em> Preferences is split into Game, Merging, AI Merging, Steam and Updates pages, and opens without stuttering. The Conflicts page fits narrower windows.</p>
+      </description>
+    </release>
     <release version="0.7.0" date="2026-11-11">
       <description>
         <p><em>A redesigned load order.</em> A health strip above the list shows what needs attention: mods not updated for the game, required mods that are missing, mods loading before ones they need, out-of-date merges and achievements, each with a button to show or fix it. A sidebar of views lists the mods that need attention, aren't updated, have conflicts, turn off achievements or are disabled. Rows take one line each, and selecting a mod shows its problems, needs and actions in a panel beside the list.</p>
