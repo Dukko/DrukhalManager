@@ -10,6 +10,8 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+use crate::merge::patch::{self, Target};
+
 use super::Mod;
 
 pub const DEFAULT: &str = "Default";
@@ -23,6 +25,9 @@ pub struct Collection {
     /// The mods' names, so ones that aren't installed can still be shown.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub names: BTreeMap<String, String>,
+    /// The folder of its merged patch, once it has one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub patch: Option<String>,
 }
 
 /// A mod in a collection that isn't installed.
@@ -37,7 +42,7 @@ pub struct Placeholder {
 
 impl Collection {
     pub fn new(name: &str, mods: Vec<String>) -> Self {
-        Self { name: name.to_owned(), mods, names: BTreeMap::new() }
+        Self { name: name.to_owned(), mods, names: BTreeMap::new(), patch: None }
     }
 
     /// Makes `enabled`, the load order being saved, the collection's mods.
@@ -184,6 +189,32 @@ impl Collections {
             self.active = to.clone();
         }
         Some(to)
+    }
+
+    /// The active collection's merged patch. A collection without one is
+    /// given a folder for it: the patch older versions shared between
+    /// collections if `legacy_exists` and no collection has it yet, or else
+    /// a new folder that no collection uses and `on_disk` says is free.
+    /// Returns whether a folder was given, so the collections need saving.
+    pub fn patch_target(&mut self, legacy_exists: bool, on_disk: impl Fn(&str) -> bool) -> (Target, bool) {
+        let active = self.active.clone();
+        if let Some(folder) = self.get(&active).and_then(|c| c.patch.clone()) {
+            return (Target::new(&folder, &active), false);
+        }
+        let folder = if legacy_exists && !self.list.iter().any(|c| c.patch.as_deref() == Some(patch::LEGACY_FOLDER)) {
+            // Its merges were made for this load order; others drop it.
+            let legacy = Target::new(patch::LEGACY_FOLDER, "").id();
+            for c in self.list.iter_mut().filter(|c| c.name != active) {
+                c.mods.retain(|id| *id != legacy);
+            }
+            patch::LEGACY_FOLDER.to_owned()
+        } else {
+            patch::folder_for(&active, |f| on_disk(f) || self.list.iter().any(|c| c.patch.as_deref() == Some(f)))
+        };
+        if let Some(c) = self.get_mut(&active) {
+            c.patch = Some(folder.clone());
+        }
+        (Target::new(&folder, &active), true)
     }
 
     /// Removes `name` unless it's the last collection.
@@ -484,6 +515,24 @@ mod tests {
     }
 
     use super::*;
+
+    #[test]
+    fn gives_each_collection_its_own_patch() {
+        let legacy = "mod/drukhal_merged_patch.mod".to_owned();
+        let mut c = Collections::starting_with(vec!["mod/1.mod".into(), legacy.clone()]);
+        c.add("Other", vec!["mod/2.mod".into(), legacy.clone()]);
+        // The shared patch goes to the active collection; the other drops it.
+        let (target, given) = c.patch_target(true, |_| false);
+        assert!(given);
+        assert_eq!((target.folder.as_str(), target.name.as_str()), (patch::LEGACY_FOLDER, "Default (Patch)"));
+        assert_eq!(c.get("Other").unwrap().mods, ["mod/2.mod"]);
+        assert_eq!(c.patch_target(true, |_| false), (target.clone(), false), "kept");
+        // Another collection gets a new folder, even with the old one there.
+        c.active = "Other".into();
+        let (other, _) = c.patch_target(true, |f| f == "drukhal_patch_other");
+        assert_eq!(other.folder, "drukhal_patch_other_2", "a deleted collection's leftover folder isn't reused");
+        assert_eq!(c.get("Default").unwrap().patch.as_deref(), Some(patch::LEGACY_FOLDER));
+    }
     use crate::mods::{Descriptor, Source};
 
     fn m(id: &str, name: &str, steam: Option<u64>) -> Mod {

@@ -505,16 +505,8 @@ pub fn build(
             ui.update_continue();
         }
     });
-    match Patch::open(&ui.paths.user_dir) {
-        Ok(p) => {
-            ui.patch.replace(Some(p));
-        }
-        Err(e) => ui.add_toast(
-            adw::Toast::builder()
-                .title(format!("Could not read the merged patch: {e}"))
-                .timeout(0)
-                .build(),
-        ),
+    if let Err(e) = ui.sync_patch() {
+        ui.add_toast(adw::Toast::builder().title(e).timeout(0).build());
     }
     let weak = Rc::downgrade(&ui);
     repair_banner.connect_button_clicked(move |_| {

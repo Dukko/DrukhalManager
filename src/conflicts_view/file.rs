@@ -226,7 +226,7 @@ impl FileView {
             };
             card.set_header(&header);
             if let Some(p) = v.position.filter(|&p| p != winner) {
-                let use_it = gtk::Button::builder().label("Use This Version").tooltip_text(format!("Save this copy to {}, so it's used instead of {}'s", patch::NAME, analysis.name(winner))).build();
+                let use_it = gtk::Button::builder().label("Use This Version").tooltip_text(format!("Save this copy to the merged patch, so it's used instead of {}'s", analysis.name(winner))).build();
                 let (weak, text) = (Rc::downgrade(self), v.text.clone().unwrap_or_default());
                 use_it.connect_clicked(move |_| {
                     if let Some(view) = weak.upgrade() {
@@ -307,7 +307,7 @@ impl FileView {
                 Err(reason) => inner.append(&image_problem(reason, 0)),
             }
             if let (Some(p), Ok(copy)) = (v.position.filter(|&p| p != winner), v.image.as_ref().expect("an image version")) {
-                let use_it = gtk::Button::builder().label("Use This Version").halign(gtk::Align::Center).tooltip_text(format!("Save this copy to {}, so it's used instead of {}'s", patch::NAME, analysis.name(winner))).build();
+                let use_it = gtk::Button::builder().label("Use This Version").halign(gtk::Align::Center).tooltip_text(format!("Save this copy to the merged patch, so it's used instead of {}'s", analysis.name(winner))).build();
                 let (weak, bytes) = (Rc::downgrade(self), copy.bytes.clone());
                 use_it.connect_clicked(move |_| {
                     if let Some(view) = weak.upgrade() {
@@ -334,7 +334,7 @@ impl FileView {
     /// Opens the two copies in the external merge tool, and saves what's
     /// saved there to the patch.
     fn merge_tool_button(self: &Rc<Self>, page: &Rc<Page>, left: &Version, right: &Version, base: Option<String>) -> gtk::Button {
-        let button = gtk::Button::builder().label("Merge Tool…").tooltip_text(format!("Merge these two copies in your merge tool; what you save there goes into {}", patch::NAME)).css_classes(["flat"]).build();
+        let button = gtk::Button::builder().label("Merge Tool…").tooltip_text("Merge these two copies in your merge tool; what you save there goes into the merged patch").css_classes(["flat"]).build();
         let (left, right) = ((left.label.clone(), left.text.clone().unwrap_or_default()), (right.label.clone(), right.text.clone().unwrap_or_default()));
         let (weak, page_ref) = (Rc::downgrade(self), Rc::downgrade(page));
         button.connect_clicked(move |button| {

@@ -713,7 +713,7 @@ impl ObjectView {
             Final::Edit => {
                 let card = Card::new(true);
                 card.set_header(&result_header);
-                let save = gtk::Button::builder().label("Save to Patch").css_classes(["suggested-action"]).tooltip_text(format!("Save to {}", crate::merge::patch::NAME)).build();
+                let save = gtk::Button::builder().label("Save to Patch").css_classes(["suggested-action"]).tooltip_text("Save to the merged patch").build();
                 card.set_actions(&[save.clone().upcast()]);
                 card.set_text(&text);
                 {

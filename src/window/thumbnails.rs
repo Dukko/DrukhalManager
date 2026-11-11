@@ -87,7 +87,7 @@ impl Window {
             .css_classes(["mod-thumbnail", "placeholder"])
             .build();
         // The merged patch is this app's, so it wears the app's icon.
-        if m.id == patch::ID {
+        if patch::is_patch(&m.id) {
             picture.set_icon_name(Some(crate::APP_ID));
             picture.set_css_classes(&["mod-thumbnail", "patch"]);
             picture.set_tooltip_text(Some("Made by Drukhal Manager from your merges"));

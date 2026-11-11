@@ -7,23 +7,23 @@ use std::path::{Path, PathBuf};
 
 use zip::write::SimpleFileOptions;
 
-use super::patch::Patch;
+use super::patch::Target;
 use super::snapshot;
 use crate::mods::collections::Shared;
 
 const COLLECTION: &str = "collection.json";
 const PATCH: &str = "patch/";
 
-/// Writes `shared` and, if there is one, the patch in `user_dir` to a zip
-/// at `path`. Returns how many patch files went in.
-pub fn export(path: &Path, shared: &Shared, user_dir: &Path) -> io::Result<usize> {
+/// Writes `shared` and, if there is one, its patch `target` in `user_dir`
+/// to a zip at `path`. Returns how many patch files went in.
+pub fn export(path: &Path, shared: &Shared, user_dir: &Path, target: &Target) -> io::Result<usize> {
     let tmp = path.with_extension("zip.drukhal-tmp");
     let result = (|| {
         let mut zip = zip::ZipWriter::new(std::fs::File::create(&tmp)?);
         let options = SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
         zip.start_file(COLLECTION, options).map_err(io::Error::other)?;
         zip.write_all(&serde_json::to_vec_pretty(shared).map_err(io::Error::other)?)?;
-        let root = Patch::root(user_dir);
+        let root = target.root(user_dir);
         let mut files = Vec::new();
         if root.is_dir() {
             list(&root, &root, &mut files)?;
@@ -76,9 +76,9 @@ pub fn read(path: &Path) -> io::Result<Bundle> {
     Ok(Bundle { path: path.to_owned(), collection, patch_files })
 }
 
-/// Makes the bundle's patch the patch in `user_dir`, after backing up the
-/// current one to `backup_dir`.
-pub fn install_patch(bundle: &Bundle, user_dir: &Path, backup_dir: &Path) -> io::Result<()> {
+/// Makes the bundle's patch the patch `target` in `user_dir`, after backing
+/// up what `target` held to `backup_dir`.
+pub fn install_patch(bundle: &Bundle, user_dir: &Path, target: &Target, backup_dir: &Path) -> io::Result<()> {
     let mut zip = zip::ZipArchive::new(std::fs::File::open(&bundle.path)?).map_err(io::Error::other)?;
     let staging = backup_dir.join(format!("imported-patch-{}.drukhal-tmp", std::process::id()));
     let _ = std::fs::remove_dir_all(&staging);
@@ -98,8 +98,8 @@ pub fn install_patch(bundle: &Bundle, user_dir: &Path, backup_dir: &Path) -> io:
         if !staging.join("descriptor.mod").is_file() {
             return Err(io::Error::new(io::ErrorKind::InvalidData, "the shared patch has no descriptor"));
         }
-        snapshot::take(user_dir, backup_dir, snapshot::BEFORE_IMPORTING)?;
-        snapshot::replace_patch(user_dir, &staging)
+        snapshot::take(user_dir, target, backup_dir, snapshot::BEFORE_IMPORTING)?;
+        snapshot::replace_patch(user_dir, target, &staging)
     })();
     let _ = std::fs::remove_dir_all(&staging);
     result
@@ -108,6 +108,7 @@ pub fn install_patch(bundle: &Bundle, user_dir: &Path, backup_dir: &Path) -> io:
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::merge::patch;
     use crate::mods::collections::SharedMod;
 
     #[test]
@@ -115,24 +116,24 @@ mod tests {
         let root = std::env::temp_dir().join(format!("drukhal-bundle-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         let (mine, theirs) = (root.join("mine"), root.join("theirs"));
-        let patch = Patch::root(&mine);
+        let patch = patch::test_target().root(&mine);
         std::fs::create_dir_all(patch.join("common/buildings")).unwrap();
         std::fs::write(patch.join("descriptor.mod"), "name=\"DrukhalManager Merged Patch\"\n").unwrap();
         std::fs::write(patch.join("common/buildings/zz_merged.txt"), "a = {}").unwrap();
         let shared = Shared { format: 1, name: "Main".into(), mods: vec![SharedMod { name: "A".into(), steam_id: Some(1), id: "mod/ugc_1.mod".into() }] };
         let path = root.join("Main.zip");
-        assert_eq!(export(&path, &shared, &mine).unwrap(), 2);
+        assert_eq!(export(&path, &shared, &mine, &patch::test_target()).unwrap(), 2);
 
         let bundle = read(&path).unwrap();
         assert_eq!((bundle.collection.name.as_str(), bundle.patch_files), ("Main", 2));
         // Their own patch is backed up and replaced.
-        let theirs_patch = Patch::root(&theirs);
+        let theirs_patch = patch::test_target().root(&theirs);
         std::fs::create_dir_all(&theirs_patch).unwrap();
         std::fs::write(theirs_patch.join("descriptor.mod"), "name=\"old\"\n").unwrap();
-        install_patch(&bundle, &theirs, &root.join("backups")).unwrap();
+        install_patch(&bundle, &theirs, &patch::test_target(), &root.join("backups")).unwrap();
         assert_eq!(std::fs::read_to_string(theirs_patch.join("common/buildings/zz_merged.txt")).unwrap(), "a = {}");
-        assert!(std::fs::read_to_string(theirs.join(super::super::patch::ID)).unwrap().contains("path="));
-        let backups = snapshot::list(&root.join("backups"));
+        assert!(std::fs::read_to_string(theirs.join(patch::test_target().id())).unwrap().contains("path="));
+        let backups = snapshot::list(&root.join("backups"), &patch::test_target());
         assert_eq!(backups.len(), 1);
         assert_eq!(backups[0].reason, snapshot::BEFORE_IMPORTING);
 

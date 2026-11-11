@@ -109,7 +109,7 @@ impl State {
         let Some(at) = self
             .enabled
             .iter()
-            .position(|&i| self.mods[i].id == patch::ID)
+            .position(|&i| patch::is_patch(&self.mods[i].id))
         else {
             return false;
         };
@@ -436,7 +436,7 @@ mod tests {
     fn patch_always_loads_last() {
         let mut s = state(&[0, 1]);
         s.mods.push(Mod {
-            id: patch::ID.into(),
+            id: patch::test_target().id(),
             descriptor: Default::default(),
             content: None,
             source: mods::Source::Local,
@@ -460,7 +460,7 @@ mod tests {
             [1, 2, 0, 4],
             "moving to the bottom stops above the patch"
         );
-        s.set_enabled_ids(&[patch::ID.into(), "mod/3.mod".into()]);
+        s.set_enabled_ids(&[patch::test_target().id(), "mod/3.mod".into()]);
         assert_eq!(
             s.enabled,
             [3, 4],
@@ -476,7 +476,7 @@ mod tests {
 
         let mods = vec![
             Mod {
-                id: patch::ID.into(),
+                id: patch::test_target().id(),
                 descriptor: Default::default(),
                 content: None,
                 source: mods::Source::Local,

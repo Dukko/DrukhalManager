@@ -51,7 +51,7 @@ impl Window {
                 .iter()
                 .map(|&i| &state.mods[i])
                 .enumerate()
-                .filter(|(_, m)| m.id != patch::ID)
+                .filter(|(_, m)| !patch::is_patch(&m.id))
                 .collect();
             let names: Vec<String> = scanned
                 .iter()
@@ -652,18 +652,43 @@ impl Window {
         file_merge_dialog::present(&self.window, request);
     }
 
+    /// The active collection's merged patch, giving the collection one if
+    /// it has none.
+    pub(super) fn patch_target(&self) -> patch::Target {
+        let user_dir = &self.paths.user_dir;
+        let legacy = patch::Target::new(patch::LEGACY_FOLDER, "").root(user_dir).is_dir();
+        let (target, given) = self.collections.borrow_mut().patch_target(legacy, |folder| user_dir.join("mod").join(folder).exists());
+        if given && let Err(e) = self.collections.borrow().save(&crate::mods::collections::path()) {
+            self.add_toast(adw::Toast::new(&format!("Could not save collections: {e}")));
+        }
+        target
+    }
+
+    /// Makes the open patch the active collection's, as after switching or
+    /// renaming collections.
+    pub(super) fn sync_patch(&self) -> Result<(), String> {
+        let target = self.patch_target();
+        let open = self.patch.borrow().as_ref().map(|p| p.target().clone());
+        if open.as_ref() == Some(&target) {
+            return Ok(());
+        }
+        // Renamed: the launcher shows the patch by its collection's name.
+        if open.as_ref().is_some_and(|o| o.folder == target.folder) {
+            patch::link(&self.paths.user_dir, &target).map_err(|e| format!("Could not rename the merged patch: {e}"))?;
+        }
+        self.patch.replace(None);
+        let opened = Patch::open(&self.paths.user_dir, &target).map_err(|e| format!("Could not read the merged patch: {e}"))?;
+        self.patch.replace(Some(opened));
+        Ok(())
+    }
+
     /// Runs `f` on the merged patch, opening it first if needed.
     pub(super) fn with_patch(
         &self,
         f: impl FnOnce(&mut Patch, &std::path::Path, Option<&str>) -> std::io::Result<()>,
     ) -> Result<(), String> {
+        self.sync_patch()?;
         let mut patch = self.patch.borrow_mut();
-        if patch.is_none() {
-            *patch = Some(
-                Patch::open(&self.paths.user_dir)
-                    .map_err(|e| format!("Could not read the merged patch: {e}"))?,
-            );
-        }
         let version = self.game.as_ref().and_then(|g| g.version.as_deref());
         f(patch.as_mut().unwrap(), &self.paths.user_dir, version)
             .map_err(|e| format!("Could not save the merged patch: {e}"))
@@ -684,19 +709,20 @@ impl Window {
     /// Makes sure the merged patch is in the load order once it has content.
     pub(super) fn patch_saved(self: &Rc<Self>) {
         self.check_stale();
+        let target = self.patch_target();
         let added = {
             let mut state = self.state.borrow_mut();
-            let index = match state.mods.iter().position(|m| m.id == patch::ID) {
+            let index = match state.mods.iter().position(|m| m.id == target.id()) {
                 Some(i) => i,
                 None => {
-                    let descriptor = std::fs::read_to_string(self.paths.user_dir.join(patch::ID))
+                    let descriptor = std::fs::read_to_string(self.paths.user_dir.join(target.id()))
                         .ok()
                         .and_then(|src| mods::Descriptor::parse(&src).ok())
                         .unwrap_or_default();
                     state.mods.push(Mod {
-                        id: patch::ID.to_owned(),
+                        id: target.id(),
                         descriptor,
-                        content: Some(Patch::root(&self.paths.user_dir)),
+                        content: Some(target.root(&self.paths.user_dir)),
                         source: mods::Source::Local,
                         load_position: None,
                         error: None,
@@ -718,10 +744,10 @@ impl Window {
             (!was_enabled).then_some("added to the end of the load order")
         };
         self.refresh();
-        let toast = adw::Toast::builder().title(format!("Saved to {}", patch::NAME));
+        let toast = adw::Toast::builder().title(format!("Saved to {}", target.name));
         let toast = match added {
             Some(change) => toast
-                .title(format!("Saved to {}, which was {change}", patch::NAME))
+                .title(format!("Saved to {}, which was {change}", target.name))
                 .button_label("Save Load Order")
                 .action_name("win.save"),
             None => toast,

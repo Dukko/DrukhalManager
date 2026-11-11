@@ -71,7 +71,7 @@ impl Window {
             move || {
                 let input = input.borrow();
                 let Some(input) = input.as_ref() else { return };
-                let placed = smart_sort::plan(&input.mods, &input.enabled, &input.profiles, &overrides.borrow(), patch::ID);
+                let placed = smart_sort::plan(&input.mods, &input.enabled, &input.profiles, &overrides.borrow(), &patch::is_patch);
                 while let Some(child) = groups.first_child() {
                     groups.remove(&child);
                 }
@@ -110,7 +110,7 @@ impl Window {
                         }
                         let row = adw::ActionRow::builder().title(m.descriptor.name.trim()).subtitle(&subtitle).use_markup(false).build();
                         row.add_prefix(&gtk::Label::builder().label(position.to_string()).width_chars(3).xalign(1.0).css_classes(["dim-label", "numeric"]).build());
-                        if m.id != patch::ID {
+                        if !patch::is_patch(&m.id) {
                             row.add_suffix(&section_picker(p, &m.id, &overrides, render.clone()));
                         }
                         group.add(&row);

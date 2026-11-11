@@ -266,7 +266,7 @@ impl Window {
         let m = state.mods.get(index)?;
         let position = state.enabled.iter().position(|&i| i == index);
         let d = &m.descriptor;
-        let is_patch = m.id == patch::ID;
+        let is_patch = patch::is_patch(&m.id);
         let alias = self.settings.borrow().aliases.get(&m.id).cloned();
         let name = alias.clone().unwrap_or_else(|| display_name(m).to_owned());
         let issues = self.last_issues.borrow().get(&index).cloned().unwrap_or_default();
