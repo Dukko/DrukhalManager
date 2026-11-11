@@ -379,7 +379,7 @@ fn merge_tool_menu(request: &Rc<Request>, editor: &gtk::TextView, banner: &adw::
             popover.popdown();
             let command = (request.merge_tool)();
             if command.is_empty() {
-                return show(&banner, "Choose a merge tool in Preferences, under External Merge Tool, first.", true);
+                return show(&banner, "Choose a merge tool in Preferences, on the Merging page, first.", true);
             }
             let Ok(theirs) = std::fs::read(&copy) else {
                 return show(&banner, &format!("Could not read {name}'s copy."), true);

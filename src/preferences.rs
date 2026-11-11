@@ -17,20 +17,26 @@ use crate::update;
 
 pub const UPDATES_PAGE: &str = "updates";
 pub const AI_PAGE: &str = "ai";
+pub const MERGING_PAGE: &str = "merging";
 
 /// Edits a copy of `settings`, opening on `page` if given; `on_close`
 /// receives the result when the dialog closes.
 pub fn present(parent: &impl IsA<gtk::Widget>, settings: Settings, page: Option<&str>, on_close: impl Fn(Settings) + 'static) {
     let dialog = adw::PreferencesDialog::new();
-    let (game_page, read_game) = game_page(&settings.game);
+    let (game_page, merging_page, read_game) = game_page(&settings.game);
     let (ai_page, read_provider, read_parallel) = ai_page(&settings.provider, settings.parallel_merges);
     let (updates_page, read_updates) = updates_page(&settings.updates);
     let (tool_group, read_tool) = merge_tool_group(&settings.merge_tool);
-    ai_page.add(&tool_group);
+    merging_page.add(&tool_group);
     let (steam_group, read_steam_key) = steam_key_group();
-    game_page.add(&steam_group);
+    let steam_page = self::page("Steam", "steam", "network-server-symbolic");
+    steam_page.add(&steam_group);
+    // Several light pages rather than a few long ones: the dialog animates
+    // in slowly when the open page holds many rows.
     dialog.add(&game_page);
+    dialog.add(&merging_page);
     dialog.add(&ai_page);
+    dialog.add(&steam_page);
     dialog.add(&updates_page);
     if let Some(page) = page {
         dialog.set_visible_page_name(page);
@@ -177,7 +183,9 @@ fn path_row(title: &str, detected: Option<PathBuf>, chosen: Option<PathBuf>, fol
     (row, chosen)
 }
 
-fn game_page(options: &GameOptions) -> (adw::PreferencesPage, impl Fn() -> GameOptions + use<>) {
+/// The Game page, and the Merging page with the scan and merge options
+/// (kept apart so neither is slow to animate in).
+fn game_page(options: &GameOptions) -> (adw::PreferencesPage, adw::PreferencesPage, impl Fn() -> GameOptions + use<>) {
     let flatpak = crate::sandbox::is_flatpak();
     let home = glib::home_dir();
     let detected_exe = game::find(&steam::library_folders(&home)).map(|g| g.exe);
@@ -317,8 +325,9 @@ fn game_page(options: &GameOptions) -> (adw::PreferencesPage, impl Fn() -> GameO
     let page = page("Game", "game", "input-gaming-symbolic");
     page.add(&folders);
     page.add(&launching);
-    page.add(&scan);
-    page.add(&merging);
+    let merging_page = self::page("Merging", MERGING_PAGE, "view-dual-symbolic");
+    merging_page.add(&scan);
+    merging_page.add(&merging);
     // Chosen in the merge dialog, not here.
     let merge_to_zip = options.merge_to_zip;
     let read = move || GameOptions {
@@ -341,7 +350,7 @@ fn game_page(options: &GameOptions) -> (adw::PreferencesPage, impl Fn() -> GameO
         extra_mod_dir: extra_dir.borrow().clone(),
         merge_to_extra: merge_extra_row.is_active(),
     };
-    (page, read)
+    (page, merging_page, read)
 }
 
 fn ai_page(current: &Provider, parallel: Option<u32>) -> (adw::PreferencesPage, impl Fn() -> Provider + use<>, impl Fn(&Provider) -> Option<u32> + use<>) {

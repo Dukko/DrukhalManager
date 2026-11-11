@@ -400,6 +400,12 @@ impl Window {
             }
         });
         let weak = Rc::downgrade(self);
+        let open_merge_tool_settings = Box::new(move || {
+            if let Some(ui) = weak.upgrade() {
+                ui.open_preferences(Some(crate::preferences::MERGING_PAGE));
+            }
+        });
+        let weak = Rc::downgrade(self);
         let toast = Box::new(move |message: &str| {
             if let Some(ui) = weak.upgrade() {
                 ui.add_toast(adw::Toast::new(message));
@@ -433,6 +439,7 @@ impl Window {
             game_dir: self.game.as_ref().map(|g| g.dir.clone()),
             provider,
             open_preferences,
+            open_merge_tool_settings,
             merge_tool,
             toast,
             session: self.conflict_session.clone(),

@@ -109,6 +109,8 @@ pub struct MergeHooks {
     /// The AI provider, if one is set up.
     pub provider: Box<dyn Fn() -> Option<Provider>>,
     pub open_preferences: Box<dyn Fn()>,
+    /// Opens Preferences where the merge tool is chosen.
+    pub open_merge_tool_settings: Box<dyn Fn()>,
     /// The external merge tool's command; empty for none.
     pub merge_tool: Box<dyn Fn() -> String>,
     pub toast: Box<dyn Fn(&str)>,
