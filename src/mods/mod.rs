@@ -3,6 +3,7 @@
 pub mod archive;
 pub mod checks;
 pub mod collections;
+pub mod filter;
 mod descriptor;
 pub mod repair;
 pub mod smart_sort;

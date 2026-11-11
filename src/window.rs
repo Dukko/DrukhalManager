@@ -28,12 +28,15 @@ use state::State;
 
 use crate::conflicts_view::Analysis;
 use crate::merge::patch::{self, Patch};
-use crate::mods::Mod;
+use crate::mods::{Mod, filter};
 use crate::mods::collections::Collections;
 use crate::paradox::game::GameInstall;
 use crate::preferences;
 use crate::secrets;
 use crate::settings::{self, Settings};
+
+/// Filled by `row`, read by the lists' filter.
+type SearchFacts = Rc<RefCell<std::collections::HashMap<usize, filter::Facts>>>;
 
 pub struct Paths {
     pub user_dir: PathBuf,
@@ -55,6 +58,8 @@ struct Window {
     /// Shown when some mods load before mods they depend on.
     sort_button: gtk::Button,
     search: gtk::SearchEntry,
+    /// What the search can match each listed mod on, by mod index.
+    search_facts: SearchFacts,
     /// Offers to repair descriptors with stale paths or no mod behind them.
     repair_banner: adw::Banner,
     stack: adw::ViewStack,
@@ -223,8 +228,12 @@ pub fn build(
     top.append(&sort_alpha_button);
     top.append(&all_toggle);
     let search = gtk::SearchEntry::builder()
-        .placeholder_text("Search mods by name or tag (Ctrl+F)")
+        .placeholder_text("Search mods (Ctrl+F), or try source:local or enabled:no")
+        .hexpand(true)
         .build();
+    let search_row = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+    search_row.append(&search);
+    search_row.append(&filter_button(&search));
     // Banner titles are plain text: mod names can contain markup characters.
     let repair_banner = adw::Banner::builder()
         .button_label("Repair…")
@@ -237,19 +246,19 @@ pub fn build(
         .build();
     toolbar.add_top_bar(&restore_banner);
     content.append(&top);
-    content.append(&search);
+    content.append(&search_row);
+    let search_facts = SearchFacts::default();
+    let query: Rc<RefCell<filter::Query>> = Rc::default();
     for list in [&enabled_list, &disabled_list] {
-        let search = search.clone();
+        let (query, facts) = (query.clone(), search_facts.clone());
         list.set_filter_func(move |row| {
-            let query = search.text().to_lowercase();
-            if query.is_empty() {
-                return true;
-            }
-            row.downcast_ref::<adw::ActionRow>().is_none_or(|r| {
-                format!("{} {}", r.title(), r.subtitle().unwrap_or_default())
-                    .to_lowercase()
-                    .contains(&query)
-            })
+            let query = query.borrow();
+            query.is_empty()
+                || row
+                    .widget_name()
+                    .strip_prefix("mod-")
+                    .and_then(|i| facts.borrow().get(&i.parse().ok()?).map(|f| query.matches(f)))
+                    .unwrap_or(true)
         });
     }
     search.connect_search_changed(glib::clone!(
@@ -257,7 +266,8 @@ pub fn build(
         enabled_list,
         #[weak]
         disabled_list,
-        move |_| {
+        move |search| {
+            query.replace(filter::Query::parse(&search.text()));
             enabled_list.invalidate_filter();
             disabled_list.invalidate_filter();
         }
@@ -342,6 +352,7 @@ pub fn build(
         syncing: Cell::new(false),
         sort_button: sort_button.clone(),
         search: search.clone(),
+        search_facts,
         repair_banner: repair_banner.clone(),
         stack: stack.clone(),
         conflicts_page,
@@ -693,6 +704,70 @@ fn boxed_list(placeholder: &str) -> gtk::ListBox {
             .build(),
     ));
     list
+}
+
+/// A "Filters" button whose popover sets the search's `key:value` terms.
+fn filter_button(search: &gtk::SearchEntry) -> gtk::MenuButton {
+    // Each key's title, and its values with their labels.
+    type Choice = (&'static str, &'static str, &'static [(&'static str, &'static str)]);
+    let choices: [Choice; 4] = [
+        ("enabled", "Enabled", &[("yes", "Yes"), ("no", "No")]),
+        ("source", "Source", &[("workshop", "Workshop"), ("local", "Local")]),
+        ("achievements", "Achievements", &[("yes", "Keeps Them On"), ("no", "Turns Them Off")]),
+        ("conflicts", "Conflicts", &[("yes", "Has Conflicts"), ("no", "None")]),
+    ];
+    debug_assert!(choices.iter().map(|c| c.0).eq(filter::KEYS));
+    let grid = gtk::Grid::builder().row_spacing(6).column_spacing(12).margin_top(6).margin_bottom(6).margin_start(6).margin_end(6).build();
+    let mut pickers = Vec::new();
+    // Set while the pickers are shown what the search says.
+    let syncing = Rc::new(Cell::new(false));
+    for (row, (key, title, values)) in choices.into_iter().enumerate() {
+        let mut labels = vec!["Any"];
+        labels.extend(values.iter().map(|v| v.1));
+        let picker = gtk::DropDown::from_strings(&labels);
+        grid.attach(&gtk::Label::builder().label(title).xalign(0.0).build(), 0, row as i32, 1, 1);
+        grid.attach(&picker, 1, row as i32, 1, 1);
+        let (search, syncing) = (search.clone(), syncing.clone());
+        picker.connect_selected_notify(move |picker| {
+            if syncing.get() {
+                return;
+            }
+            let value = (picker.selected() as usize).checked_sub(1).and_then(|i| values.get(i)).map(|v| v.0);
+            let text = filter::with_value(&search.text(), key, value);
+            if text != search.text() {
+                search.set_text(&text);
+            }
+        });
+        pickers.push((key, values, picker));
+    }
+    let hint = gtk::Label::builder()
+        .label("Or type them: version:3.12, -- to leave out (source:--local), || for either")
+        .wrap(true)
+        .max_width_chars(32)
+        .xalign(0.0)
+        .css_classes(["dim-label", "caption"])
+        .build();
+    grid.attach(&hint, 0, choices.len() as i32, 2, 1);
+    let popover = gtk::Popover::builder().child(&grid).build();
+    // Shows what the search already says when opened.
+    popover.connect_show(glib::clone!(
+        #[weak]
+        search,
+        move |_| {
+            let text = search.text();
+            syncing.set(true);
+            for (key, values, picker) in &pickers {
+                let at = filter::value_of(&text, key).and_then(|v| values.iter().position(|x| x.0 == v)).map_or(0, |i| i as u32 + 1);
+                picker.set_selected(at);
+            }
+            syncing.set(false);
+        }
+    ));
+    gtk::MenuButton::builder()
+        .label("Filters")
+        .tooltip_text("Filter the mods by state")
+        .popover(&popover)
+        .build()
 }
 
 fn display_name(m: &Mod) -> &str {
