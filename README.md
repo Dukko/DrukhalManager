@@ -23,7 +23,7 @@ It does the usual mod manager things (load orders, collections, Paradox Launcher
 * Merges two conflicting versions with Claude or any OpenAI-compatible model, using the base game's version as a reference, and saves the result to a patch mod that loads last. Your mods are never touched.
 * Merges the easy ones without AI: if only one mod actually changed something, let's not burn computing power for no reason.
 * Sorts your load order the way the community guides suggest, with sub-mods under the mod they belong to.
-* Remembers which mods each campaign was played with, and can freeze a collection so a Workshop update doesn't break a game in progress (a-la Irony merge, but faster).
+* Remembers which mods each campaign was played with, and can freeze a collection so a Workshop update doesn't break a game in progress (like Irony's collection merge, but faster).
 
 ### Should you use it?
 
@@ -77,9 +77,9 @@ Drag mods around, type a position into the number, or press **Smart Sort**. The 
 
 Smart Sort follows the order the community guides use: unofficial patches (`~`) first, then graphics, flavor, shipsets, galaxy generation, gameplay, large overhauls, compatibility patches, UI mods, UI patches, and universal patches (`!`) last. It decides where a mod goes from its name, its dependencies and the folders it ships, because Workshop tags are often wrong. You get a preview before anything moves, and if it puts a mod in the wrong place you can move it and it'll remember.
 
-The search box takes filters as well as names. `enabled:yes conflicts:yes` lists the enabled mods with conflicts, `source:local || giga` finds local mods or anything called giga, and `--` leaves things out. If you don't want to remember the syntax, the **Filters** button does it for you.
+The search box takes filters as well as names. `enabled:yes conflicts:yes` lists the enabled mods with conflicts, `source:local || giga` finds local mods or anything called giga, and `--` leaves things out. If you don't want to remember the syntax, the **Filters** button builds the filter for you.
 
-Some other things that are up there:
+Also on this page:
 
 * **Collections** are named load orders, each synced to its own Paradox Launcher playset. You can import a playset, a Workshop collection link, or a load order a friend pasted, and **Copy Load Order** gives you a numbered list with Workshop links to paste back.
 * **Notes** on a mod, for things like "keep this below UIOD or the outliner breaks". Search finds them.
