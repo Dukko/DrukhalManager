@@ -7,7 +7,7 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use adw::prelude::*;
-use gtk::glib;
+use gtk::{gio, glib};
 
 use crate::diff::{self, Diff, Hunk, Kind};
 
@@ -511,8 +511,86 @@ impl Pair {
                 });
                 pair.refresh.replace(Some(id));
             });
+            pair.add_put_in_menu();
         }
         pair
+    }
+
+    /// Adds Put This In to the view-only card's right-click menu: it
+    /// copies the difference under the pointer into the editable card.
+    fn add_put_in_menu(self: &Rc<Self>) {
+        let action = gio::SimpleAction::new("put-in", None);
+        action.set_enabled(false);
+        // The difference that was right-clicked, by its place in the list.
+        let clicked: Rc<Cell<Option<usize>>> = Rc::default();
+        let weak = Rc::downgrade(self);
+        action.connect_activate({
+            let clicked = clicked.clone();
+            move |_, _| {
+                if let (Some(pair), Some(hunk)) = (weak.upgrade(), clicked.get()) {
+                    pair.put_in(hunk);
+                }
+            }
+        });
+        let group = gio::SimpleActionGroup::new();
+        group.add_action(&action);
+        self.left.code.insert_action_group("diff", Some(&group));
+        let menu = gio::Menu::new();
+        menu.append(Some("Put This In"), Some("diff.put-in"));
+        self.left.code.set_extra_menu(Some(&menu));
+
+        // Before the text view opens its menu, note what's under the pointer.
+        let click = gtk::GestureClick::builder().button(gtk::gdk::BUTTON_SECONDARY).propagation_phase(gtk::PropagationPhase::Capture).build();
+        let weak = Rc::downgrade(self);
+        click.connect_pressed(move |_, _, x, y| {
+            let Some(pair) = weak.upgrade() else { return };
+            // The differences must match what's in the editor right now.
+            if let Some(id) = pair.refresh.take() {
+                id.remove();
+                pair.texts.borrow_mut().1 = pair.right.text();
+                pair.update(true);
+            }
+            let code = &pair.left.code;
+            let (_, by) = code.window_to_buffer_coords(gtk::TextWindowType::Widget, x as i32, y as i32);
+            let (iter, _) = code.line_at_y(by);
+            let line = iter.line() as usize;
+            let hunk = pair.diff.borrow().hunks.iter().position(|h| h.left.contains(&line));
+            clicked.set(hunk);
+            action.set_enabled(hunk.is_some());
+        });
+        self.left.code.add_controller(click);
+    }
+
+    /// Replaces the editable card's side of difference `index` with the
+    /// view-only card's lines, as one edit that can be undone.
+    fn put_in(&self, index: usize) {
+        let Some(hunk) = self.diff.borrow().hunks.get(index).cloned() else { return };
+        let left = self.texts.borrow().0.clone();
+        let lines: Vec<&str> = left.lines().collect();
+        let Some(theirs) = lines.get(hunk.left.clone()) else { return };
+        let text = theirs.join("\n");
+        let buffer = self.right.code.buffer();
+        buffer.begin_user_action();
+        if hunk.right.is_empty() {
+            // Lines only the left has go in before the line that follows.
+            match buffer.iter_at_line(hunk.right.start as i32).filter(|_| hunk.right.start < buffer.line_count() as usize) {
+                Some(mut at) => buffer.insert(&mut at, &format!("{text}\n")),
+                None => buffer.insert(&mut buffer.end_iter(), &format!("\n{text}")),
+            }
+        } else if let (Some(mut start), Some(mut end)) = (buffer.iter_at_line(hunk.right.start as i32), buffer.iter_at_line(hunk.right.end as i32 - 1)) {
+            if !end.ends_line() {
+                end.forward_to_line_end();
+            }
+            buffer.delete(&mut start, &mut end);
+            buffer.insert(&mut start, &text);
+        }
+        buffer.end_user_action();
+        // Compare again now, not after the typing pause.
+        if let Some(id) = self.refresh.take() {
+            id.remove();
+        }
+        self.texts.borrow_mut().1 = self.right.text();
+        self.update(true);
     }
 
     pub fn connect_change(&self, f: impl Fn(usize, Option<usize>, bool) + 'static) {
