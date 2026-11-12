@@ -4,29 +4,30 @@
 
 # DrukhalManager
 
-**A native Linux mod manager for Stellaris, with AI-assisted conflict merging.**
+A Stellaris mod manager for Linux that can merge conflicting mods with AI.
 
 [![Latest release](https://img.shields.io/github/v/release/Dukko/DrukhalManager?label=release&color=4a86cf)](https://github.com/Dukko/DrukhalManager/releases/latest)
 [![CI](https://github.com/Dukko/DrukhalManager/actions/workflows/ci.yml/badge.svg)](https://github.com/Dukko/DrukhalManager/actions/workflows/ci.yml)
 [![Flatpak](https://img.shields.io/badge/install-Flatpak-4a90d9?logo=flatpak&logoColor=white)](#installing)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
-Built with Rust, GTK 4 and libadwaita · A fork of [Irony Mod Manager](https://github.com/bcssov/IronyModManager)
-
-<img src="docs/screenshots/hero.png" alt="The load order after Smart Sort: a sidebar of views and categories, a health strip counting mods not updated for the game and mods that turn off achievements, and the mods grouped under category headers, each with its thumbnail and game version" width="860">
+<img src="docs/screenshots/hero.png" alt="The load order, grouped by category, with the views and categories in a sidebar" width="860">
 
 </div>
 
-## Why DrukhalManager?
+I play Stellaris on Linux with around 150 mods, and two things kept eating my evenings: working out which mods overwrite each other, and fixing the load order after every Steam update. [Irony Mod Manager](https://github.com/bcssov/IronyModManager) solves the first one well, but I wanted something native to my desktop that could also do the tedious part of merging for me. DrukhalManager is a fork of Irony, rewritten in Rust and GTK 4.
 
-- 🐧 **Feels at home on Linux.** A native GTK 4 app that follows your desktop's theme, installed as a Flatpak that keeps itself up to date.
-- ⚔️ **Sees every conflict.** Files and objects that more than one mod changes, side by side, with the version the game actually uses marked and the reason it wins.
-- 🤖 **Merges them for you.** Send two conflicting versions, plus the base game's, to Claude or any OpenAI-compatible model, and save the result to a patch mod that loads last.
-- ⚡ **Skips the AI when it can.** Conflicts where only one mod changed anything are merged directly, at no cost.
-- 🧹 **Hides the noise.** Ignore one conflict, a whole folder, or anything matching a rule like `gfx/**`.
-- 🗂️ **Keeps your load orders.** Named collections that sync to Paradox Launcher playsets, with Workshop collection import, dependency checks and descriptor repair.
-- 🧭 **Sorts them for you.** Smart Sort orders your mods the way the Stellaris community's load order guides suggest, keeping sub-mods below their mods and every mod after its dependencies.
-- 🛡️ **Protects your campaigns.** Each campaign remembers its mods, a collection can be frozen so Steam updates can't break it, and Find the Crashing Mod… tracks down the mod that crashes the game.
+It does the usual mod manager things (load orders, collections, Paradox Launcher playsets) and a few less usual ones:
+
+* Shows every file and object that more than one mod changes, side by side, and tells you which version the game ends up using and why.
+* Merges two conflicting versions with Claude or any OpenAI-compatible model, using the base game's version as a reference, and saves the result to a patch mod that loads last. Your mods are never touched.
+* Merges the easy ones without AI: if only one mod actually changed something, there's nothing to ask a model about.
+* Sorts your load order the way the community guides suggest, with sub-mods under the mod they belong to.
+* Remembers which mods each campaign was played with, and can freeze a collection so a Workshop update doesn't break a game in progress.
+
+### Should you use it?
+
+Probably not if you play anything other than Stellaris; Irony supports several Paradox games and has years more testing behind it. AI merging also isn't free or magic. Each merge is an API call you pay for (or a local model you run), and you should read what comes back before saving it. DrukhalManager shows you a cost estimate and the full result, but checking it is on you.
 
 ## Installing
 
@@ -70,47 +71,46 @@ makepkg -si
 
 This installs `drukhal-manager` with a desktop entry and icon.
 
-## A tour
+## Load order
 
-### 🗂️ Your load order
+Drag mods around, type a position into the number, or press **Smart Sort**. The strip above the list counts what needs looking at, like mods that haven't been updated for your game version or mods loading before something they depend on, and each count has a button that shows you which ones.
 
-Drag mods into order, type a position, or let DrukhalManager sort them. Thumbnails come from each mod's folder, or from its Workshop preview. Each mod is marked when it turns off achievements, is waiting on a Steam update, or was unsubscribed in Steam.
+Smart Sort follows the order the community guides use: unofficial patches (`~`) first, then graphics, flavor, shipsets, galaxy generation, gameplay, large overhauls, compatibility patches, UI mods, UI patches, and universal patches (`!`) last. It decides where a mod goes from its name, its dependencies and the folders it ships, because Workshop tags are often wrong. You get a preview before anything moves, and if it puts a mod in the wrong place you can move it and it'll remember.
 
-A health strip above the list counts what needs attention, such as mods not updated for your game version, missing required mods and out-of-date merges, each with a button to show or fix it. The sidebar lists views (Needs Attention, Has Conflicts, Disabled and more) and Smart Sort's categories with how many mods each holds. Select a mod to see its problems, what it needs and what it overrides beside the list.
+The search box takes filters as well as names. `enabled:yes conflicts:yes` lists the enabled mods with conflicts, `source:local || giga` finds local mods or anything called giga, and `--` leaves things out. If you don't want to remember the syntax, the **Filters** button writes it for you.
 
-- **Search** finds mods by name, note or Workshop ID, and understands filters such as `enabled:`, `conflicts:` and `version:`, with `--` to leave mods out. The **Filters** button sets them for you.
-- **Smart Sort** groups your mods into sections, following the community's load order guides: unofficial patches (`~`) first, then graphics, flavor, shipsets, galaxy generation, gameplay and large overhauls, then compatibility patches, UI mods such as UI Overhaul Dynamic and their patches, and universal patches (`!`) last. Sub-mods go directly below the mod they need, and every mod still loads after its dependencies. A mod's section comes from its name, its dependencies and the folders it ships, not its often-wrong tags. A preview shows where each mod goes and why, and you can move any mod to another section; your choice is remembered. Applying it can be undone.
-- **Other sorts:** **Sort A–Z, Dependencies First** (in Smart Sort's drop-down) sorts by name, and **Sort by Dependencies** appears when a mod loads before one it needs.
-- **Collections:** several named load orders, switched from the header, each synced to its own Paradox Launcher playset. Import a launcher playset (Irony's, for example), the game's current load order, a shared file, or a **Workshop collection** from its link. Mods you don't have yet are listed with links to subscribe. **Copy Load Order** shares one as a numbered list with Workshop links, ready for a chat or forum post.
-- **Names and notes:** rename a mod, or write yourself a note on it, such as why it sits where it does. Notes show on the mod's row and in its details, search finds both, and a shared collection file can carry your notes.
-- **Checks:** warns when a mod loads before one it depends on, and notes missing dependencies and mods made for an older game version. With a Steam Web API key, Workshop "Required items" are checked like dependencies too. After a game update, mods that don't support it yet can be set aside until they do.
-- **Campaigns:** each campaign remembers the mods it was played with, and launching it with different ones asks first. **Freeze This Collection…** copies its Workshop mods into local ones, so a Steam update can't break a campaign in progress. **Find the Crashing Mod…** halves the enabled mods between launches until it finds the culprit, then puts your load order back.
-- **Descriptor repair:** fixes `.mod` files that point at folders that no longer exist, and removes those whose mod is gone. Everything is backed up first.
-- **Reload** (F5) picks up mods subscribed or removed while the app is open, and **Merge into One Mod** copies a collection into a single local mod or zip, the way the game would load it. An **Extra Mod Folder** in Preferences loads local mods kept elsewhere, and **DLC…** in the main menu turns DLCs on and off.
+Some other things that live here:
 
-### ⚔️ Conflicts, side by side
+* **Collections** are named load orders, each synced to its own Paradox Launcher playset. You can import a playset, a Workshop collection link, or a load order a friend pasted, and **Copy Load Order** gives you a numbered list with Workshop links to paste back.
+* **Notes** on a mod, for things like "keep this below UIOD or the outliner breaks". Search finds them.
+* **Freeze This Collection…** copies its Workshop mods into local ones, so you can finish a campaign on the versions you started with.
+* **Find the Crashing Mod…** turns off half your mods, has you launch the game, and keeps halving until it finds the one that crashes. Your load order is put back afterwards.
+* **Descriptor repair** fixes `.mod` files pointing at folders that no longer exist, after backing them up.
 
-<img src="docs/screenshots/conflicts-framed.png" alt="The Conflicts page: a sidebar of conflicts by folder, and two versions of one object side by side, the in-game one marked">
+## Conflicts
 
-Every file and object that more than one enabled mod changes is listed by folder, with a search and a filter by mod. Pick one to see two versions side by side, with the changed lines and words highlighted.
+<img src="docs/screenshots/conflicts-framed.png" alt="The Conflicts page, with a list of conflicts on the left and two versions of one object side by side">
 
-- The version the game uses today is marked **In game**, with the reason: its file name sorts last, the folder keeps the first definition it reads, or the load order decides.
-- ⚡ **Simple** conflicts need no AI, because only one mod changed the object from the base game, or every mod ships the same version.
-- The left card is view only and the right one is editable, so you can adjust a version by hand. **Take Change** copies single differences across, or right-click one and choose **Put This In**. **Base Game** compares each version with the game's own instead, and **Changed Lines Only** folds the lines both versions share.
-- **Merge Tool…** opens both versions, or whole overridden files, in Meld, KDiff3, VS Code or another tool, and uses what you save.
-- Overridden images, DDS textures included, are shown side by side with their sizes.
-- Keyboard shortcuts move between conflicts (Alt+Page Down / Page Up), pick a side (Alt+Left / Right), merge (Alt+M) and ignore (Alt+I).
+Pick a conflict on the left and you get two versions next to each other with the differences highlighted. The one the game actually loads is marked **In game**, along with the reason: its file name sorts last, the folder keeps the first definition it reads, or it's simply later in the load order. Conflicts marked ⚡ are the simple kind, where only one mod changed anything or every mod ships the same thing.
 
-### 🤖 Merging with AI
+The right-hand version is editable, so you can fix things by hand. **Take Change** copies a single difference across, **Changed Lines Only** hides the parts that match, and **Base Game** compares against the vanilla file instead. If you'd rather use Meld or KDiff3, **Merge Tool…** opens both versions there.
 
-**Merge with AI** sends both versions, plus the base game's when it can be found, to the model you choose. The result stays on the left while the next mod's version slides in on the right, until one result is left to review and **Save to Patch**.
+Most of the noise in a big mod list is graphics and localisation files nobody cares about. You can ignore one conflict, a folder, or a pattern like `gfx/**`, and the rule editor tells you how many conflicts each rule hides.
 
-- **Merge All** merges a whole folder, several objects at once, with an estimate of the calls and cost first. It works on folders of overridden files too, with one AI call per object the copies disagree on.
-- A result that comes back broken is sent back to the model once with the error, before it counts as failed.
-- **Overridden files** are split into their objects. Objects the copies agree on, or that only one mod changed, are combined directly, and the AI is only asked about real disagreements.
-- **Broken braces** are listed under **Problems**. **Fix…** repairs them automatically, and **Fix with AI** restores the intended nesting.
+| Shortcut | Does |
+| --- | --- |
+| Alt+Page Down / Alt+Page Up | Next / previous conflict |
+| Alt+Left / Alt+Right | Use the left / right version |
+| Alt+M | Merge with AI |
+| Alt+I | Ignore the conflict |
 
-Everything is saved to a merged patch, a local mod that loads last, with files named so its definitions win. Each collection has its own patch, named after it, since merges only fit the load order they were made for. Merges whose mods or the base game changed since are flagged as outdated, and your mods are never modified. The patch is backed up before each Merge All and before merges are removed, and **Merged Patch Backups…** in the main menu restores any of the last ten. **Export with the Merged Patch** shares a collection and its patch in one zip.
+## Merging with AI
+
+**Merge with AI** sends both versions, and the base game's when there is one, to the model you've picked in Preferences. With three or more mods it works through them one at a time, merging the result with the next mod's version until you're left with one to review. **Merge All** does a whole folder and tells you roughly how many calls and how much money that'll be before it starts.
+
+The model only ever sees the conflicting definitions, not your whole mod folder. When it returns something with broken syntax, it gets one more try with the error message before the merge counts as failed.
+
+Results go into a merged patch mod, one per collection, that loads last. If one of the mods or the game updates later, the merges that depended on it are flagged as outdated. The patch is backed up before every Merge All, and **Merged Patch Backups…** keeps the last ten.
 
 <table>
 <tr>
@@ -118,20 +118,18 @@ Everything is saved to a merged patch, a local mod that loads last, with files n
 <td width="50%"><img src="docs/screenshots/ignore-rules.png" alt="The Ignore Rules editor"></td>
 </tr>
 <tr>
-<td><b>Choose a provider</b>: Claude, with the model of your choice and its price, OpenRouter, or a local server such as Ollama or LM Studio.</td>
-<td><b>Ignore rules</b> hide conflicts by path, like <code>gfx/**</code>, optionally only for an exact set of mods, with a live count of what each rule hides.</td>
+<td>Claude, OpenRouter, or a local server like Ollama or LM Studio.</td>
+<td>Ignore rules, with a count of what each one hides.</td>
 </tr>
 </table>
 
-Text boxes, such as the model's reasoning, merged results and the file editors, can be made taller or shorter by dragging the grip below them.
+API keys go in your system keyring. Without a keyring they're stored in a settings file only your user can read.
 
-API keys are kept in your system keyring, or in a settings file only you can read when there's no keyring. Merging sends only the conflicting definitions to the provider you choose.
+## When something goes wrong
 
-### 🔔 Notifications and troubleshooting
+The bell in the header keeps every notification, so you can go back to one you missed. If you hit a bug, **Main Menu → Troubleshooting** copies a short report you can paste into an issue. It comes from a small log of scans, merges, AI calls and game launches, and never includes API keys, prompts or file contents.
 
-- The **bell** in the header keeps every notification, newest first, with its time and its button, such as Show or Restart. A badge counts the new ones, and repeats are folded into one.
-- DrukhalManager keeps a small **diagnostics log** of scans, merged patch changes, AI calls, game sessions and update checks, never API keys, prompts or file contents. **Main Menu → Troubleshooting** copies a report to paste into a bug report.
-- The **multiplayer check** writes a report of your game and mod files to compare with friends', pointing out the files that differ, including line endings and differences between the native Linux and Windows builds.
+For multiplayer desyncs, **Multiplayer Check…** saves a report of your game and mod files. Swap reports with the other players and open theirs, and it lists the files that differ.
 
 ## Building
 
