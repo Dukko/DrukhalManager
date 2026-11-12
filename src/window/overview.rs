@@ -1,6 +1,7 @@
 //! Around the load order: the views sidebar, the health strip above the
 //! list, and the inspector showing the selected mod.
 
+use std::cell::RefCell;
 use std::rc::Rc;
 use std::time::SystemTime;
 
@@ -29,6 +30,7 @@ const CSS: &str = "
 .inspector-problem { padding: 10px 12px; border-radius: 10px; background: alpha(@warning_color, 0.12); }
 .inspector-problem.info { background: alpha(currentColor, 0.06); }
 .inspector-stat { padding: 8px 12px; }
+.inspector-note textview, .inspector-note textview text { background: transparent; color: inherit; }
 .category-dot { min-width: 8px; min-height: 8px; border-radius: 99px; }
 .category-header { padding: 7px 12px 5px 12px; background: alpha(currentColor, 0.03); border-bottom: 1px solid alpha(currentColor, 0.08); }
 .category-dot.unofficial { background: #57e389; }
@@ -449,18 +451,58 @@ impl Window {
         top.append(&titles);
         page.append(&top);
 
-        // The user's own note, ahead of what the app found.
-        if let Some(note) = self.settings.borrow().notes.get(&m.id) {
+        // The user's own note, ahead of what the app found, edited in
+        // place. Emptying it removes the note.
+        let note = self.settings.borrow().notes.get(&m.id).cloned();
+        if let Some(note) = note {
             let card = gtk::Box::new(gtk::Orientation::Horizontal, 10);
             card.add_css_class("inspector-problem");
             card.add_css_class("info");
+            card.add_css_class("inspector-note");
             card.append(&gtk::Image::builder().icon_name("document-edit-symbolic").valign(gtk::Align::Start).css_classes(["dim-label"]).build());
-            let text = label(note, &[]);
-            text.set_hexpand(true);
-            text.set_selectable(true);
+            let text = gtk::TextView::builder().wrap_mode(gtk::WrapMode::WordChar).accepts_tab(false).hexpand(true).build();
+            text.update_property(&[gtk::accessible::Property::Label("Note")]);
+            text.buffer().set_text(&note);
+            let id = m.id.clone();
+            let weak = Rc::downgrade(self);
+            // Kept in memory as it's typed, so a rebuild loses nothing.
+            text.buffer().connect_changed(move |buffer| {
+                let Some(ui) = weak.upgrade() else { return };
+                let typed = buffer.text(&buffer.start_iter(), &buffer.end_iter(), false).trim().to_owned();
+                let mut settings = ui.settings.borrow_mut();
+                if typed.is_empty() {
+                    settings.notes.remove(&id);
+                } else {
+                    settings.notes.insert(id.clone(), typed);
+                }
+            });
+            // Saved, and shown on the row, once it's left, or when the
+            // inspector moves on to another mod while it's being typed.
+            let saved = Rc::new(RefCell::new(note));
+            let id = m.id.clone();
+            let weak = Rc::downgrade(self);
+            let commit = Rc::new(move || {
+                let Some(ui) = weak.upgrade() else { return };
+                let current = ui.settings.borrow().notes.get(&id).cloned().unwrap_or_default();
+                if current == *saved.borrow() {
+                    return;
+                }
+                *saved.borrow_mut() = current;
+                ui.save_settings("the note");
+                // Refreshing rebuilds this view, so not from its own handler.
+                let weak = Rc::downgrade(&ui);
+                glib::idle_add_local_once(move || {
+                    if let Some(ui) = weak.upgrade() {
+                        ui.refresh();
+                    }
+                });
+            });
+            let focus = gtk::EventControllerFocus::new();
+            let on_leave = commit.clone();
+            focus.connect_leave(move |_| on_leave());
+            text.add_controller(focus);
+            text.connect_unrealize(move |_| commit());
             card.append(&text);
-            let edit = gtk::Button::builder().label("Edit").valign(gtk::Align::Start).action_name("win.edit-note").action_target(&target).css_classes(["flat", "small"]).build();
-            card.append(&edit);
             page.append(&card);
         }
 
