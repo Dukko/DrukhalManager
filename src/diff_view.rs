@@ -13,8 +13,10 @@ use crate::diff::{self, Diff, Hunk, Kind};
 
 /// Unchanged lines kept around each difference when the rest is folded.
 const FOLD_CONTEXT: usize = 3;
-/// The fewest lines worth folding: the fold's own row takes one.
+/// The fewest lines worth folding: the fold's own bubble takes room.
 const FOLD_MIN: usize = 4;
+/// Space around a fold bubble, above and below together, in pixels.
+const FOLD_ROOM: i32 = 12;
 
 /// Above this many lines, syntax colouring is skipped to stay responsive.
 const COLOUR_LIMIT: usize = 20_000;
@@ -46,8 +48,9 @@ pub struct Card {
     /// Whether the card keeps its own line numbers and colours up to date
     /// while edited. A pair refreshes its editable card itself.
     standalone: Cell<bool>,
-    /// The rows standing in for folded lines.
-    folds: RefCell<Vec<gtk::Button>>,
+    /// The bubbles standing in for folded lines, each with where its room
+    /// is: above (or else below) a line, and how far into that room it sits.
+    folds: RefCell<Vec<(gtk::Button, usize, bool, i32)>>,
 }
 
 impl Card {
@@ -109,10 +112,30 @@ impl Card {
         widget.append(&body);
 
         let card = Rc::new(Self { widget, dot, title, subtitle, badge, actions, numbers_scroll, scroll, numbers, code, standalone: Cell::new(true), folds: RefCell::default() });
+        // Fold bubbles follow the text as it's laid out: a long text is
+        // measured bit by bit, which shows as its scrolling range changing.
+        // The adjustment is replaced when cards link their scrolling.
+        let watch = {
+            let weak = Rc::downgrade(&card);
+            move |code: &gtk::TextView| {
+                let Some(adjustment) = code.vadjustment() else { return };
+                let weak = weak.clone();
+                adjustment.connect_changed(move |_| {
+                    if let Some(card) = weak.upgrade() {
+                        card.place_folds();
+                    }
+                });
+            }
+        };
+        watch(&card.code);
+        card.code.connect_vadjustment_notify(watch);
         if editable {
             // Line numbers keep up with edits.
             let weak = Rc::downgrade(&card);
             card.code.buffer().connect_changed(move |buffer| {
+                if let Some(card) = weak.upgrade() {
+                    card.place_folds();
+                }
                 if let Some(card) = weak.upgrade()
                     && card.standalone.get()
                 {
@@ -201,7 +224,7 @@ impl Card {
         }
         clear_marks(&buffer);
         clear_marks(&self.numbers.buffer());
-        for fold in self.folds.take() {
+        for (fold, ..) in self.folds.take() {
             self.code.remove(&fold);
         }
         if lines <= COLOUR_LIMIT {
@@ -253,7 +276,7 @@ impl Card {
             gaps.push((last, false, missing));
         }
         for (line, above, rows) in gaps {
-            self.add_gap(line, above, rows);
+            self.add_gap(line, above, rows as i32 * self.line_height());
         }
     }
 
@@ -282,11 +305,14 @@ impl Card {
         }
     }
 
-    /// Leaves room for `rows` lines above (or below) `line`, where the other
-    /// card has lines this one doesn't.
-    fn add_gap(&self, line: usize, above: bool, rows: usize) {
-        let height = self.code.create_pango_layout(Some("X")).pixel_size().1.max(1);
-        let px = rows as i32 * height;
+    /// The height of a line of code.
+    fn line_height(&self) -> i32 {
+        self.code.create_pango_layout(Some("X")).pixel_size().1.max(1)
+    }
+
+    /// Leaves `px` of room above (or below) `line`: for lines the other
+    /// card has and this one doesn't, or for a fold bubble.
+    fn add_gap(&self, line: usize, above: bool, px: i32) {
         let name = format!("gap-{}-{px}", if above { "above" } else { "below" });
         for buffer in [self.code.buffer(), self.numbers.buffer()] {
             let table = buffer.tag_table();
@@ -303,33 +329,46 @@ impl Card {
         }
     }
 
-    /// Hides `lines`, which are the same on both cards, behind a row at
-    /// `y` (in the text's own coordinates, `height` tall) that says how
-    /// many there are and calls `expand` when clicked.
-    fn fold(&self, lines: std::ops::Range<usize>, y: i32, height: i32, expand: impl Fn() + 'static) {
+    /// Hides `lines`, which are the same on both cards, behind a bubble
+    /// that says how many there are and calls `expand` when clicked. The
+    /// bubble gets room of its own, `FOLD_ROOM` taller than a line of
+    /// `height`, so it can't cover text.
+    fn fold(&self, lines: std::ops::Range<usize>, height: i32, expand: impl Fn() + 'static) {
         for buffer in [self.code.buffer(), self.numbers.buffer()] {
             let Some(start) = buffer.iter_at_line(lines.start as i32) else { return };
             let end = buffer.iter_at_line(lines.end as i32).unwrap_or_else(|| buffer.end_iter());
             buffer.apply_tag_by_name("folded", &start, &end);
         }
-        // Room for the row: above the line after the fold, or at the end of
-        // the text below the line before it.
-        if lines.end < self.code.buffer().line_count() as usize {
-            self.add_gap(lines.end, true, 1);
-        } else if let Some(before) = lines.start.checked_sub(1) {
-            self.add_gap(before, false, 1);
-        }
+        // The room is above the line after the fold, or at the end of the
+        // text below the line before it.
+        let (line, above) = if lines.end < self.code.buffer().line_count() as usize { (lines.end, true) } else { (lines.start.saturating_sub(1), false) };
+        self.add_gap(line, above, height + FOLD_ROOM);
         let n = lines.len();
-        let row = gtk::Button::builder()
-            .label(format!("⋯ {n} unchanged {}", if n == 1 { "line" } else { "lines" }))
+        let bubble = gtk::Button::builder()
+            .label(format!("⋯  {n} unchanged {}", if n == 1 { "line" } else { "lines" }))
             .tooltip_text("Show these lines")
-            .css_classes(["flat", "fold-row"])
+            .css_classes(["fold-bubble"])
             .height_request(height)
             .cursor(&gtk::gdk::Cursor::from_name("pointer", None).expect("the pointer cursor exists"))
             .build();
-        row.connect_clicked(move |_| expand());
-        self.code.add_overlay(&row, 0, y);
-        self.folds.borrow_mut().push(row);
+        bubble.connect_clicked(move |_| expand());
+        self.code.add_overlay(&bubble, 0, 0);
+        self.folds.borrow_mut().push((bubble, line, above, FOLD_ROOM / 2));
+        self.place_folds();
+    }
+
+    /// Puts each fold bubble in its room, going by where the text view
+    /// really laid the lines out.
+    fn place_folds(&self) {
+        let buffer = self.code.buffer();
+        for (bubble, line, above, inset) in &*self.folds.borrow() {
+            let Some(iter) = buffer.iter_at_line(*line as i32) else { continue };
+            let (y, height) = self.code.line_yrange(&iter);
+            // The room is the top of the line's space, or the bottom.
+            let room = bubble.height_request() + 2 * inset;
+            let top = if *above { y } else { y + height - room };
+            self.code.move_overlay(bubble, 0, top + inset);
+        }
     }
 
     /// Highlights `lines` as the difference being looked at.
@@ -541,20 +580,15 @@ impl Pair {
     /// Folds the runs of unchanged rows on both cards, but for the ones
     /// the user opened.
     fn fold_unchanged(&self, diff: &Diff) {
-        let height = self.left.code.create_pango_layout(Some("X")).pixel_size().1.max(1);
-        // Rows above the fold being placed: hidden ones, and fold rows.
-        let (mut hidden, mut folds) = (0, 0);
+        let height = self.left.line_height();
         for rows in diff::folds(diff, FOLD_CONTEXT, FOLD_MIN) {
             let (Some(left), Some(right)) = (diff.rows[rows.start].left, diff.rows[rows.start].right) else { continue };
             if self.unfolded.borrow().contains(&left) {
                 continue;
             }
-            // The cards are aligned row by row, so the row is at the same
-            // height on both.
-            let y = (rows.start - hidden + folds) as i32 * height;
             for (card, first) in [(&self.left, left), (&self.right, right)] {
                 let me = self.me.clone();
-                card.fold(first..first + rows.len(), y, height, move || {
+                card.fold(first..first + rows.len(), height, move || {
                     if let Some(pair) = me.upgrade() {
                         pair.unfolded.borrow_mut().insert(left);
                         // With what's in the editor now, not what was last compared.
@@ -563,9 +597,14 @@ impl Pair {
                     }
                 });
             }
-            hidden += rows.len();
-            folds += 1;
         }
+        // Once more when the cards have been laid out.
+        let (left, right) = (Rc::downgrade(&self.left), Rc::downgrade(&self.right));
+        glib::idle_add_local_once(move || {
+            for card in [left.upgrade(), right.upgrade()].into_iter().flatten() {
+                card.place_folds();
+            }
+        });
     }
 
     /// Number of differences between the two cards.
@@ -794,7 +833,8 @@ const CSS: &str = r#"
 .code-card-header { padding: 8px 10px 8px 14px; min-height: 40px; }
 .code-view, .code-view text, .line-numbers, .line-numbers text { background: transparent; }
 .line-numbers text { color: alpha(currentColor, 0.45); }
-.fold-row { min-height: 0; padding: 0 10px; border-radius: 6px; font-size: smaller; font-weight: normal; color: alpha(currentColor, 0.6); }
+.fold-bubble { min-height: 0; padding: 0 12px; border-radius: 999px; font-size: smaller; font-weight: normal; background: alpha(currentColor, 0.09); box-shadow: none; }
+.fold-bubble:hover { background: alpha(currentColor, 0.16); }
 .mod-dot { min-width: 10px; min-height: 10px; border-radius: 99px; }
 .mod-color-0 { background: #3584e4; }
 .mod-color-1 { background: #2ec27e; }
