@@ -11,6 +11,11 @@ use gtk::glib;
 
 use crate::diff::{self, Diff, Hunk, Kind};
 
+/// Unchanged lines kept around each difference when the rest is folded.
+const FOLD_CONTEXT: usize = 3;
+/// The fewest lines worth folding: the fold's own row takes one.
+const FOLD_MIN: usize = 4;
+
 /// Above this many lines, syntax colouring is skipped to stay responsive.
 const COLOUR_LIMIT: usize = 20_000;
 
@@ -41,6 +46,8 @@ pub struct Card {
     /// Whether the card keeps its own line numbers and colours up to date
     /// while edited. A pair refreshes its editable card itself.
     standalone: Cell<bool>,
+    /// The rows standing in for folded lines.
+    folds: RefCell<Vec<gtk::Button>>,
 }
 
 impl Card {
@@ -101,7 +108,7 @@ impl Card {
         widget.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
         widget.append(&body);
 
-        let card = Rc::new(Self { widget, dot, title, subtitle, badge, actions, numbers_scroll, scroll, numbers, code, standalone: Cell::new(true) });
+        let card = Rc::new(Self { widget, dot, title, subtitle, badge, actions, numbers_scroll, scroll, numbers, code, standalone: Cell::new(true), folds: RefCell::default() });
         if editable {
             // Line numbers keep up with edits.
             let weak = Rc::downgrade(&card);
@@ -176,8 +183,7 @@ impl Card {
     }
 
     pub fn text(&self) -> String {
-        let buffer = self.code.buffer();
-        buffer.text(&buffer.start_iter(), &buffer.end_iter(), false).to_string()
+        buffer_text(&self.code.buffer())
     }
 
     /// Puts `text` in the card, unless `keep_text` says to mark what's
@@ -195,6 +201,9 @@ impl Card {
         }
         clear_marks(&buffer);
         clear_marks(&self.numbers.buffer());
+        for fold in self.folds.take() {
+            self.code.remove(&fold);
+        }
         if lines <= COLOUR_LIMIT {
             colour_lines(&buffer, 0, lines);
         }
@@ -294,6 +303,35 @@ impl Card {
         }
     }
 
+    /// Hides `lines`, which are the same on both cards, behind a row at
+    /// `y` (in the text's own coordinates, `height` tall) that says how
+    /// many there are and calls `expand` when clicked.
+    fn fold(&self, lines: std::ops::Range<usize>, y: i32, height: i32, expand: impl Fn() + 'static) {
+        for buffer in [self.code.buffer(), self.numbers.buffer()] {
+            let Some(start) = buffer.iter_at_line(lines.start as i32) else { return };
+            let end = buffer.iter_at_line(lines.end as i32).unwrap_or_else(|| buffer.end_iter());
+            buffer.apply_tag_by_name("folded", &start, &end);
+        }
+        // Room for the row: above the line after the fold, or at the end of
+        // the text below the line before it.
+        if lines.end < self.code.buffer().line_count() as usize {
+            self.add_gap(lines.end, true, 1);
+        } else if let Some(before) = lines.start.checked_sub(1) {
+            self.add_gap(before, false, 1);
+        }
+        let n = lines.len();
+        let row = gtk::Button::builder()
+            .label(format!("⋯ {n} unchanged {}", if n == 1 { "line" } else { "lines" }))
+            .tooltip_text("Show these lines")
+            .css_classes(["flat", "fold-row"])
+            .height_request(height)
+            .cursor(&gtk::gdk::Cursor::from_name("pointer", None).expect("the pointer cursor exists"))
+            .build();
+        row.connect_clicked(move |_| expand());
+        self.code.add_overlay(&row, 0, y);
+        self.folds.borrow_mut().push(row);
+    }
+
     /// Highlights `lines` as the difference being looked at.
     fn mark_current(&self, lines: Option<std::ops::Range<usize>>) {
         for buffer in [self.code.buffer(), self.numbers.buffer()] {
@@ -367,6 +405,11 @@ pub struct Pair {
     current: Cell<Option<usize>>,
     compare: RefCell<Compare>,
     ignore_whitespace: Cell<bool>,
+    /// Whether runs of unchanged lines are folded away.
+    fold: Cell<bool>,
+    /// Folds the user opened, by their first line on the left.
+    unfolded: RefCell<std::collections::BTreeSet<usize>>,
+    me: std::rc::Weak<Pair>,
     /// Whether the cards share their scrolling.
     linked: Cell<bool>,
     /// Set while the pair fills the cards, so that isn't taken for an edit.
@@ -386,7 +429,10 @@ impl Pair {
         let widget = gtk::Box::builder().spacing(12).homogeneous(true).vexpand(true).build();
         widget.append(&left.widget);
         widget.append(&right.widget);
-        let pair = Rc::new(Self {
+        let pair = Rc::new_cyclic(|me| Self {
+            me: me.clone(),
+            fold: Cell::new(false),
+            unfolded: RefCell::default(),
             widget,
             left,
             right,
@@ -439,8 +485,15 @@ impl Pair {
         self.on_edit.borrow_mut().push(Box::new(f));
     }
 
+    /// Whether to fold runs of unchanged lines, from the next `show` on.
+    /// Only cards compared with each other fold.
+    pub fn set_fold(&self, fold: bool) {
+        self.fold.set(fold);
+    }
+
     /// Shows `left` and `right`, compared as `compare` says.
     pub fn show(&self, left: &str, right: &str, compare: &Compare, ignore_whitespace: bool) {
+        self.unfolded.borrow_mut().clear();
         self.texts.replace((left.to_owned(), right.to_owned()));
         self.compare.replace(compare.clone());
         self.ignore_whitespace.set(ignore_whitespace);
@@ -462,6 +515,9 @@ impl Pair {
                 let diff = diff::lines(&left, &right, whitespace);
                 self.left.show_side(&left, &right, &diff, Side::Left, false);
                 self.right.show_side(&right, &left, &diff, Side::Right, keep_right);
+                if self.fold.get() {
+                    self.fold_unchanged(&diff);
+                }
                 diff
             }
             Compare::Base(base) => {
@@ -480,6 +536,36 @@ impl Pair {
         self.diff.replace(diff);
         self.current.set(None);
         self.notify();
+    }
+
+    /// Folds the runs of unchanged rows on both cards, but for the ones
+    /// the user opened.
+    fn fold_unchanged(&self, diff: &Diff) {
+        let height = self.left.code.create_pango_layout(Some("X")).pixel_size().1.max(1);
+        // Rows above the fold being placed: hidden ones, and fold rows.
+        let (mut hidden, mut folds) = (0, 0);
+        for rows in diff::folds(diff, FOLD_CONTEXT, FOLD_MIN) {
+            let (Some(left), Some(right)) = (diff.rows[rows.start].left, diff.rows[rows.start].right) else { continue };
+            if self.unfolded.borrow().contains(&left) {
+                continue;
+            }
+            // The cards are aligned row by row, so the row is at the same
+            // height on both.
+            let y = (rows.start - hidden + folds) as i32 * height;
+            for (card, first) in [(&self.left, left), (&self.right, right)] {
+                let me = self.me.clone();
+                card.fold(first..first + rows.len(), y, height, move || {
+                    if let Some(pair) = me.upgrade() {
+                        pair.unfolded.borrow_mut().insert(left);
+                        // With what's in the editor now, not what was last compared.
+                        pair.texts.borrow_mut().1 = pair.right.text();
+                        pair.update(true);
+                    }
+                });
+            }
+            hidden += rows.len();
+            folds += 1;
+        }
     }
 
     /// Number of differences between the two cards.
@@ -536,8 +622,9 @@ impl Pair {
     }
 }
 
+/// The buffer's whole text, folded lines too.
 fn buffer_text(buffer: &gtk::TextBuffer) -> String {
-    buffer.text(&buffer.start_iter(), &buffer.end_iter(), false).to_string()
+    buffer.text(&buffer.start_iter(), &buffer.end_iter(), true).to_string()
 }
 
 /// Replaces the buffer's text if it differs, and says whether it did.
@@ -552,7 +639,7 @@ fn set_if_changed(buffer: &gtk::TextBuffer, text: &str) -> bool {
 /// Removes the difference marks and gaps, keeping the syntax colours.
 fn clear_marks(buffer: &gtk::TextBuffer) {
     let (start, end) = buffer.bounds();
-    for name in ["filler", "added", "removed", "changed", "current", "word"] {
+    for name in ["filler", "added", "removed", "changed", "current", "word", "folded"] {
         buffer.remove_tag_by_name(name, &start, &end);
     }
     let mut gaps = Vec::new();
@@ -614,6 +701,7 @@ fn create_tags(buffer: &gtk::TextBuffer) {
     tag("number", &[("foreground", pick("#c64600", "#ffa348").to_value())]);
     tag("string", &[("foreground", pick("#26a269", "#8ff0a4").to_value())]);
     tag("comment", &[("foreground", pick("#77767b", "#9a9996").to_value())]);
+    tag("folded", &[("invisible", true.to_value())]);
     tag("filler", &[("paragraph-background", pick("rgba(128,128,128,0.10)", "rgba(255,255,255,0.05)").to_value())]);
     tag("added", &[("paragraph-background", pick("rgba(46,194,126,0.18)", "rgba(46,194,126,0.16)").to_value())]);
     tag("removed", &[("paragraph-background", pick("rgba(224,27,36,0.13)", "rgba(224,27,36,0.18)").to_value())]);
@@ -706,6 +794,7 @@ const CSS: &str = r#"
 .code-card-header { padding: 8px 10px 8px 14px; min-height: 40px; }
 .code-view, .code-view text, .line-numbers, .line-numbers text { background: transparent; }
 .line-numbers text { color: alpha(currentColor, 0.45); }
+.fold-row { min-height: 0; padding: 0 10px; border-radius: 6px; font-size: smaller; font-weight: normal; color: alpha(currentColor, 0.6); }
 .mod-dot { min-width: 10px; min-height: 10px; border-radius: 99px; }
 .mod-color-0 { background: #3584e4; }
 .mod-color-1 { background: #2ec27e; }

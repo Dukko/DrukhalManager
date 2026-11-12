@@ -148,6 +148,8 @@ pub struct Session {
     /// than the differences between them.
     pub compare_base: bool,
     pub ignore_whitespace: bool,
+    /// Whether comparisons fold runs of unchanged lines.
+    pub fold_unchanged: bool,
 }
 
 impl Session {

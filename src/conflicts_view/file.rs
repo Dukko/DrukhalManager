@@ -250,12 +250,14 @@ impl FileView {
         if has_base {
             bar.extra.append(&option_toggle(&page.hooks, "Base Game", "Mark what each copy changed from the base game, instead of the differences between the two", |s| s.compare_base, |s, v| s.compare_base = v, rerender.clone()));
         }
+        bar.extra.append(&option_toggle(&page.hooks, "Changed Lines Only", "Fold runs of lines that are the same in both, keeping a few around each difference. Click a fold to open it", |s| s.fold_unchanged, |s, v| s.fold_unchanged = v, rerender.clone()));
         bar.extra.append(&option_toggle(&page.hooks, "Ignore Spacing", "Don't count lines that only differ in spacing or indentation", |s| s.ignore_whitespace, |s, v| s.ignore_whitespace = v, rerender));
         let session = page.hooks.session.borrow();
         let compare = match base.and_then(|b| b.text.as_ref().ok()) {
             Some(b) if has_base && session.compare_base => Compare::Base(b.clone()),
             _ => Compare::Each,
         };
+        pair.set_fold(session.fold_unchanged);
         pair.show(left_text, right_text, &compare, session.ignore_whitespace);
         drop(session);
         let body = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(8).build();
