@@ -388,7 +388,7 @@ impl Window {
                 return ui.toast_error("That isn't a Workshop collection link or ID");
             };
             let toast = adw::Toast::builder().title("Reading the collection from Steam…").timeout(0).build();
-            ui.add_toast(toast.clone());
+            ui.show_progress(&toast);
             let weak = Rc::downgrade(ui);
             glib::spawn_future_local(async move {
                 let fetched = gio::spawn_blocking(move || workshop::fetch(id)).await.unwrap_or_else(|_| Err("The request failed".to_owned()));
@@ -571,7 +571,7 @@ impl Window {
                 ui.save_settings("the merge format");
             }
             let toast = adw::Toast::builder().title(format!("Merging into “{name}”…")).timeout(0).build();
-            ui.add_toast(toast.clone());
+            ui.show_progress(&toast);
             let user_dir = ui.paths.user_dir.clone();
             let out_dir = ui.settings.borrow().game.merge_dir(&user_dir);
             let version = crate::merge::patch::supported_version(ui.game.as_ref().and_then(|g| g.version.as_deref()));

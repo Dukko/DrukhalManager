@@ -9,6 +9,7 @@ mod game_update_ui;
 mod launch;
 mod overview;
 mod list;
+mod notifications;
 mod persist;
 mod reload;
 mod repair_ui;
@@ -129,6 +130,8 @@ struct Window {
     missing_list: gtk::ListBox,
     missing_heading: gtk::Label,
     toasts: adw::ToastOverlay,
+    /// Every notification, kept to read later.
+    bell: Rc<notifications::Bell>,
     collections: RefCell<Collections>,
     collection_button: gtk::MenuButton,
     /// Offers to restore the active collection when the game's load order
@@ -232,6 +235,8 @@ pub fn build(
         .primary(true)
         .build();
     header.pack_end(&menu_button);
+    let bell = notifications::Bell::new();
+    header.pack_end(&bell.button);
     header.pack_end(&launch);
     header.pack_end(&save);
     let collection_button = gtk::MenuButton::builder()
@@ -485,6 +490,7 @@ pub fn build(
         missing_list,
         missing_heading,
         toasts,
+        bell,
         undo_action: undo_action.clone(),
         redo_action: redo_action.clone(),
         update_monitor: RefCell::new(None),
@@ -818,6 +824,7 @@ impl Window {
                 .build();
             toast.set_custom_title(Some(&label));
         }
+        self.notify(&toast);
         self.toasts.add_toast(toast);
     }
 

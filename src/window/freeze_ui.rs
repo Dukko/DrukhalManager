@@ -59,7 +59,7 @@ impl Window {
         let base = self.paths.user_dir.join("mod").join(freeze::FOLDER);
         let folder = freeze::folder_name(&name, |f| base.join(f).exists());
         let toast = adw::Toast::builder().title(format!("Copying {}…", plural(to_copy.len(), "mod", "mods"))).timeout(0).build();
-        self.add_toast(toast.clone());
+        self.show_progress(&toast);
         let user_dir = self.paths.user_dir.clone();
         let weak = Rc::downgrade(self);
         glib::spawn_future_local(async move {
