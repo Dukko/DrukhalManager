@@ -276,7 +276,7 @@ impl Card {
             gaps.push((last, false, missing));
         }
         for (line, above, rows) in gaps {
-            self.add_gap(line, above, rows as i32 * self.line_height());
+            self.add_gap(line, above, rows * self.line_height());
         }
     }
 
