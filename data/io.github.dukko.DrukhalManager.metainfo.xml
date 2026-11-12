@@ -36,6 +36,13 @@
     <control>keyboard</control>
   </supports>
   <releases>
+    <release version="0.8.2" date="2026-11-12">
+      <description>
+        <p><em>Categories in the Load Order.</em> The sidebar lists the Smart Sort categories with how many mods each holds; click one to see only its mods. The load order shows a small header wherever the category changes, and says when mods were moved there by hand. Turn the headers off in the Smart Sort menu.</p>
+        <p><em>Faster conflict scans.</em> Scans remember what they read, so a rescan only reads the files that changed, even after restarting the app.</p>
+        <p><em>Fixes.</em> The Conflicts page no longer freezes for a few seconds after a scan or while searching.</p>
+      </description>
+    </release>
     <release version="0.8.1" date="2026-11-12">
       <description>
         <p><em>Changed Lines Only.</em> A new toggle on the Conflicts page folds the lines that are the same in both versions, keeping a few around each difference. Click a fold to open it.</p>
