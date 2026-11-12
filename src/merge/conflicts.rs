@@ -17,6 +17,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
+use super::scan_cache::ScanCache;
 use crate::paradox::script::{self, Entries, Entry};
 
 /// One enabled mod, in load order.
@@ -275,7 +276,13 @@ pub const FRAGMENT_FOLDERS: &[&str] = &["common/inline_scripts"];
 /// Finds the files and objects more than one of `mods` defines. Only the
 /// localisation of `languages` is read; `None` reads every language, and an
 /// empty set none.
+#[cfg(test)]
 pub fn analyze(mods: &[ModInput], languages: Option<&BTreeSet<String>>) -> Report {
+    analyze_cached(mods, languages, &mut ScanCache::default())
+}
+
+/// Like `analyze`, parsing only the files `cache` doesn't know as they are.
+pub fn analyze_cached(mods: &[ModInput], languages: Option<&BTreeSet<String>>, cache: &mut ScanCache) -> Report {
     let mut report = Report::default();
 
     // Lowercased relative path -> (load position, path as spelled in that
@@ -314,14 +321,8 @@ pub fn analyze(mods: &[ModInput], languages: Option<&BTreeSet<String>>) -> Repor
         }
         let Some(category) = object_category(path) else { continue };
         let full = mods[winner].root.as_ref().unwrap().join(path);
-        let src = match std::fs::read(&full) {
-            Ok(bytes) => String::from_utf8_lossy(&bytes).into_owned(),
-            Err(e) => {
-                report.errors.push(FileError { mod_position: winner, file: path.clone(), message: e.to_string() });
-                continue;
-            }
-        };
-        let keys = match object_keys(&category, &src) {
+        let keys = cache.keys(&full, &category, |src| object_keys(&category, src));
+        let keys = match keys {
             Ok(keys) => keys,
             Err(message) => {
                 report.errors.push(FileError { mod_position: winner, file: path.clone(), message });

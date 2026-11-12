@@ -98,6 +98,9 @@ struct Window {
     conflict_session: Rc<RefCell<crate::conflicts_view::Session>>,
     analysis: RefCell<Option<Rc<Analysis>>>,
     scanning: Cell<bool>,
+    /// What earlier scans read, loaded by the first scan; see
+    /// `merge::scan_cache`.
+    scan_cache: std::sync::Arc<std::sync::Mutex<Option<crate::merge::scan_cache::ScanCache>>>,
     /// Whether the Conflicts page shows ignored conflicts (dimmed).
     show_ignored: Cell<bool>,
     /// The mod (descriptor id) the Conflicts page is filtered to.
@@ -447,6 +450,7 @@ pub fn build(
         conflict_session: Rc::default(),
         analysis: RefCell::new(None),
         scanning: Cell::new(false),
+        scan_cache: Default::default(),
         show_ignored: Cell::new(false),
         conflict_filter: RefCell::new(None),
         stale: RefCell::new(Vec::new()),
