@@ -83,7 +83,7 @@ impl Window {
                 // Until a key is set in Preferences.
                 Ok(None) => return ui.requirements_not_before.set(Some(Instant::now() + NO_KEY)),
                 Err(e) => {
-                    eprintln!("Could not read Workshop requirements: {e}");
+                    crate::diagnostics::log!("requirements", "Could not read Workshop requirements: {e}");
                     return ui.requirements_not_before.set(Some(Instant::now() + RETRY));
                 }
             };
@@ -97,7 +97,7 @@ impl Window {
             });
             ui.requirements.borrow_mut().update(found);
             if let Err(e) = ui.requirements.borrow().save(&Cache::path()) {
-                eprintln!("Could not save the Workshop requirements: {e}");
+                crate::diagnostics::log!("requirements", "Could not save the Workshop requirements: {e}");
             }
             ui.refresh();
         });

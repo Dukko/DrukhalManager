@@ -80,6 +80,8 @@ impl Window {
         let saved = cache.clone();
         let languages = self.settings.borrow().game.languages(&self.paths.user_dir);
         let labels: Vec<String> = names.clone();
+        crate::diagnostics::log!("scan", "Scanning {} mods for conflicts", inputs.len());
+        let started = std::time::Instant::now();
         glib::spawn_future_local(async move {
             let result = gio::spawn_blocking(move || {
                 // Zipped mods are read from an unpacked copy; one that can't
@@ -106,13 +108,25 @@ impl Window {
                 if let Some(cache) = saved.lock().unwrap_or_else(|e| e.into_inner()).as_mut()
                     && let Err(e) = cache.save(&ScanCache::path())
                 {
-                    eprintln!("Could not save the conflict scan cache: {e}");
+                    crate::diagnostics::log!("scan", "Could not save the conflict scan cache: {e}");
                 }
             });
             let Some(ui) = weak.upgrade() else { return };
             ui.scanning.set(false);
             match result {
                 Ok((report, roots, simple)) => {
+                    crate::diagnostics::log!(
+                        "scan",
+                        "Scan done in {:.1}s: {} file and {} object conflicts, {} files with errors, {} mods skipped",
+                        started.elapsed().as_secs_f32(),
+                        report.files.len(),
+                        report.objects.len(),
+                        report.errors.len(),
+                        report.skipped.len()
+                    );
+                    for (position, reason) in &report.skipped {
+                        crate::diagnostics::log!("scan", "Skipped {}: {reason}", names.get(*position).map_or("a mod", String::as_str));
+                    }
                     ui.check_stale();
                     ui.conflict_session.borrow_mut().rescanned();
                     ui.analysis.replace(Some(Rc::new(Analysis {
@@ -133,7 +147,7 @@ impl Window {
                 Err(panic) => {
                     // The panic's message, to report it.
                     let detail = panic.downcast_ref::<String>().map(String::as_str).or_else(|| panic.downcast_ref::<&str>().copied()).unwrap_or("unknown error");
-                    eprintln!("Scan failed: {detail}");
+                    crate::diagnostics::log!("scan", "Scan failed: {detail}");
                     ui.conflicts_page.set_child(Some(&status_page(
                         "Scan Failed",
                         &format!("Something went wrong while reading the mods' files. Please report this: {detail}"),

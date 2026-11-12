@@ -224,6 +224,10 @@ pub fn build(
     menu.append(Some("Merged Patch _Backups…"), Some("win.patch-backups"));
     menu.append(Some("_Preferences"), Some("win.preferences"));
     menu.append(Some("_Keyboard Shortcuts"), Some("win.shortcuts"));
+    let troubleshooting = gio::Menu::new();
+    troubleshooting.append(Some("_Copy Diagnostics"), Some("win.copy-diagnostics"));
+    troubleshooting.append(Some("Open _Log Folder"), Some("win.open-log-folder"));
+    menu.append_submenu(Some("_Troubleshooting"), &troubleshooting);
     menu.append(Some("_About DrukhalManager"), Some("win.about"));
     let menu_button = gtk::MenuButton::builder()
         .icon_name("open-menu-symbolic")

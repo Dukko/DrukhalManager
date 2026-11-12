@@ -254,6 +254,11 @@ impl Patch {
     /// Adds or replaces a merged copy of `path`, or a chosen copy of an
     /// image or other binary file.
     pub fn save_file(&mut self, user_dir: &Path, game_version: Option<&str>, path: &str, contents: impl AsRef<[u8]>, prints: Vec<Print>) -> io::Result<()> {
+        let result = self.save_file_unlogged(user_dir, game_version, path, contents, prints);
+        crate::diagnostics::outcome("patch", || format!("Saved {path} to {}", self.target.name), result)
+    }
+
+    fn save_file_unlogged(&mut self, user_dir: &Path, game_version: Option<&str>, path: &str, contents: impl AsRef<[u8]>, prints: Vec<Print>) -> io::Result<()> {
         let sources = prints.iter().filter(|p| p.mod_id != VANILLA).map(|p| p.name.clone()).collect();
         self.write_descriptors(user_dir, game_version)?;
         let target = self.root.join(path);
@@ -269,6 +274,11 @@ impl Patch {
 
     /// Removes a merged object and its file.
     pub fn remove(&mut self, category: &str, key: &str) -> io::Result<()> {
+        let result = self.remove_unlogged(category, key);
+        crate::diagnostics::outcome("patch", || format!("Removed {category}/{key} from {}", self.target.name), result)
+    }
+
+    fn remove_unlogged(&mut self, category: &str, key: &str) -> io::Result<()> {
         if let Some(at) = self.manifest.merges.iter().position(|m| m.category == category && m.key == key) {
             let merge = self.manifest.merges.remove(at);
             remove_if_present(&self.root.join(&merge.file))?;
@@ -278,6 +288,11 @@ impl Patch {
 
     /// Removes a merged or fixed file.
     pub fn remove_file(&mut self, path: &str) -> io::Result<()> {
+        let result = self.remove_file_unlogged(path);
+        crate::diagnostics::outcome("patch", || format!("Removed {path} from {}", self.target.name), result)
+    }
+
+    fn remove_file_unlogged(&mut self, path: &str) -> io::Result<()> {
         if let Some(at) = self.manifest.files.iter().position(|f| f.path.eq_ignore_ascii_case(path)) {
             let merge = self.manifest.files.remove(at);
             remove_if_present(&self.root.join(&merge.path))?;
@@ -393,7 +408,7 @@ impl Patch {
         }
         if dirty && let Err(e) = self.write_manifest() {
             // Only bookkeeping: the next check redoes it.
-            eprintln!("Could not update the merged patch's records: {e}");
+            crate::diagnostics::log!("patch", "Could not update the merged patch's records: {e}");
         }
         stale
     }
@@ -430,6 +445,11 @@ impl Patch {
     /// mod's descriptors if needed. `game_version` (e.g. `v4.5.3`) sets the
     /// version the launcher shows the patch as supporting.
     pub fn save(&mut self, user_dir: &Path, game_version: Option<&str>, category: &str, key: &str, script: &str, prints: Vec<Print>) -> io::Result<()> {
+        let result = self.save_unlogged(user_dir, game_version, category, key, script, prints);
+        crate::diagnostics::outcome("patch", || format!("Saved {category}/{key} to {}", self.target.name), result)
+    }
+
+    fn save_unlogged(&mut self, user_dir: &Path, game_version: Option<&str>, category: &str, key: &str, script: &str, prints: Vec<Print>) -> io::Result<()> {
         let sources = prints.iter().filter(|p| p.mod_id != VANILLA).map(|p| p.name.clone()).collect();
         self.write_descriptors(user_dir, game_version)?;
         let file = file_for(category, key);
@@ -478,11 +498,11 @@ pub fn link(user_dir: &Path, target: &Target) -> io::Result<()> {
 
 /// Deletes the patch `target` and the descriptor the launcher finds it by.
 pub fn delete(user_dir: &Path, target: &Target) -> io::Result<()> {
-    remove_if_present(&user_dir.join(target.id()))?;
-    match std::fs::remove_dir_all(target.root(user_dir)) {
+    let result = remove_if_present(&user_dir.join(target.id())).and_then(|()| match std::fs::remove_dir_all(target.root(user_dir)) {
         Err(e) if e.kind() != io::ErrorKind::NotFound => Err(e),
         _ => Ok(()),
-    }
+    });
+    crate::diagnostics::outcome("patch", || format!("Deleted {}", target.name), result)
 }
 
 /// `text` as a descriptor's quoted value.

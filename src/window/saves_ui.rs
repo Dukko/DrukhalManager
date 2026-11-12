@@ -36,7 +36,7 @@ impl Window {
         let mut saves = Saves::load(&path);
         saves.record(&last.folder, played);
         if let Err(e) = saves.save(&path) {
-            eprintln!("Could not remember the save's mods: {e}");
+            crate::diagnostics::log!("saves", "Could not remember the save's mods: {e}");
         }
         self.update_continue();
     }

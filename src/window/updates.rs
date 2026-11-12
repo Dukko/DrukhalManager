@@ -13,8 +13,10 @@ type Action = fn(&Rc<Window>);
 
 impl Window {
     pub(super) fn add_update_actions(self: &Rc<Self>) {
-        let actions: [(&str, Action); 4] = [
+        let actions: [(&str, Action); 6] = [
             ("about", Self::show_about),
+            ("copy-diagnostics", Self::copy_diagnostics),
+            ("open-log-folder", Self::open_log_folder),
             ("install-update", Self::install_update),
             ("restart", Self::restart),
             ("show-update", |ui| ui.open_preferences(Some(UPDATES_PAGE))),
@@ -41,10 +43,48 @@ impl Window {
             .license_type(gtk::License::MitX11)
             .website("https://github.com/Dukko/DrukhalManager")
             .issue_url("https://github.com/Dukko/DrukhalManager/issues")
+            .debug_info(self.diagnostics())
+            .debug_info_filename("DrukhalManager diagnostics.txt")
             .build();
         about.add_acknowledgement_section(Some("A Fork Of"), &["Irony Mod Manager by Mario (bcssov) https://github.com/bcssov/IronyModManager"]);
         about.add_legal_section("Irony Mod Manager", Some("© 2020 Mario"), gtk::License::MitX11, None);
         about.present(Some(&self.window));
+    }
+
+    /// What to attach to a bug report: versions, the system, and the end of
+    /// the log. No keys, prompts or file contents.
+    fn diagnostics(&self) -> String {
+        let state = self.state.borrow();
+        let provider = match &self.settings.borrow().provider {
+            crate::merge::ai::Provider::Anthropic { model, .. } => format!("Claude, {model}"),
+            crate::merge::ai::Provider::OpenAiCompatible { model, .. } => format!("OpenAI-compatible, {model}"),
+        };
+        let env = |name: &str| std::env::var(name).unwrap_or_else(|_| "unknown".to_owned());
+        let facts = [
+            ("DrukhalManager", format!("{} ({})", update::CURRENT, if crate::sandbox::is_flatpak() { "Flatpak" } else { "native" })),
+            ("Stellaris", self.game.as_ref().and_then(|g| g.version.clone()).unwrap_or_else(|| "not found".to_owned())),
+            ("System", crate::diagnostics::distro()),
+            ("Desktop", format!("{} ({})", env("XDG_CURRENT_DESKTOP"), env("XDG_SESSION_TYPE"))),
+            ("GTK", format!("{}.{}.{}", gtk::major_version(), gtk::minor_version(), gtk::micro_version())),
+            ("libadwaita", format!("{}.{}.{}", adw::major_version(), adw::minor_version(), adw::micro_version())),
+            ("AI provider", provider),
+            ("Mods", format!("{} installed, {} enabled", state.mods.len(), state.enabled.len())),
+            ("Collection", self.collections.borrow().active.clone()),
+        ];
+        crate::diagnostics::report(&facts, 200)
+    }
+
+    fn copy_diagnostics(self: &Rc<Self>) {
+        self.window.clipboard().set_text(&self.diagnostics());
+        self.add_toast(adw::Toast::new("Copied the diagnostics; paste them into your bug report"));
+    }
+
+    fn open_log_folder(self: &Rc<Self>) {
+        let dir = crate::diagnostics::dir();
+        if let Err(e) = std::fs::create_dir_all(&dir) {
+            return self.add_toast(adw::Toast::builder().title(format!("Could not open the log folder: {e}")).timeout(0).build());
+        }
+        gtk::FileLauncher::new(Some(&gio::File::for_path(dir))).launch(Some(&self.window), None::<&gio::Cancellable>, |_| {});
     }
 
     /// At startup, if enabled: tells the user about a newer release they
@@ -57,7 +97,13 @@ impl Window {
         let weak = Rc::downgrade(self);
         glib::spawn_future_local(async move {
             let prereleases = options.prereleases;
-            if let Ok(Ok(latest)) = gio::spawn_blocking(move || update::latest(prereleases)).await
+            let found = gio::spawn_blocking(move || update::latest(prereleases)).await;
+            match &found {
+                Ok(Ok(latest)) => crate::diagnostics::log!("update", "Checked for updates: the latest is {}", latest.version),
+                Ok(Err(e)) => crate::diagnostics::log!("update", "Could not check for updates: {e}"),
+                Err(_) => crate::diagnostics::log!("update", "Could not check for updates: the check crashed"),
+            }
+            if let Ok(Ok(latest)) = found
                 && update::is_newer(&latest.version, update::CURRENT)
                 && options.skipped_version.as_deref() != Some(latest.version.as_str())
                 && let Some(ui) = weak.upgrade()

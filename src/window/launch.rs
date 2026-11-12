@@ -176,6 +176,13 @@ impl Window {
             return;
         }
         let played = self.playing();
+        crate::diagnostics::log!(
+            "game",
+            "Launching with {} enabled mods{}{}",
+            self.state.borrow().enabled.len(),
+            if resume { ", continuing the last save" } else { "" },
+            if crate::sandbox::is_flatpak() { ", through Steam" } else { "" }
+        );
         if crate::sandbox::is_flatpak() {
             // A sandboxed app can't start the game itself; Steam can, and
             // the launcher playset carries the load order.
@@ -200,6 +207,7 @@ impl Window {
         let mut child = match game.launch(&extra) {
             Ok(child) => child,
             Err(e) => {
+                crate::diagnostics::log!("game", "Could not start Stellaris: {e}");
                 return self.add_toast(
                     adw::Toast::builder()
                         .title(format!("Could not start Stellaris: {e}"))
@@ -238,7 +246,10 @@ impl Window {
             let user_dir = &ui.paths.user_dir;
             if !running {
                 running = session::started(user_dir, launched);
-                if !running && launched.elapsed().unwrap_or_default() > GIVE_UP {
+                if running {
+                    crate::diagnostics::log!("game", "Stellaris started");
+                } else if launched.elapsed().unwrap_or_default() > GIVE_UP {
+                    crate::diagnostics::log!("game", "Stellaris didn't start within half an hour; stopped watching");
                     return glib::ControlFlow::Break;
                 }
                 return glib::ControlFlow::Continue;
@@ -257,6 +268,8 @@ impl Window {
     /// After a session that started at `started`, points out errors the
     /// game logged about the mods, and that it crashed.
     fn report_session(self: &Rc<Self>, started: std::time::SystemTime, crashed: bool) {
+        let minutes = started.elapsed().unwrap_or_default().as_secs() / 60;
+        crate::diagnostics::log!("game", "Stellaris {} after {minutes} min", if crashed { "crashed" } else { "exited" });
         if self.hunting() {
             return self.ask_hunt_result(crashed);
         }
@@ -266,6 +279,9 @@ impl Window {
             .is_ok_and(|t| t >= started);
         let report = if fresh { Some(self.error_report()) } else { None };
         let from_mods = report.as_ref().map_or(0, |r| r.from_mods());
+        if from_mods > 0 {
+            crate::diagnostics::log!("game", "error.log has {from_mods} errors from the mods");
+        }
         if from_mods == 0 && !crashed {
             return;
         }
