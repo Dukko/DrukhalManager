@@ -15,19 +15,19 @@ A Stellaris mod manager for Linux that can merge conflicting mods with AI.
 
 </div>
 
-I play Stellaris on Linux with around 150 mods, and two things kept eating my evenings: working out which mods overwrite each other, and fixing the load order after every Steam update. [Irony Mod Manager](https://github.com/bcssov/IronyModManager) solves the first one well, but I wanted something native to my desktop that could also do the tedious part of merging for me. DrukhalManager is a fork of Irony, rewritten in Rust and GTK 4.
+I play Stellaris on Linux with around 150 mods, and two things kept messing up my evenings: working out which mods overwrite each other, and fixing the load order after every Steam update. [Irony Mod Manager](https://github.com/bcssov/IronyModManager) solves the first one well, but I wanted something native to my desktop that could also do the annoying and boring parts of merging for me. DrukhalManager is an opinionated fork of Irony, rewritten in Rust and GTK 4.
 
-It does the usual mod manager things (load orders, collections, Paradox Launcher playsets) and a few less usual ones:
+It does the usual mod manager things (load orders, collections, Paradox Launcher playsets) and a few **less usual** ones:
 
 * Shows every file and object that more than one mod changes, side by side, and tells you which version the game ends up using and why.
 * Merges two conflicting versions with Claude or any OpenAI-compatible model, using the base game's version as a reference, and saves the result to a patch mod that loads last. Your mods are never touched.
-* Merges the easy ones without AI: if only one mod actually changed something, there's nothing to ask a model about.
+* Merges the easy ones without AI: if only one mod actually changed something, let's not burn computing power for no reason.
 * Sorts your load order the way the community guides suggest, with sub-mods under the mod they belong to.
-* Remembers which mods each campaign was played with, and can freeze a collection so a Workshop update doesn't break a game in progress.
+* Remembers which mods each campaign was played with, and can freeze a collection so a Workshop update doesn't break a game in progress (a-la Irony merge, but faster).
 
 ### Should you use it?
 
-Probably not if you play anything other than Stellaris; Irony supports several Paradox games and has years more testing behind it. AI merging also isn't free or magic. Each merge is an API call you pay for (or a local model you run), and you should read what comes back before saving it. DrukhalManager shows you a cost estimate and the full result, but checking it is on you.
+Probably not if you play anything other than Stellaris; Irony supports several Paradox games and has years more testing behind it. AI merging also isn't free or magic. Each merge is an API call you pay for (or a local model you run), and you should read what comes back before saving it. DrukhalManager shows you a cost estimate and the full result, but you still need to know what's going on and not mash accept.
 
 ## Installing
 
@@ -77,9 +77,9 @@ Drag mods around, type a position into the number, or press **Smart Sort**. The 
 
 Smart Sort follows the order the community guides use: unofficial patches (`~`) first, then graphics, flavor, shipsets, galaxy generation, gameplay, large overhauls, compatibility patches, UI mods, UI patches, and universal patches (`!`) last. It decides where a mod goes from its name, its dependencies and the folders it ships, because Workshop tags are often wrong. You get a preview before anything moves, and if it puts a mod in the wrong place you can move it and it'll remember.
 
-The search box takes filters as well as names. `enabled:yes conflicts:yes` lists the enabled mods with conflicts, `source:local || giga` finds local mods or anything called giga, and `--` leaves things out. If you don't want to remember the syntax, the **Filters** button writes it for you.
+The search box takes filters as well as names. `enabled:yes conflicts:yes` lists the enabled mods with conflicts, `source:local || giga` finds local mods or anything called giga, and `--` leaves things out. If you don't want to remember the syntax, the **Filters** button does it for you.
 
-Some other things that live here:
+Some other things that are up there:
 
 * **Collections** are named load orders, each synced to its own Paradox Launcher playset. You can import a playset, a Workshop collection link, or a load order a friend pasted, and **Copy Load Order** gives you a numbered list with Workshop links to paste back.
 * **Notes** on a mod, for things like "keep this below UIOD or the outliner breaks". Search finds them.
@@ -95,7 +95,7 @@ Pick a conflict on the left and you get two versions next to each other with the
 
 The right-hand version is editable, so you can fix things by hand. **Take Change** copies a single difference across, **Changed Lines Only** hides the parts that match, and **Base Game** compares against the vanilla file instead. If you'd rather use Meld or KDiff3, **Merge Tool…** opens both versions there.
 
-Most of the noise in a big mod list is graphics and localisation files nobody cares about. You can ignore one conflict, a folder, or a pattern like `gfx/**`, and the rule editor tells you how many conflicts each rule hides.
+Most of the noise in a big mod list is graphics and localisation files I usually don't care about. You can ignore one conflict, a folder, or a pattern like `gfx/**`, and the rule editor tells you how many conflicts each rule hides.
 
 | Shortcut | Does |
 | --- | --- |
@@ -155,7 +155,7 @@ To install by hand elsewhere, copy `target/release/drukhal-manager` to your `PAT
 
 ## Credits
 
-DrukhalManager is a fork of [Irony Mod Manager](https://github.com/bcssov/IronyModManager) by Mario (bcssov), and wouldn't exist without it. Irony already ships a native Linux build with Proton support; DrukhalManager is a Rust and GTK alternative focused on AI-assisted merging. Irony's design and behaviour are the reference for this rewrite: its conflict solver, override rules, collections, load order checks and descriptor handling are the models for DrukhalManager's, and code ported from it is marked at the top of the relevant source files. Thank you, Mario.
+DrukhalManager is a fork of [Irony Mod Manager](https://github.com/bcssov/IronyModManager) by Mario (bcssov), and wouldn't exist without it. Irony already ships a native Linux build with Proton support; DrukhalManager is a Rust and GTK alternative focused on AI-assisted merging and QoL features I personally wanted. Irony's design and behaviour are the reference for this rewrite: its conflict solver, override rules, collections, load order checks and descriptor handling are the models for DrukhalManager's, and code ported from it is marked at the top of the relevant source files. Thank you, Mario.
 
 ### Built with AI assistance
 
