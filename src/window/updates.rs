@@ -198,7 +198,7 @@ impl Window {
         let toast = current.unwrap_or_else(|| {
             let toast = adw::Toast::builder().timeout(0).build();
             self.update_toast.replace(Some(toast.clone()));
-            self.add_toast(toast.clone());
+            self.show_progress(&toast);
             toast
         });
         match progress {
