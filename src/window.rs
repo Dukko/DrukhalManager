@@ -34,6 +34,7 @@ use state::State;
 
 use crate::conflicts_view::Analysis;
 use crate::merge::patch::{self, Patch};
+use crate::mods::smart_sort::{self, Category};
 use crate::mods::{Mod, checks, filter};
 use crate::mods::collections::Collections;
 use crate::paradox::game::GameInstall;
@@ -68,6 +69,17 @@ struct Window {
     view_counts: Vec<(filter::View, gtk::Label)>,
     /// The game version, achievements and last save, under the views.
     game_info: gtk::Label,
+    /// The sidebar's Smart Sort categories, the one showing, if any, and
+    /// each one's row and count.
+    categories_list: gtk::ListBox,
+    category: Rc<Cell<Option<Category>>>,
+    category_counts: Vec<(Category, gtk::ListBoxRow, gtk::Label)>,
+    /// The load order's category runs, by the mod each starts with, for the
+    /// list's headers.
+    category_runs: RefCell<std::collections::HashMap<usize, smart_sort::Run>>,
+    /// The folders each mod ships, by its files' path, for Smart Sort's
+    /// categories.
+    profiles: RefCell<std::collections::HashMap<PathBuf, smart_sort::Profile>>,
     enabled_section: gtk::Box,
     disabled_section: gtk::Box,
     /// The selected mod's details, and the panel it's in.
@@ -244,6 +256,7 @@ pub fn build(
         .build();
     let sort_menu = gio::Menu::new();
     sort_menu.append(Some("Sort A–Z, Dependencies First"), Some("win.sort-alphabetically"));
+    sort_menu.append(Some("Show _Category Headers"), Some("win.category-headers"));
     let sort_alpha_button = adw::SplitButton::builder()
         .child(&adw::ButtonContent::builder().icon_name("view-sort-ascending-symbolic").label("Smart Sort…").build())
         .tooltip_text("Sort into sections by what each mod changes, keeping sub-mods below their mods and every mod after its dependencies")
@@ -283,17 +296,20 @@ pub fn build(
     let search_facts = SearchFacts::default();
     let query: Rc<RefCell<filter::Query>> = Rc::default();
     let view: Rc<Cell<filter::View>> = Rc::default();
+    let category: Rc<Cell<Option<Category>>> = Rc::default();
     for list in [&enabled_list, &disabled_list] {
-        let (query, facts, view) = (query.clone(), search_facts.clone(), view.clone());
+        let (query, facts, view, category) = (query.clone(), search_facts.clone(), view.clone(), category.clone());
         list.set_filter_func(move |row| {
             let query = query.borrow();
-            let view = view.get();
-            if query.is_empty() && view == filter::View::All {
+            let (view, category) = (view.get(), category.get());
+            if query.is_empty() && view == filter::View::All && category.is_none() {
                 return true;
             }
             row.widget_name()
                 .strip_prefix("mod-")
-                .and_then(|i| facts.borrow().get(&i.parse().ok()?).map(|f| view.matches(f) && query.matches(f)))
+                .and_then(|i| {
+                    facts.borrow().get(&i.parse().ok()?).map(|f| view.matches(f) && category.is_none_or(|c| f.category == Some(c)) && query.matches(f))
+                })
                 .unwrap_or(true)
         });
     }
@@ -306,6 +322,8 @@ pub fn build(
             query.replace(filter::Query::parse(&search.text()));
             enabled_list.invalidate_filter();
             disabled_list.invalidate_filter();
+            // Category headers show only while not searching.
+            enabled_list.invalidate_headers();
         }
     ));
     let enabled_section = gtk::Box::new(gtk::Orientation::Vertical, 6);
@@ -334,8 +352,9 @@ pub fn build(
     // Views on the left, the list, and the selected mod on the right; the
     // side panels fold away in a narrow window.
     let (views_list, view_counts, game_info) = overview::views_sidebar();
+    let (categories_list, category_counts) = overview::categories_sidebar();
     let views_split = adw::OverlaySplitView::builder()
-        .sidebar(&overview::sidebar_page(&views_list, &game_info))
+        .sidebar(&overview::sidebar_page(&views_list, &categories_list, &game_info))
         .css_classes(["load-order-split"])
         .content(&scrolled_page(&content))
         .min_sidebar_width(200.0)
@@ -428,6 +447,11 @@ pub fn build(
         view,
         view_counts,
         game_info,
+        categories_list,
+        category,
+        category_counts,
+        category_runs: RefCell::default(),
+        profiles: RefCell::default(),
         enabled_section,
         disabled_section,
         inspector,

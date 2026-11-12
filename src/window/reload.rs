@@ -68,6 +68,7 @@ impl Window {
             let restored = ui.state.borrow_mut().restore_returned(&collection, &returned);
             // Updated mods may have new thumbnails and files.
             *ui.thumbnails.borrow_mut() = Default::default();
+            ui.profiles.borrow_mut().clear();
             ui.check_stale();
             ui.update_repair_banner();
             let rescan = ui.analysis.borrow().is_some();

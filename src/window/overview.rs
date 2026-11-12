@@ -5,13 +5,14 @@ use std::rc::Rc;
 use std::time::SystemTime;
 
 use adw::prelude::*;
-use gtk::{gdk, glib};
+use gtk::{gdk, gio, glib};
 
 use super::{Window, display_name};
 use crate::conflicts_view::plural;
 use crate::merge::patch;
 use crate::mods::checks::{self, Severity};
 use crate::mods::filter::View;
+use crate::mods::smart_sort::{Category, Run};
 use crate::paradox::steam::ItemState;
 
 const CSS: &str = "
@@ -28,6 +29,19 @@ const CSS: &str = "
 .inspector-problem { padding: 10px 12px; border-radius: 10px; background: alpha(@warning_color, 0.12); }
 .inspector-problem.info { background: alpha(currentColor, 0.06); }
 .inspector-stat { padding: 8px 12px; }
+.category-dot { min-width: 8px; min-height: 8px; border-radius: 99px; }
+.category-header { padding: 7px 12px 5px 12px; background: alpha(currentColor, 0.03); border-bottom: 1px solid alpha(currentColor, 0.08); }
+.category-dot.unofficial { background: #57e389; }
+.category-dot.graphics { background: #62a0ea; }
+.category-dot.flavor { background: #f08cbe; }
+.category-dot.shipsets { background: #a3a7f2; }
+.category-dot.galaxy { background: #5cc8bd; }
+.category-dot.gameplay { background: #f5c211; }
+.category-dot.overhaul { background: #f0875a; }
+.category-dot.patches { background: #c9a27e; }
+.category-dot.ui { background: #c061cb; }
+.category-dot.ui-patches { background: #dc9ae0; }
+.category-dot.universal { background: #c0bfbc; }
 ";
 
 pub(super) fn add_css() {
@@ -62,12 +76,59 @@ pub(super) fn views_sidebar() -> (gtk::ListBox, Vec<(View, gtk::Label)>, gtk::La
     (list, counts, info)
 }
 
-pub(super) fn sidebar_page(list: &gtk::ListBox, info: &gtk::Label) -> gtk::Box {
+/// The Smart Sort categories, each with its row and count; a category with
+/// no enabled mods is hidden.
+pub(super) fn categories_sidebar() -> (gtk::ListBox, Vec<(Category, gtk::ListBoxRow, gtk::Label)>) {
+    let list = gtk::ListBox::builder().css_classes(["navigation-sidebar"]).build();
+    let mut counts = Vec::new();
+    for category in Category::ALL {
+        let line = gtk::Box::new(gtk::Orientation::Horizontal, 10);
+        line.append(&category_dot(category));
+        line.append(&gtk::Label::builder().label(category.title()).xalign(0.0).hexpand(true).ellipsize(gtk::pango::EllipsizeMode::End).build());
+        let count = gtk::Label::builder().css_classes(["dim-label", "numeric", "caption"]).build();
+        line.append(&count);
+        let row = gtk::ListBoxRow::builder().child(&line).tooltip_text(category.description()).visible(false).build();
+        list.append(&row);
+        counts.push((category, row, count));
+    }
+    (list, counts)
+}
+
+/// A category's colour, shared by the sidebar and the list's headers.
+fn category_dot(category: Category) -> gtk::Box {
+    gtk::Box::builder().valign(gtk::Align::Center).css_classes(["category-dot", category.key()]).build()
+}
+
+pub(super) fn sidebar_page(views: &gtk::ListBox, categories: &gtk::ListBox, info: &gtk::Label) -> gtk::Box {
     let page = gtk::Box::builder().orientation(gtk::Orientation::Vertical).css_classes(["side-panel"]).overflow(gtk::Overflow::Hidden).build();
-    page.append(&gtk::Label::builder().label("Views").xalign(0.0).margin_start(18).margin_top(12).margin_bottom(4).css_classes(["heading", "dim-label"]).build());
-    page.append(&gtk::ScrolledWindow::builder().child(list).vexpand(true).hscrollbar_policy(gtk::PolicyType::Never).build());
+    let heading = |text: &str| gtk::Label::builder().label(text).xalign(0.0).margin_start(18).margin_top(12).margin_bottom(4).css_classes(["heading", "dim-label"]).build();
+    let lists = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    lists.append(&heading("Views"));
+    lists.append(views);
+    let categories_heading = heading("Categories");
+    categories_heading.set_tooltip_text(Some("The sections Smart Sort puts enabled mods in"));
+    lists.append(&categories_heading);
+    lists.append(categories);
+    // Hidden with the list while no category has a mod.
+    categories.bind_property("visible", &categories_heading, "visible").sync_create().build();
+    page.append(&gtk::ScrolledWindow::builder().child(&lists).vexpand(true).hscrollbar_policy(gtk::PolicyType::Never).build());
     page.append(info);
     page
+}
+
+/// A header over a run of mods in one category: "Gameplay · 42".
+fn category_header(run: &Run) -> gtk::Widget {
+    let line = gtk::Box::builder().spacing(8).css_classes(["category-header"]).build();
+    line.append(&category_dot(run.category));
+    let title = if run.manual { format!("{} (manually ordered)", run.category.title()) } else { run.category.title().to_owned() };
+    line.append(&gtk::Label::builder().label(title).xalign(0.0).css_classes(["caption-heading"]).build());
+    line.append(&gtk::Label::builder().label(format!("· {}", run.len)).xalign(0.0).css_classes(["caption", "dim-label", "numeric"]).build());
+    line.set_tooltip_text(Some(&if run.manual {
+        format!("Smart Sort would put {} elsewhere in {}: moved here by hand", if run.len == 1 { "this mod" } else { "these mods" }, run.category.title())
+    } else {
+        run.category.description().to_owned()
+    }));
+    line.upcast()
 }
 
 /// Something a button does to the window.
@@ -113,10 +174,22 @@ impl Window {
         self.views_list.connect_row_selected(move |_, row| {
             let (Some(ui), Some(row)) = (weak.upgrade(), row) else { return };
             let view = View::ALL.get(row.index() as usize).copied().unwrap_or_default();
+            ui.categories_list.unselect_all();
+            ui.category.set(None);
             ui.view.set(view);
             ui.apply_view();
         });
+        let weak = Rc::downgrade(self);
+        self.categories_list.connect_row_selected(move |_, row| {
+            let (Some(ui), Some(row)) = (weak.upgrade(), row) else { return };
+            let Some(&category) = Category::ALL.get(row.index() as usize) else { return };
+            ui.views_list.unselect_all();
+            ui.category.set(Some(category));
+            ui.view.set(View::All);
+            ui.apply_view();
+        });
         self.views_list.select_row(self.views_list.row_at_index(0).as_ref());
+        self.setup_category_headers();
         for (list, other) in [(&self.enabled_list, &self.disabled_list), (&self.disabled_list, &self.enabled_list)] {
             let weak = Rc::downgrade(self);
             let other = other.downgrade();
@@ -146,10 +219,67 @@ impl Window {
 
     fn apply_view(&self) {
         let view = self.view.get();
+        let category = self.category.get();
         self.enabled_section.set_visible(view != View::Disabled);
-        self.disabled_section.set_visible(matches!(view, View::All | View::Attention | View::Disabled));
+        self.disabled_section.set_visible(category.is_none() && matches!(view, View::All | View::Attention | View::Disabled));
+        let show_missing = self.missing_list.first_child().is_some() && view == View::All && category.is_none();
+        self.missing_heading.set_visible(show_missing);
+        self.missing_list.set_visible(show_missing);
         self.enabled_list.invalidate_filter();
         self.disabled_list.invalidate_filter();
+        self.enabled_list.invalidate_headers();
+    }
+
+    /// Whether the load order shows its category headers: only in the
+    /// whole load order, where its rows are all there, in order.
+    fn shows_category_headers(&self) -> bool {
+        !self.settings.borrow().hide_category_headers && self.view.get() == View::All && self.category.get().is_none() && self.search.text().trim().is_empty()
+    }
+
+    /// Puts a header over each run of mods in one category, and adds the
+    /// action that turns them off.
+    fn setup_category_headers(self: &Rc<Self>) {
+        let weak = Rc::downgrade(self);
+        self.enabled_list.set_header_func(move |row, _| {
+            let Some(ui) = weak.upgrade() else { return };
+            let run = ui.shows_category_headers().then(|| row.widget_name().strip_prefix("mod-").and_then(|i| i.parse().ok()).and_then(|i: usize| ui.category_runs.borrow().get(&i).cloned())).flatten();
+            match run {
+                Some(run) => row.set_header(Some(&category_header(&run))),
+                None if row.header().is_some() => row.set_header(None::<&gtk::Widget>),
+                None => {}
+            }
+        });
+        let shown = !self.settings.borrow().hide_category_headers;
+        let action = gio::SimpleAction::new_stateful("category-headers", None, &shown.to_variant());
+        let weak = Rc::downgrade(self);
+        action.connect_change_state(move |action, value| {
+            let (Some(ui), Some(shown)) = (weak.upgrade(), value.and_then(|v| v.get::<bool>())) else { return };
+            action.set_state(&shown.to_variant());
+            ui.settings.borrow_mut().hide_category_headers = !shown;
+            ui.save_settings("whether category headers show");
+            ui.enabled_list.invalidate_headers();
+        });
+        self.window.add_action(&action);
+    }
+
+    /// Updates the categories' counts, hiding those with no enabled mods,
+    /// and leaves a category that emptied for the whole load order.
+    pub(super) fn refresh_category_counts(&self) {
+        let facts = self.search_facts.borrow();
+        let mut any = false;
+        let mut emptied = false;
+        for (category, row, label) in &self.category_counts {
+            let n = facts.values().filter(|f| f.category == Some(*category)).count();
+            label.set_label(&n.to_string());
+            row.set_visible(n > 0);
+            any |= n > 0;
+            emptied |= n == 0 && self.category.get() == Some(*category);
+        }
+        drop(facts);
+        self.categories_list.set_visible(any);
+        if emptied {
+            self.set_view(View::All);
+        }
     }
 
     /// Updates the views' counts from what the rows said about each mod.
