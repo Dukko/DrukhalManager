@@ -36,6 +36,15 @@
     <control>keyboard</control>
   </supports>
   <releases>
+    <release version="0.8.1" date="2026-11-12">
+      <description>
+        <p><em>Changed Lines Only.</em> A new toggle on the Conflicts page folds the lines that are the same in both versions, keeping a few around each difference. Click a fold to open it.</p>
+        <p><em>Put This In.</em> Right-click a difference on the view-only version to copy those lines into the version you're editing.</p>
+        <p><em>Keyboard shortcuts for conflicts.</em> Alt+Page Down and Alt+Page Up move between conflicts, Alt+Left and Alt+Right use the left or right version, Alt+M merges with AI and Alt+I ignores a conflict. They're listed in Keyboard Shortcuts.</p>
+        <p><em>Choose the Claude model.</em> Preferences → AI Merging lets you pick which Claude model merges, with its price, and cost estimates follow your choice.</p>
+        <p><em>Fixes.</em> Preferences now says whether your API keys are in the system keyring or, when there is none, in DrukhalManager's own settings file. A Steam Web API key can be saved without a keyring.</p>
+      </description>
+    </release>
     <release version="0.8.0" date="2026-11-11">
       <description>
         <p><em>One merged patch per collection.</em> Merges only fit the load order they were made for, so each collection now has its own merged patch, named after it, and switching collections switches patches. The patch you had becomes the active collection's. Backups, exporting with the patch and importing work per collection: an imported patch goes to the new collection instead of replacing yours.</p>
