@@ -66,10 +66,12 @@ impl Window {
         }
         self.fetching_requirements.set(true);
         let weak = Rc::downgrade(self);
+        // Where the key is kept while there's no keyring.
+        let in_file = self.settings.borrow().steam_key.clone();
         glib::spawn_future_local(async move {
             let fetched = gio::spawn_blocking(move || {
                 // Without the user's own key, required items can't be read.
-                let Some(key) = secrets::get(secrets::STEAM).ok().flatten().filter(|k| !k.trim().is_empty()) else { return Ok(None) };
+                let Some(key) = secrets::get(secrets::STEAM).ok().flatten().into_iter().chain([in_file]).find(|k| !k.trim().is_empty()) else { return Ok(None) };
                 workshop::requirements(key.trim(), &ids).map(Some)
             })
             .await
@@ -102,14 +104,18 @@ impl Window {
     }
 
     /// Stores a Steam Web API key typed in Preferences (empty removes it)
-    /// and fetches requirements with it.
+    /// and fetches requirements with it. It goes in the keyring, or with no
+    /// keyring in the (private) settings file, as the provider's key does.
     pub(super) fn store_steam_key(self: &Rc<Self>, key: String) {
         let weak = Rc::downgrade(self);
         glib::spawn_future_local(async move {
-            let stored = gio::spawn_blocking(move || secrets::set(secrets::STEAM, &key)).await.unwrap_or_else(|_| Err("The keyring call failed".into()));
+            let for_keyring = key.clone();
+            let stored = gio::spawn_blocking(move || secrets::set(secrets::STEAM, &for_keyring)).await.unwrap_or_else(|_| Err("The keyring call failed".into()));
             let Some(ui) = weak.upgrade() else { return };
-            if let Err(e) = stored {
-                return ui.toast_error_message(&e);
+            let in_file = if stored.is_ok() { String::new() } else { key };
+            if ui.settings.borrow().steam_key != in_file {
+                ui.settings.borrow_mut().steam_key = in_file;
+                ui.save_settings("the Steam key");
             }
             ui.requirements_not_before.set(None);
             ui.fetch_requirements();
