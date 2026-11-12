@@ -61,6 +61,10 @@ impl Window {
             }
         }
         self.last_issues.replace(issues.clone());
+        // Each enabled mod's Smart Sort category, and the runs it makes,
+        // before the rows go in, since their headers ask for them.
+        let placed = self.smart_plan(&state);
+        *self.category_runs.borrow_mut() = mods::smart_sort::runs(&state.enabled, &placed).into_iter().map(|run| (state.enabled[run.start], run)).collect();
         let none = Vec::new();
         let no_achievements: Vec<String> = state
             .enabled
@@ -83,9 +87,17 @@ impl Window {
                 issues.get(&index).unwrap_or(&none),
             ));
         }
+        {
+            let mut facts = self.search_facts.borrow_mut();
+            for p in &placed {
+                if let Some(f) = facts.get_mut(&p.index) {
+                    f.category = Some(p.category);
+                }
+            }
+        }
         self.missing_list.remove_all();
         let placeholders = self.collections.borrow().active().placeholders(&state.mods);
-        let show_missing = !placeholders.is_empty() && self.view.get() == mods::filter::View::All;
+        let show_missing = !placeholders.is_empty() && self.view.get() == mods::filter::View::All && self.category.get().is_none();
         self.missing_heading.set_visible(show_missing);
         self.missing_list.set_visible(show_missing);
         for p in placeholders {
@@ -146,6 +158,11 @@ impl Window {
         drop(state);
         self.refresh_health(health);
         self.refresh_view_counts(enabled);
+        self.refresh_category_counts();
+        // The facts the filter reads came after the rows.
+        if self.category.get().is_some() {
+            self.enabled_list.invalidate_filter();
+        }
         // Keep showing the selected mod, in its new place.
         if let Some(index) = self.selected.get() {
             let name = format!("mod-{index}");
@@ -167,6 +184,23 @@ impl Window {
         self.undo_action.set_enabled(can_undo);
         self.redo_action.set_enabled(can_redo);
         self.scan_if_stale();
+    }
+
+    /// Where Smart Sort would put each enabled mod, in its order. Reads the
+    /// folders of mods it hasn't seen yet.
+    fn smart_plan(&self, state: &State) -> Vec<mods::smart_sort::Placement> {
+        let mut cache = self.profiles.borrow_mut();
+        let mut profiles = std::collections::HashMap::new();
+        for &i in &state.enabled {
+            let Some(content) = &state.mods[i].content else { continue };
+            if !cache.contains_key(content) {
+                let Ok(files) = mods::archive::files(content) else { continue };
+                cache.insert(content.clone(), mods::smart_sort::Profile::read(&files));
+            }
+            profiles.insert(i, cache[content].clone());
+        }
+        let overrides = self.settings.borrow().sort_categories.iter().filter_map(|(id, key)| Some((id.clone(), mods::smart_sort::Category::from_key(key)?))).collect();
+        mods::smart_sort::plan(&state.mods, &state.enabled, &profiles, &overrides, &patch::is_patch)
     }
 
     /// Undoes the last load order change, unless the user is typing in a
@@ -395,6 +429,8 @@ impl Window {
                 outdated,
                 // Set below, once the problems are known.
                 attention: false,
+                // Set by `refresh`, from the Smart Sort plan.
+                category: None,
             },
         );
         row.set_widget_name(&format!("mod-{index}"));

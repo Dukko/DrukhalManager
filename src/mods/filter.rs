@@ -28,6 +28,8 @@ pub struct Facts {
     /// Has a warning: a missing requirement, a bad load order, a broken
     /// descriptor and the like.
     pub attention: bool,
+    /// The Smart Sort section of an enabled mod, once known.
+    pub category: Option<super::smart_sort::Category>,
 }
 
 /// The sidebar's lists of mods, each a filter over the same rows.
@@ -268,6 +270,7 @@ mod tests {
             conflicts: true,
             outdated: false,
             attention: true,
+            category: None,
         }
     }
 

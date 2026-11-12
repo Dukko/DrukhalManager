@@ -295,6 +295,76 @@ pub fn plan(mods: &[Mod], enabled: &[usize], profiles: &HashMap<usize, Profile>,
         .collect()
 }
 
+/// Mods next to each other in the load order that share a category.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Run {
+    /// Where it starts in the load order, and how many mods it holds.
+    pub start: usize,
+    pub len: usize,
+    pub category: Category,
+    /// Smart Sort would put these mods elsewhere: they were moved by hand.
+    pub manual: bool,
+}
+
+/// The runs of `order` (mod indices, as loaded), by the category each mod
+/// has in `placed`, the Smart Sort plan for the same mods. A run is manual
+/// when none of its mods follow the plan's order: those kept are the
+/// longest part of the load order that does, so one mod dragged away from
+/// its section is the one marked, not the section it left. The order
+/// within a section doesn't count.
+pub fn runs(order: &[usize], placed: &[Placement]) -> Vec<Run> {
+    // Each mod's section in the plan, counted along it, so a section that
+    // dependencies split in two is two places.
+    let mut place: HashMap<usize, (usize, Category)> = HashMap::new();
+    let mut section = 0;
+    for (at, p) in placed.iter().enumerate() {
+        if at > 0 && placed[at - 1].category != p.category {
+            section += 1;
+        }
+        place.insert(p.index, (section, p.category));
+    }
+    let keyed: Vec<(usize, Category)> = order.iter().filter_map(|i| place.get(i).copied()).collect();
+    if keyed.len() != order.len() {
+        return Vec::new();
+    }
+    let kept = longest_non_decreasing(&keyed.iter().map(|k| k.0).collect::<Vec<_>>());
+
+    let mut runs: Vec<Run> = Vec::new();
+    for (at, &(_, category)) in keyed.iter().enumerate() {
+        match runs.last_mut() {
+            Some(run) if run.category == category => {
+                run.len += 1;
+                run.manual &= !kept[at];
+            }
+            _ => runs.push(Run { start: at, len: 1, category, manual: !kept[at] }),
+        }
+    }
+    runs
+}
+
+/// Which items are in a longest non-decreasing subsequence of `keys`.
+fn longest_non_decreasing(keys: &[usize]) -> Vec<bool> {
+    // `tails[l]` ends the best subsequence of length l + 1 found so far.
+    let mut tails: Vec<usize> = Vec::new();
+    let mut previous: Vec<Option<usize>> = vec![None; keys.len()];
+    for (i, &k) in keys.iter().enumerate() {
+        let l = tails.partition_point(|&t| keys[t] <= k);
+        previous[i] = l.checked_sub(1).map(|l| tails[l]);
+        if l == tails.len() {
+            tails.push(i);
+        } else {
+            tails[l] = i;
+        }
+    }
+    let mut kept = vec![false; keys.len()];
+    let mut at = tails.last().copied();
+    while let Some(i) = at {
+        kept[i] = true;
+        at = previous[i];
+    }
+    kept
+}
+
 /// Whether a name joins two mods with `+`, as in `MECR+UIOD`.
 fn plus_joined(lower: &str) -> bool {
     lower.split('+').filter(|part| part.chars().any(char::is_alphanumeric)).count() >= 2
@@ -466,6 +536,39 @@ mod tests {
         assert_eq!(at("Planetary Diversity - Exotic Worlds"), at("Planetary Diversity") + 1);
         assert_eq!(at("Whiter Stars"), at("Planetary Diversity - Exotic Worlds") + 1);
         assert!(placed.iter().find(|p| p.index == 1).unwrap().chosen);
+    }
+
+    #[test]
+    fn finds_runs_moved_by_hand() {
+        use Category::*;
+        let plan: Vec<Placement> = [Unofficial, Graphics, Graphics, Graphics, Gameplay, Gameplay, Ui]
+            .into_iter()
+            .enumerate()
+            .map(|(index, category)| Placement { index, category, parent: None, reason: String::new(), chosen: false })
+            .collect();
+        let run = |start, len, category, manual| Run { start, len, category, manual };
+
+        // As sorted, with the order inside a section changed: nothing manual.
+        assert_eq!(runs(&[0, 3, 1, 2, 5, 4, 6], &plan), [
+            run(0, 1, Unofficial, false),
+            run(1, 3, Graphics, false),
+            run(4, 2, Gameplay, false),
+            run(6, 1, Ui, false),
+        ]);
+        // A gameplay mod dragged into the graphics: only it is marked, and
+        // the graphics on either side are runs of their own.
+        assert_eq!(runs(&[0, 1, 4, 2, 3, 5, 6], &plan), [
+            run(0, 1, Unofficial, false),
+            run(1, 1, Graphics, false),
+            run(2, 1, Gameplay, true),
+            run(3, 2, Graphics, false),
+            run(5, 1, Gameplay, false),
+            run(6, 1, Ui, false),
+        ]);
+        // A UI mod dragged to the top.
+        assert_eq!(runs(&[6, 0, 1, 2, 3, 4, 5], &plan)[0], run(0, 1, Ui, true));
+        // Mods the plan doesn't know of: no runs rather than wrong ones.
+        assert!(runs(&[0, 9], &plan).is_empty());
     }
 
     #[test]
