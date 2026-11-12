@@ -246,6 +246,10 @@ impl Window {
         let hooks = self.merge_hooks(&analysis);
         let (widget, view) = conflicts_view::build(&analysis, self.rescan_button(), hooks);
         self.conflicts_page.set_child(Some(&widget));
+        // On the window, so the shortcuts work wherever the focus is.
+        if let Ok(page) = view.clone().downcast::<conflicts_view::Page>() {
+            self.window.insert_action_group("conflicts", Some(&page.actions()));
+        }
         self.conflicts_view.replace(Some(view));
     }
 

@@ -138,6 +138,7 @@ impl FileView {
             let (_, button) = merge_controls(merged, stale.as_deref());
             button.set_css_classes(&["suggested-action"]);
             button.set_tooltip_text(Some("Combine the copies object by object, using AI only where they disagree"));
+            page.bind_key("merge-ai", &button);
             let weak = Rc::downgrade(self);
             let index = self.index;
             button.connect_clicked(move |_| {
@@ -214,7 +215,7 @@ impl FileView {
         let c = &analysis.report.files[self.index];
         let winner = *c.mods.last().unwrap();
         let pair = Pair::new(false);
-        for (card, v) in [(&pair.left, left), (&pair.right, right)] {
+        for (card, v, key) in [(&pair.left, left, "use-left"), (&pair.right, right, "use-right")] {
             let header = match v.position {
                 None => Header { title: v.label.clone(), subtitle: "The game's own copy".into(), color: None, badge: None },
                 Some(p) => Header {
@@ -233,6 +234,7 @@ impl FileView {
                         view.use_version(p, text.as_bytes());
                     }
                 });
+                page.bind_key(key, &use_it);
                 card.set_actions(&[use_it.upcast()]);
             }
         }
@@ -273,7 +275,7 @@ impl FileView {
         let c = &analysis.report.files[self.index];
         let winner = *c.mods.last().unwrap();
         let row = gtk::Box::builder().spacing(12).homogeneous(true).vexpand(true).build();
-        for v in [left, right] {
+        for (v, key) in [(left, "use-left"), (right, "use-right")] {
             let card = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(8).css_classes(["card"]).build();
             let inner = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(8).margin_top(12).margin_bottom(12).margin_start(12).margin_end(12).build();
             card.append(&inner);
@@ -316,6 +318,7 @@ impl FileView {
                         view.use_version(p, &bytes);
                     }
                 });
+                page.bind_key(key, &use_it);
                 inner.append(&use_it);
             }
             row.append(&card);

@@ -258,6 +258,18 @@ enum Status {
     Attention,
 }
 
+/// What the keyboard can do on the page: an action in the `conflicts`
+/// group, its accelerator, and its name in the Keyboard Shortcuts window.
+/// All use Alt, so none can be typed into a text field by mistake.
+pub const SHORTCUTS: &[(&str, &str, &str)] = &[
+    ("next", "<Alt>Page_Down", "Next Conflict"),
+    ("previous", "<Alt>Page_Up", "Previous Conflict"),
+    ("use-left", "<Alt>Left", "Use the Left Version"),
+    ("use-right", "<Alt>Right", "Use the Right Version"),
+    ("merge-ai", "<Alt>m", "Merge with AI"),
+    ("ignore", "<Alt>i", "Ignore the Conflict, or Stop Ignoring It"),
+];
+
 pub struct Page {
     pub analysis: Rc<Analysis>,
     pub hooks: Rc<MergeHooks>,
@@ -273,6 +285,8 @@ pub struct Page {
     /// Each listed item's status holder and subtitle, to update in place.
     parts: RefCell<HashMap<Item, (gtk::Box, gtk::Label, gtk::ListBoxRow)>>,
     current: Cell<Option<Item>>,
+    /// The buttons the shortcuts press, by action; see [`Page::bind_key`].
+    keys: RefCell<HashMap<&'static str, glib::WeakRef<gtk::Button>>>,
     /// Keeps the selected item's view alive; its widgets hold only weak
     /// references to it.
     view: RefCell<Option<Rc<dyn Any>>>,
@@ -412,6 +426,7 @@ pub fn build(analysis: &Rc<Analysis>, rescan: gtk::Button, hooks: Rc<MergeHooks>
         rows: RefCell::default(),
         parts: RefCell::default(),
         current: Cell::new(None),
+        keys: RefCell::default(),
         view: RefCell::new(None),
         files,
         objects,
@@ -839,8 +854,75 @@ impl Page {
         }
     }
 
+    /// Lets the shortcut for `action` (one of [`SHORTCUTS`]) press
+    /// `button`, and adds the keys to its tooltip. The last button bound
+    /// wins, as views bind theirs again each time they're drawn.
+    pub fn bind_key(&self, action: &'static str, button: &gtk::Button) {
+        if let Some((_, accel, _)) = SHORTCUTS.iter().find(|s| s.0 == action)
+            && let Some((key, modifiers)) = gtk::accelerator_parse(*accel)
+            && let Some(tooltip) = button.tooltip_text()
+        {
+            button.set_tooltip_text(Some(&format!("{tooltip} ({})", gtk::accelerator_get_label(key, modifiers))));
+        }
+        self.keys.borrow_mut().insert(action, button.downgrade());
+    }
+
+    /// The `conflicts` action group behind [`SHORTCUTS`], for the window.
+    pub fn actions(self: &Rc<Self>) -> gio::SimpleActionGroup {
+        let group = gio::SimpleActionGroup::new();
+        for &(name, _, _) in SHORTCUTS {
+            let action = gio::SimpleAction::new(name, None);
+            let weak = Rc::downgrade(self);
+            action.connect_activate(move |_, _| {
+                if let Some(page) = weak.upgrade() {
+                    page.key(name);
+                }
+            });
+            group.add_action(&action);
+        }
+        group
+    }
+
+    fn key(self: &Rc<Self>, action: &str) {
+        // Not from another page, nor from under a dialog.
+        let under_dialog = self.split.root().and_downcast::<adw::ApplicationWindow>().is_some_and(|w| w.visible_dialog().is_some());
+        if !self.split.is_mapped() || under_dialog {
+            return;
+        }
+        match action {
+            "next" | "previous" => {
+                let rows: Vec<Item> = self.rows.borrow().iter().flatten().copied().collect();
+                let at = self.current.get().and_then(|c| rows.iter().position(|&i| i == c));
+                let to = match (at, action == "next") {
+                    (Some(i), true) => i + 1,
+                    (Some(i), false) => i.wrapping_sub(1),
+                    (None, _) => 0,
+                };
+                if let Some(&item) = rows.get(to) {
+                    self.show(item);
+                    // Brings the row into view.
+                    if let Some((_, _, row)) = self.parts.borrow().get(&item) {
+                        row.grab_focus();
+                    }
+                }
+            }
+            "ignore" => {
+                if let Some(item @ (Item::Object(_) | Item::File(_))) = self.current.get() {
+                    self.toggle_ignored(item);
+                }
+            }
+            _ => {
+                let button = self.keys.borrow().get(action).and_then(|b| b.upgrade());
+                if let Some(button) = button.filter(|b| b.is_mapped() && b.is_sensitive()) {
+                    button.emit_clicked();
+                }
+            }
+        }
+    }
+
     /// Shows `item` in the main pane and selects its row.
     pub fn show(self: &Rc<Self>, item: Item) {
+        self.keys.borrow_mut().clear();
         self.current.set(Some(item));
         self.hooks.session.borrow_mut().selected = Some(self.key_of(item));
         if let Some((_, _, row)) = self.parts.borrow().get(&item) {
