@@ -120,7 +120,7 @@ mod tests {
         std::fs::create_dir_all(patch.join("common/buildings")).unwrap();
         std::fs::write(patch.join("descriptor.mod"), "name=\"DrukhalManager Merged Patch\"\n").unwrap();
         std::fs::write(patch.join("common/buildings/zz_merged.txt"), "a = {}").unwrap();
-        let shared = Shared { format: 1, name: "Main".into(), mods: vec![SharedMod { name: "A".into(), steam_id: Some(1), id: "mod/ugc_1.mod".into() }] };
+        let shared = Shared { format: 1, name: "Main".into(), mods: vec![SharedMod { name: "A".into(), steam_id: Some(1), id: "mod/ugc_1.mod".into(), note: None }] };
         let path = root.join("Main.zip");
         assert_eq!(export(&path, &shared, &mine, &patch::test_target()).unwrap(), 2);
 

@@ -254,6 +254,9 @@ pub struct SharedMod {
     pub steam_id: Option<u64>,
     /// The descriptor id on the machine it was exported from.
     pub id: String,
+    /// The sharer's note on the mod, when they chose to include notes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
 }
 
 /// The mods with `ids`, in order, to share; mods that aren't installed are
@@ -264,7 +267,7 @@ pub fn export(name: &str, ids: &[String], mods: &[Mod], names: &BTreeMap<String,
         .map(|id| {
             let m = mods.iter().find(|m| m.id == *id);
             let name = m.map(|m| m.descriptor.name.clone()).or_else(|| names.get(id).cloned()).unwrap_or_else(|| id.clone());
-            SharedMod { name, steam_id: m.and_then(|m| m.descriptor.remote_file_id).or_else(|| steam_id_of(id)), id: id.clone() }
+            SharedMod { name, steam_id: m.and_then(|m| m.descriptor.remote_file_id).or_else(|| steam_id_of(id)), id: id.clone(), note: None }
         })
         .collect();
     Shared { format: 1, name: name.to_owned(), mods: shared }
@@ -280,23 +283,50 @@ pub fn import(shared: &Shared, mods: &[Mod]) -> (Collection, Vec<String>) {
     let mut c = Collection::new(&shared.name, Vec::new());
     let mut missing = Vec::new();
     for s in &shared.mods {
-        let id = match find(s, mods) {
-            Some(m) => m.id.clone(),
-            None => {
-                missing.push(s.name.clone());
-                match (s.steam_id, s.id.is_empty()) {
-                    (Some(sid), _) => format!("mod/ugc_{sid}.mod"),
-                    (None, false) => s.id.clone(),
-                    (None, true) => continue,
-                }
-            }
-        };
+        if find(s, mods).is_none() {
+            missing.push(s.name.clone());
+        }
+        let Some(id) = local_id(s, mods) else { continue };
         if !c.mods.contains(&id) {
             c.names.insert(id.clone(), s.name.clone());
             c.mods.push(id);
         }
     }
     (c, missing)
+}
+
+/// The id a shared mod has here: the installed mod's, or for one that isn't
+/// installed, the id Steam would give it. `None` for a mod with neither a
+/// Steam id nor a descriptor id.
+fn local_id(s: &SharedMod, mods: &[Mod]) -> Option<String> {
+    match (find(s, mods), s.steam_id, s.id.is_empty()) {
+        (Some(m), _, _) => Some(m.id.clone()),
+        (None, Some(sid), _) => Some(format!("mod/ugc_{sid}.mod")),
+        (None, None, false) => Some(s.id.clone()),
+        (None, None, true) => None,
+    }
+}
+
+/// Puts the user's `notes` on the shared mods, by their ids here.
+pub fn attach_notes(shared: &mut Shared, notes: &BTreeMap<String, String>) {
+    for m in &mut shared.mods {
+        m.note = notes.get(&m.id).cloned();
+    }
+}
+
+/// The notes a shared collection came with, by the ids their mods have here
+/// (as `import` gives them), leaving out mods that already have a note in
+/// `mine`: the user's own note wins.
+pub fn imported_notes(shared: &Shared, mods: &[Mod], mine: &BTreeMap<String, String>) -> Vec<(String, String)> {
+    let mut notes: Vec<(String, String)> = Vec::new();
+    for s in &shared.mods {
+        let Some(note) = s.note.as_deref().map(str::trim).filter(|n| !n.is_empty()) else { continue };
+        let Some(id) = local_id(s, mods) else { continue };
+        if !mine.contains_key(&id) && !notes.iter().any(|(i, _)| *i == id) {
+            notes.push((id, note.to_owned()));
+        }
+    }
+    notes
 }
 
 /// The installed mod a shared one stands for, as `resolve` matches them.
@@ -352,13 +382,13 @@ pub fn from_text(text: &str) -> Option<Shared> {
         let mod_ = if let Some((title, url)) = rest.rsplit_once(" — ")
             && let Some(id) = url.split("id=").nth(1).and_then(|id| id.split(|c: char| !c.is_ascii_digit()).next()?.parse().ok())
         {
-            SharedMod { name: title.trim().to_owned(), steam_id: Some(id), id: String::new() }
+            SharedMod { name: title.trim().to_owned(), steam_id: Some(id), id: String::new(), note: None }
         } else if let Some(open) = rest.rfind(" (mod/")
             && rest.ends_with(".mod)")
         {
-            SharedMod { name: rest[..open].trim().to_owned(), steam_id: None, id: rest[open + 2..rest.len() - 1].to_owned() }
+            SharedMod { name: rest[..open].trim().to_owned(), steam_id: None, id: rest[open + 2..rest.len() - 1].to_owned(), note: None }
         } else {
-            SharedMod { name: rest.to_owned(), steam_id: None, id: String::new() }
+            SharedMod { name: rest.to_owned(), steam_id: None, id: String::new(), note: None }
         };
         mods.push(mod_);
     }
@@ -438,7 +468,7 @@ pub fn from_launcher_json(text: &str) -> Option<Shared> {
         .into_iter()
         .filter_map(|(_, m)| {
             let steam_id = m.steam_id.as_deref().and_then(|s| s.trim().parse().ok());
-            (steam_id.is_some() || !m.display_name.is_empty()).then(|| SharedMod { name: m.display_name, steam_id, id: String::new() })
+            (steam_id.is_some() || !m.display_name.is_empty()).then(|| SharedMod { name: m.display_name, steam_id, id: String::new(), note: None })
         })
         .collect();
     let name = if playset.name.trim().is_empty() { "Launcher Playset".to_owned() } else { playset.name.trim().to_owned() };
@@ -484,7 +514,7 @@ mod tests {
         assert!(from_launcher_json(r#"{"format":1,"name":"x","mods":[]}"#).is_none_or(|s| s.mods.is_empty()));
 
         let mut shared = from_launcher_json(new).unwrap();
-        shared.mods.insert(1, SharedMod { name: "Local".into(), steam_id: None, id: "mod/local.mod".into() });
+        shared.mods.insert(1, SharedMod { name: "Local".into(), steam_id: None, id: "mod/local.mod".into(), note: None });
         let (json, skipped) = to_launcher_json(&shared);
         assert_eq!(skipped, ["Local"]);
         let back = from_launcher_json(&json).unwrap();
@@ -498,8 +528,8 @@ mod tests {
             format: 1,
             name: "Main".into(),
             mods: vec![
-                SharedMod { name: "UI Overhaul Dynamic".into(), steam_id: Some(1623423360), id: "mod/ugc_1623423360.mod".into() },
-                SharedMod { name: "My Patch (v2)".into(), steam_id: None, id: "mod/my_patch.mod".into() },
+                SharedMod { name: "UI Overhaul Dynamic".into(), steam_id: Some(1623423360), id: "mod/ugc_1623423360.mod".into(), note: None },
+                SharedMod { name: "My Patch (v2)".into(), steam_id: None, id: "mod/my_patch.mod".into(), note: None },
             ],
         };
         let text = to_text(&shared);
@@ -574,6 +604,28 @@ mod tests {
         let (c, missing) = import(&serde_json::from_str(&json).unwrap(), &there);
         assert_eq!(c.mods, ["mod/ugc_1_renamed.mod", "mod/my_local.mod", "mod/gone.mod"], "kept as a placeholder");
         assert_eq!(missing, ["mod/gone.mod"]);
+    }
+
+    #[test]
+    fn shares_notes_when_asked() {
+        let here = [m("mod/ugc_1.mod", "One", Some(1)), m("mod/local.mod", "Local Thing", None)];
+        let mut shared = export("Mine", &["mod/ugc_1.mod".into(), "mod/local.mod".into(), "mod/ugc_7.mod".into()], &here, &BTreeMap::new());
+        let json = serde_json::to_string(&shared).unwrap();
+        assert!(!json.contains("note"), "left out unless attached");
+        let notes: BTreeMap<String, String> = [("mod/ugc_1.mod", "Keep below Giga"), ("mod/ugc_7.mod", "Breaks after 4.0"), ("mod/other.mod", "Not shared")].map(|(k, v)| (k.to_owned(), v.to_owned())).into();
+        attach_notes(&mut shared, &notes);
+        assert_eq!(shared.mods.iter().map(|m| m.note.as_deref()).collect::<Vec<_>>(), [Some("Keep below Giga"), None, Some("Breaks after 4.0")]);
+        let shared: Shared = serde_json::from_str(&serde_json::to_string(&shared).unwrap()).unwrap();
+
+        // A friend has One under another descriptor, and their own note on it.
+        let there = [m("mod/ugc_1_renamed.mod", "One", Some(1))];
+        assert_eq!(
+            imported_notes(&shared, &there, &BTreeMap::new()),
+            [("mod/ugc_1_renamed.mod".to_owned(), "Keep below Giga".to_owned()), ("mod/ugc_7.mod".to_owned(), "Breaks after 4.0".to_owned())],
+            "by the ids here, placeholders included"
+        );
+        let theirs = [("mod/ugc_1_renamed.mod".to_owned(), "Mine".to_owned())].into();
+        assert_eq!(imported_notes(&shared, &there, &theirs), [("mod/ugc_7.mod".to_owned(), "Breaks after 4.0".to_owned())], "their own note wins");
     }
 
     #[test]
