@@ -712,9 +712,11 @@ impl Page {
         }
         self.rows.replace(rows);
         self.parts.replace(parts);
+        // The summary once, not per row: it looks at every conflict.
         for item in self.parts.borrow().keys() {
-            self.update_status(*item);
+            self.set_status(*item);
         }
+        self.update_summary();
         // Keep the selection on the current item, if it's still listed.
         if let Some(current) = self.current.get()
             && let Some((_, _, row)) = self.parts.borrow().get(&current)
@@ -791,6 +793,12 @@ impl Page {
 
     /// Refreshes the dot and subtitle of `item`'s row, and the summary.
     pub fn update_status(&self, item: Item) {
+        self.set_status(item);
+        self.update_summary();
+    }
+
+    /// Refreshes the dot and subtitle of `item`'s row.
+    fn set_status(&self, item: Item) {
         let parts = self.parts.borrow();
         let Some((holder, subtitle, row)) = parts.get(&item) else { return };
         let (status, text) = self.status_of(item);
@@ -820,8 +828,6 @@ impl Page {
         } else {
             row.remove_css_class("dim-label");
         }
-        drop(parts);
-        self.update_summary();
     }
 
     fn update_summary(&self) {
