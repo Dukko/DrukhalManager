@@ -36,6 +36,13 @@
     <control>keyboard</control>
   </supports>
   <releases>
+    <release version="0.9.0" date="2026-11-12">
+      <description>
+        <p><em>Notifications in one place.</em> A bell in the header keeps every notification, newest first, with its time and its button, such as Show or Restart. Dismiss them one by one, or all at once with Clear All. Repeats are folded into one, and a badge counts the new ones. Toasts no longer stay on screen until closed.</p>
+        <p><em>Notes on mods.</em> Write yourself a note on any mod, such as why it sits where it does, from its menu. The note shows as an icon on the row and in the mod's details, where you can edit it in place. Search finds notes, and a shared collection file can carry them.</p>
+        <p><em>Diagnostics for bug reports.</em> DrukhalManager now keeps a small log of scans, merged patch changes, AI calls, game sessions and update checks. It never holds API keys, prompts or file contents. Main Menu, then Troubleshooting, copies a report to paste into a bug report or opens the log folder.</p>
+      </description>
+    </release>
     <release version="0.8.2" date="2026-11-12">
       <description>
         <p><em>Categories in the Load Order.</em> The sidebar lists the Smart Sort categories with how many mods each holds; click one to see only its mods. The load order shows a small header wherever the category changes, and says when mods were moved there by hand. Turn the headers off in the Smart Sort menu.</p>
