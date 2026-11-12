@@ -602,6 +602,14 @@ pub fn build(
         }
     });
     window.add_action(&rename_mod);
+    let edit_note = gio::SimpleAction::new("edit-note", Some(glib::VariantTy::UINT32));
+    let weak = Rc::downgrade(&ui);
+    edit_note.connect_activate(move |_, index| {
+        if let (Some(ui), Some(index)) = (weak.upgrade(), index.and_then(|i| i.get::<u32>())) {
+            ui.edit_note(index as usize);
+        }
+    });
+    window.add_action(&edit_note);
     let get_requirements = gio::SimpleAction::new("get-requirements", Some(glib::VariantTy::UINT32));
     let weak = Rc::downgrade(&ui);
     get_requirements.connect_activate(move |_, index| {

@@ -449,6 +449,21 @@ impl Window {
         top.append(&titles);
         page.append(&top);
 
+        // The user's own note, ahead of what the app found.
+        if let Some(note) = self.settings.borrow().notes.get(&m.id) {
+            let card = gtk::Box::new(gtk::Orientation::Horizontal, 10);
+            card.add_css_class("inspector-problem");
+            card.add_css_class("info");
+            card.append(&gtk::Image::builder().icon_name("document-edit-symbolic").valign(gtk::Align::Start).css_classes(["dim-label"]).build());
+            let text = label(note, &[]);
+            text.set_hexpand(true);
+            text.set_selectable(true);
+            card.append(&text);
+            let edit = gtk::Button::builder().label("Edit").valign(gtk::Align::Start).action_name("win.edit-note").action_target(&target).css_classes(["flat", "small"]).build();
+            card.append(&edit);
+            page.append(&card);
+        }
+
         // What's wrong, each with its fix where there is one.
         let mut problems: Vec<(Severity, String, Option<gtk::Widget>)> = Vec::new();
         for (severity, message) in self.extra_problems(m) {
@@ -578,6 +593,9 @@ impl Window {
             items.push(("Show Conflicts", "win.show-conflicts"));
         }
         items.push(("Rename…", "win.rename-mod"));
+        if !self.settings.borrow().notes.contains_key(&m.id) {
+            items.push(("Add Note…", "win.edit-note"));
+        }
         if position.is_some() && !is_patch {
             items.push(("Move to Top", "win.move-top"));
             items.push(("Move to Bottom", "win.move-bottom"));

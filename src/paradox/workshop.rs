@@ -167,6 +167,7 @@ fn to_shared(root: u64, items: &[u64], files: &HashMap<u64, (String, u32)>) -> R
             name: files.get(&id).map(|(t, _)| t.trim()).filter(|t| !t.is_empty()).map_or_else(|| format!("Workshop item {id}"), str::to_owned),
             steam_id: Some(id),
             id: format!("mod/ugc_{id}.mod"),
+            note: None,
         })
         .collect();
     Ok(Shared { format: 1, name, mods })
@@ -435,7 +436,7 @@ mod tests {
         let files = HashMap::from([(10, ("  Friends ".to_owned(), STELLARIS_APP_ID)), (1, ("Giga".to_owned(), STELLARIS_APP_ID))]);
         let shared = to_shared(10, &[1, 2], &files).unwrap();
         assert_eq!(shared.name, "Friends");
-        assert_eq!(shared.mods[0], SharedMod { name: "Giga".into(), steam_id: Some(1), id: "mod/ugc_1.mod".into() });
+        assert_eq!(shared.mods[0], SharedMod { name: "Giga".into(), steam_id: Some(1), id: "mod/ugc_1.mod".into(), note: None });
         assert_eq!(shared.mods[1].name, "Workshop item 2");
 
         let other = HashMap::from([(10, ("Skyrim".to_owned(), 489830))]);

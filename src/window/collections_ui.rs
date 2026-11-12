@@ -510,6 +510,7 @@ impl Window {
                     None => return ui.toast_error(&format!("Not a collection or playset file: {e}")),
                 },
             };
+            ui.adopt_notes(&shared);
             let (collection, missing) = collections::import(&shared, &ui.state.borrow().mods);
             ui.add_and_switch(collection, missing);
         });
@@ -621,13 +622,46 @@ impl Window {
     }
 
     fn export_collection(self: &Rc<Self>) {
+        self.ask_include_notes(|ui, notes| ui.export_collection_file(notes));
+    }
+
+    /// Asks whether to share the user's notes on the active collection's
+    /// mods, then calls `go` with the answer. Doesn't ask when none has one.
+    fn ask_include_notes(self: &Rc<Self>, go: impl Fn(&Rc<Window>, bool) + 'static) {
+        let name = self.collections.borrow().active.clone();
+        let noted = {
+            let settings = self.settings.borrow();
+            self.shared_collection(&name, false).mods.iter().filter(|m| settings.notes.contains_key(&m.id)).count()
+        };
+        if noted == 0 {
+            return go(self, false);
+        }
+        let body = format!("{} in “{name}” {} your notes. Whoever imports the file sees them on mods they haven't noted themselves.", plural(noted, "mod", "mods"), if noted == 1 { "has" } else { "have" });
+        let dialog = adw::AlertDialog::new(Some("Include Your Notes?"), Some(&body));
+        dialog.add_responses(&[("cancel", "_Cancel"), ("without", "_Leave Out"), ("with", "_Include")]);
+        dialog.set_response_appearance("with", adw::ResponseAppearance::Suggested);
+        dialog.set_default_response(Some("with"));
+        dialog.set_close_response("cancel");
+        let weak = Rc::downgrade(self);
+        dialog.connect_response(None, move |_, response| {
+            let Some(ui) = weak.upgrade() else { return };
+            match response {
+                "with" => go(&ui, true),
+                "without" => go(&ui, false),
+                _ => {}
+            }
+        });
+        dialog.present(Some(&self.window));
+    }
+
+    fn export_collection_file(self: &Rc<Self>, notes: bool) {
         let name = self.collections.borrow().active.clone();
         let dialog = gtk::FileDialog::builder().title("Export Collection").initial_name(format!("{name}.json")).modal(true).build();
         let weak = Rc::downgrade(self);
         dialog.save(Some(&self.window), None::<&gio::Cancellable>, move |file| {
             let (Some(ui), Ok(file)) = (weak.upgrade(), file) else { return };
             let Some(path) = file.path() else { return };
-            let shared = ui.shared_collection(&name, false);
+            let shared = ui.shared_collection_with(&name, notes);
             match serde_json::to_vec_pretty(&shared).map_err(|e| e.to_string()).and_then(|json| std::fs::write(&path, json).map_err(|e| e.to_string())) {
                 Ok(()) => ui.add_toast(adw::Toast::new(&format!("Exported “{name}” with {}", plural(shared.mods.len(), "mod", "mods")))),
                 Err(e) => ui.toast_error(&format!("Could not export: {e}")),
@@ -640,13 +674,17 @@ impl Window {
     /// Exports the load order with the merged patch in one zip, so a friend
     /// gets the same merges, e.g. to play together.
     fn export_bundle(self: &Rc<Self>) {
+        self.ask_include_notes(|ui, notes| ui.export_bundle_file(notes));
+    }
+
+    fn export_bundle_file(self: &Rc<Self>, notes: bool) {
         let name = self.collections.borrow().active.clone();
         let dialog = gtk::FileDialog::builder().title("Export with the Merged Patch").initial_name(format!("{name}.zip")).modal(true).build();
         let weak = Rc::downgrade(self);
         dialog.save(Some(&self.window), None::<&gio::Cancellable>, move |file| {
             let (Some(ui), Ok(file)) = (weak.upgrade(), file) else { return };
             let Some(path) = file.path() else { return };
-            let shared = ui.shared_collection(&name, false);
+            let shared = ui.shared_collection_with(&name, notes);
             match bundle::export(&path, &shared, &ui.paths.user_dir, &ui.patch_target()) {
                 Ok(0) => ui.add_toast(adw::Toast::new(&format!("Exported “{name}” with {}; there's no merged patch yet", plural(shared.mods.len(), "mod", "mods")))),
                 Ok(files) => ui.add_toast(adw::Toast::new(&format!("Exported “{name}” with {} and the merged patch ({})", plural(shared.mods.len(), "mod", "mods"), plural(files, "file", "files")))),
@@ -716,6 +754,7 @@ impl Window {
         if patch.is_none() {
             shared.mods.retain(|m| !crate::merge::patch::is_patch(&m.id));
         }
+        self.adopt_notes(&shared);
         let (mut collection, missing) = collections::import(&shared, &self.state.borrow().mods);
         collection.patch = patch;
         self.add_and_switch(collection, missing);
@@ -742,6 +781,27 @@ impl Window {
                 ui.toast_error(&format!("{exported}. The launcher only knows Workshop mods, so {} left out: {}", if skipped.len() == 1 { "this local mod was" } else { "these local mods were" }, skipped.join(", ")));
             }
         });
+    }
+
+    /// `shared_collection` with the merged patch, and the user's notes if
+    /// `notes`.
+    fn shared_collection_with(&self, name: &str, notes: bool) -> collections::Shared {
+        let mut shared = self.shared_collection(name, false);
+        if notes {
+            collections::attach_notes(&mut shared, &self.settings.borrow().notes);
+        }
+        shared
+    }
+
+    /// Takes the notes an imported collection came with, for mods that
+    /// don't have one here.
+    fn adopt_notes(&self, shared: &collections::Shared) {
+        let notes = collections::imported_notes(shared, &self.state.borrow().mods, &self.settings.borrow().notes);
+        if notes.is_empty() {
+            return;
+        }
+        self.settings.borrow_mut().notes.extend(notes);
+        self.save_settings("the imported notes");
     }
 
     /// The current load order to share as the collection `name`, with its
@@ -780,6 +840,7 @@ impl Window {
             let Some(shared) = text.ok().flatten().and_then(|t| collections::from_text(&t)) else {
                 return ui.toast_error("The clipboard doesn't hold a load order");
             };
+            ui.adopt_notes(&shared);
             let (collection, missing) = collections::import(&shared, &ui.state.borrow().mods);
             ui.add_and_switch(collection, missing);
         });

@@ -352,6 +352,82 @@ impl Window {
         });
     }
 
+    /// Asks for a note on the mod at `index`, shown on its row and in the
+    /// inspector. An empty note removes it.
+    pub(super) fn edit_note(self: &Rc<Self>, index: usize) {
+        let (id, name) = {
+            let state = self.state.borrow();
+            let Some(m) = state.mods.get(index) else { return };
+            let name = self.settings.borrow().aliases.get(&m.id).cloned().unwrap_or_else(|| display_name(m).trim().to_owned());
+            (m.id.clone(), name)
+        };
+        let current = self.settings.borrow().notes.get(&id).cloned();
+        let text = gtk::TextView::builder()
+            .wrap_mode(gtk::WrapMode::WordChar)
+            .accepts_tab(false)
+            .top_margin(8)
+            .bottom_margin(8)
+            .left_margin(10)
+            .right_margin(10)
+            .build();
+        text.buffer().set_text(current.as_deref().unwrap_or(""));
+        text.update_property(&[gtk::accessible::Property::Label("Note")]);
+        let scrolled = gtk::ScrolledWindow::builder().child(&text).hscrollbar_policy(gtk::PolicyType::Never).min_content_height(110).max_content_height(260).propagate_natural_height(true).css_classes(["card"]).build();
+        let dialog = adw::AlertDialog::new(Some(if current.is_some() { "Edit Note" } else { "Add Note" }), Some(&name));
+        dialog.set_extra_child(Some(&scrolled));
+        dialog.add_response("cancel", "_Cancel");
+        if current.is_some() {
+            dialog.add_response("remove", "_Remove");
+            dialog.set_response_appearance("remove", adw::ResponseAppearance::Destructive);
+        }
+        dialog.add_response("save", "_Save");
+        dialog.set_response_appearance("save", adw::ResponseAppearance::Suggested);
+        dialog.set_default_response(Some("save"));
+        dialog.set_close_response("cancel");
+        // Enter starts a new line; Ctrl+Enter saves.
+        let keys = gtk::EventControllerKey::new();
+        keys.connect_key_pressed(glib::clone!(
+            #[weak]
+            dialog,
+            #[upgrade_or]
+            glib::Propagation::Proceed,
+            move |_, key, _, modifiers| {
+                if matches!(key, gdk::Key::Return | gdk::Key::KP_Enter) && modifiers.contains(gdk::ModifierType::CONTROL_MASK) {
+                    dialog.emit_by_name::<()>("response", &[&"save"]);
+                    return glib::Propagation::Stop;
+                }
+                glib::Propagation::Proceed
+            }
+        ));
+        text.add_controller(keys);
+        let weak = Rc::downgrade(self);
+        let field = text.clone();
+        dialog.connect_response(None, move |_, response| {
+            let Some(ui) = weak.upgrade() else { return };
+            let buffer = field.buffer();
+            let note = match response {
+                "save" => buffer.text(&buffer.start_iter(), &buffer.end_iter(), false).trim().to_owned(),
+                "remove" => String::new(),
+                _ => return,
+            };
+            if note.as_str() == current.as_deref().unwrap_or("") {
+                return;
+            }
+            {
+                let mut settings = ui.settings.borrow_mut();
+                if note.is_empty() {
+                    settings.notes.remove(&id);
+                } else {
+                    settings.notes.insert(id.clone(), note);
+                }
+            }
+            ui.save_settings("the note");
+            ui.refresh();
+        });
+        dialog.present(Some(&self.window));
+        text.grab_focus();
+    }
+
     pub(super) fn row(
         self: &Rc<Self>,
         m: &Mod,
@@ -392,6 +468,11 @@ impl Window {
         // First, so it ends up nearest the name: later prefixes go before it.
         row.add_prefix(&self.thumbnail_sized(m, 28));
 
+        let note = self.settings.borrow().notes.get(&m.id).cloned();
+        if let Some(note) = &note {
+            row.add_suffix(&gtk::Image::builder().icon_name("document-edit-symbolic").tooltip_text(note).valign(gtk::Align::Center).css_classes(["dim-label"]).build());
+        }
+
         let game = self.game.as_ref().and_then(|g| g.version.as_deref());
         let outdated = game.is_some_and(|game| !d.game_version().is_empty() && !checks::version_matches(d.game_version(), game));
         if !d.game_version().is_empty() {
@@ -417,6 +498,7 @@ impl Window {
         let no_achievements = changes_checksum(m);
         let mut text = vec![name.to_owned(), display_name(m).to_owned(), source.to_owned(), d.tags.join(" ")];
         text.extend(d.remote_file_id.map(|id| id.to_string()));
+        text.extend(note);
         self.search_facts.borrow_mut().insert(
             index,
             mods::filter::Facts {
@@ -582,6 +664,10 @@ impl Window {
         }
         let item = gio::MenuItem::new(Some("_Rename…"), None);
         item.set_action_and_target_value(Some("win.rename-mod"), Some(&index_variant));
+        menu.append_item(&item);
+        let has_note = self.settings.borrow().notes.contains_key(&m.id);
+        let item = gio::MenuItem::new(Some(if has_note { "Edit _Note…" } else { "Add _Note…" }), None);
+        item.set_action_and_target_value(Some("win.edit-note"), Some(&index_variant));
         menu.append_item(&item);
         if m.content.is_some() {
             let item = gio::MenuItem::new(Some("Open Folder"), None);
