@@ -33,6 +33,10 @@ pub struct Header {
     pub badge: Option<(String, Option<&'static str>)>,
 }
 
+/// What clicking a fold bubble does now.
+type OnClick = Rc<RefCell<Option<Rc<dyn Fn()>>>>;
+type Bubble = (gtk::Button, OnClick);
+
 /// One version, in a card.
 pub struct Card {
     pub widget: gtk::Box,
@@ -51,6 +55,9 @@ pub struct Card {
     /// The bubbles standing in for folded lines, each with where its room
     /// is: above (or else below) a line, and how far into that room it sits.
     folds: RefCell<Vec<(gtk::Button, usize, bool, i32)>>,
+    /// Every bubble made so far, with what clicking it does. A text view
+    /// can't give its overlays back, so they're hidden and used again.
+    bubbles: RefCell<Vec<Bubble>>,
 }
 
 impl Card {
@@ -111,7 +118,7 @@ impl Card {
         widget.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
         widget.append(&body);
 
-        let card = Rc::new(Self { widget, dot, title, subtitle, badge, actions, numbers_scroll, scroll, numbers, code, standalone: Cell::new(true), folds: RefCell::default() });
+        let card = Rc::new(Self { widget, dot, title, subtitle, badge, actions, numbers_scroll, scroll, numbers, code, standalone: Cell::new(true), folds: RefCell::default(), bubbles: RefCell::default() });
         // Fold bubbles follow the text as it's laid out: a long text is
         // measured bit by bit, which shows as its scrolling range changing.
         // The adjustment is replaced when cards link their scrolling.
@@ -225,7 +232,7 @@ impl Card {
         clear_marks(&buffer);
         clear_marks(&self.numbers.buffer());
         for (fold, ..) in self.folds.take() {
-            self.code.remove(&fold);
+            fold.set_visible(false);
         }
         if lines <= COLOUR_LIMIT {
             colour_lines(&buffer, 0, lines);
@@ -344,15 +351,32 @@ impl Card {
         let (line, above) = if lines.end < self.code.buffer().line_count() as usize { (lines.end, true) } else { (lines.start.saturating_sub(1), false) };
         self.add_gap(line, above, height + FOLD_ROOM);
         let n = lines.len();
-        let bubble = gtk::Button::builder()
-            .label(format!("⋯  {n} unchanged {}", if n == 1 { "line" } else { "lines" }))
-            .tooltip_text("Show these lines")
-            .css_classes(["fold-bubble"])
-            .height_request(height)
-            .cursor(&gtk::gdk::Cursor::from_name("pointer", None).expect("the pointer cursor exists"))
-            .build();
-        bubble.connect_clicked(move |_| expand());
-        self.code.add_overlay(&bubble, 0, 0);
+        let free = self.bubbles.borrow().iter().find(|(b, _)| !b.is_visible()).cloned();
+        let (bubble, on_click) = free.unwrap_or_else(|| {
+            let bubble = gtk::Button::builder()
+                .tooltip_text("Show these lines")
+                .css_classes(["fold-bubble"])
+                .cursor(&gtk::gdk::Cursor::from_name("pointer", None).expect("the pointer cursor exists"))
+                .build();
+            let on_click = OnClick::default();
+            bubble.connect_clicked({
+                let on_click = on_click.clone();
+                move |_| {
+                    // Taken out first: expanding hides and reuses bubbles.
+                    let expand = on_click.borrow().clone();
+                    if let Some(expand) = expand {
+                        expand();
+                    }
+                }
+            });
+            self.code.add_overlay(&bubble, 0, 0);
+            self.bubbles.borrow_mut().push((bubble.clone(), on_click.clone()));
+            (bubble, on_click)
+        });
+        bubble.set_label(&format!("⋯  {n} unchanged {}", if n == 1 { "line" } else { "lines" }));
+        bubble.set_height_request(height);
+        bubble.set_visible(true);
+        on_click.replace(Some(Rc::new(expand)));
         self.folds.borrow_mut().push((bubble, line, above, FOLD_ROOM / 2));
         self.place_folds();
     }
