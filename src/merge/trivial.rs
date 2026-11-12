@@ -6,6 +6,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use super::conflicts::Report;
+use super::scan_cache::ScanCache;
 use super::patch::fingerprint;
 use super::source::{self, Source};
 
@@ -47,14 +48,42 @@ pub fn resolve(vanilla: Option<&Source>, sources: &[Source]) -> Option<Resolved>
 /// reason. `roots` and `names` are by scanned position. Reads each file once
 /// and each game folder once; slow parts of a big load order, so run it off
 /// the main thread.
+#[cfg(test)]
 pub fn simple_conflicts(report: &Report, roots: &[Option<PathBuf>], names: &[String], game_dir: Option<&Path>) -> HashMap<usize, String> {
+    simple_conflicts_cached(report, roots, names, game_dir, None, &mut ScanCache::default())
+}
+
+/// Like `simple_conflicts`, taking the verdicts `cache` has for conflicts
+/// whose files haven't changed, and keeping the new ones. `game_version`
+/// stands for the base game's files; without it nothing is cached, unless
+/// there's no game to compare with either.
+pub fn simple_conflicts_cached(report: &Report, roots: &[Option<PathBuf>], names: &[String], game_dir: Option<&Path>, game_version: Option<&str>, cache: &mut ScanCache) -> HashMap<usize, String> {
+    let game = match (game_dir, game_version) {
+        (None, _) => Some("none"),
+        (Some(_), version) => version,
+    };
+    let mut simple = HashMap::new();
+    // Each conflict's fingerprint, for those to work out.
+    let mut prints: HashMap<usize, String> = HashMap::new();
     let mut by_category: HashMap<&str, Vec<usize>> = HashMap::new();
     for (i, c) in report.objects.iter().enumerate() {
+        let print = game.and_then(|game| {
+            let paths: Option<Vec<PathBuf>> = c.definitions.iter().map(|d| Some(roots.get(d.mod_position)?.as_ref()?.join(&d.file))).collect();
+            let paths = paths?;
+            let definitions: Vec<(&str, &str, &Path)> = c.definitions.iter().zip(&paths).map(|(d, p)| (names[d.mod_position].as_str(), d.file.as_str(), p.as_path())).collect();
+            cache.conflict_print(&c.category, &c.key, game, &definitions)
+        });
+        if let Some(print) = print {
+            if let Some(verdict) = cache.verdict(&print) {
+                simple.extend(verdict.map(|reason| (i, reason)));
+                continue;
+            }
+            prints.insert(i, print);
+        }
         by_category.entry(c.category.as_str()).or_default().push(i);
     }
     // Each file parsed once: its objects by key.
     let mut files: HashMap<(PathBuf, &str), HashMap<String, String>> = HashMap::new();
-    let mut simple = HashMap::new();
     for (category, indices) in by_category {
         let keys: Vec<String> = indices.iter().map(|&i| report.objects[i].key.clone()).collect();
         let vanilla = game_dir.map(|dir| source::vanilla_many(dir, category, &keys)).unwrap_or_default();
@@ -70,8 +99,12 @@ pub fn simple_conflicts(report: &Report, roots: &[Option<PathBuf>], names: &[Str
                 let Some(text) = objects.get(&c.key).cloned() else { continue 'objects };
                 sources.push(Source { label: names[d.mod_position].clone(), file: d.file.clone(), text });
             }
-            if let Some(resolved) = resolve(vanilla.get(&c.key), &sources) {
-                simple.insert(i, resolved.reason);
+            let reason = resolve(vanilla.get(&c.key), &sources).map(|r| r.reason);
+            if let Some(print) = prints.remove(&i) {
+                cache.set_verdict(print, reason.clone());
+            }
+            if let Some(reason) = reason {
+                simple.insert(i, reason);
             }
         }
     }
@@ -163,14 +196,30 @@ mod tests {
             }
         }
         let names: Vec<String> = enabled.iter().map(|m| m.descriptor.name.clone()).collect();
-        let start = std::time::Instant::now();
-        let report = crate::merge::conflicts::analyze(&inputs, None);
-        println!("scan: {:?}, {} object conflicts", start.elapsed(), report.objects.len());
-        let game = crate::paradox::game::find(&crate::paradox::steam::library_folders(&home)).map(|g| g.dir);
+        let game = crate::paradox::game::find(&crate::paradox::steam::library_folders(&home));
+        let (dir, version) = (game.as_ref().map(|g| g.dir.clone()), game.and_then(|g| g.version));
         let roots: Vec<_> = inputs.iter().map(|i| i.root.clone().filter(|r| r.is_dir())).collect();
+        // Cold, then again with what the first run cached.
+        let mut cache = ScanCache::default();
+        let mut results = Vec::new();
+        for run in ["cold", "cached"] {
+            let start = std::time::Instant::now();
+            let report = crate::merge::conflicts::analyze_cached(&inputs, None, &mut cache);
+            println!("{run} scan: {:?}, {} object conflicts", start.elapsed(), report.objects.len());
+            let start = std::time::Instant::now();
+            let simple = simple_conflicts_cached(&report, &roots, &names, dir.as_deref(), version.as_deref(), &mut cache);
+            println!("{run} simple check: {:?}, {} of {} simple", start.elapsed(), simple.len(), report.objects.len());
+            results.push((report.files, report.objects, report.errors, simple));
+        }
+        assert!(results[0] == results[1], "the cache changed what was found");
+        let path = std::env::temp_dir().join(format!("drukhal-scan-cache-size-{}.json", std::process::id()));
         let start = std::time::Instant::now();
-        let simple = simple_conflicts(&report, &roots, &names, game.as_deref());
-        println!("simple check: {:?}, {} of {} simple", start.elapsed(), simple.len(), report.objects.len());
+        cache.save(&path).unwrap();
+        println!("cache: {} KB, saved in {:?}", std::fs::metadata(&path).unwrap().len() / 1024, start.elapsed());
+        let start = std::time::Instant::now();
+        ScanCache::load(&path);
+        println!("loaded in {:?}", start.elapsed());
+        std::fs::remove_file(path).unwrap();
     }
 
     #[test]

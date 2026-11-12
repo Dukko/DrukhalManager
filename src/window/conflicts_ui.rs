@@ -14,6 +14,7 @@ use crate::folder_merge_dialog;
 use crate::fix_dialog;
 use crate::merge::conflicts::{self, ModInput};
 use crate::merge::patch::{self, Patch};
+use crate::merge::scan_cache::ScanCache;
 use crate::merge::snapshot;
 use crate::mods::{self, archive, Mod};
 use crate::settings;
@@ -74,6 +75,9 @@ impl Window {
 
         let weak = Rc::downgrade(self);
         let game_dir = self.game.as_ref().map(|g| g.dir.clone());
+        let game_version = self.game.as_ref().and_then(|g| g.version.clone());
+        let cache = self.scan_cache.clone();
+        let saved = cache.clone();
         let languages = self.settings.borrow().game.languages(&self.paths.user_dir);
         let labels: Vec<String> = names.clone();
         glib::spawn_future_local(async move {
@@ -89,11 +93,22 @@ impl Window {
                     }
                 }
                 let roots: Vec<_> = inputs.iter().map(|i| i.root.clone().filter(|r| r.is_dir())).collect();
-                let report = conflicts::analyze(&inputs, Some(&languages));
-                let simple = crate::merge::trivial::simple_conflicts(&report, &roots, &labels, game_dir.as_deref());
+                // A poisoned lock only means an earlier scan panicked.
+                let mut cache = cache.lock().unwrap_or_else(|e| e.into_inner());
+                let cache = cache.get_or_insert_with(|| ScanCache::load(&ScanCache::path()));
+                let report = conflicts::analyze_cached(&inputs, Some(&languages), cache);
+                let simple = crate::merge::trivial::simple_conflicts_cached(&report, &roots, &labels, game_dir.as_deref(), game_version.as_deref(), cache);
                 (report, roots, simple)
             })
             .await;
+            // Written after the results show; the next scan waits for it.
+            gio::spawn_blocking(move || {
+                if let Some(cache) = saved.lock().unwrap_or_else(|e| e.into_inner()).as_mut()
+                    && let Err(e) = cache.save(&ScanCache::path())
+                {
+                    eprintln!("Could not save the conflict scan cache: {e}");
+                }
+            });
             let Some(ui) = weak.upgrade() else { return };
             ui.scanning.set(false);
             match result {

@@ -11,4 +11,5 @@ pub mod lint;
 pub mod patch;
 pub mod snapshot;
 pub mod source;
+pub mod scan_cache;
 pub mod trivial;
