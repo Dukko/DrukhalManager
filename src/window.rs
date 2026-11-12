@@ -813,6 +813,8 @@ impl Window {
     /// Long ones wrap instead of stretching across the window.
     fn add_toast(&self, toast: adw::Toast) {
         toast.set_use_markup(false);
+        // First: a custom title below clears the toast's own.
+        self.notify(&toast);
         let title = toast.title().unwrap_or_default();
         if title.chars().count() > 60 && toast.custom_title().is_none() {
             let label = gtk::Label::builder()
@@ -824,7 +826,6 @@ impl Window {
                 .build();
             toast.set_custom_title(Some(&label));
         }
-        self.notify(&toast);
         self.toasts.add_toast(toast);
     }
 
