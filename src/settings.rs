@@ -50,6 +50,10 @@ pub struct Settings {
     /// `None` when it wasn't changed. Never written to the file.
     #[serde(skip)]
     pub new_steam_key: Option<String>,
+    /// The Steam Web API key, kept here only while there's no keyring to
+    /// hold it.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub steam_key: String,
     /// Workshop items the user said aren't really required, by id.
     #[serde(default)]
     pub ignored_requirements: std::collections::BTreeSet<u64>,
@@ -164,12 +168,12 @@ pub fn default_parallel(provider: &Provider) -> u32 {
 }
 
 fn default_provider() -> Provider {
-    Provider::Anthropic { api_key: String::new() }
+    Provider::claude("")
 }
 
 impl Default for Settings {
     fn default() -> Self {
-        Self { provider: default_provider(), ignored: Default::default(), ignore_rules: String::new(), parallel_merges: None, show_dependency_conflicts: false, game: Default::default(), updates: Default::default(), sort_categories: Default::default(), aliases: Default::default(), disabled_order: Default::default(), key_in_keyring: false, new_steam_key: None, ignored_requirements: Default::default(), last_game_version: None, merge_tool: String::new() }
+        Self { provider: default_provider(), ignored: Default::default(), ignore_rules: String::new(), parallel_merges: None, show_dependency_conflicts: false, game: Default::default(), updates: Default::default(), sort_categories: Default::default(), aliases: Default::default(), disabled_order: Default::default(), key_in_keyring: false, new_steam_key: None, steam_key: String::new(), ignored_requirements: Default::default(), last_game_version: None, merge_tool: String::new() }
     }
 }
 
@@ -226,6 +230,11 @@ impl Settings {
                 *key = found;
             }
         }
+        // A Steam key saved while there was no keyring moves there too.
+        if !self.steam_key.is_empty() && crate::secrets::set(crate::secrets::STEAM, &self.steam_key).is_ok() {
+            self.steam_key.clear();
+            let _ = self.save(path);
+        }
         self
     }
 
@@ -238,8 +247,8 @@ impl Settings {
 
     pub fn ready_provider(&self) -> Option<Provider> {
         match &self.provider {
-            Provider::Anthropic { api_key } if api_key.is_empty() => {
-                std::env::var("ANTHROPIC_API_KEY").ok().filter(|k| !k.is_empty()).map(|api_key| Provider::Anthropic { api_key })
+            Provider::Anthropic { api_key, model } if api_key.is_empty() => {
+                std::env::var("ANTHROPIC_API_KEY").ok().filter(|k| !k.is_empty()).map(|api_key| Provider::Anthropic { api_key, model: model.clone() })
             }
             Provider::OpenAiCompatible { base_url, model, .. } if base_url.trim().is_empty() || model.trim().is_empty() => None,
             p => Some(p.clone()),
@@ -249,7 +258,7 @@ impl Settings {
 
 pub fn api_key_mut(provider: &mut Provider) -> &mut String {
     match provider {
-        Provider::Anthropic { api_key } | Provider::OpenAiCompatible { api_key, .. } => api_key,
+        Provider::Anthropic { api_key, .. } | Provider::OpenAiCompatible { api_key, .. } => api_key,
     }
 }
 
@@ -266,7 +275,7 @@ mod tests {
     fn saves_privately_and_loads() {
         let path = std::env::temp_dir().join(format!("drukhal-settings-{}/settings.json", std::process::id()));
         assert_eq!(Settings::load(&path), Settings::default());
-        let s = Settings { provider: Provider::OpenAiCompatible { base_url: "http://localhost:11434/v1".into(), model: "qwen".into(), api_key: String::new() }, ignored: ["file:x".to_owned()].into(), ignore_rules: "gfx/**".into(), parallel_merges: Some(3), show_dependency_conflicts: true, game: GameOptions { launch_args: "-debug".into(), close_after_launch: true, ..Default::default() }, updates: UpdateOptions { check_at_startup: true, skipped_version: Some("0.2.0".into()), prereleases: true }, sort_categories: [("mod/ugc_1.mod".to_owned(), "ui".to_owned())].into(), aliases: [("mod/ugc_2.mod".to_owned(), "UIOD".to_owned())].into(), disabled_order: DisabledOrder::RecentlyUpdated, key_in_keyring: false, new_steam_key: None, ignored_requirements: Default::default(), last_game_version: None, merge_tool: "meld {left} {right}".into() };
+        let s = Settings { provider: Provider::OpenAiCompatible { base_url: "http://localhost:11434/v1".into(), model: "qwen".into(), api_key: String::new() }, ignored: ["file:x".to_owned()].into(), ignore_rules: "gfx/**".into(), parallel_merges: Some(3), show_dependency_conflicts: true, game: GameOptions { launch_args: "-debug".into(), close_after_launch: true, ..Default::default() }, updates: UpdateOptions { check_at_startup: true, skipped_version: Some("0.2.0".into()), prereleases: true }, sort_categories: [("mod/ugc_1.mod".to_owned(), "ui".to_owned())].into(), aliases: [("mod/ugc_2.mod".to_owned(), "UIOD".to_owned())].into(), disabled_order: DisabledOrder::RecentlyUpdated, key_in_keyring: false, new_steam_key: None, steam_key: String::new(), ignored_requirements: Default::default(), last_game_version: None, merge_tool: "meld {left} {right}".into() };
         s.save(&path).unwrap();
         assert_eq!(Settings::load(&path), s);
         assert!(s.ready_provider().is_some());
@@ -278,13 +287,19 @@ mod tests {
         assert!(Settings { provider: openrouter(), ..Default::default() }.ready_provider().is_none(), "needs a model");
 
         // With the key in the keyring, the file leaves it out.
-        let mut with_key = Settings { provider: Provider::Anthropic { api_key: "sk-secret".into() }, ..Default::default() };
+        let mut with_key = Settings { provider: Provider::claude("sk-secret"), ..Default::default() };
         with_key.save(&path).unwrap();
         assert!(std::fs::read_to_string(&path).unwrap().contains("sk-secret"), "no keyring: kept in the private file");
         with_key.key_in_keyring = true;
         with_key.save(&path).unwrap();
         assert!(!std::fs::read_to_string(&path).unwrap().contains("sk-secret"));
-        assert_eq!(with_key.provider, Provider::Anthropic { api_key: "sk-secret".into() }, "still in memory");
+        assert_eq!(with_key.provider, Provider::claude("sk-secret"), "still in memory");
+
+        // The Steam key is in the file only while no keyring holds it.
+        assert!(!std::fs::read_to_string(&path).unwrap().contains("steam_key"));
+        let with_steam = Settings { steam_key: "STEAMKEY".into(), ..Default::default() };
+        with_steam.save(&path).unwrap();
+        assert_eq!(Settings::load(&path).steam_key, "STEAMKEY");
         std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
     }
 

@@ -8,7 +8,7 @@ use std::rc::Rc;
 use adw::prelude::*;
 use gtk::{gio, glib};
 
-use crate::merge::ai::{CLAUDE_MODEL, OPENROUTER_URL, Provider};
+use crate::merge::ai::{self, ClaudeModel, OPENROUTER_URL, Provider};
 use crate::merge::collection;
 use crate::merge::conflicts::LANGUAGES;
 use crate::paradox::{game, steam};
@@ -26,11 +26,11 @@ pub fn present(parent: &impl IsA<gtk::Widget>, settings: Settings, page: Option<
     // and would otherwise size itself to an empty page.
     let dialog = adw::PreferencesDialog::builder().content_width(640).content_height(720).build();
     let (game_page, merging_page, read_game) = game_page(&settings.game);
-    let (ai_page, read_provider, read_parallel) = ai_page(&settings.provider, settings.parallel_merges);
+    let (ai_page, read_provider, read_parallel, ai_keyring) = ai_page(&settings.provider, settings.parallel_merges);
     let (updates_page, read_updates) = updates_page(&settings.updates);
     let (tool_group, read_tool) = merge_tool_group(&settings.merge_tool);
     merging_page.add(&tool_group);
-    let (steam_group, read_steam_key) = steam_key_group();
+    let (steam_group, read_steam_key) = steam_key_group(settings.steam_key.clone(), Box::new(ai_keyring));
     let steam_page = self::page("Steam", "steam", "network-server-symbolic");
     steam_page.add(&steam_group);
     // Several light pages rather than a few long ones: the dialog animates
@@ -81,24 +81,41 @@ fn collect_groups(widget: &gtk::Widget, out: &mut Vec<adw::PreferencesGroup>) {
     }
 }
 
+/// Where an API key is kept, for a group's description: the keyring, or
+/// without one the settings file.
+fn key_storage(keyring: bool) -> &'static str {
+    if keyring {
+        "The key is kept in your system keyring."
+    } else {
+        "No keyring is available, so the key is kept in DrukhalManager's settings file, readable only by you."
+    }
+}
+
+const STEAM_DESCRIPTION: &str = "With your own Steam Web API key, the mod list also checks the Workshop's “Required items” of enabled mods, which many mods list only there. Get a key at <a href=\"https://steamcommunity.com/dev/apikey\">steamcommunity.com/dev/apikey</a>.";
+
 /// The Steam Web API key, which lets DrukhalManager read mods' Workshop
-/// "Required items". Loaded from the keyring in the background; the
-/// reader returns it only if it was changed.
-fn steam_key_group() -> (adw::PreferencesGroup, impl Fn() -> Option<String> + use<>) {
-    let group = adw::PreferencesGroup::builder()
-        .title("Steam Workshop")
-        .description("With your own Steam Web API key, the mod list also checks the Workshop's “Required items” of enabled mods, which many mods list only there. Get a key at <a href=\"https://steamcommunity.com/dev/apikey\">steamcommunity.com/dev/apikey</a>; it's kept in your keyring.")
-        .build();
+/// "Required items". Loaded from the keyring in the background, or with no
+/// keyring from the settings file (`in_file`); the reader returns it only
+/// if it was changed. `on_keyring` hears whether there is a keyring, once
+/// that's known.
+fn steam_key_group(in_file: String, on_keyring: Box<dyn Fn(bool)>) -> (adw::PreferencesGroup, impl Fn() -> Option<String> + use<>) {
+    let group = adw::PreferencesGroup::builder().title("Steam Workshop").description(format!("{STEAM_DESCRIPTION} {}", key_storage(true))).build();
     let row = adw::PasswordEntryRow::builder().title("Steam Web API Key").build();
     group.add(&row);
     let loaded: Rc<RefCell<Option<String>>> = Rc::default();
     glib::spawn_future_local(glib::clone!(
         #[weak]
         row,
+        #[weak]
+        group,
         #[strong]
         loaded,
         async move {
-            let key = gio::spawn_blocking(|| crate::secrets::get(crate::secrets::STEAM)).await.ok().and_then(Result::ok).flatten().unwrap_or_default();
+            let found = gio::spawn_blocking(|| crate::secrets::get(crate::secrets::STEAM)).await.unwrap_or_else(|_| Err("The keyring call failed".into()));
+            let keyring = found.is_ok();
+            group.set_description(Some(&format!("{STEAM_DESCRIPTION} {}", key_storage(keyring))));
+            on_keyring(keyring);
+            let key = found.ok().flatten().filter(|k| !k.is_empty()).unwrap_or(in_file);
             // Not if the user typed something meanwhile.
             if row.text().is_empty() {
                 row.set_text(&key);
@@ -379,11 +396,78 @@ fn game_page(options: &GameOptions) -> (adw::PreferencesPage, adw::PreferencesPa
     (page, merging_page, read)
 }
 
-fn ai_page(current: &Provider, parallel: Option<u32>) -> (adw::PreferencesPage, impl Fn() -> Provider + use<>, impl Fn(&Provider) -> Option<u32> + use<>) {
+const CLAUDE_DESCRIPTION: &str = "Leave the key empty to use the ANTHROPIC_API_KEY environment variable.";
+const COMPATIBLE_DESCRIPTION: &str = "OpenRouter, or a local server such as Ollama (http://localhost:11434/v1) or LM Studio (http://localhost:1234/v1). Use a model that's good at code; small local models often produce broken merges.";
+
+/// A price per million tokens: "$4", "$0.10".
+fn dollars(amount: f64) -> String {
+    if amount.fract() == 0.0 { format!("${amount:.0}") } else { format!("${amount:.2}") }
+}
+
+/// What the chosen Claude model costs, under its row.
+fn price_text(model: &str) -> String {
+    match ai::claude_price(model) {
+        Some(p) => format!("{} per million input tokens, {} per million output tokens", dollars(p.input), dollars(p.output)),
+        None => "Its price isn't known here, so merges show no cost estimate".to_owned(),
+    }
+}
+
+/// The Claude model choice: the built-in list at first, then the models
+/// the key can use, from the API. Returns the row and a reader of the
+/// chosen model's id.
+fn claude_model_row(current: &str, api_key: &str) -> (adw::ComboRow, impl Fn() -> String + use<>) {
+    let with_current = |mut models: Vec<ClaudeModel>, current: &str| {
+        if !models.iter().any(|m| m.id == current) {
+            models.push(ClaudeModel { id: current.to_owned(), name: current.to_owned() });
+        }
+        models
+    };
+    let models = Rc::new(RefCell::new(with_current(ai::builtin_claude_models(), current)));
+    let names = gtk::StringList::new(&models.borrow().iter().map(|m| m.name.as_str()).collect::<Vec<_>>());
+    let selected = models.borrow().iter().position(|m| m.id == current).unwrap_or(0);
+    let row = adw::ComboRow::builder().title("Model").model(&names).selected(selected as u32).build();
+    let chosen = {
+        let (row, models) = (row.clone(), models.clone());
+        move || models.borrow().get(row.selected() as usize).map(|m| m.id.clone()).unwrap_or_else(|| ai::CLAUDE_MODEL.to_owned())
+    };
+    row.set_subtitle(&price_text(&chosen()));
+    row.connect_selected_notify({
+        let chosen = chosen.clone();
+        move |row| row.set_subtitle(&price_text(&chosen()))
+    });
+
+    let key = if api_key.is_empty() { std::env::var("ANTHROPIC_API_KEY").unwrap_or_default() } else { api_key.to_owned() };
+    if !key.is_empty() {
+        glib::spawn_future_local(glib::clone!(
+            #[weak]
+            row,
+            #[strong]
+            chosen,
+            async move {
+                // Without an answer the built-in list stays.
+                let Ok(Ok(listed)) = gio::spawn_blocking(move || ai::claude_models(&key)).await else { return };
+                if listed.is_empty() {
+                    return;
+                }
+                let keep = chosen();
+                let listed = with_current(listed, &keep);
+                let position = listed.iter().position(|m| m.id == keep).unwrap_or(0);
+                let new_names: Vec<&str> = listed.iter().map(|m| m.name.as_str()).collect();
+                names.splice(0, names.n_items(), &new_names);
+                models.replace(listed.clone());
+                row.set_selected(position as u32);
+                row.set_subtitle(&price_text(&keep));
+            }
+        ));
+    }
+    (row, chosen)
+}
+
+fn ai_page(current: &Provider, parallel: Option<u32>) -> (adw::PreferencesPage, impl Fn() -> Provider + use<>, impl Fn(&Provider) -> Option<u32> + use<>, impl Fn(bool) + use<>) {
     // Remember both providers' fields while the user switches between them.
-    let (mut anthropic_key, mut openai) = (String::new(), settings::openrouter());
+    let (mut anthropic_key, mut claude_model, mut openai) = (String::new(), ai::CLAUDE_MODEL.to_owned(), settings::openrouter());
     match current {
-        Provider::Anthropic { api_key } => anthropic_key = api_key.clone(),
+        Provider::Anthropic { api_key, model } => (anthropic_key, claude_model) = (api_key.clone(), model.clone()),
         p @ Provider::OpenAiCompatible { .. } => openai = p.clone(),
     }
     let Provider::OpenAiCompatible { base_url, model, api_key: openai_key } = openai else { unreachable!() };
@@ -396,14 +480,16 @@ fn ai_page(current: &Provider, parallel: Option<u32>) -> (adw::PreferencesPage, 
 
     let anthropic = adw::PreferencesGroup::builder()
         .title("Claude")
-        .description(format!("Merges use {CLAUDE_MODEL}. The key is kept in your system keyring. Leave it empty to use the ANTHROPIC_API_KEY environment variable."))
+        .description(format!("{} {CLAUDE_DESCRIPTION}", key_storage(true)))
         .build();
     let anthropic_key_row = adw::PasswordEntryRow::builder().title("API Key").text(&anthropic_key).build();
+    let (model_choice, read_claude_model) = claude_model_row(&claude_model, &anthropic_key);
     anthropic.add(&anthropic_key_row);
+    anthropic.add(&model_choice);
 
     let compatible = adw::PreferencesGroup::builder()
         .title("OpenAI-Compatible Endpoint")
-        .description("OpenRouter, or a local server such as Ollama (http://localhost:11434/v1) or LM Studio (http://localhost:1234/v1). Use a model that's good at code; small local models often produce broken merges.")
+        .description(format!("{COMPATIBLE_DESCRIPTION} {}", key_storage(true)))
         .build();
     let url_row = adw::EntryRow::builder().title("Base URL").text(&base_url).build();
     let model_row = adw::EntryRow::builder().title("Model ID, as the provider names it").text(&model).build();
@@ -439,7 +525,7 @@ fn ai_page(current: &Provider, parallel: Option<u32>) -> (adw::PreferencesPage, 
     page.add(&merge_all);
     let read = move || {
         if provider.selected() == 0 {
-            Provider::Anthropic { api_key: anthropic_key_row.text().trim().to_owned() }
+            Provider::Anthropic { api_key: anthropic_key_row.text().trim().to_owned(), model: read_claude_model() }
         } else {
             let url = url_row.text().trim().to_owned();
             Provider::OpenAiCompatible {
@@ -451,7 +537,13 @@ fn ai_page(current: &Provider, parallel: Option<u32>) -> (adw::PreferencesPage, 
     };
     // Only remembered when it differs from the provider's default.
     let read_parallel = move |provider: &Provider| Some(parallel_row.value() as u32).filter(|&n| n != settings::default_parallel(provider));
-    (page, read, read_parallel)
+    // Says where the keys really are, once it's known whether there's a
+    // keyring.
+    let keyring = move |available: bool| {
+        anthropic.set_description(Some(&format!("{} {CLAUDE_DESCRIPTION}", key_storage(available))));
+        compatible.set_description(Some(&format!("{COMPATIBLE_DESCRIPTION} {}", key_storage(available))));
+    };
+    (page, read, read_parallel, keyring)
 }
 
 fn updates_page(options: &UpdateOptions) -> (adw::PreferencesPage, impl Fn() -> UpdateOptions + use<>) {

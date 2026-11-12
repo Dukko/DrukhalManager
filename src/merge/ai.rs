@@ -13,7 +13,9 @@ use serde_json::{Value, json};
 
 use super::source::Source;
 
+/// The Claude model merges use unless another is chosen in Preferences.
 pub const CLAUDE_MODEL: &str = "claude-opus-5-5";
+const ANTHROPIC_MODELS_URL: &str = "https://api.anthropic.com/v1/models?limit=100";
 pub const OPENROUTER_URL: &str = "https://openrouter.ai/api/v1";
 const ANTHROPIC_URL: &str = "https://api.anthropic.com/v1/messages";
 const API_VERSION: &str = "2026-10-21";
@@ -24,20 +26,112 @@ const FALLBACK_BETA: &str = "server-side-fallback-2026-07-01";
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Provider {
-    Anthropic { api_key: String },
+    Anthropic {
+        api_key: String,
+        /// A model id as the API names it; settings from before the choice
+        /// existed get [`CLAUDE_MODEL`].
+        #[serde(default = "default_claude_model")]
+        model: String,
+    },
     /// `base_url` is the part before `/chat/completions`, e.g.
     /// `https://openrouter.ai/api/v1` or `http://localhost:11434/v1`.
     OpenAiCompatible { base_url: String, model: String, api_key: String },
 }
 
+fn default_claude_model() -> String {
+    CLAUDE_MODEL.to_owned()
+}
+
 impl Provider {
+    /// Claude with the default model.
+    pub fn claude(api_key: impl Into<String>) -> Self {
+        Provider::Anthropic { api_key: api_key.into(), model: default_claude_model() }
+    }
+
     /// What to show the user as doing the merge.
     pub fn model_name(&self) -> &str {
         match self {
-            Provider::Anthropic { .. } => CLAUDE_MODEL,
-            Provider::OpenAiCompatible { model, .. } => model,
+            Provider::Anthropic { model, .. } | Provider::OpenAiCompatible { model, .. } => model,
         }
     }
+}
+
+/// A Claude model that can be chosen for merging.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ClaudeModel {
+    pub id: String,
+    pub name: String,
+}
+
+/// The Claude models and their prices in US dollars per million input and
+/// output tokens: the one place to update when prices change. The first
+/// four are offered when the Models API can't be asked; the rest price
+/// older models it may list. (Haiku 5.5 costs more past 100K input tokens,
+/// which no merge reaches.)
+const CLAUDE_MODELS: &[(&str, &str, f64, f64, bool)] = &[
+    (CLAUDE_MODEL, "Claude Opus 5.5", 4.0, 20.0, true),
+    ("claude-fable-5-2", "Claude Fable 5.2", 8.0, 40.0, true),
+    ("claude-sonnet-5-5", "Claude Sonnet 5.5", 2.0, 10.0, true),
+    ("claude-haiku-5-5", "Claude Haiku 5.5", 0.10, 0.50, true),
+    ("claude-fable-5-1", "Claude Fable 5.1", 10.0, 50.0, false),
+    ("claude-fable-5", "Claude Fable 5", 10.0, 50.0, false),
+    ("claude-opus-5", "Claude Opus 5", 5.0, 25.0, false),
+    ("claude-opus-4-8", "Claude Opus 4.8", 5.0, 25.0, false),
+    ("claude-opus-4-7", "Claude Opus 4.7", 5.0, 25.0, false),
+    ("claude-opus-4-6", "Claude Opus 4.6", 5.0, 25.0, false),
+    ("claude-sonnet-5", "Claude Sonnet 5", 2.0, 10.0, false),
+    ("claude-sonnet-4-6", "Claude Sonnet 4.6", 3.0, 15.0, false),
+];
+
+/// The models offered without asking the API.
+pub fn builtin_claude_models() -> Vec<ClaudeModel> {
+    CLAUDE_MODELS.iter().filter(|m| m.4).map(|m| ClaudeModel { id: m.0.to_owned(), name: m.1.to_owned() }).collect()
+}
+
+/// A Claude model's price, if it's in the table.
+pub fn claude_price(model: &str) -> Option<Price> {
+    CLAUDE_MODELS.iter().find(|m| m.0 == model).map(|m| Price { input: m.2, output: m.3 })
+}
+
+/// The Claude models this key can use for merging, newest first, from the
+/// Models API. Blocking; run it off the main thread.
+pub fn claude_models(api_key: &str) -> Result<Vec<ClaudeModel>, String> {
+    let mut response = ureq::Agent::config_builder()
+        .http_status_as_error(false)
+        .timeout_global(Some(Duration::from_secs(20)))
+        .build()
+        .new_agent()
+        .get(ANTHROPIC_MODELS_URL)
+        .header("x-api-key", api_key)
+        .header("anthropic-version", API_VERSION)
+        .call()
+        .map_err(|e| format!("Could not reach the Claude API: {e}"))?;
+    let status = response.status().as_u16();
+    let reply: Value = response.body_mut().read_json().unwrap_or(Value::Null);
+    if status != 200 {
+        return Err(http_error("The Claude API", status, &reply));
+    }
+    Ok(listed_claude_models(&reply))
+}
+
+/// Reads the Models API's list, keeping the models a merge request works
+/// with: it asks for adaptive thinking, an effort level and structured
+/// output.
+fn listed_claude_models(list: &Value) -> Vec<ClaudeModel> {
+    let supported = |v: &Value| v["supported"].as_bool() == Some(true);
+    list["data"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|m| {
+            let c = &m["capabilities"];
+            supported(&c["thinking"]["types"]["adaptive"]) && supported(&c["effort"]["high"]) && supported(&c["structured_outputs"])
+        })
+        .filter_map(|m| {
+            let id = m["id"].as_str()?;
+            Some(ClaudeModel { id: id.to_owned(), name: m["display_name"].as_str().unwrap_or(id).to_owned() })
+        })
+        .collect()
 }
 
 /// What the model is doing, reported while a request streams.
@@ -79,9 +173,6 @@ impl std::ops::AddAssign for Usage {
         };
     }
 }
-
-/// Claude Opus 5.5's price in US dollars per million input and output tokens.
-const CLAUDE_PRICE: (f64, f64) = (4.0, 20.0);
 
 /// What a request is expected to use before it's sent.
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
@@ -130,12 +221,12 @@ impl Price {
     }
 }
 
-/// The model's price, when it can be found: fixed for Claude, and looked up
-/// from the `/models` list for OpenAI-compatible services that publish
+/// The model's price, when it can be found: from the table for Claude, and
+/// looked up from the `/models` list for OpenAI-compatible services that publish
 /// prices there (OpenRouter). Blocking; run it off the main thread.
 pub fn price(provider: &Provider) -> Option<Price> {
     match provider {
-        Provider::Anthropic { .. } => Some(Price { input: CLAUDE_PRICE.0, output: CLAUDE_PRICE.1 }),
+        Provider::Anthropic { model, .. } => claude_price(model),
         Provider::OpenAiCompatible { base_url, model, api_key } => {
             let url = format!("{}/models", base_url.trim_end_matches('/'));
             let mut request = ureq::Agent::config_builder().http_status_as_error(false).timeout_global(Some(Duration::from_secs(20))).build().new_agent().get(&url);
@@ -279,18 +370,23 @@ pub fn fix(provider: &Provider, category: &str, key: &str, text: &str, problems:
 
 fn complete(provider: &Provider, system: &str, prompt: &str, on: &mut dyn FnMut(Progress)) -> Result<Merged, String> {
     match provider {
-        Provider::Anthropic { api_key } => merge_anthropic(api_key, system, prompt, on),
+        Provider::Anthropic { api_key, model } => merge_anthropic(api_key, model, system, prompt, on),
         Provider::OpenAiCompatible { base_url, model, api_key } => merge_openai(base_url, model, api_key, system, prompt, on),
     }
 }
 
-fn merge_anthropic(api_key: &str, system: &str, prompt: &str, on: &mut dyn FnMut(Progress)) -> Result<Merged, String> {
-    let body = json!({
-        "model": CLAUDE_MODEL,
+/// Whether a declined request can be retried on another model by the API.
+/// Haiku has no server-side fallback, and mustn't be sent the parameter.
+fn has_fallback(model: &str) -> bool {
+    !model.starts_with("claude-haiku")
+}
+
+fn anthropic_body(model: &str, system: &str, prompt: &str) -> Value {
+    let mut body = json!({
+        "model": model,
         "max_tokens": 64000,
         "stream": true,
-        "fallbacks": "default",
-        // Claude Opus 5.5 always thinks; ask for readable summaries of it.
+        // Current Claude models always think; ask for readable summaries.
         "thinking": {"type": "adaptive", "display": "summarized"},
         "output_config": {
             "effort": "high",
@@ -299,13 +395,20 @@ fn merge_anthropic(api_key: &str, system: &str, prompt: &str, on: &mut dyn FnMut
         "system": system,
         "messages": [{"role": "user", "content": prompt}]
     });
+    if has_fallback(model) {
+        body["fallbacks"] = json!("default");
+    }
+    body
+}
 
+fn merge_anthropic(api_key: &str, model: &str, system: &str, prompt: &str, on: &mut dyn FnMut(Progress)) -> Result<Merged, String> {
+    let body = anthropic_body(model, system, prompt);
     let mut response = with_backoff(on, || {
-        agent()
-            .post(ANTHROPIC_URL)
-            .header("x-api-key", api_key)
-            .header("anthropic-version", API_VERSION)
-            .header("anthropic-beta", FALLBACK_BETA)
+        let mut request = agent().post(ANTHROPIC_URL).header("x-api-key", api_key).header("anthropic-version", API_VERSION);
+        if has_fallback(model) {
+            request = request.header("anthropic-beta", FALLBACK_BETA);
+        }
+        request
             .send_json(&body)
             .map_err(|e| format!("Could not reach the Claude API: {e}"))
     })?;
@@ -314,7 +417,7 @@ fn merge_anthropic(api_key: &str, system: &str, prompt: &str, on: &mut dyn FnMut
         let reply: Value = response.body_mut().read_json().unwrap_or(Value::Null);
         return Err(http_error("The Claude API", status.as_u16(), &reply));
     }
-    anthropic_stream(std::io::BufReader::new(response.into_body().into_reader()), on)
+    anthropic_stream(std::io::BufReader::new(response.into_body().into_reader()), claude_price(model), on)
 }
 
 /// Times a rate-limited or overloaded request is tried again.
@@ -366,7 +469,7 @@ fn read_sse(reader: impl BufRead, mut f: impl FnMut(&str) -> Result<(), String>)
     Ok(())
 }
 
-fn anthropic_stream(reader: impl BufRead, on: &mut dyn FnMut(Progress)) -> Result<Merged, String> {
+fn anthropic_stream(reader: impl BufRead, price: Option<Price>, on: &mut dyn FnMut(Progress)) -> Result<Merged, String> {
     let mut text = String::new();
     let mut stop_reason = None;
     let mut usage = Usage::default();
@@ -378,7 +481,7 @@ fn anthropic_stream(reader: impl BufRead, on: &mut dyn FnMut(Progress)) -> Resul
                 let u = &event["message"]["usage"];
                 usage.input = count(u, "input_tokens") + count(u, "cache_creation_input_tokens") + count(u, "cache_read_input_tokens");
                 usage.output = count(u, "output_tokens");
-                usage.cost = Some(Price { input: CLAUDE_PRICE.0, output: CLAUDE_PRICE.1 }.cost(usage.input, usage.output));
+                usage.cost = price.map(|p| p.cost(usage.input, usage.output));
             }
             Some("content_block_delta") => match event["delta"]["type"].as_str() {
                 Some("thinking_delta") => on(Progress::Thinking(event["delta"]["thinking"].as_str().unwrap_or_default().to_owned())),
@@ -394,7 +497,7 @@ fn anthropic_stream(reader: impl BufRead, on: &mut dyn FnMut(Progress)) -> Resul
                 // Cumulative, so the last one is the total.
                 if let Some(output) = event["usage"]["output_tokens"].as_u64() {
                     usage.output = output;
-                    usage.cost = Some(Price { input: CLAUDE_PRICE.0, output: CLAUDE_PRICE.1 }.cost(usage.input, usage.output));
+                    usage.cost = price.map(|p| p.cost(usage.input, usage.output));
                 }
             }
             Some("error") => return Err(format!("The Claude API reported an error: {}", event["error"]["message"].as_str().unwrap_or("unknown"))),
@@ -667,7 +770,7 @@ mod tests {
     #[test]
     fn streams_anthropic_thinking_and_answer() {
         let sse = "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":10,\"cache_read_input_tokens\":20,\"output_tokens\":1}}}\n\nevent: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"thinking_delta\",\"thinking\":\"Comparing the \"}}\n\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"thinking_delta\",\"thinking\":\"two versions.\"}}\n\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"signature_delta\",\"signature\":\"x\"}}\n\ndata: {\"type\":\"content_block_delta\",\"index\":1,\"delta\":{\"type\":\"text_delta\",\"text\":\"{\\\"script\\\":\\\"x = {}\\\",\"}}\n\ndata: {\"type\":\"content_block_delta\",\"index\":1,\"delta\":{\"type\":\"text_delta\",\"text\":\"\\\"notes\\\":\\\"n\\\"}\"}}\n\nevent: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":12}}\n\n";
-        let (result, thinking, output) = collect(|on| anthropic_stream(sse.as_bytes(), on));
+        let (result, thinking, output) = collect(|on| anthropic_stream(sse.as_bytes(), claude_price(CLAUDE_MODEL), on));
         let merged = result.unwrap();
         assert_eq!((merged.script.as_str(), merged.notes.as_str()), ("x = {}", "n"));
         let usage = merged.usage.unwrap();
@@ -677,9 +780,9 @@ mod tests {
         assert!(output.starts_with("{\"script\""));
 
         let refusal = "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"refusal\"}}\n\n";
-        assert!(collect(|on| anthropic_stream(refusal.as_bytes(), on)).0.unwrap_err().contains("declined"));
+        assert!(collect(|on| anthropic_stream(refusal.as_bytes(), None, on)).0.unwrap_err().contains("declined"));
         let error = "event: error\ndata: {\"type\":\"error\",\"error\":{\"type\":\"overloaded_error\",\"message\":\"Overloaded\"}}\n\n";
-        assert!(collect(|on| anthropic_stream(error.as_bytes(), on)).0.unwrap_err().contains("Overloaded"));
+        assert!(collect(|on| anthropic_stream(error.as_bytes(), None, on)).0.unwrap_err().contains("Overloaded"));
     }
 
     #[test]
@@ -719,7 +822,7 @@ mod tests {
         let a = Source { label: "A".into(), file: "a.txt".into(), text: "x = { a = yes }".repeat(100) };
         let e = estimate("common/buildings", "x", None, &[a.clone(), a]);
         assert!(e.input > 1000 && e.output_low > 500 && e.output_high > e.output_low);
-        assert_eq!(price(&Provider::Anthropic { api_key: "k".into() }).unwrap().cost(1_000_000, 100_000), 6.0);
+        assert_eq!(price(&Provider::claude("k")).unwrap().cost(1_000_000, 100_000), 6.0);
         let list = json!({"data": [{"id": "a/b", "pricing": {"prompt": "0.0000003", "completion": "0.0000012"}}, {"id": "free", "pricing": {}}]});
         let p = listed_price(&list, "a/b").unwrap();
         assert!((p.input - 0.3).abs() < 1e-9 && (p.output - 1.2).abs() < 1e-9);
@@ -754,5 +857,34 @@ mod tests {
         let json = serde_json::to_string(&p).unwrap();
         assert!(json.contains("\"kind\":\"open_ai_compatible\""));
         assert_eq!(serde_json::from_str::<Provider>(&json).unwrap(), p);
+        // Settings from before the model could be chosen.
+        assert_eq!(serde_json::from_str::<Provider>(r#"{"kind":"anthropic","api_key":"k"}"#).unwrap(), Provider::claude("k"));
+        let sonnet = Provider::Anthropic { api_key: "k".into(), model: "claude-sonnet-5-5".into() };
+        assert_eq!(serde_json::from_str::<Provider>(&serde_json::to_string(&sonnet).unwrap()).unwrap(), sonnet);
+    }
+
+    #[test]
+    fn claude_models_have_prices_and_fit_the_request() {
+        let builtin = builtin_claude_models();
+        assert_eq!(builtin[0].id, CLAUDE_MODEL, "the default comes first");
+        assert!(builtin.iter().all(|m| claude_price(&m.id).is_some()));
+        let sonnet = Provider::Anthropic { api_key: "k".into(), model: "claude-sonnet-5-5".into() };
+        assert_eq!(price(&sonnet).unwrap().cost(1_000_000, 100_000), 3.0);
+        assert_eq!(claude_price("claude-next-9"), None, "unknown models have no estimate");
+
+        // Haiku has no server-side fallback.
+        assert_eq!(anthropic_body(CLAUDE_MODEL, "s", "p")["fallbacks"], "default");
+        let haiku = anthropic_body("claude-haiku-5-5", "s", "p");
+        assert_eq!(haiku["model"], "claude-haiku-5-5");
+        assert!(haiku.get("fallbacks").is_none());
+
+        let yes = json!({"supported": true});
+        let caps = |adaptive: bool| json!({"structured_outputs": yes, "effort": {"supported": true, "high": yes}, "thinking": {"supported": true, "types": {"adaptive": {"supported": adaptive}}}});
+        let list = json!({"data": [
+            {"id": "claude-new-1", "display_name": "Claude New 1", "capabilities": caps(true)},
+            {"id": "claude-old-1", "display_name": "Claude Old 1", "capabilities": caps(false)},
+            {"id": "claude-bare"}
+        ]});
+        assert_eq!(listed_claude_models(&list), vec![ClaudeModel { id: "claude-new-1".into(), name: "Claude New 1".into() }]);
     }
 }

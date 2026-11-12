@@ -813,6 +813,8 @@ impl Window {
             let Ok(loaded) = gio::spawn_blocking(move || settings::Settings::load(&path.clone()).with_keyring(&path)).await else { return };
             let Some(ui) = weak.upgrade() else { return };
             let mut current = ui.settings.borrow_mut();
+            // Empty once the keyring took a Steam key the file was holding.
+            current.steam_key = loaded.steam_key.clone();
             // Unless Preferences changed the provider meanwhile.
             if secrets::kind(&current.provider) == secrets::kind(&loaded.provider) && settings::api_key_mut(&mut current.provider).is_empty() {
                 current.provider = loaded.provider;
