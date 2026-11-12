@@ -27,6 +27,9 @@ impl Window {
         });
         self.window.add_action(&action);
         app.set_accels_for_action("win.shortcuts", &["<Control>question"]);
+        for (action, accel, _) in crate::conflicts_view::SHORTCUTS {
+            app.set_accels_for_action(&format!("conflicts.{action}"), &[accel]);
+        }
 
         // A plain `?` can't be an accelerator: those run before the focused
         // widget, so it couldn't be typed into the search. Handle it only
@@ -58,6 +61,14 @@ impl Window {
             }
             dialog.add(section);
         }
+        let conflicts = adw::ShortcutsSection::new(Some("Conflicts"));
+        for (action, _, title) in crate::conflicts_view::SHORTCUTS {
+            conflicts.add(adw::ShortcutsItem::from_action(title, &format!("conflicts.{action}")));
+        }
+        // These belong to the comparison, not to an action.
+        conflicts.add(adw::ShortcutsItem::new("Next Difference", "<Alt>Down"));
+        conflicts.add(adw::ShortcutsItem::new("Previous Difference", "<Alt>Up"));
+        dialog.add(conflicts);
         dialog.present(Some(&self.window));
     }
 }

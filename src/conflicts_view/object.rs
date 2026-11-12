@@ -443,6 +443,7 @@ impl ObjectView {
                     view.merge_with_ai();
                 }
             });
+            page.bind_key("merge-ai", &merge);
             header.actions.append(&merge);
         }
         self.header.set_child(Some(&header.widget));
@@ -526,6 +527,8 @@ impl ObjectView {
             Some(_) => right_button.add_css_class("suggested-action"),
             None => {}
         }
+        page.bind_key("use-left", &left_button);
+        page.bind_key("use-right", &right_button);
         pair.left.set_header(&left_header);
         pair.left.set_actions(&[left_button.clone().upcast()]);
         let (right_title, right_origin) = (right.label.clone(), analysis.origin(right_position, &right.file));
