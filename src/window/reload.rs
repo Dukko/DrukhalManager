@@ -45,7 +45,7 @@ impl Window {
                 // Registers mods Steam downloaded since, as the launcher would.
                 let synced = mods::sync::sync(&user_dir, &workshop_dirs);
                 for error in &synced.errors {
-                    eprintln!("{error}");
+                    crate::diagnostics::log!("mods", "{error}");
                 }
                 mods::discover(&user_dir, &workshop_dirs).map(|found| (found, synced.updated, linked.errors)).map_err(|e| e.to_string())
             })

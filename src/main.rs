@@ -1,5 +1,6 @@
 mod conflicts_view;
 mod dds;
+mod diagnostics;
 mod diff;
 mod diff_view;
 mod error_report_dialog;
@@ -44,6 +45,7 @@ fn build_ui(app: &adw::Application) {
     {
         gtk::IconTheme::for_display(&display).add_search_path(icons);
     }
+    diagnostics::log!("app", "DrukhalManager {} started ({})", update::CURRENT, if sandbox::is_flatpak() { "Flatpak" } else { "native" });
     let home = gtk::glib::home_dir();
     // Folders chosen in Preferences replace the detected ones.
     let options = settings::Settings::load(&settings::path()).game;
@@ -52,10 +54,10 @@ fn build_ui(app: &adw::Application) {
     let workshop_dirs = steam::workshop_dirs(&home, steam::STELLARIS_APP_ID);
     // Mods subscribed or updated since the Paradox Launcher last ran.
     for error in mods::sync::sync(&user_dir, &workshop_dirs).errors {
-        eprintln!("{error}");
+        diagnostics::log!("mods", "{error}");
     }
     for error in mods::extra::link(&user_dir, options.extra_mod_dir.as_deref()).errors {
-        eprintln!("{error}");
+        diagnostics::log!("mods", "{error}");
     }
     let found = mods::discover(&user_dir, &workshop_dirs);
     let paths = window::Paths { user_dir, backup_dir: sandbox::data_dir().join("DrukhalManager/backups") };
@@ -63,5 +65,9 @@ fn build_ui(app: &adw::Application) {
         Some(exe) => game::from_executable(exe).ok(),
         None => game::find(&libraries),
     };
+    match &found {
+        Ok(mods) => diagnostics::log!("app", "{} mods found; game {}", mods.len(), game.as_ref().and_then(|g| g.version.as_deref()).unwrap_or("not found")),
+        Err(e) => diagnostics::log!("app", "Could not read the mods: {e}"),
+    }
     window::build(app, paths, game, found);
 }

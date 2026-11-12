@@ -369,10 +369,33 @@ pub fn fix(provider: &Provider, category: &str, key: &str, text: &str, problems:
 }
 
 fn complete(provider: &Provider, system: &str, prompt: &str, on: &mut dyn FnMut(Progress)) -> Result<Merged, String> {
-    match provider {
+    // Who was asked and what it cost; never the prompt or the key.
+    let who = match provider {
+        Provider::Anthropic { model, .. } => format!("Claude {model}"),
+        Provider::OpenAiCompatible { base_url, model, .. } => format!("{model} at {}", host(base_url)),
+    };
+    let started = std::time::Instant::now();
+    let result = match provider {
         Provider::Anthropic { api_key, model } => merge_anthropic(api_key, model, system, prompt, on),
         Provider::OpenAiCompatible { base_url, model, api_key } => merge_openai(base_url, model, api_key, system, prompt, on),
+    };
+    let took = started.elapsed().as_secs_f32();
+    match &result {
+        Ok(Merged { usage: Some(u), .. }) => {
+            let cost = u.cost.map(|c| format!(", ${c:.4}")).unwrap_or_default();
+            crate::diagnostics::log!("ai", "{who} answered in {took:.0}s: {} tokens in, {} out{cost}", u.input, u.output);
+        }
+        Ok(_) => crate::diagnostics::log!("ai", "{who} answered in {took:.0}s"),
+        Err(e) => crate::diagnostics::log!("ai", "{who} failed after {took:.0}s: {e}"),
     }
+    result
+}
+
+/// The host of a provider's URL, which is all the log needs of it.
+fn host(url: &str) -> &str {
+    let rest = url.split_once("://").map_or(url, |(_, r)| r);
+    let host = rest.split(['/', '?']).next().unwrap_or(rest);
+    host.rsplit_once('@').map_or(host, |(_, h)| h)
 }
 
 /// Whether a declined request can be retried on another model by the API.
@@ -678,6 +701,13 @@ fn parse_merged(text: &str) -> Result<Merged, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn logs_only_the_host() {
+        assert_eq!(host("https://openrouter.ai/api/v1"), "openrouter.ai");
+        assert_eq!(host("http://localhost:11434/v1"), "localhost:11434");
+        assert_eq!(host("https://user:secret@example.com/v1?key=x"), "example.com");
+    }
 
     /// Serves OpenAI-style streamed replies, one per request, and records
     /// the prompts it was sent.

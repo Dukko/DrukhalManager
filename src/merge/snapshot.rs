@@ -59,6 +59,16 @@ fn now_ms() -> u128 {
 /// `reason` is [`BEFORE_REMOVING`] and the newest snapshot was taken for
 /// removals moments ago.
 pub fn take(user_dir: &Path, target: &Target, backup_dir: &Path, reason: &str) -> io::Result<Option<PathBuf>> {
+    let result = take_unlogged(user_dir, target, backup_dir, reason);
+    match &result {
+        Ok(Some(_)) => crate::diagnostics::log!("patch", "Backed up {} ({reason})", target.name),
+        Ok(None) => {}
+        Err(e) => crate::diagnostics::log!("patch", "Failed: back up {} ({reason}): {e}", target.name),
+    }
+    result
+}
+
+fn take_unlogged(user_dir: &Path, target: &Target, backup_dir: &Path, reason: &str) -> io::Result<Option<PathBuf>> {
     let root = target.root(user_dir);
     if !root.is_dir() {
         return Ok(None);
@@ -111,7 +121,8 @@ pub fn restore(user_dir: &Path, target: &Target, backup_dir: &Path, snapshot: &S
         return Err(io::Error::new(io::ErrorKind::NotFound, "The backup is gone"));
     }
     take(user_dir, target, backup_dir, BEFORE_RESTORING)?;
-    replace_patch(user_dir, target, &source)
+    let result = replace_patch(user_dir, target, &source);
+    crate::diagnostics::outcome("patch", || format!("Restored {} from its backup ({})", target.name, snapshot.reason), result)
 }
 
 /// Makes a copy of the patch folder at `source` the patch, swapping it in
