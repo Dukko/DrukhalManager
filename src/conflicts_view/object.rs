@@ -604,6 +604,7 @@ impl ObjectView {
             (Some(v), true) => Compare::Base(v.text.clone()),
             _ => Compare::Each,
         };
+        pair.set_fold(session.fold_unchanged);
         pair.show(&left.text, &steps.right_source().text, &compare, session.ignore_whitespace);
         drop(session);
         let body = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(8).build();
@@ -664,6 +665,7 @@ impl ObjectView {
         if has_base {
             into.append(&option_toggle(&page.hooks, "Base Game", "Mark what each version changed from the base game, instead of the differences between the two", |s| s.compare_base, |s, v| s.compare_base = v, rerender.clone()));
         }
+        into.append(&option_toggle(&page.hooks, "Changed Lines Only", "Fold runs of lines that are the same in both, keeping a few around each difference. Click a fold to open it", |s| s.fold_unchanged, |s, v| s.fold_unchanged = v, rerender.clone()));
         into.append(&option_toggle(&page.hooks, "Ignore Spacing", "Don't count lines that only differ in spacing or indentation", |s| s.ignore_whitespace, |s, v| s.ignore_whitespace = v, rerender));
     }
 
@@ -771,7 +773,14 @@ impl ObjectView {
                     }
                 });
                 bar.extra.append(&take);
+                let weak = Rc::downgrade(self);
+                bar.extra.append(&option_toggle(&page.hooks, "Changed Lines Only", "Fold runs of lines that are the same in both, keeping a few around each difference. Click a fold to open it", |s| s.fold_unchanged, |s, v| s.fold_unchanged = v, move || {
+                    if let Some(view) = weak.upgrade() {
+                        view.render(gtk::StackTransitionType::None);
+                    }
+                }));
                 let whitespace = page.hooks.session.borrow().ignore_whitespace;
+                pair.set_fold(page.hooks.session.borrow().fold_unchanged);
                 pair.show(&text, &theirs.text, &crate::diff_view::Compare::Each, whitespace);
                 toolbar.append(&bar.widget);
                 bar.widget.set_hexpand(true);

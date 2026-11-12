@@ -41,6 +41,25 @@ pub struct Diff {
     pub hunks: Vec<Hunk>,
 }
 
+/// The runs of unchanged rows to fold away when only changes are shown:
+/// those at least `min` rows long after leaving `context` rows next to
+/// each difference. Nothing is folded when the texts don't differ.
+pub fn folds(diff: &Diff, context: usize, min: usize) -> Vec<Range<usize>> {
+    let end = diff.rows.len();
+    let mut out = Vec::new();
+    let mut after = None;
+    for hunk in diff.hunks.iter().map(|h| h.rows.clone()).chain(if diff.hunks.is_empty() { None } else { Some(end..end) }) {
+        // The start and end of the text have a difference on one side only.
+        let from = after.map_or(0, |a: usize| a + context);
+        let to = if hunk.start == end { end } else { hunk.start.saturating_sub(context) };
+        if to > from && to - from >= min {
+            out.push(from..to);
+        }
+        after = Some(hunk.end);
+    }
+    out
+}
+
 /// Past this many differences the line diff gives up matching and marks
 /// the rest as changed, to bound time and memory on unrelated texts. The
 /// search keeps about `MAX_EDITS²` numbers (32 MB here) and runs on the
@@ -245,6 +264,22 @@ mod tests {
 
     fn sides(d: &Diff) -> Vec<(Option<usize>, Option<usize>, Kind)> {
         d.rows.iter().map(|r| (r.left, r.right, r.kind)).collect()
+    }
+
+    #[test]
+    fn folds_long_unchanged_runs_keeping_context() {
+        let text = |changed: &[usize]| (0..40).map(|i| if changed.contains(&i) { format!("line {i} changed") } else { format!("line {i}") }).collect::<Vec<_>>().join("\n");
+        let same = text(&[]);
+        assert!(folds(&lines(&same, &same, false), 3, 4).is_empty(), "nothing to fold around");
+        // Changes at rows 10 and 30: the start, the middle and the end fold.
+        let d = lines(&same, &text(&[10, 30]), false);
+        assert_eq!(folds(&d, 3, 4), vec![0..7, 14..27, 34..40]);
+        assert!(folds(&d, 3, 4).iter().all(|r| d.rows[r.clone()].iter().all(|row| row.kind == Kind::Same)));
+        // Runs too short to be worth a fold row stay.
+        let d = lines(&same, &text(&[5, 14, 37]), false);
+        assert_eq!(folds(&d, 3, 4), vec![18..34]);
+        let d = lines(&same, &text(&[0, 39]), false);
+        assert_eq!(folds(&d, 3, 4), vec![4..36]);
     }
 
     #[test]
