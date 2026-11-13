@@ -20,7 +20,7 @@ pub fn files(content: &Path) -> io::Result<PathBuf> {
 }
 
 fn cache_dir() -> PathBuf {
-    gtk::glib::user_cache_dir().join("DrukhalManager/archives")
+    crate::platform::cache_dir().join("archives")
 }
 
 pub(crate) fn files_in(content: &Path, cache: &Path) -> io::Result<PathBuf> {
@@ -53,7 +53,7 @@ pub(crate) fn files_in(content: &Path, cache: &Path) -> io::Result<PathBuf> {
         return Err(e);
     }
     let _ = std::fs::remove_dir_all(&dir);
-    std::fs::rename(&tmp, &dir)?;
+    crate::platform::rename(&tmp, &dir)?;
     Ok(dir)
 }
 

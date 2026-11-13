@@ -1,6 +1,7 @@
-//! Locating Steam libraries and Stellaris workshop content on Linux.
+//! Locating Steam libraries and Stellaris workshop content.
 //!
-//! The lookup order (native Steam, then Flatpak, then every library listed in
+//! The lookup order (on Linux native Steam, then Flatpak; on Windows where
+//! the registry says Steam is; then every library listed in
 //! `libraryfolders.vdf`) follows Irony Mod Manager's `SteamDirectory`
 //! (MIT, © 2020 Mario, https://github.com/bcssov/IronyModManager).
 
@@ -9,6 +10,7 @@ use std::path::{Path, PathBuf};
 
 pub const STELLARIS_APP_ID: u32 = 281990;
 
+#[cfg(unix)]
 const ROOTS: &[&str] = &[
     ".local/share/Steam",
     ".steam/steam",
@@ -18,13 +20,27 @@ const ROOTS: &[&str] = &[
 ];
 
 /// Candidate Steam install roots, most common first.
+#[cfg(unix)]
 fn steam_roots(home: &Path) -> Vec<PathBuf> {
     ROOTS.iter().map(|p| home.join(p)).filter(|p| p.is_dir()).collect()
+}
+
+/// Candidate Steam install roots: where the registry says Steam is, then
+/// the default install folder.
+#[cfg(windows)]
+fn steam_roots(_home: &Path) -> Vec<PathBuf> {
+    use windows_registry::{CURRENT_USER, LOCAL_MACHINE};
+    let registry = [(CURRENT_USER, r"Software\Valve\Steam", "SteamPath"), (LOCAL_MACHINE, r"SOFTWARE\WOW6432Node\Valve\Steam", "InstallPath"), (LOCAL_MACHINE, r"SOFTWARE\Valve\Steam", "InstallPath")];
+    let from_registry = registry.into_iter().filter_map(|(key, path, value)| key.open(path).and_then(|k| k.get_string(value)).ok()).map(PathBuf::from);
+    let defaults = ["ProgramFiles(x86)", "ProgramFiles"].into_iter().filter_map(std::env::var_os).map(|dir| PathBuf::from(dir).join("Steam"));
+    // The same folder spelt differently is removed by `library_folders`.
+    from_registry.chain(defaults).filter(|p| p.is_dir()).collect()
 }
 
 /// Steam roots that are links to folders this process can't see, such as
 /// a Steam install on another drive when running sandboxed. Returns where
 /// they point, resolved through any chain of links.
+#[cfg(unix)]
 pub fn unreachable_roots(home: &Path) -> Vec<PathBuf> {
     let mut targets = BTreeSet::new();
     for root in ROOTS.iter().map(|p| home.join(p)) {
@@ -41,6 +57,12 @@ pub fn unreachable_roots(home: &Path) -> Vec<PathBuf> {
         }
     }
     targets.into_iter().collect()
+}
+
+/// Only a sandbox hides folders, and there's none on Windows.
+#[cfg(windows)]
+pub fn unreachable_roots(_home: &Path) -> Vec<PathBuf> {
+    Vec::new()
 }
 
 /// Every Steam library folder known on this machine, deduplicated.
@@ -76,10 +98,11 @@ pub fn workshop_dirs(home: &Path, app_id: u32) -> Vec<PathBuf> {
         .collect()
 }
 
-/// The Stellaris user directory (`~/.local/share/Paradox Interactive/Stellaris`),
-/// looked up on the host when sandboxed.
+/// The Stellaris user directory (`~/.local/share/Paradox Interactive/Stellaris`,
+/// looked up on the host when sandboxed; `Documents\Paradox Interactive\Stellaris`
+/// on Windows).
 pub fn stellaris_user_dir() -> PathBuf {
-    crate::sandbox::data_dir().join("Paradox Interactive/Stellaris")
+    crate::platform::paradox_dir().join("Stellaris")
 }
 
 #[derive(Debug, PartialEq)]
@@ -306,6 +329,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn reports_links_to_missing_folders() {
         let home = std::env::temp_dir().join(format!("drukhal-steam-links-{}", std::process::id()));
         std::fs::create_dir_all(home.join(".local/share")).unwrap();

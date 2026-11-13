@@ -61,7 +61,7 @@ impl Window {
         };
         let env = |name: &str| std::env::var(name).unwrap_or_else(|_| "unknown".to_owned());
         let facts = [
-            ("DrukhalManager", format!("{} ({})", update::CURRENT, if crate::sandbox::is_flatpak() { "Flatpak" } else { "native" })),
+            ("DrukhalManager", format!("{} ({})", update::CURRENT, if crate::platform::is_flatpak() { "Flatpak" } else { "native" })),
             ("Stellaris", self.game.as_ref().and_then(|g| g.version.clone()).unwrap_or_else(|| "not found".to_owned())),
             ("System", crate::diagnostics::distro()),
             ("Desktop", format!("{} ({})", env("XDG_CURRENT_DESKTOP"), env("XDG_SESSION_TYPE"))),
@@ -111,7 +111,7 @@ impl Window {
                 ui.announce_update(Some(&latest));
             }
             // While it runs, Flatpak also reports versions published later.
-            if crate::sandbox::is_flatpak()
+            if crate::platform::is_flatpak()
                 && let Some(ui) = weak.upgrade()
                 && let Some(monitor) = ui.monitor().await
             {
@@ -136,7 +136,7 @@ impl Window {
         };
         // Test versions aren't in the Flatpak repository; Preferences says
         // how to get one.
-        let installable = crate::sandbox::is_flatpak() && !release.is_some_and(|r| r.prerelease);
+        let installable = crate::platform::is_flatpak() && !release.is_some_and(|r| r.prerelease);
         let (label, action) = if installable { ("Update", "win.install-update") } else { ("Details", "win.show-update") };
         self.add_toast(adw::Toast::builder().title(title).button_label(label).action_name(action).timeout(0).build());
     }
@@ -164,7 +164,7 @@ impl Window {
     }
 
     fn install_update(self: &Rc<Self>) {
-        if !crate::sandbox::is_flatpak() {
+        if !crate::platform::is_flatpak() {
             gtk::UriLauncher::new(update::RELEASES_URL).launch(Some(&self.window), None::<&gio::Cancellable>, |_| {});
             return;
         }

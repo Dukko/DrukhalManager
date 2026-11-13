@@ -26,7 +26,7 @@ pub struct Cache {
 
 impl Cache {
     pub fn path() -> PathBuf {
-        gtk::glib::user_cache_dir().join("DrukhalManager/workshop-dependents.json")
+        crate::platform::cache_dir().join("workshop-dependents.json")
     }
 
     pub fn load(path: &Path) -> Self {
@@ -39,7 +39,7 @@ impl Cache {
         }
         let tmp = path.with_extension("json.tmp");
         std::fs::write(&tmp, serde_json::to_vec(self).map_err(std::io::Error::other)?)?;
-        std::fs::rename(tmp, path)
+        crate::platform::rename(tmp, path)
     }
 
     /// Of `ids`, those whose dependents are unknown or old; all of them

@@ -35,3 +35,36 @@ jobs:
         run: cargo test --locked
       - name: cargo clippy
         run: cargo clippy --all-targets --locked
+      - name: Keep non-UI code free of GTK
+        # So a native Windows UI could reuse it later (#153).
+        run: |
+          if grep -rnE '\b(gtk|adw|glib|gio)::' src/merge src/mods src/paradox src/platform.rs src/settings.rs src/secrets.rs src/diagnostics.rs src/multiplayer.rs src/dds.rs src/diff.rs; then
+            echo "::error::GTK used outside the UI; go through src/platform.rs instead"
+            exit 1
+          fi
+
+  windows:
+    name: build, test, clippy (Windows)
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - uses: actions/checkout@v4
+      # GTK, libadwaita and a GNU-target Rust from MSYS2's UCRT64 environment.
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: >-
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-pkgconf
+            mingw-w64-ucrt-x86_64-gtk4
+            mingw-w64-ucrt-x86_64-libadwaita
+            mingw-w64-ucrt-x86_64-rust
+      - name: cargo build
+        run: cargo build --locked
+      - name: cargo test
+        run: cargo test --locked
+      - name: cargo clippy
+        run: cargo clippy --all-targets --locked

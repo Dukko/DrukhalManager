@@ -32,7 +32,7 @@ pub struct Saves {
 }
 
 pub fn path() -> PathBuf {
-    gtk::glib::user_data_dir().join("DrukhalManager/saves.json")
+    crate::platform::private_data_dir().join("saves.json")
 }
 
 impl Saves {
@@ -46,7 +46,7 @@ impl Saves {
         }
         let tmp = path.with_extension("json.tmp");
         std::fs::write(&tmp, serde_json::to_vec_pretty(self).map_err(std::io::Error::other)?)?;
-        std::fs::rename(tmp, path)
+        crate::platform::rename(tmp, path)
     }
 
     pub fn record(&mut self, folder: &str, played: Played) {

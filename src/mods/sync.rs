@@ -127,7 +127,7 @@ fn descriptor_text(raw: &str, location: &Location, id: u64) -> String {
         Location::Folder(p) => ("path", p),
         Location::Archive(p) => ("archive", p),
     };
-    out.push_str(&format!("{key}=\"{}\"\nremote_file_id=\"{id}\"\n", path.to_string_lossy()));
+    out.push_str(&format!("{key}=\"{}\"\nremote_file_id=\"{id}\"\n", crate::platform::descriptor_path(path)));
     out
 }
 
@@ -150,7 +150,7 @@ fn write(path: &Path, text: &str) -> std::io::Result<()> {
     }
     let tmp = path.with_extension("mod.tmp");
     std::fs::write(&tmp, text)?;
-    std::fs::rename(&tmp, path)
+    crate::platform::rename(&tmp, path)
 }
 
 #[cfg(test)]
@@ -196,11 +196,11 @@ mod tests {
         assert_eq!(synced, Synced { added: vec!["New".into()], updated: vec!["Changed".into()], errors: vec![] });
 
         let written = std::fs::read_to_string(user.join("mod/ugc_1.mod")).unwrap();
-        assert_eq!(written, format!("name=\"New\"\ntags={{\n\t\"Gameplay\"\n}}\nversion=\"1.0\"\npath=\"{}\"\nremote_file_id=\"1\"\n", new.display()));
+        assert_eq!(written, format!("name=\"New\"\ntags={{\n\t\"Gameplay\"\n}}\nversion=\"1.0\"\npath=\"{}\"\nremote_file_id=\"1\"\n", crate::platform::descriptor_path(&new)));
         let d = Descriptor::parse(&written).unwrap();
         assert_eq!((d.remote_file_id, d.tags), (Some(1), vec!["Gameplay".to_owned()]));
         let updated = Descriptor::parse(&std::fs::read_to_string(user.join("mod/ugc_2.mod")).unwrap()).unwrap();
-        assert_eq!((updated.version.as_str(), updated.path), ("2.0", Some(old_path.display().to_string())), "keeps a working path");
+        assert_eq!((updated.version.as_str(), updated.path), ("2.0", Some(crate::platform::descriptor_path(&old_path))), "keeps a working path");
         assert_eq!(std::fs::read_to_string(user.join("mod/ugc_3.mod")).unwrap(), same, "unchanged files aren't rewritten");
         assert!(!user.join("mod/ugc_4.mod").exists(), "a copy with the same id counts as registered");
         assert!(!user.join("mod/ugc_5.mod").exists(), "only items Steam lists as installed");
@@ -224,7 +224,7 @@ mod tests {
         sync(&user, &[content]);
         let d = Descriptor::parse(&std::fs::read_to_string(user.join("mod/ugc_7.mod")).unwrap()).unwrap();
         assert!(d.is_archive);
-        assert_eq!(d.path, Some(dir.join("mod.zip").display().to_string()));
+        assert_eq!(d.path, Some(crate::platform::descriptor_path(&dir.join("mod.zip"))));
         std::fs::remove_dir_all(root).unwrap();
     }
 }

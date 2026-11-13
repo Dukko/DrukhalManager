@@ -271,7 +271,7 @@ impl Patch {
             let (from, to) = (self.root.join(&merge.file), self.root.join(&wanted));
             if from.is_file() {
                 std::fs::create_dir_all(to.parent().unwrap())?;
-                std::fs::rename(&from, &to)?;
+                crate::platform::rename(&from, &to)?;
             }
             merge.file = wanted;
             moved = true;
@@ -594,7 +594,7 @@ fn relocate_unlogged(user_dir: &Path, from: &Target, to: &Target) -> io::Result<
     if let Some(parent) = new.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    if std::fs::rename(&old, &new).is_err() {
+    if crate::platform::rename(&old, &new).is_err() {
         // Another drive: copy, and only then delete.
         let copied = super::snapshot::copy_dir(&old, &new);
         if let Err(e) = copied {
@@ -621,7 +621,7 @@ fn descriptor_text(text: &str) -> String {
 }
 
 fn write_outer(user_dir: &Path, target: &Target, inner: &str) -> io::Result<()> {
-    let outer = format!("{}\npath=\"{}\"\n", inner.trim_end(), target.root(user_dir).display());
+    let outer = format!("{}\npath=\"{}\"\n", inner.trim_end(), crate::platform::descriptor_path(&target.root(user_dir)));
     write_atomic(&user_dir.join(target.id()), outer.as_bytes())
 }
 
@@ -760,7 +760,7 @@ fn write_atomic(path: &Path, contents: &[u8]) -> io::Result<()> {
     let mut file = std::fs::File::create(&tmp)?;
     file.write_all(contents)?;
     file.sync_all()?;
-    std::fs::rename(&tmp, path)
+    crate::platform::rename(&tmp, path)
 }
 
 #[cfg(test)]
@@ -893,7 +893,7 @@ mod tests {
         assert!(!home.root(&user).exists());
         assert!(away.root(&user).join(MANIFEST).is_file());
         let outer = std::fs::read_to_string(user.join(home.id())).unwrap();
-        assert!(outer.contains(&format!("path=\"{}\"", away.root(&user).display())), "{outer}");
+        assert!(outer.contains(&format!("path=\"{}\"", crate::platform::descriptor_path(&away.root(&user)))), "{outer}");
         assert_eq!(Patch::open(&user, &away).unwrap().manifest.merges.len(), 1);
 
         std::fs::create_dir_all(home.root(&user)).unwrap();

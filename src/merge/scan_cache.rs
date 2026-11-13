@@ -67,7 +67,7 @@ fn today() -> u32 {
 
 impl ScanCache {
     pub fn path() -> PathBuf {
-        gtk::glib::user_cache_dir().join("DrukhalManager/conflict-scan.json")
+        crate::platform::cache_dir().join("conflict-scan.json")
     }
 
     /// The cache at `path`; empty if there is none or it can't be read.
@@ -92,7 +92,7 @@ impl ScanCache {
         self.app = APP.to_owned();
         let tmp = path.with_extension("json.tmp");
         std::fs::write(&tmp, serde_json::to_vec(self).map_err(std::io::Error::other)?)?;
-        std::fs::rename(tmp, path)?;
+        crate::platform::rename(tmp, path)?;
         self.changed = false;
         Ok(())
     }

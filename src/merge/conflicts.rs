@@ -365,7 +365,7 @@ pub(crate) fn walk(root: &Path, dir: &Path, out: &mut Vec<String>) -> std::io::R
             walk(root, &path, out)?;
         } else if kind.is_file() && dir != root {
             let rel = path.strip_prefix(root).unwrap();
-            out.push(rel.components().map(|c| c.as_os_str().to_string_lossy()).collect::<Vec<_>>().join("/"));
+            out.push(crate::platform::game_path(rel));
         }
     }
     Ok(())

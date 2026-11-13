@@ -40,7 +40,7 @@ pub(super) struct Cache {
 
 /// Where a Workshop item's downloaded preview is kept.
 fn previews_dir() -> PathBuf {
-    glib::user_cache_dir().join("DrukhalManager/previews")
+    crate::platform::cache_dir().join("previews")
 }
 
 pub(super) fn add_css() {
@@ -261,8 +261,10 @@ mod tests {
         std::fs::create_dir_all(dir.join("gfx")).unwrap();
         std::fs::write(dir.join("Thumbnail.PNG"), b"").unwrap();
         std::fs::write(dir.join("gfx/Cover.png"), b"").unwrap();
-        assert_eq!(find(&dir, "thumbnail.png"), Some(dir.join("Thumbnail.PNG")), "ignores case");
-        assert_eq!(find(&dir, "gfx/cover.png"), Some(dir.join("gfx/Cover.png")));
+        // Windows finds it by the name asked for, so compare ignoring case.
+        let found = |name: &str, expected: &str| find(&dir, name).is_some_and(|p| p.to_string_lossy().eq_ignore_ascii_case(&dir.join(expected).to_string_lossy()));
+        assert!(found("thumbnail.png", "Thumbnail.PNG"), "ignores case");
+        assert!(found("gfx/cover.png", "gfx/Cover.png"));
         assert_eq!(find(&dir, "missing.png"), None);
         std::fs::remove_dir_all(dir).unwrap();
     }

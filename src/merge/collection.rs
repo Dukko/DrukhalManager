@@ -116,7 +116,7 @@ pub fn write(user_dir: &Path, out_dir: &Path, collection: &str, name: &str, supp
     {
         return Err(io::Error::new(
             io::ErrorKind::StorageFull,
-            format!("the merge needs about {} but only {} is free", gtk::glib::format_size(needed), gtk::glib::format_size(free)),
+            format!("the merge needs about {} but only {} is free", size(needed), size(free)),
         ));
     }
 
@@ -130,11 +130,11 @@ pub fn write(user_dir: &Path, out_dir: &Path, collection: &str, name: &str, supp
     let location = match output {
         Output::Folder => {
             write_folder(&mod_dir, collection, &files, &inner)?;
-            format!("path=\"{}\"", target.display())
+            format!("path=\"{}\"", crate::platform::descriptor_path(&target))
         }
         Output::Zip => {
             write_zip(&mod_dir, collection, &files, &inner)?;
-            format!("archive=\"{}\"", zip.display())
+            format!("archive=\"{}\"", crate::platform::descriptor_path(&zip))
         }
     };
     // The other form of an earlier merge would be left behind.
@@ -180,7 +180,7 @@ fn write_folder(mod_dir: &Path, collection: &str, files: &Files, descriptor: &st
         if target.exists() {
             std::fs::remove_dir_all(&target)?;
         }
-        std::fs::rename(&building, &target)
+        crate::platform::rename(&building, &target)
     })();
     if result.is_err() {
         let _ = std::fs::remove_dir_all(&building);
@@ -205,7 +205,7 @@ fn write_zip(mod_dir: &Path, collection: &str, files: &Files, descriptor: &str) 
         zip.start_file("descriptor.mod", options).map_err(io::Error::other)?;
         io::Write::write_all(&mut zip, descriptor.as_bytes())?;
         zip.finish().map_err(io::Error::other)?.sync_all()?;
-        std::fs::rename(&building, &target)
+        crate::platform::rename(&building, &target)
     })();
     if result.is_err() {
         let _ = std::fs::remove_file(&building);
@@ -227,9 +227,22 @@ fn remove_if_present(path: &Path) -> io::Result<()> {
 
 /// Free bytes on the filesystem holding `dir`, if it can be told.
 fn free_space(dir: &Path) -> Option<u64> {
-    use gtk::gio::prelude::*;
-    let info = gtk::gio::File::for_path(dir).query_filesystem_info("filesystem::free", None::<&gtk::gio::Cancellable>).ok()?;
-    info.has_attribute("filesystem::free").then(|| info.attribute_uint64("filesystem::free"))
+    fs4::available_space(dir).ok()
+}
+
+/// `bytes` for people: "1.5 GB".
+fn size(bytes: u64) -> String {
+    const UNITS: [&str; 5] = ["kB", "MB", "GB", "TB", "PB"];
+    if bytes < 1000 {
+        return format!("{bytes} bytes");
+    }
+    let mut value = bytes as f64 / 1000.0;
+    let mut unit = 0;
+    while value >= 1000.0 && unit < UNITS.len() - 1 {
+        value /= 1000.0;
+        unit += 1;
+    }
+    format!("{value:.1} {}", UNITS[unit])
 }
 
 #[cfg(test)]
@@ -282,7 +295,7 @@ mod tests {
         assert_eq!(parsed.name, "My Game! (Merged)");
         assert_eq!(parsed.replace_path, ["common/ethics"]);
         assert_eq!(parsed.supported_version, "v4.5.*");
-        assert_eq!(parsed.path.as_deref(), Some(out.to_str().unwrap()));
+        assert_eq!(parsed.path, Some(crate::platform::descriptor_path(&out)));
 
         // Merging again replaces the earlier merge.
         let merged = write(&user, &user.join("mod"), "My Game!", &mod_name("My Game!", None), "v4.5.*", &mods[..1], Output::Folder).unwrap();
@@ -302,7 +315,7 @@ mod tests {
         let descriptor = crate::mods::Descriptor::parse(&std::fs::read_to_string(user.join(&merged.id)).unwrap()).unwrap();
         assert!(descriptor.is_archive);
         let zip = user.join("mod/drukhal_merged_my_game.zip");
-        assert_eq!(descriptor.path.as_deref(), Some(zip.to_str().unwrap()));
+        assert_eq!(descriptor.path, Some(crate::platform::descriptor_path(&zip)));
         let files = crate::mods::archive::files_in(&zip, &root.join("cache")).unwrap();
         assert_eq!(std::fs::read_to_string(files.join("Common/Buildings/x.txt")).unwrap(), "b");
         assert_eq!(std::fs::read_to_string(files.join("descriptor.mod")).unwrap().lines().next(), Some("name=\"My Game! (Merged)\""));
@@ -316,7 +329,7 @@ mod tests {
         let merged = write(&user, &elsewhere, "My Game!", &mod_name("My Game!", None), "v4.5.*", &mods, Output::Folder).unwrap();
         assert!(!out.exists() && elsewhere.join("drukhal_merged_my_game/descriptor.mod").exists());
         let descriptor = crate::mods::Descriptor::parse(&std::fs::read_to_string(user.join(&merged.id)).unwrap()).unwrap();
-        assert_eq!(descriptor.path.as_deref(), Some(elsewhere.join("drukhal_merged_my_game").to_str().unwrap()));
+        assert_eq!(descriptor.path, Some(crate::platform::descriptor_path(&elsewhere.join("drukhal_merged_my_game"))));
 
         std::fs::write(user.join("mod/drukhal_merged_other2.zip"), "not ours").unwrap();
         assert!(write(&user, &user.join("mod"), "Other2", "Other2", "*", &mods, Output::Zip).is_err());

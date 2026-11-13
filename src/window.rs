@@ -183,7 +183,8 @@ pub fn build(
 ) {
     thumbnails::add_css();
     overview::add_css();
-    crate::sandbox::load_host_stylesheet();
+    #[cfg(unix)]
+    crate::host_stylesheet::load_host_stylesheet();
     // Sized by the visible page only: measuring the Conflicts page's diff
     // on every layout of the Mods page (as while a dialog animates) made
     // the whole window slow.
@@ -858,7 +859,7 @@ pub fn build(
     });
 
     window.present();
-    if ui.game.is_none() && crate::sandbox::is_flatpak() {
+    if ui.game.is_none() && crate::platform::is_flatpak() {
         ui.explain_sandbox_access();
     }
     ui.check_for_updates_at_startup();

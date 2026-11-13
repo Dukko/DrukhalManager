@@ -252,7 +252,7 @@ pub fn download_previews(ids: &[u64], dir: &std::path::Path) -> Vec<u64> {
             let Some(bytes) = bytes.filter(|b| !b.is_empty()) else { continue };
             let path = dir.join(id.to_string());
             let tmp = path.with_extension("tmp");
-            if std::fs::write(&tmp, bytes).and_then(|()| std::fs::rename(&tmp, &path)).is_ok() {
+            if std::fs::write(&tmp, bytes).and_then(|()| crate::platform::rename(&tmp, &path)).is_ok() {
                 saved.push(id);
             }
         }
@@ -596,7 +596,8 @@ mod tests {
         let ids: Vec<u64> = shared.mods.iter().filter_map(|m| m.steam_id).take(3).collect();
         let saved = download_previews(&ids, &dir);
         assert!(!saved.is_empty());
-        assert!(gtk::gdk_pixbuf::Pixbuf::from_file(dir.join(saved[0].to_string())).is_ok(), "an image");
+        let bytes = std::fs::read(dir.join(saved[0].to_string())).unwrap();
+        assert!(bytes.starts_with(&[0xFF, 0xD8, 0xFF]) || bytes.starts_with(b"\x89PNG") || bytes.starts_with(b"GIF8"), "an image");
         std::fs::remove_dir_all(dir).unwrap();
     }
 

@@ -9,12 +9,24 @@ repository = "https://github.com/Dukko/DrukhalManager"
 [dependencies]
 adw = { version = "0.9.2", package = "libadwaita", features = ["v1_8"] }
 async-channel = "2.5.0"
+dirs = "7.0.0"
+fs4 = "1.1.0"
 futures-lite = "2.6.1"
 gtk = { version = "0.11.5", package = "gtk4", features = ["v4_14"] }
-oo7 = { version = "0.7.0", default-features = false, features = ["async-std", "native_crypto"] }
 rusqlite = { version = "0.41.1", features = ["bundled"] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
 sha2 = "0.11.1"
+shlex = "2.0.1"
 ureq = { version = "3", features = ["json"] }
+uuid = { version = "1.29.2", features = ["v4"] }
 zip = { version = "9.5.0", default-features = false, features = ["deflate-flate2-zlib-rs"] }
+
+# The system keyring: the Secret Service (or the Secret portal in the
+# Flatpak) on Linux, Credential Manager on Windows.
+[target.'cfg(unix)'.dependencies]
+oo7 = { version = "0.7.0", default-features = false, features = ["async-std", "native_crypto"] }
+
+[target.'cfg(windows)'.dependencies]
+keyring = { version = "3.6.3", default-features = false, features = ["windows-native"] }
+windows-registry = "0.100.0"

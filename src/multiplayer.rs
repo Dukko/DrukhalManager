@@ -122,7 +122,7 @@ pub struct HashCache {
 
 impl HashCache {
     pub fn path() -> PathBuf {
-        gtk::glib::user_cache_dir().join("DrukhalManager/file-hashes.json")
+        crate::platform::cache_dir().join("file-hashes.json")
     }
 
     /// The cache at `path`; empty if there is none or it can't be read.
@@ -145,7 +145,7 @@ impl HashCache {
         self.version = CACHE_VERSION;
         let tmp = path.with_extension("json.tmp");
         std::fs::write(&tmp, serde_json::to_vec(self).map_err(std::io::Error::other)?)?;
-        std::fs::rename(tmp, path)
+        crate::platform::rename(tmp, path)
     }
 
     /// The file's hash, and its hash without CRs if it has any.
@@ -507,7 +507,12 @@ mod tests {
         let files = &compare(&windows, &linux).mods[0].files;
         assert!(files.contains(&FileDiff::LineEndings("common/a.txt".into())), "{files:?}");
         assert!(files.contains(&FileDiff::Changed("common/c.txt".into())), "more than line endings");
+        // A case-insensitive folder can't hold both spellings: there,
+        // `Common/` was written into `common/` and `events/e.txt` over `E.txt`.
+        #[cfg(unix)]
         assert_eq!(windows.mods[0].case, ["Common/Traits/t.txt", "events/E.txt", "events/e.txt"]);
+        #[cfg(windows)]
+        assert_eq!(windows.mods[0].case, ["common/Traits/t.txt"]);
         assert!(misnamed_folder("common/Traits/t.txt") && !misnamed_folder("common/inline_scripts/MECR/x.txt") && !misnamed_folder("common/T.txt"));
         assert_eq!(compare(&windows, &linux).case, [("M".to_owned(), windows.mods[0].case.clone())]);
         assert!(compare(&windows, &Report { build: Some(Build::Windows), ..linux.clone() }).case.is_empty(), "same build");

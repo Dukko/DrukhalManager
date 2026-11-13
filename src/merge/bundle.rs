@@ -33,7 +33,7 @@ pub fn export(path: &Path, shared: &Shared, user_dir: &Path, target: &Target) ->
             io::copy(&mut std::fs::File::open(root.join(relative))?, &mut zip)?;
         }
         zip.finish().map_err(io::Error::other)?.sync_all()?;
-        std::fs::rename(&tmp, path)?;
+        crate::platform::rename(&tmp, path)?;
         Ok(files.len())
     })();
     if result.is_err() {
@@ -49,7 +49,7 @@ fn list(root: &Path, dir: &Path, out: &mut Vec<String>) -> io::Result<()> {
         if path.is_dir() {
             list(root, &path, out)?;
         } else if let Ok(relative) = path.strip_prefix(root) {
-            out.push(relative.components().map(|c| c.as_os_str().to_string_lossy()).collect::<Vec<_>>().join("/"));
+            out.push(crate::platform::game_path(relative));
         }
     }
     out.sort();

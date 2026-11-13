@@ -72,7 +72,7 @@ fn write(user_dir: &Path, backup_dir: &Path, key: &str, list: &[String]) -> io::
         file.write_all(&serde_json::to_vec(&doc).map_err(io::Error::other)?)?;
         file.sync_all()?;
     }
-    std::fs::rename(&tmp, &path)?;
+    crate::platform::rename(&tmp, &path)?;
     Ok(backup)
 }
 

@@ -7,13 +7,15 @@ mod error_report_dialog;
 mod file_merge_dialog;
 mod fix_dialog;
 mod folder_merge_dialog;
+#[cfg(unix)]
+mod host_stylesheet;
 mod merge;
 mod merge_dialog;
 mod mods;
 mod multiplayer;
 mod multiplayer_dialog;
 mod paradox;
-mod sandbox;
+mod platform;
 mod secrets;
 mod preferences;
 mod resize_grip;
@@ -45,8 +47,8 @@ fn build_ui(app: &adw::Application) {
     {
         gtk::IconTheme::for_display(&display).add_search_path(icons);
     }
-    diagnostics::log!("app", "DrukhalManager {} started ({})", update::CURRENT, if sandbox::is_flatpak() { "Flatpak" } else { "native" });
-    let home = gtk::glib::home_dir();
+    diagnostics::log!("app", "DrukhalManager {} started ({})", update::CURRENT, if platform::is_flatpak() { "Flatpak" } else { "native" });
+    let home = platform::home_dir();
     // Folders chosen in Preferences replace the detected ones.
     let options = settings::Settings::load(&settings::path()).game;
     let user_dir = options.data_dir.clone().unwrap_or_else(steam::stellaris_user_dir);
@@ -60,7 +62,7 @@ fn build_ui(app: &adw::Application) {
         diagnostics::log!("mods", "{error}");
     }
     let found = mods::discover(&user_dir, &workshop_dirs);
-    let paths = window::Paths { user_dir, backup_dir: sandbox::data_dir().join("DrukhalManager/backups") };
+    let paths = window::Paths { user_dir, backup_dir: platform::data_dir().join("backups") };
     let game = match &options.executable {
         Some(exe) => game::from_executable(exe).ok(),
         None => game::find(&libraries),

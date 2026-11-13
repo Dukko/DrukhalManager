@@ -92,7 +92,7 @@ fn write_descriptor(folder: &Path, target: &Path) -> std::io::Result<bool> {
         })
         .map(|line| format!("{line}\n"))
         .collect();
-    text.push_str(&format!("path=\"{}\"\n", folder.display()));
+    text.push_str(&format!("path=\"{}\"\n", crate::platform::descriptor_path(folder)));
     let existing = std::fs::read_to_string(target).ok();
     if existing.as_deref() != Some(text.as_str()) {
         std::fs::create_dir_all(target.parent().unwrap())?;
@@ -108,7 +108,7 @@ fn slug(name: &str) -> String {
 }
 
 fn unreadable(dir: &Path, e: &std::io::Error) -> String {
-    if crate::sandbox::is_flatpak() && !dir.starts_with(gtk::glib::home_dir()) {
+    if crate::platform::is_flatpak() && !dir.starts_with(crate::platform::home_dir()) {
         format!(
             "The extra mod folder {} is outside your home folder, so DrukhalManager can't see it from its sandbox. Run this once, then restart: flatpak override --user --filesystem={} io.github.dukko.DrukhalManager",
             dir.display(),
