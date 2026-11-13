@@ -73,7 +73,7 @@ This installs `drukhal-manager` with a desktop entry and icon.
 
 ## Load order
 
-Drag mods around, type a position into the number, or press **Smart Sort**. The strip above the list counts what needs looking at, like mods that haven't been updated for your game version or mods loading before something they depend on, and each count has a button that shows you which ones.
+Drag mods around, type a position into the number, or press **Smart Sort**. Undo, Redo and Reload sit at the top left of the window. The strip above the list counts what needs looking at, like mods that haven't been updated for your game version or mods loading before something they depend on, and each count has a button that shows you which ones. The count of mods not updated for your game also offers **Disable for Now…**, which keeps your full load order as a collection first.
 
 Smart Sort follows the order the community guides use: unofficial patches (`~`) first, then graphics, flavor, shipsets, galaxy generation, gameplay, large overhauls, compatibility patches, UI mods, UI patches, and universal patches (`!`) last. It decides where a mod goes from its name, its dependencies and the folders it ships, because Workshop tags are often wrong. You get a preview before anything moves, and if it puts a mod in the wrong place you can move it and it'll remember.
 
@@ -84,7 +84,7 @@ Also on this page:
 * **Collections** are named load orders, each synced to its own Paradox Launcher playset. You can import a playset, a Workshop collection link, or a load order a friend pasted, and **Copy Load Order** gives you a numbered list with Workshop links to paste back.
 * **Notes** on a mod, for things like "keep this below UIOD or the outliner breaks". Search finds them.
 * **Freeze This Collection…** copies its Workshop mods into local ones, so you can finish a campaign on the versions you started with.
-* **Find the Crashing Mod…** turns off half your mods, has you launch the game, and keeps halving until it finds the one that crashes. Your load order is put back afterwards.
+* **Find Compatibility Patches…** searches the Workshop for patches between mods you run that you haven't subscribed to. It's on the Compatibility Patches header in the list, or in the sidebar while you have none. It needs a Steam Web API key (**Preferences → Steam**).
 * **Descriptor repair** fixes `.mod` files pointing at folders that no longer exist, after backing them up.
 
 ## Conflicts
@@ -110,7 +110,7 @@ Most of the noise in a big mod list is graphics and localisation files I usually
 
 The model only ever sees the conflicting definitions, not your whole mod folder. When it returns something with broken syntax, it gets one more try with the error message before the merge counts as failed.
 
-Results go into a merged patch mod, one per collection, that loads last. If one of the mods or the game updates later, the merges that depended on it are flagged as outdated. The patch is backed up before every Merge All, and **Merged Patch Backups…** keeps the last ten.
+Results go into a merged patch mod, one per collection, that loads last. If one of the mods or the game updates later, the merges that depended on it are flagged as outdated. The patch is backed up before every Merge All, and the backups button at the bottom of the Conflicts list keeps the last ten.
 
 <table>
 <tr>
@@ -125,11 +125,21 @@ Results go into a merged patch mod, one per collection, that loads last. If one 
 
 API keys go in your system keyring. Without a keyring they're stored in a settings file only your user can read.
 
+## Launching
+
+**Launch** starts the game with your load order. Its dropdown holds the other ways in:
+
+* **Continue** loads your last save straight away.
+* **Saves…** lists the campaigns you started from DrukhalManager and the mods each one was played with.
+* **Multiplayer Check…** saves a report of your game and mod files for multiplayer desyncs. Swap reports with the other players and open theirs, and it lists the files that differ.
+* **DLC…** turns DLC on or off for your next game.
+* **Find the Crashing Mod…** turns off half your mods, has you launch the game, and keeps halving until it finds the one that crashes. Your load order is put back afterwards.
+
 ## When something goes wrong
 
-The bell in the header keeps every notification, so you can go back to one you missed. If you hit a bug, **Main Menu → Troubleshooting** copies a short report you can paste into an issue. It comes from a small log of scans, merges, AI calls and game launches, and never includes API keys, prompts or file contents.
+If the last game logged errors, the bottom of the sidebar says how many; click it to see them grouped by the mod they came from. The bell in the header keeps every notification, so you can go back to one you missed. If you hit a bug, **Main Menu → Troubleshooting** copies a short report you can paste into an issue. It comes from a small log of scans, merges, AI calls and game launches, and never includes API keys, prompts or file contents.
 
-For multiplayer desyncs, **Multiplayer Check…** saves a report of your game and mod files. Swap reports with the other players and open theirs, and it lists the files that differ.
+There's a longer how-to for each of these in the [wiki](https://github.com/Dukko/DrukhalManager/wiki).
 
 ## Building
 

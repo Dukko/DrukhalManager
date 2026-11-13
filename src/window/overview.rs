@@ -24,6 +24,10 @@ const CSS: &str = "
 .side-panel .navigation-sidebar { background: transparent; }
 .health-card { padding: 10px 14px; }
 .health-card .number { font-size: 20px; font-weight: 700; }
+/* Buttons that read as links: on health cards with two actions, in the
+   sidebar, and on the Compatibility Patches header. */
+button.health-action, button.sidebar-link { min-height: 0; padding: 2px 4px; margin-left: -4px; }
+.category-header button.sidebar-link { margin: -2px -6px -2px 0; }
 .mod-list > row.mod-row { min-height: 0; }
 .mod-list > row.mod-row > box.header { min-height: 40px; padding-top: 2px; padding-bottom: 2px; }
 .conflict-count { padding: 1px 7px; border-radius: 99px; background: alpha(@accent_color, 0.15); color: @accent_color; }
@@ -101,7 +105,12 @@ fn category_dot(category: Category) -> gtk::Box {
     gtk::Box::builder().valign(gtk::Align::Center).css_classes(["category-dot", category.key()]).build()
 }
 
-pub(super) fn sidebar_page(views: &gtk::ListBox, categories: &gtk::ListBox, info: &gtk::Label) -> gtk::Box {
+/// A small link-like button for the sidebar, running `action`.
+pub(super) fn sidebar_link(label: &str, action: &str) -> gtk::Button {
+    gtk::Button::builder().label(label).action_name(action).halign(gtk::Align::Start).css_classes(["flat", "sidebar-link", "caption-heading", "accent"]).build()
+}
+
+pub(super) fn sidebar_page(views: &gtk::ListBox, categories: &gtk::ListBox, find_patches: &gtk::Button, info: &gtk::Label, errors: &gtk::Button) -> gtk::Box {
     let page = gtk::Box::builder().orientation(gtk::Orientation::Vertical).css_classes(["side-panel"]).overflow(gtk::Overflow::Hidden).build();
     let heading = |text: &str| gtk::Label::builder().label(text).xalign(0.0).margin_start(18).margin_top(12).margin_bottom(4).css_classes(["heading", "dim-label"]).build();
     let lists = gtk::Box::new(gtk::Orientation::Vertical, 0);
@@ -113,8 +122,13 @@ pub(super) fn sidebar_page(views: &gtk::ListBox, categories: &gtk::ListBox, info
     lists.append(categories);
     // Hidden with the list while no category has a mod.
     categories.bind_property("visible", &categories_heading, "visible").sync_create().build();
+    find_patches.set_margin_start(12);
+    lists.append(find_patches);
     page.append(&gtk::ScrolledWindow::builder().child(&lists).vexpand(true).hscrollbar_policy(gtk::PolicyType::Never).build());
     page.append(info);
+    errors.set_margin_start(6);
+    errors.set_margin_bottom(8);
+    page.append(errors);
     page
 }
 
@@ -130,6 +144,10 @@ fn category_header(run: &Run) -> gtk::Widget {
     } else {
         run.category.description().to_owned()
     }));
+    if run.category == Category::Patches {
+        let find = gtk::Button::builder().label("Find More…").action_name("win.find-patches").tooltip_text("Search the Workshop for patches between your enabled mods").hexpand(true).halign(gtk::Align::End).css_classes(["flat", "sidebar-link", "caption-heading", "accent"]).build();
+        line.append(&find);
+    }
     line.upcast()
 }
 
@@ -310,7 +328,9 @@ impl Window {
         self.health.append(&self.health_card(&h.enabled.to_string(), &first, None, false));
         if h.outdated > 0 {
             let text = format!("not updated for {}", short.as_deref().unwrap_or("this game"));
-            self.health.append(&self.health_card(&h.outdated.to_string(), &text, Some(("Show", Box::new(|ui: &Rc<Window>| ui.set_view(View::Outdated)))), true));
+            let show: Card = Box::new(|ui: &Rc<Window>| ui.set_view(View::Outdated));
+            let disable: Card = Box::new(|ui: &Rc<Window>| ui.show_outdated_mods(false));
+            self.health.append(&self.health_card_with_actions(&h.outdated.to_string(), &text, vec![("Show", show), ("Disable for Now…", disable)], true));
         }
         if h.missing_required > 0 {
             let text = if h.missing_required == 1 { "required mod missing" } else { "required mods missing" };
@@ -364,6 +384,7 @@ impl Window {
             info.push(line);
         }
         self.game_info.set_label(&info.join("\n"));
+        self.refresh_error_count();
     }
 
     /// A health strip card: a number, what it counts, and what clicking
@@ -385,6 +406,48 @@ impl Window {
         let button = gtk::Button::builder().child(&body).css_classes(["card", "health-card"]).build();
         self.run_later_on_click(&button, Rc::from(run));
         button.upcast()
+    }
+
+    /// A health strip card with more than one thing to do: the card
+    /// itself isn't a button, each action is.
+    fn health_card_with_actions(self: &Rc<Self>, number: &str, text: &str, actions: Vec<(&str, Card)>, warn: bool) -> gtk::Widget {
+        let body = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(2).css_classes(["card", "health-card"]).build();
+        let number = gtk::Label::builder().label(number).xalign(0.0).css_classes(["number", "numeric"]).build();
+        if warn {
+            number.add_css_class("warning");
+        }
+        body.append(&number);
+        body.append(&label(text, &["caption"]));
+        let row = gtk::Box::new(gtk::Orientation::Horizontal, 12);
+        for (verb, run) in actions {
+            let button = gtk::Button::builder().label(verb).css_classes(["flat", "health-action", "caption-heading", "accent"]).build();
+            self.run_later_on_click(&button, Rc::from(run));
+            row.append(&button);
+        }
+        body.append(&row);
+        body.upcast()
+    }
+
+    /// Shows how many errors the game logged last time, as a link to them
+    /// in the sidebar. The log is counted again only when it changes.
+    pub(super) fn refresh_error_count(self: &Rc<Self>) {
+        let log = crate::paradox::error_log::path(&self.paths.user_dir);
+        let modified = std::fs::metadata(&log).and_then(|m| m.modified()).ok();
+        if modified.is_none() {
+            self.errors_link.set_visible(false);
+            return;
+        }
+        if self.error_log_seen.get() == modified {
+            return;
+        }
+        self.error_log_seen.set(modified);
+        let weak = Rc::downgrade(self);
+        glib::spawn_future_local(async move {
+            let count = gio::spawn_blocking(move || std::fs::read(&log).map(|b| String::from_utf8_lossy(&b).lines().filter(|l| !l.trim().is_empty()).count()).unwrap_or(0)).await.unwrap_or(0);
+            let Some(ui) = weak.upgrade() else { return };
+            ui.errors_link.set_label(&format!("Last game logged {}", plural(count, "error", "errors")));
+            ui.errors_link.set_visible(count > 0);
+        });
     }
 
     /// Fills the inspector with the selected mod, or says to pick one.
