@@ -103,6 +103,9 @@ pub struct MergeHooks {
     pub remove_merge: Box<dyn Fn(&Stale)>,
     /// Starts tracking an untracked merge from its mods' current files.
     pub keep_merge: Box<dyn Fn(&Stale)>,
+    /// Takes the picked mod's new version for a "Use This Version"
+    /// choice where only that mod changed: that one, or all of them.
+    pub update_picks: Box<dyn Fn(Option<&Stale>)>,
     /// Rebuilds the whole page, e.g. after a folder was ignored.
     pub rerender: Box<dyn Fn()>,
     pub game_dir: Option<PathBuf>,
@@ -1094,6 +1097,18 @@ impl Page {
             ("Outdated Merges", outdated_summary(&all), format!("{what} changed since these were merged or fixed, so the patch may be undoing their updates. Re-merge them from the list, or remove them from the patch."))
         };
         let header = self.detail_header(title, subtitle);
+        let picks = all.iter().filter(|s| !untracked && !s.untracked && s.pick.is_some()).count();
+        let description = if picks > 0 {
+            format!("{description} Where you chose one mod's version and only that mod changed, you can take its new version instead.")
+        } else {
+            description
+        };
+        if picks > 1 {
+            let update = gtk::Button::builder().label(format!("Use {picks} New Versions")).tooltip_text("Replace each picked version with the new one from the same mod. The patch is backed up first").css_classes(["suggested-action"]).build();
+            let hooks = self.hooks.clone();
+            update.connect_clicked(move |_| (hooks.update_picks)(None));
+            header.actions.append(&update);
+        }
         let intro = gtk::Label::builder().label(&description).wrap(true).xalign(0.0).css_classes(["dim-label"]).build();
         let stale: Vec<&Stale> = all.iter().filter(|s| s.untracked == untracked).collect();
         scrolled_detail(&[header.widget.upcast(), intro.upcast(), self.stale_list(&stale).upcast()])
@@ -1111,6 +1126,10 @@ impl Page {
                 (None, true) => s.path.clone(),
                 (Some((category, _)), false) => format!("{category} · {}", s.reasons.join("; ")),
                 (None, false) => format!("{} · {}", s.path, s.reasons.join("; ")),
+            };
+            let subtitle = match &s.pick {
+                Some(name) => format!("{subtitle} · you picked {name}'s version"),
+                None => subtitle,
             };
             let r = row(title, &subtitle);
             let icon = if s.untracked { "dialog-question-symbolic" } else { "dialog-warning-symbolic" };
@@ -1130,6 +1149,12 @@ impl Page {
                     }
                 });
                 r.add_suffix(&open);
+            }
+            if let Some(name) = &s.pick {
+                let update = gtk::Button::builder().label("Use New Version").tooltip_text(format!("Replace the picked version with {name}'s new one. The patch is backed up first")).valign(gtk::Align::Center).css_classes(["flat"]).build();
+                let (hooks, stale) = (hooks.clone(), (*s).clone());
+                update.connect_clicked(move |_| (hooks.update_picks)(Some(&stale)));
+                r.add_suffix(&update);
             }
             if s.untracked {
                 let keep = gtk::Button::builder().label("Keep As Is").tooltip_text("Track changes to its mods from their current versions").valign(gtk::Align::Center).css_classes(["flat"]).build();
