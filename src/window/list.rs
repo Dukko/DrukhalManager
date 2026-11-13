@@ -18,6 +18,13 @@ impl Window {
         self.apply_requirements();
         self.fetch_requirements();
         let frozen_updates = self.frozen_updates();
+        self.check_published();
+        let (updated_since, waiting): (Vec<String>, Vec<String>) = {
+            let (updated, waiting) = (self.updated_since_last_session(), self.waiting_updates());
+            let state = self.state.borrow();
+            let names = |found: Vec<(usize, u64)>| found.iter().map(|&(i, _)| display_name(&state.mods[i]).to_owned()).collect();
+            (names(updated), names(waiting))
+        };
         let state = self.state.borrow();
         self.search_facts.borrow_mut().clear();
         // Rebuilding drops the selection; it's put back at the end.
@@ -148,6 +155,8 @@ impl Window {
             no_achievements,
             stale_merges: self.stale.borrow().len(),
             frozen_updates,
+            updated_since,
+            waiting,
         };
         let (enabled, total) = (state.enabled.len(), state.mods.len());
         self.syncing.set(true);

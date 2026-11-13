@@ -16,6 +16,7 @@ mod reload;
 mod repair_ui;
 mod requirements_ui;
 mod saves_ui;
+mod session_updates_ui;
 mod selection_ui;
 mod shortcuts;
 mod smart_sort_ui;
@@ -72,6 +73,12 @@ struct Window {
     view_counts: Vec<(filter::View, gtk::Label)>,
     /// The game version, achievements and last save, under the views.
     game_info: gtk::Label,
+    /// The enabled mods' versions when the game was last launched.
+    last_session: RefCell<Option<crate::mods::last_session::LastSession>>,
+    /// When the Workshop last updated each enabled mod, by Workshop id, as
+    /// of the last check, and when that was.
+    published: RefCell<std::collections::HashMap<u64, u64>>,
+    published_checked: Cell<Option<std::time::Instant>>,
     /// The mods selected together, by id, kept across list rebuilds.
     marked: RefCell<Vec<String>>,
     /// Set while the lists' selection is changed by the app, not the user.
@@ -513,6 +520,9 @@ pub fn build(
         view,
         view_counts,
         game_info,
+        last_session: RefCell::new(crate::mods::last_session::LastSession::load(&crate::mods::last_session::path())),
+        published: RefCell::default(),
+        published_checked: Cell::new(None),
         marked: RefCell::default(),
         restoring_marks: Cell::new(false),
         bulk,
