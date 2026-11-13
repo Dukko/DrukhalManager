@@ -18,8 +18,17 @@ impl Window {
         self.apply_requirements();
         self.fetch_requirements();
         let frozen_updates = self.frozen_updates();
+        self.check_published();
+        let (updated_since, waiting): (Vec<String>, Vec<String>) = {
+            let (updated, waiting) = (self.updated_since_last_session(), self.waiting_updates());
+            let state = self.state.borrow();
+            let names = |found: Vec<(usize, u64)>| found.iter().map(|&(i, _)| display_name(&state.mods[i]).to_owned()).collect();
+            (names(updated), names(waiting))
+        };
         let state = self.state.borrow();
         self.search_facts.borrow_mut().clear();
+        // Rebuilding drops the selection; it's put back at the end.
+        self.restoring_marks.set(true);
         self.enabled_list.remove_all();
         self.disabled_list.remove_all();
         // Conflict counts are only shown while they match the load order.
@@ -146,6 +155,8 @@ impl Window {
             no_achievements,
             stale_merges: self.stale.borrow().len(),
             frozen_updates,
+            updated_since,
+            waiting,
         };
         let (enabled, total) = (state.enabled.len(), state.mods.len());
         self.syncing.set(true);
@@ -176,11 +187,16 @@ impl Window {
                 }
                 None
             });
-            if let Some((list, row)) = found {
+            if let Some((list, row)) = found
+                && self.marked.borrow().len() < 2
+            {
                 list.select_row(Some(&row));
             }
             self.show_inspector();
         }
+        self.restoring_marks.set(false);
+        self.restore_marks();
+        self.update_bulk_bar();
         self.undo_action.set_enabled(can_undo);
         self.redo_action.set_enabled(can_redo);
         self.scan_if_stale();
