@@ -227,7 +227,7 @@ impl Settings {
         let mut file = options.open(&tmp)?;
         file.write_all(&serde_json::to_vec_pretty(&on_disk).map_err(io::Error::other)?)?;
         file.sync_all()?;
-        std::fs::rename(&tmp, path)
+        crate::platform::rename(&tmp, path)
     }
 
     /// Brings in the keyring: a key still in the file (from before the

@@ -33,7 +33,7 @@ pub fn export(path: &Path, shared: &Shared, user_dir: &Path, target: &Target) ->
             io::copy(&mut std::fs::File::open(root.join(relative))?, &mut zip)?;
         }
         zip.finish().map_err(io::Error::other)?.sync_all()?;
-        std::fs::rename(&tmp, path)?;
+        crate::platform::rename(&tmp, path)?;
         Ok(files.len())
     })();
     if result.is_err() {

@@ -53,7 +53,7 @@ pub(crate) fn files_in(content: &Path, cache: &Path) -> io::Result<PathBuf> {
         return Err(e);
     }
     let _ = std::fs::remove_dir_all(&dir);
-    std::fs::rename(&tmp, &dir)?;
+    crate::platform::rename(&tmp, &dir)?;
     Ok(dir)
 }
 

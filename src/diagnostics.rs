@@ -149,7 +149,7 @@ impl Log {
         for age in (0..KEEP).rev() {
             let from = self.path(age);
             if from.exists() {
-                fs::rename(&from, self.path(age + 1))?;
+                crate::platform::rename(&from, self.path(age + 1))?;
             }
         }
         Ok(())

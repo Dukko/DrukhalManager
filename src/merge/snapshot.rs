@@ -90,7 +90,7 @@ fn take_unlogged(user_dir: &Path, target: &Target, backup_dir: &Path, reason: &s
     let info = serde_json::to_vec_pretty(&Info { reason: reason.to_owned() }).map_err(io::Error::other)?;
     std::fs::write(staging.join(INFO), info)?;
     // Renamed into place whole, so a half-written snapshot is never listed.
-    std::fs::rename(&staging, &dir)?;
+    crate::platform::rename(&staging, &dir)?;
     for old in list(backup_dir, target).iter().skip(KEPT) {
         std::fs::remove_dir_all(&old.dir)?;
     }
@@ -138,11 +138,11 @@ pub fn replace_patch(user_dir: &Path, target: &Target, source: &Path) -> io::Res
     let _ = std::fs::remove_dir_all(&old);
     let had_patch = root.is_dir();
     if had_patch {
-        std::fs::rename(&root, &old)?;
+        crate::platform::rename(&root, &old)?;
     }
-    if let Err(e) = std::fs::rename(&staging, &root) {
+    if let Err(e) = crate::platform::rename(&staging, &root) {
         if had_patch {
-            let _ = std::fs::rename(&old, &root);
+            let _ = crate::platform::rename(&old, &root);
         }
         return Err(e);
     }

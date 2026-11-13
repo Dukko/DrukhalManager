@@ -33,7 +33,7 @@ impl Window {
             Err(e) => {
                 // Keep the unreadable file for inspection instead of
                 // overwriting it.
-                let _ = std::fs::rename(&path, path.with_extension("json.unreadable"));
+                let _ = crate::platform::rename(&path, path.with_extension("json.unreadable"));
                 self.toast_error(&format!("Collections could not be read ({e}) and were reset; the old file was kept next to it"));
                 Collections::starting_with(current.clone())
             }

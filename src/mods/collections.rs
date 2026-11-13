@@ -143,7 +143,7 @@ impl Collections {
         std::fs::create_dir_all(path.parent().unwrap())?;
         let tmp = path.with_extension("json.tmp");
         std::fs::write(&tmp, serde_json::to_vec_pretty(self).map_err(io::Error::other)?)?;
-        std::fs::rename(&tmp, path)
+        crate::platform::rename(&tmp, path)
     }
 
     pub fn get(&self, name: &str) -> Option<&Collection> {

@@ -252,7 +252,7 @@ pub fn download_previews(ids: &[u64], dir: &std::path::Path) -> Vec<u64> {
             let Some(bytes) = bytes.filter(|b| !b.is_empty()) else { continue };
             let path = dir.join(id.to_string());
             let tmp = path.with_extension("tmp");
-            if std::fs::write(&tmp, bytes).and_then(|()| std::fs::rename(&tmp, &path)).is_ok() {
+            if std::fs::write(&tmp, bytes).and_then(|()| crate::platform::rename(&tmp, &path)).is_ok() {
                 saved.push(id);
             }
         }

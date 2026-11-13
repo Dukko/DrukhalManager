@@ -84,12 +84,12 @@ pub fn apply(user_dir: &Path, backup_dir: &Path, stale: &[StalePath], remove: &[
         std::fs::write(backup_of(&s.id), &src)?;
         let tmp = file.with_extension("mod.drukhal-tmp");
         std::fs::write(&tmp, fixed)?;
-        std::fs::rename(&tmp, &file)?;
+        crate::platform::rename(&tmp, &file)?;
     }
     for o in remove {
         let file = user_dir.join(&o.id);
         // Moved, not deleted: the backup folder can restore it.
-        if std::fs::rename(&file, backup_of(&o.id)).is_err() {
+        if crate::platform::rename(&file, backup_of(&o.id)).is_err() {
             std::fs::copy(&file, backup_of(&o.id))?;
             std::fs::remove_file(&file)?;
         }

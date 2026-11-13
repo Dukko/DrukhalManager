@@ -145,7 +145,7 @@ impl HashCache {
         self.version = CACHE_VERSION;
         let tmp = path.with_extension("json.tmp");
         std::fs::write(&tmp, serde_json::to_vec(self).map_err(std::io::Error::other)?)?;
-        std::fs::rename(tmp, path)
+        crate::platform::rename(tmp, path)
     }
 
     /// The file's hash, and its hash without CRs if it has any.

@@ -180,7 +180,7 @@ fn write_folder(mod_dir: &Path, collection: &str, files: &Files, descriptor: &st
         if target.exists() {
             std::fs::remove_dir_all(&target)?;
         }
-        std::fs::rename(&building, &target)
+        crate::platform::rename(&building, &target)
     })();
     if result.is_err() {
         let _ = std::fs::remove_dir_all(&building);
@@ -205,7 +205,7 @@ fn write_zip(mod_dir: &Path, collection: &str, files: &Files, descriptor: &str) 
         zip.start_file("descriptor.mod", options).map_err(io::Error::other)?;
         io::Write::write_all(&mut zip, descriptor.as_bytes())?;
         zip.finish().map_err(io::Error::other)?.sync_all()?;
-        std::fs::rename(&building, &target)
+        crate::platform::rename(&building, &target)
     })();
     if result.is_err() {
         let _ = std::fs::remove_file(&building);

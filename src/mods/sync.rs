@@ -150,7 +150,7 @@ fn write(path: &Path, text: &str) -> std::io::Result<()> {
     }
     let tmp = path.with_extension("mod.tmp");
     std::fs::write(&tmp, text)?;
-    std::fs::rename(&tmp, path)
+    crate::platform::rename(&tmp, path)
 }
 
 #[cfg(test)]

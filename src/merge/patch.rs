@@ -271,7 +271,7 @@ impl Patch {
             let (from, to) = (self.root.join(&merge.file), self.root.join(&wanted));
             if from.is_file() {
                 std::fs::create_dir_all(to.parent().unwrap())?;
-                std::fs::rename(&from, &to)?;
+                crate::platform::rename(&from, &to)?;
             }
             merge.file = wanted;
             moved = true;
@@ -594,7 +594,7 @@ fn relocate_unlogged(user_dir: &Path, from: &Target, to: &Target) -> io::Result<
     if let Some(parent) = new.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    if std::fs::rename(&old, &new).is_err() {
+    if crate::platform::rename(&old, &new).is_err() {
         // Another drive: copy, and only then delete.
         let copied = super::snapshot::copy_dir(&old, &new);
         if let Err(e) = copied {
@@ -760,7 +760,7 @@ fn write_atomic(path: &Path, contents: &[u8]) -> io::Result<()> {
     let mut file = std::fs::File::create(&tmp)?;
     file.write_all(contents)?;
     file.sync_all()?;
-    std::fs::rename(&tmp, path)
+    crate::platform::rename(&tmp, path)
 }
 
 #[cfg(test)]

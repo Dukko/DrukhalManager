@@ -114,6 +114,28 @@ pub fn game_path(relative: &Path) -> String {
     relative.components().map(|c| c.as_os_str().to_string_lossy()).collect::<Vec<_>>().join("/")
 }
 
+/// `std::fs::rename`, except that on Windows a rename refused because
+/// something briefly has the file open is tried again for a moment. That
+/// happens when an antivirus or the search indexer opens a file that was just
+/// written.
+pub fn rename(from: impl AsRef<Path>, to: impl AsRef<Path>) -> std::io::Result<()> {
+    let (from, to) = (from.as_ref(), to.as_ref());
+    #[cfg(windows)]
+    {
+        const ERROR_ACCESS_DENIED: i32 = 5;
+        const ERROR_SHARING_VIOLATION: i32 = 32;
+        for _ in 0..10 {
+            match std::fs::rename(from, to) {
+                Err(e) if matches!(e.raw_os_error(), Some(ERROR_ACCESS_DENIED | ERROR_SHARING_VIOLATION)) => {
+                    std::thread::sleep(std::time::Duration::from_millis(100));
+                }
+                result => return result,
+            }
+        }
+    }
+    std::fs::rename(from, to)
+}
+
 /// Where `program` is installed, found through `PATH`.
 pub fn find_program(program: &str) -> Option<PathBuf> {
     let candidate = |dir: &Path| -> Option<PathBuf> {
