@@ -901,6 +901,10 @@ mod tests {
         std::fs::remove_dir(home.root(&user)).unwrap();
         relocate(&user, &away, &home).unwrap();
         assert!(home.root(&user).join(MANIFEST).is_file() && !away.root(&user).exists());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn updates_picked_versions_when_only_their_mod_changed() {
         let root = std::env::temp_dir().join(format!("drukhal-picks-{}", std::process::id()));
         let (user, a, b, game) = (root.join("user"), root.join("a"), root.join("b"), root.join("game"));
