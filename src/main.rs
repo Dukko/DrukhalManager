@@ -1,3 +1,6 @@
+// Release builds on Windows open without a console window.
+#![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
+
 mod conflicts_view;
 mod dds;
 mod diagnostics;
