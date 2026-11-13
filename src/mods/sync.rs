@@ -200,7 +200,7 @@ mod tests {
         let d = Descriptor::parse(&written).unwrap();
         assert_eq!((d.remote_file_id, d.tags), (Some(1), vec!["Gameplay".to_owned()]));
         let updated = Descriptor::parse(&std::fs::read_to_string(user.join("mod/ugc_2.mod")).unwrap()).unwrap();
-        assert_eq!((updated.version.as_str(), updated.path), ("2.0", Some(old_path.display().to_string())), "keeps a working path");
+        assert_eq!((updated.version.as_str(), updated.path), ("2.0", Some(crate::platform::descriptor_path(&old_path))), "keeps a working path");
         assert_eq!(std::fs::read_to_string(user.join("mod/ugc_3.mod")).unwrap(), same, "unchanged files aren't rewritten");
         assert!(!user.join("mod/ugc_4.mod").exists(), "a copy with the same id counts as registered");
         assert!(!user.join("mod/ugc_5.mod").exists(), "only items Steam lists as installed");
@@ -224,7 +224,7 @@ mod tests {
         sync(&user, &[content]);
         let d = Descriptor::parse(&std::fs::read_to_string(user.join("mod/ugc_7.mod")).unwrap()).unwrap();
         assert!(d.is_archive);
-        assert_eq!(d.path, Some(dir.join("mod.zip").display().to_string()));
+        assert_eq!(d.path, Some(crate::platform::descriptor_path(&dir.join("mod.zip"))));
         std::fs::remove_dir_all(root).unwrap();
     }
 }

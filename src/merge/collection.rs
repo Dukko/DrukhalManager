@@ -315,7 +315,7 @@ mod tests {
         let descriptor = crate::mods::Descriptor::parse(&std::fs::read_to_string(user.join(&merged.id)).unwrap()).unwrap();
         assert!(descriptor.is_archive);
         let zip = user.join("mod/drukhal_merged_my_game.zip");
-        assert_eq!(descriptor.path.as_deref(), Some(zip.to_str().unwrap()));
+        assert_eq!(descriptor.path, Some(crate::platform::descriptor_path(&zip)));
         let files = crate::mods::archive::files_in(&zip, &root.join("cache")).unwrap();
         assert_eq!(std::fs::read_to_string(files.join("Common/Buildings/x.txt")).unwrap(), "b");
         assert_eq!(std::fs::read_to_string(files.join("descriptor.mod")).unwrap().lines().next(), Some("name=\"My Game! (Merged)\""));
@@ -329,7 +329,7 @@ mod tests {
         let merged = write(&user, &elsewhere, "My Game!", &mod_name("My Game!", None), "v4.5.*", &mods, Output::Folder).unwrap();
         assert!(!out.exists() && elsewhere.join("drukhal_merged_my_game/descriptor.mod").exists());
         let descriptor = crate::mods::Descriptor::parse(&std::fs::read_to_string(user.join(&merged.id)).unwrap()).unwrap();
-        assert_eq!(descriptor.path.as_deref(), Some(elsewhere.join("drukhal_merged_my_game").to_str().unwrap()));
+        assert_eq!(descriptor.path, Some(crate::platform::descriptor_path(&elsewhere.join("drukhal_merged_my_game"))));
 
         std::fs::write(user.join("mod/drukhal_merged_other2.zip"), "not ours").unwrap();
         assert!(write(&user, &user.join("mod"), "Other2", "Other2", "*", &mods, Output::Zip).is_err());
