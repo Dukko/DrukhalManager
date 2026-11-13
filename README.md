@@ -73,7 +73,7 @@ This installs `drukhal-manager` with a desktop entry and icon.
 
 ## Load order
 
-Drag mods around, type a position into the number, or press **Smart Sort**. Undo, Redo and Reload sit at the top left of the window. The strip above the list counts what needs looking at, like mods that haven't been updated for your game version or mods loading before something they depend on, and each count has a button that shows you which ones. The count of mods not updated for your game also offers **Disable for Now…**, which keeps your full load order as a collection first.
+Drag mods around, type a position into the number, or press **Smart Sort**. Ctrl+click or Shift+click to select several mods, then enable, disable, move or categorise them all at once. Undo, Redo and Reload sit at the top left of the window. The strip above the list counts what needs looking at, like mods that haven't been updated for your game version or mods loading before something they depend on, and each count has a button that shows you which ones. The count of mods not updated for your game also offers **Disable for Now…**, which keeps your full load order as a collection first.
 
 Smart Sort follows the order the community guides use: unofficial patches (`~`) first, then graphics, flavor, shipsets, galaxy generation, gameplay, large overhauls, compatibility patches, UI mods, UI patches, and universal patches (`!`) last. It decides where a mod goes from its name, its dependencies and the folders it ships, because Workshop tags are often wrong. You get a preview before anything moves, and if it puts a mod in the wrong place you can move it and it'll remember.
 
@@ -111,7 +111,7 @@ Most of the noise in a big mod list is graphics and localisation files I usually
 
 The model only ever sees the conflicting definitions, not your whole mod folder. When it returns something with broken syntax, it gets one more try with the error message before the merge counts as failed.
 
-Results go into a merged patch mod, one per collection, that loads last. If one of the mods or the game updates later, the merges that depended on it are flagged as outdated. The patch is backed up before every Merge All, and the backups button at the bottom of the Conflicts list keeps the last ten.
+Results go into a merged patch mod, one per collection, that loads last. If one of the mods or the game updates later, the merges that depended on it are flagged as outdated. Where you picked one mod's version and only that mod changed, one click takes its new version. The patch is backed up before every Merge All, and the backups button at the bottom of the Conflicts list keeps the last ten.
 
 <table>
 <tr>
@@ -130,7 +130,7 @@ API keys go in your system keyring. Without a keyring they're stored in a settin
 
 **Launch** starts the game with your load order. Its dropdown holds the other ways in:
 
-* **Continue** loads your last save straight away.
+* **Continue** loads your last save straight away. If Steam updated any of your mods since you last played, or the Workshop has updates Steam hasn't downloaded yet, the health strip says which, with links to their change notes.
 * **Saves…** lists the campaigns you started from DrukhalManager and the mods each one was played with.
 * **Multiplayer Check…** saves a report of your game and mod files for multiplayer desyncs. Swap reports with the other players and open theirs, and it lists the files that differ.
 * **DLC…** turns DLC on or off for your next game.

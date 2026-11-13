@@ -119,6 +119,25 @@ struct FileDetails {
     consumer_app_id: u32,
     #[serde(default)]
     preview_url: String,
+    #[serde(default)]
+    time_updated: u64,
+}
+
+fn parse_times(json: &str) -> Result<HashMap<u64, u64>, String> {
+    let reply: Envelope<FileResponse> = serde_json::from_str(json).map_err(|e| format!("Unexpected reply from Steam: {e}"))?;
+    Ok(reply.response.publishedfiledetails.into_iter().filter(|f| f.result == OK && f.time_updated > 0).filter_map(|f| Some((f.publishedfileid.parse().ok()?, f.time_updated))).collect())
+}
+
+/// When each of `ids` was last updated on the Workshop, in Unix seconds:
+/// newer than the installed copy means Steam hasn't downloaded it yet.
+/// Needs no key. Blocks; call off the main thread.
+pub fn published_times(ids: &[u64]) -> Result<HashMap<u64, u64>, String> {
+    let agent = agent();
+    let mut times = HashMap::new();
+    for batch in ids.chunks(ITEMS_PER_CALL) {
+        times.extend(parse_times(&post(&agent, "GetPublishedFileDetails", "itemcount", batch)?)?);
+    }
+    Ok(times)
 }
 
 /// The collections among `json`'s entries, children in Steam's sort order.
@@ -591,6 +610,12 @@ mod tests {
 
         let other = HashMap::from([(10, ("Skyrim".to_owned(), 489830))]);
         assert!(to_shared(10, &[1], &other).is_err());
+    }
+
+    #[test]
+    fn reads_update_times() {
+        let json = r#"{"response":{"publishedfiledetails":[{"publishedfileid":"1","result":1,"time_updated":1700000000},{"publishedfileid":"2","result":9},{"publishedfileid":"3","result":1}]}}"#;
+        assert_eq!(parse_times(json).unwrap(), HashMap::from([(1, 1_700_000_000)]), "missing and unknown items are left out");
     }
 }
 

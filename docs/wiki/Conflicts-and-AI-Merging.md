@@ -39,4 +39,6 @@ Each merge is a paid API call (or a local model you run), so read what comes bac
 
 Merges are saved into a merged patch mod that loads last, one per collection. Your mods are never changed. When a mod or the game updates, the merges that depended on it are flagged as outdated.
 
+**Use This Version** choices are easier to bring up to date. When the mod you picked updates and nothing else in that conflict changed, the Outdated Merges page says "you picked *mod*'s version" and offers **Use New Version** on that row, or **Use N New Versions** at the top for all of them at once. The patch is backed up first. If the other mods or the base game changed too, re-merge it as usual.
+
 The patch is backed up before every **Merge All**. The backups button at the bottom of the conflicts list, next to **Rules…** and **Rescan**, shows the last ten, each with **Restore…**.
