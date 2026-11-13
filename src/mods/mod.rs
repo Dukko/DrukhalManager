@@ -10,6 +10,7 @@ pub mod freeze;
 mod descriptor;
 pub mod repair;
 pub mod game_update;
+pub mod patches;
 pub mod requirements;
 pub mod saves;
 pub mod smart_sort;

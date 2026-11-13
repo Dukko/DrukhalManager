@@ -120,6 +120,36 @@ impl Window {
         picture
     }
 
+    /// The Workshop preview of item `id`, which needn't be installed,
+    /// `size` pixels square.
+    pub(super) fn workshop_thumbnail(self: &Rc<Self>, id: u64, size: i32) -> gtk::Image {
+        let picture = gtk::Image::builder()
+            .pixel_size(size)
+            .width_request(size)
+            .height_request(size)
+            .valign(gtk::Align::Center)
+            .overflow(gtk::Overflow::Hidden)
+            .css_classes(["mod-thumbnail", "placeholder"])
+            .build();
+        let path = previews_dir().join(id.to_string());
+        if !path.is_file() {
+            self.download_preview(id, path, &picture);
+            return picture;
+        }
+        let mut cache = self.thumbnails.borrow_mut();
+        if let Some(texture) = cache.loaded.get(&path) {
+            show(&picture, texture.as_ref());
+            return picture;
+        }
+        let waiting = cache.pending.entry(path.clone()).or_default();
+        waiting.push(picture.downgrade());
+        if waiting.len() == 1 {
+            drop(cache);
+            self.read_thumbnail(path);
+        }
+        picture
+    }
+
     /// Reads `path` and shows it in the images waiting for it.
     fn read_thumbnail(self: &Rc<Self>, path: PathBuf) {
         let weak = Rc::downgrade(self);

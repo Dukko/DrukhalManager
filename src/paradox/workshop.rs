@@ -315,6 +315,127 @@ pub fn requirements(key: &str, ids: &[u64]) -> Result<HashMap<u64, Vec<(u64, Str
 }
 
 
+/// A Workshop item that lists some mod among its required items, such as
+/// a compatibility patch.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, Deserialize)]
+pub struct Dependent {
+    pub id: u64,
+    pub title: String,
+    /// Its required items.
+    pub requires: Vec<u64>,
+    pub subscriptions: u64,
+    /// When its author last updated it, in Unix seconds.
+    pub updated: u64,
+    pub tags: Vec<String>,
+}
+
+#[derive(Deserialize)]
+struct QueryResponse {
+    #[serde(default)]
+    total: u64,
+    #[serde(default)]
+    next_cursor: Option<String>,
+    #[serde(default)]
+    publishedfiledetails: Vec<QueryItem>,
+}
+
+#[derive(Deserialize)]
+struct QueryItem {
+    publishedfileid: String,
+    #[serde(default = "ok")]
+    result: u32,
+    #[serde(default)]
+    title: String,
+    #[serde(default)]
+    subscriptions: u64,
+    #[serde(default)]
+    time_updated: u64,
+    #[serde(default)]
+    tags: Vec<QueryTag>,
+    #[serde(default)]
+    children: Vec<DetailsChild>,
+}
+
+#[derive(Deserialize)]
+struct QueryTag {
+    #[serde(default)]
+    tag: String,
+}
+
+fn ok() -> u32 {
+    OK
+}
+
+/// One page of a `QueryFiles` reply: the items, how many there are in
+/// all, and the cursor for the next page.
+fn parse_dependents(json: &str) -> Result<(Vec<Dependent>, u64, Option<String>), String> {
+    let reply: Envelope<QueryResponse> = serde_json::from_str(json).map_err(|e| format!("Unexpected reply from Steam: {e}"))?;
+    let r = reply.response;
+    let items = r
+        .publishedfiledetails
+        .into_iter()
+        .filter(|d| d.result == OK)
+        .filter_map(|d| {
+            Some(Dependent {
+                id: d.publishedfileid.parse().ok()?,
+                title: d.title.trim().to_owned(),
+                requires: d.children.iter().filter_map(|c| c.publishedfileid.parse().ok()).collect(),
+                subscriptions: d.subscriptions,
+                updated: d.time_updated,
+                tags: d.tags.into_iter().map(|t| t.tag).filter(|t| !t.is_empty()).collect(),
+            })
+        })
+        .collect();
+    Ok((items, r.total, r.next_cursor))
+}
+
+/// Pages asked for at most per mod; Gigastructural Engineering, among the
+/// most patched, has about 300 dependents.
+const MAX_PAGES: usize = 20;
+
+/// The Workshop items that list `id` among their required items, each
+/// with its own required items. Uses Steam's Web API with the user's own
+/// key. Blocks; call off the main thread.
+pub fn dependents(key: &str, id: u64) -> Result<Vec<Dependent>, String> {
+    let agent = agent();
+    let mut found = Vec::new();
+    let mut cursor = "*".to_owned();
+    for _ in 0..MAX_PAGES {
+        let query = [
+            ("key", key.to_owned()),
+            ("appid", STELLARIS_APP_ID.to_string()),
+            ("child_publishedfileid", id.to_string()),
+            ("return_details", "true".to_owned()),
+            ("return_children", "true".to_owned()),
+            ("return_tags", "true".to_owned()),
+            ("numperpage", ITEMS_PER_CALL.to_string()),
+            ("cursor", cursor.clone()),
+        ];
+        let json = agent
+            .get("https://api.steampowered.com/IPublishedFileService/QueryFiles/v1/")
+            .header("user-agent", &user_agent())
+            .query_pairs(query.iter().map(|(k, v)| (*k, v.as_str())))
+            .call()
+            .map_err(|e| match e {
+                ureq::Error::StatusCode(401 | 403) => "Steam didn't accept the Steam Web API key".to_owned(),
+                e => format!("Could not reach Steam: {e}"),
+            })?
+            .body_mut()
+            .read_to_string()
+            .map_err(|e| format!("Could not read Steam's reply: {e}"))?;
+        let (items, total, next) = parse_dependents(&json)?;
+        let last = items.is_empty();
+        found.extend(items);
+        match next {
+            Some(next) if !last && next != cursor && (found.len() as u64) < total => cursor = next,
+            _ => break,
+        }
+    }
+    // The mod itself never needs patching against itself.
+    found.retain(|d| d.id != id);
+    Ok(found)
+}
+
 /// Fetches the collection. Blocks; call off the main thread.
 pub fn fetch(root: u64) -> Result<Shared, String> {
     let agent = agent();
@@ -353,6 +474,35 @@ mod tests {
         assert_eq!(parsed[&2966277231], ("MECR+UIOD".to_owned(), vec![2652578379, 1623423360]));
         assert!(parsed[&3090328185].1.is_empty());
         assert!(!parsed.contains_key(&5));
+    }
+
+    #[test]
+    fn reads_dependents_from_queries() {
+        let json = r#"{"response":{"total":3,"next_cursor":"AoJ","publishedfiledetails":[
+            {"result":1,"publishedfileid":"3001","title":" GPM + EMEX Compatibility Patch ","subscriptions":5120,"time_updated":1730000000,
+             "tags":[{"tag":"Compatibility","display_name":"Compatibility"},{"tag":"Gameplay"}],
+             "children":[{"publishedfileid":"10","sortorder":0,"file_type":0},{"publishedfileid":"20","sortorder":1,"file_type":0}]},
+            {"publishedfileid":"3002","title":"No result field"},
+            {"result":9,"publishedfileid":"3003"}]}}"#;
+        let (items, total, next) = parse_dependents(json).unwrap();
+        assert_eq!((total, next.as_deref()), (3, Some("AoJ")));
+        assert_eq!(items.len(), 2, "missing items are left out");
+        assert_eq!(items[0], Dependent { id: 3001, title: "GPM + EMEX Compatibility Patch".into(), requires: vec![10, 20], subscriptions: 5120, updated: 1730000000, tags: vec!["Compatibility".into(), "Gameplay".into()] });
+        assert!(items[1].requires.is_empty());
+    }
+
+    /// Talks to Steam with a key: `STEAM_KEY=… cargo test -- --ignored finds_real_dependents --nocapture`.
+    #[test]
+    #[ignore]
+    fn finds_real_dependents() {
+        let key = std::env::var("STEAM_KEY").expect("STEAM_KEY");
+        // UI Overhaul Dynamic.
+        let found = dependents(&key, 1623423360).unwrap();
+        println!("{} dependents, e.g. {:?}", found.len(), found.iter().take(3).map(|d| &d.title).collect::<Vec<_>>());
+        assert!(found.len() > ITEMS_PER_CALL, "more than one page");
+        assert!(found.iter().all(|d| d.requires.contains(&1623423360)));
+        let ids: HashSet<u64> = found.iter().map(|d| d.id).collect();
+        assert_eq!(ids.len(), found.len(), "no item twice across pages");
     }
 
     #[test]

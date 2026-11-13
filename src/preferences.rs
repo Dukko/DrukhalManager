@@ -91,7 +91,7 @@ fn key_storage(keyring: bool) -> &'static str {
     }
 }
 
-const STEAM_DESCRIPTION: &str = "With your own Steam Web API key, the mod list also checks the Workshop's “Required items” of enabled mods, which many mods list only there. Get a key at <a href=\"https://steamcommunity.com/dev/apikey\">steamcommunity.com/dev/apikey</a>.";
+const STEAM_DESCRIPTION: &str = "With your own Steam Web API key, the mod list also checks the Workshop's “Required items” of enabled mods, which many mods list only there, and Find Compatibility Patches can search the Workshop for patches between your mods. Get a key at <a href=\"https://steamcommunity.com/dev/apikey\">steamcommunity.com/dev/apikey</a>.";
 
 /// The Steam Web API key, which lets DrukhalManager read mods' Workshop
 /// "Required items". Loaded from the keyring in the background, or with no

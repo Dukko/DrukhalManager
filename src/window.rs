@@ -8,6 +8,7 @@ mod ignore_rules_ui;
 mod game_update_ui;
 mod launch;
 mod overview;
+mod patches_ui;
 mod list;
 mod notifications;
 mod persist;
@@ -101,6 +102,10 @@ struct Window {
     /// No requirements are fetched before this: between batches, and for a
     /// while after Steam refused or couldn't be reached.
     requirements_not_before: Cell<Option<std::time::Instant>>,
+    /// What lists each Workshop mod as required, for suggesting patches.
+    dependents: RefCell<crate::mods::patches::Cache>,
+    /// Find Compatibility Patches, while it's open.
+    patches_dialog: RefCell<Option<Rc<patches_ui::Dialog>>>,
     /// Offers to repair descriptors with stale paths or no mod behind them.
     repair_banner: adw::Banner,
     stack: adw::ViewStack,
@@ -222,6 +227,7 @@ pub fn build(
     menu.append(Some("_DLC…"), Some("win.dlc"));
     menu.append(Some("_Multiplayer Check…"), Some("win.multiplayer"));
     menu.append(Some("Mods _Not Updated for This Game…"), Some("win.outdated-mods"));
+    menu.append(Some("Find _Compatibility Patches…"), Some("win.find-patches"));
     menu.append(Some("_Saves…"), Some("win.saves"));
     menu.append(Some("_Find the Crashing Mod…"), Some("win.crash-hunt"));
     menu.append(Some("Merged Patch _Backups…"), Some("win.patch-backups"));
@@ -476,6 +482,8 @@ pub fn build(
         requirements: RefCell::new(crate::mods::requirements::Cache::load(&crate::mods::requirements::Cache::path())),
         fetching_requirements: Cell::new(false),
         requirements_not_before: Cell::new(None),
+        dependents: RefCell::new(crate::mods::patches::Cache::load(&crate::mods::patches::Cache::path())),
+        patches_dialog: RefCell::new(None),
         repair_banner: repair_banner.clone(),
         stack: stack.clone(),
         conflicts_page,
@@ -701,6 +709,14 @@ pub fn build(
         }
     });
     window.add_action(&outdated_mods);
+    let find_patches = gio::SimpleAction::new("find-patches", None);
+    let weak = Rc::downgrade(&ui);
+    find_patches.connect_activate(move |_, _| {
+        if let Some(ui) = weak.upgrade() {
+            ui.find_patches();
+        }
+    });
+    window.add_action(&find_patches);
     let multiplayer = gio::SimpleAction::new("multiplayer", None);
     let weak = Rc::downgrade(&ui);
     multiplayer.connect_activate(move |_, _| {
