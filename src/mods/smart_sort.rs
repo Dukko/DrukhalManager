@@ -366,7 +366,7 @@ fn longest_non_decreasing(keys: &[usize]) -> Vec<bool> {
 }
 
 /// Whether a name joins two mods with `+`, as in `MECR+UIOD`.
-fn plus_joined(lower: &str) -> bool {
+pub(crate) fn plus_joined(lower: &str) -> bool {
     lower.split('+').filter(|part| part.chars().any(char::is_alphanumeric)).count() >= 2
 }
 

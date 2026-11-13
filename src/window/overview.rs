@@ -154,7 +154,7 @@ pub(super) struct Health {
 }
 
 /// "3 days ago" and the like, for when a mod was updated.
-fn ago(t: SystemTime) -> String {
+pub(super) fn ago(t: SystemTime) -> String {
     let days = SystemTime::now().duration_since(t).map_or(0, |d| d.as_secs() / 86_400);
     match days {
         0 => "today".to_owned(),

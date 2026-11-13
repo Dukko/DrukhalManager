@@ -71,8 +71,8 @@ impl Window {
         glib::spawn_future_local(async move {
             let fetched = gio::spawn_blocking(move || {
                 // Without the user's own key, required items can't be read.
-                let Some(key) = secrets::get(secrets::STEAM).ok().flatten().into_iter().chain([in_file]).find(|k| !k.trim().is_empty()) else { return Ok(None) };
-                workshop::requirements(key.trim(), &ids).map(Some)
+                let Some(key) = steam_key(in_file) else { return Ok(None) };
+                workshop::requirements(&key, &ids).map(Some)
             })
             .await
             .unwrap_or_else(|_| Err("the fetch failed".into()));
@@ -163,4 +163,11 @@ impl Window {
             )));
         }
     }
+}
+
+/// The user's Steam Web API key: from the keyring, or else `in_file`, the
+/// settings file's copy while there's no keyring. Blocks; call off the
+/// main thread.
+pub(super) fn steam_key(in_file: String) -> Option<String> {
+    secrets::get(secrets::STEAM).ok().flatten().into_iter().chain([in_file]).map(|k| k.trim().to_owned()).find(|k| !k.is_empty())
 }
