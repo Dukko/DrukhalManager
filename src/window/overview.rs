@@ -210,24 +210,6 @@ impl Window {
         });
         self.views_list.select_row(self.views_list.row_at_index(0).as_ref());
         self.setup_category_headers();
-        for (list, other) in [(&self.enabled_list, &self.disabled_list), (&self.disabled_list, &self.enabled_list)] {
-            let weak = Rc::downgrade(self);
-            let other = other.downgrade();
-            list.connect_row_selected(move |_, row| {
-                let (Some(ui), Some(row)) = (weak.upgrade(), row) else { return };
-                let Some(index) = row.widget_name().strip_prefix("mod-").and_then(|i| i.parse().ok()) else { return };
-                if let Some(other) = other.upgrade() {
-                    other.unselect_all();
-                }
-                let changed = ui.selected.replace(Some(index)) != Some(index);
-                if changed || ui.inspector.child().is_none() {
-                    ui.show_inspector();
-                }
-                if ui.inspector_split.is_collapsed() {
-                    ui.inspector_split.set_show_sidebar(true);
-                }
-            });
-        }
         self.show_inspector();
     }
 
@@ -248,6 +230,7 @@ impl Window {
         self.enabled_list.invalidate_filter();
         self.disabled_list.invalidate_filter();
         self.enabled_list.invalidate_headers();
+        self.update_select_shown();
     }
 
     /// Whether the load order shows its category headers: only in the

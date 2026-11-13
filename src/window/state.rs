@@ -159,6 +159,39 @@ impl State {
         self.revision += 1;
     }
 
+    /// Enables or disables several mods as one undoable change. Enabled
+    /// ones are appended in the order given. Returns whether anything
+    /// changed.
+    pub(crate) fn set_enabled_many(&mut self, indices: &[usize], on: bool) -> bool {
+        let changes: Vec<usize> = indices.iter().copied().filter(|i| *i < self.mods.len() && self.enabled.contains(i) != on).collect();
+        if changes.is_empty() {
+            return false;
+        }
+        self.checkpoint();
+        if on {
+            for i in changes {
+                if !self.enabled.contains(&i) {
+                    self.enabled.push(i);
+                }
+            }
+        } else {
+            self.enabled.retain(|i| !changes.contains(i));
+        }
+        self.pin_patch();
+        self.dirty = true;
+        self.revision += 1;
+        true
+    }
+
+    /// Moves the enabled ones of `indices` to the top or the bottom of the
+    /// load order, keeping their order among themselves, as one undoable
+    /// change. Returns whether the order changed.
+    pub(crate) fn move_many(&mut self, indices: &[usize], to_top: bool) -> bool {
+        let (picked, rest): (Vec<usize>, Vec<usize>) = self.enabled.iter().partition(|i| indices.contains(i));
+        let sorted = if to_top { [picked, rest].concat() } else { [rest, picked].concat() };
+        self.reorder(sorted)
+    }
+
     /// Moves the mod at load position `from` in front of the mod currently at
     /// `before` (`before == len` moves it to the end).
     /// Moves the mod at load position `from` so it ends up at position `to`
@@ -551,6 +584,27 @@ mod tests {
         let before = s.revision;
         s.move_to(2, 2);
         assert_eq!(s.revision, before, "same position is a no-op");
+    }
+
+    #[test]
+    fn changes_many_mods_in_one_step() {
+        let mut s = state(&[0, 1, 2]);
+        s.mods.push(Mod { id: "mod/4.mod".into(), ..s.mods[0].clone() });
+        assert!(s.set_enabled_many(&[4, 1, 3], true), "only 4 and 3 change");
+        assert_eq!(s.enabled, [0, 1, 2, 4, 3], "appended in the order given");
+        assert!(s.move_many(&[3, 1], true));
+        assert_eq!(s.enabled, [1, 3, 0, 2, 4], "kept in load order among themselves");
+        assert!(s.move_many(&[1, 3], false));
+        assert_eq!(s.enabled, [0, 2, 4, 1, 3]);
+        assert!(!s.move_many(&[1, 3], false), "already there");
+        assert!(s.set_enabled_many(&[0, 4, 3], false));
+        assert_eq!(s.enabled, [2, 1]);
+        assert!(!s.set_enabled_many(&[0], false));
+        for expected in [vec![0, 2, 4, 1, 3], vec![1, 3, 0, 2, 4], vec![0, 1, 2, 4, 3], vec![0, 1, 2]] {
+            assert!(s.undo());
+            assert_eq!(s.enabled, expected, "each bulk change is one step");
+        }
+        assert!(!s.undo());
     }
 
     #[test]
