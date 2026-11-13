@@ -18,6 +18,11 @@ impl Window {
         self.apply_requirements();
         self.fetch_requirements();
         let frozen_updates = self.frozen_updates();
+        let updated_since: Vec<String> = {
+            let updated = self.updated_since_last_session();
+            let state = self.state.borrow();
+            updated.iter().map(|&(i, _)| display_name(&state.mods[i]).to_owned()).collect()
+        };
         let state = self.state.borrow();
         self.search_facts.borrow_mut().clear();
         self.enabled_list.remove_all();
@@ -146,6 +151,7 @@ impl Window {
             no_achievements,
             stale_merges: self.stale.borrow().len(),
             frozen_updates,
+            updated_since,
         };
         let (enabled, total) = (state.enabled.len(), state.mods.len());
         self.syncing.set(true);

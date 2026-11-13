@@ -176,6 +176,10 @@ impl Window {
             return;
         }
         let played = self.playing();
+        // A crash hunt's tests aren't how the mods are played.
+        if !self.hunting() {
+            self.remember_session();
+        }
         crate::diagnostics::log!(
             "game",
             "Launching with {} enabled mods{}{}",

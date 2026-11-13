@@ -16,6 +16,7 @@ mod reload;
 mod repair_ui;
 mod requirements_ui;
 mod saves_ui;
+mod session_updates_ui;
 mod shortcuts;
 mod smart_sort_ui;
 mod dlc_ui;
@@ -71,6 +72,8 @@ struct Window {
     view_counts: Vec<(filter::View, gtk::Label)>,
     /// The game version, achievements and last save, under the views.
     game_info: gtk::Label,
+    /// The enabled mods' versions when the game was last launched.
+    last_session: RefCell<Option<crate::mods::last_session::LastSession>>,
     /// "Last game logged 23 errors", under `game_info`.
     errors_link: gtk::Button,
     /// When the error log counted for `errors_link` was written.
@@ -491,6 +494,7 @@ pub fn build(
         view,
         view_counts,
         game_info,
+        last_session: RefCell::new(crate::mods::last_session::LastSession::load(&crate::mods::last_session::path())),
         errors_link,
         error_log_seen: Cell::new(None),
         categories_list,

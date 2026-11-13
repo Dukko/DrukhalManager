@@ -35,6 +35,7 @@ The cards above the list count what needs a look:
 * **Not updated for your game version.** **Show** lists them. **Disable for Now…** turns them off until their authors catch up, after keeping your full load order as a collection called "Before Stellaris vX.Y", so you can switch back in one step.
 * **Required mods missing.** **Show** lists the mods that need something you don't have.
 * **Loading before a dependency.** **Sort** fixes the order.
+* **Updated since you last played.** Mods Steam updated after your last launch from DrukhalManager. See [[Launching and Saves]].
 * **Achievements.** Whether your mods turn achievements off, and which ones do.
 
 ## Searching

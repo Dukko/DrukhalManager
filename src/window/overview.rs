@@ -169,6 +169,8 @@ pub(super) struct Health {
     pub stale_merges: usize,
     /// Frozen mods Steam has updated since, by name.
     pub frozen_updates: Vec<String>,
+    /// Enabled mods Steam updated since the last launch, by name.
+    pub updated_since: Vec<String>,
 }
 
 /// "3 days ago" and the like, for when a mod was updated.
@@ -343,6 +345,13 @@ impl Window {
         if h.stale_merges > 0 {
             let text = if h.stale_merges == 1 { "merge out of date" } else { "merges out of date" };
             self.health.append(&self.health_card(&h.stale_merges.to_string(), text, Some(("Review", Box::new(|ui: &Rc<Window>| ui.stack.set_visible_child_name("conflicts")))), true));
+        }
+        if !h.updated_since.is_empty() {
+            let n = h.updated_since.len();
+            let text = if n == 1 { "mod updated since you last played" } else { "mods updated since you last played" };
+            let card = self.health_card(&n.to_string(), text, Some(("Show", Box::new(|ui: &Rc<Window>| ui.show_session_updates()))), false);
+            card.set_tooltip_text(Some(&h.updated_since.join("\n")));
+            self.health.append(&card);
         }
         if !h.frozen_updates.is_empty() {
             let n = h.frozen_updates.len();

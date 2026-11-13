@@ -129,7 +129,7 @@ API keys go in your system keyring. Without a keyring they're stored in a settin
 
 **Launch** starts the game with your load order. Its dropdown holds the other ways in:
 
-* **Continue** loads your last save straight away.
+* **Continue** loads your last save straight away. If Steam updated any of your mods since you last played, the health strip says which, with links to their change notes.
 * **Saves…** lists the campaigns you started from DrukhalManager and the mods each one was played with.
 * **Multiplayer Check…** saves a report of your game and mod files for multiplayer desyncs. Swap reports with the other players and open theirs, and it lists the files that differ.
 * **DLC…** turns DLC on or off for your next game.
