@@ -849,7 +849,7 @@ impl Window {
                 ui.settings.replace(settings);
                 if extra_changed {
                     // Lists the new folder's mods, and drops the old one's.
-                    ui.reload(|_| {});
+                    ui.reload(|ui| ui.rebuild_collection_menu());
                 }
                 if languages_changed && ui.analysis.borrow().is_some() {
                     ui.scan();

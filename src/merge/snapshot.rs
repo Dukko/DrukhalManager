@@ -153,7 +153,7 @@ fn stamp_of(dir: &Path, target: &Target) -> Option<u128> {
     dir.file_name()?.to_str()?.strip_prefix(&prefix(target))?.parse().ok()
 }
 
-fn copy_dir(from: &Path, to: &Path) -> io::Result<()> {
+pub(crate) fn copy_dir(from: &Path, to: &Path) -> io::Result<()> {
     std::fs::create_dir_all(to)?;
     for entry in std::fs::read_dir(from)? {
         let entry = entry?;

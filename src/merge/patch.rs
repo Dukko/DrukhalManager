@@ -27,17 +27,26 @@ const MANIFEST: &str = "drukhal_merges.json";
 /// Which patch: each collection has its own.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Target {
-    /// Its folder in the user's `mod` folder, and the name of its
-    /// descriptor there.
+    /// Its folder, and the name of its descriptor in the user's `mod`
+    /// folder.
     pub folder: String,
     /// The name the launcher and the mod list show.
     pub name: String,
+    /// Where its folder is when not in the user's `mod` folder, such as
+    /// the Extra Mod Folder.
+    pub dir: Option<PathBuf>,
 }
 
 impl Target {
     /// The patch of the collection `collection`, kept in `folder`.
     pub fn new(folder: &str, collection: &str) -> Self {
-        Self { folder: folder.to_owned(), name: format!("{collection} (Patch)") }
+        Self { folder: folder.to_owned(), name: format!("{collection} (Patch)"), dir: None }
+    }
+
+    /// The same patch, kept in `dir` (`None`: the user's `mod` folder).
+    pub fn in_dir(mut self, dir: Option<PathBuf>) -> Self {
+        self.dir = dir;
+        self
     }
 
     /// How `dlc_load.json` and the mod list refer to it.
@@ -46,7 +55,7 @@ impl Target {
     }
 
     pub fn root(&self, user_dir: &Path) -> PathBuf {
-        user_dir.join("mod").join(&self.folder)
+        self.dir.clone().unwrap_or_else(|| user_dir.join("mod")).join(&self.folder)
     }
 }
 
@@ -496,6 +505,34 @@ pub fn link(user_dir: &Path, target: &Target) -> io::Result<()> {
     }
 }
 
+/// Moves the patch `from` to where `to` keeps it, and points the
+/// descriptor the launcher finds it by there. Moving between drives
+/// copies, then deletes the old folder.
+pub fn relocate(user_dir: &Path, from: &Target, to: &Target) -> io::Result<()> {
+    let result = relocate_unlogged(user_dir, from, to);
+    crate::diagnostics::outcome("patch", || format!("Moved {} to {}", from.name, to.root(user_dir).display()), result)
+}
+
+fn relocate_unlogged(user_dir: &Path, from: &Target, to: &Target) -> io::Result<()> {
+    let (old, new) = (from.root(user_dir), to.root(user_dir));
+    if new.exists() {
+        return Err(io::Error::new(io::ErrorKind::AlreadyExists, format!("{} already exists", new.display())));
+    }
+    if let Some(parent) = new.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    if std::fs::rename(&old, &new).is_err() {
+        // Another drive: copy, and only then delete.
+        let copied = super::snapshot::copy_dir(&old, &new);
+        if let Err(e) = copied {
+            let _ = std::fs::remove_dir_all(&new);
+            return Err(e);
+        }
+        std::fs::remove_dir_all(&old)?;
+    }
+    link(user_dir, to)
+}
+
 /// Deletes the patch `target` and the descriptor the launcher finds it by.
 pub fn delete(user_dir: &Path, target: &Target) -> io::Result<()> {
     let result = remove_if_present(&user_dir.join(target.id())).and_then(|()| match std::fs::remove_dir_all(target.root(user_dir)) {
@@ -732,6 +769,32 @@ mod tests {
             (false, vec!["A isn't enabled any more".to_owned()]),
         ]);
         assert!(patch.track(Some(&("events".into(), "gone".into())), "", vec![], None).is_err());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn moves_to_another_folder_and_back() {
+        let root = std::env::temp_dir().join(format!("drukhal-relocate-{}", std::process::id()));
+        let (user, extra) = (root.join("user"), root.join("extra"));
+        std::fs::create_dir_all(user.join("mod")).unwrap();
+        let home = test_target();
+        let mut patch = Patch::open(&user, &home).unwrap();
+        patch.save(&user, None, "common/buildings", "lab", "lab = {}", vec![]).unwrap();
+        let away = home.clone().in_dir(Some(extra.clone()));
+        assert_eq!(away.id(), home.id(), "the launcher finds it by the same descriptor");
+
+        relocate(&user, &home, &away).unwrap();
+        assert!(!home.root(&user).exists());
+        assert!(away.root(&user).join(MANIFEST).is_file());
+        let outer = std::fs::read_to_string(user.join(home.id())).unwrap();
+        assert!(outer.contains(&format!("path=\"{}\"", away.root(&user).display())), "{outer}");
+        assert_eq!(Patch::open(&user, &away).unwrap().manifest.merges.len(), 1);
+
+        std::fs::create_dir_all(home.root(&user)).unwrap();
+        assert!(relocate(&user, &away, &home).is_err(), "won't overwrite a folder in the way");
+        std::fs::remove_dir(home.root(&user)).unwrap();
+        relocate(&user, &away, &home).unwrap();
+        assert!(home.root(&user).join(MANIFEST).is_file() && !away.root(&user).exists());
         std::fs::remove_dir_all(root).unwrap();
     }
 

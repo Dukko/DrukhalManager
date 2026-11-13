@@ -84,6 +84,7 @@ Also on this page:
 * **Collections** are named load orders, each synced to its own Paradox Launcher playset. You can import a playset, a Workshop collection link, or a load order a friend pasted, and **Copy Load Order** gives you a numbered list with Workshop links to paste back.
 * **Notes** on a mod, for things like "keep this below UIOD or the outliner breaks". Search finds them.
 * **Freeze This Collection…** copies its Workshop mods into local ones, so you can finish a campaign on the versions you started with.
+* **Extra Mod Folder** (Preferences → Game) loads mods kept elsewhere, such as on another drive, and a collection's merged patch can be moved there too.
 * **Find Compatibility Patches…** searches the Workshop for patches between mods you run that you haven't subscribed to. It's on the Compatibility Patches header in the list, or in the sidebar while you have none. It needs a Steam Web API key (**Preferences → Steam**).
 * **Descriptor repair** fixes `.mod` files pointing at folders that no longer exist, after backing them up.
 

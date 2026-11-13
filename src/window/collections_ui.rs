@@ -61,6 +61,7 @@ impl Window {
         action("collection-merge", Window::merge_collection);
         action("collection-freeze", Window::freeze_collection);
         action("collection-unfreeze", Window::unfreeze_collection);
+        action("collection-move-patch", Window::move_patch);
         action("collection-export", Window::export_collection);
         action("collection-export-launcher", Window::export_launcher);
         action("collection-export-bundle", Window::export_bundle);
@@ -94,6 +95,54 @@ impl Window {
 
     fn toast_error(&self, message: &str) {
         self.add_toast(adw::Toast::builder().title(message).timeout(0).build());
+    }
+
+    /// Moves the active collection's merged patch to the Extra Mod Folder,
+    /// or back to the game's mod folder. Its descriptor follows, so the
+    /// game, backups and export keep finding it.
+    fn move_patch(self: &Rc<Self>) {
+        let from = self.patch_target();
+        if !from.root(&self.paths.user_dir).is_dir() {
+            return self.toast_error_message("This collection has no merged patch yet");
+        }
+        let to_dir = if from.dir.is_some() {
+            None
+        } else {
+            match self.settings.borrow().game.extra_mod_dir.clone() {
+                Some(dir) => Some(dir),
+                None => return self.toast_error_message("Choose an Extra Mod Folder in Preferences → Game first"),
+            }
+        };
+        let to = from.clone().in_dir(to_dir.clone());
+        // Closed while it moves, and opened again from its new place.
+        self.patch.replace(None);
+        let user_dir = self.paths.user_dir.clone();
+        let weak = Rc::downgrade(self);
+        glib::spawn_future_local(async move {
+            let moved = {
+                let (from, to) = (from.clone(), to.clone());
+                gio::spawn_blocking(move || crate::merge::patch::relocate(&user_dir, &from, &to)).await.unwrap_or_else(|_| Err(std::io::Error::other("the move failed")))
+            };
+            let Some(ui) = weak.upgrade() else { return };
+            if let Err(e) = moved {
+                return ui.toast_error_message(&format!("Could not move the merged patch: {e}"));
+            }
+            {
+                let mut collections = ui.collections.borrow_mut();
+                let active = collections.active.clone();
+                if let Some(c) = collections.get_mut(&active) {
+                    c.patch_dir = to_dir.clone();
+                }
+            }
+            ui.save_collections();
+            ui.rebuild_collection_menu();
+            let place = match &to_dir {
+                Some(dir) => dir.display().to_string(),
+                None => "the game's mod folder".to_owned(),
+            };
+            // The mod list reads where the patch now is.
+            ui.reload(move |ui| ui.add_toast(adw::Toast::new(&format!("Moved {} to {place}", to.name))));
+        });
     }
 
     pub(super) fn rebuild_collection_menu(&self) {
@@ -135,6 +184,14 @@ impl Window {
             share.append(Some("Un_freeze This Collection…"), Some("win.collection-unfreeze"));
         }
         menu.append_section(None, &share);
+        // Only once there's an Extra Mod Folder, or to bring it back.
+        let active = collections.active();
+        let has_extra = self.settings.borrow().game.extra_mod_dir.is_some();
+        if active.patch.is_some() && (active.patch_dir.is_some() || has_extra) {
+            let place = gio::Menu::new();
+            place.append(Some(if active.patch_dir.is_some() { "Move Merged Patch to the _Mod Folder" } else { "Move Merged Patch to the E_xtra Mod Folder" }), Some("win.collection-move-patch"));
+            menu.append_section(None, &place);
+        }
 
         self.collection_button.set_menu_model(Some(&menu));
         self.collection_button.set_label(&collections.active);
@@ -283,7 +340,11 @@ impl Window {
 
     fn delete_collection(self: &Rc<Self>) {
         let active = self.collections.borrow().active.clone();
-        let patch = self.collections.borrow().active().patch.clone().map(|folder| crate::merge::patch::Target::new(&folder, &active)).filter(|t| t.root(&self.paths.user_dir).is_dir());
+        let patch = {
+            let collections = self.collections.borrow();
+            let c = collections.active();
+            c.patch.clone().map(|folder| crate::merge::patch::Target::new(&folder, &active).in_dir(c.patch_dir.clone())).filter(|t| t.root(&self.paths.user_dir).is_dir())
+        };
         let body = if patch.is_some() {
             "The collection's load order and its merged patch are deleted; the patch is kept in DrukhalManager's backups folder. Its playset stays in the Paradox Launcher, and your mods aren't touched."
         } else {
