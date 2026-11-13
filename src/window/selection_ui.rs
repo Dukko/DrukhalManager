@@ -17,7 +17,6 @@ pub(super) struct BulkBar {
     pub revealer: gtk::Revealer,
     count: gtk::Label,
     collections: gio::Menu,
-    add_to: gtk::MenuButton,
     moves: [gtk::Button; 2],
 }
 
@@ -27,8 +26,10 @@ impl BulkBar {
         let button = |label: &str, action: &str| gtk::Button::builder().label(label).action_name(action).build();
         let enable = button("Enable", "win.bulk-enable");
         let disable = button("Disable", "win.bulk-disable");
-        let top = button("Move to Top", "win.bulk-top");
-        let bottom = button("Move to Bottom", "win.bulk-bottom");
+        // Icons keep the bar narrow, so it never makes the window wider.
+        let icon = |icon: &str, tip: &str, action: &str| gtk::Button::builder().icon_name(icon).tooltip_text(tip).action_name(action).build();
+        let top = icon("go-top-symbolic", "Move to Top", "win.bulk-top");
+        let bottom = icon("go-bottom-symbolic", "Move to Bottom", "win.bulk-bottom");
 
         let categories = gio::Menu::new();
         let item = gio::MenuItem::new(Some("Let Smart Sort Decide"), None);
@@ -41,10 +42,11 @@ impl BulkBar {
             named.append_item(&item);
         }
         categories.append_section(None, &named);
-        let category = gtk::MenuButton::builder().label("Category").menu_model(&categories).tooltip_text("Choose the Smart Sort section these mods go in").build();
-
         let collections = gio::Menu::new();
-        let add_to = gtk::MenuButton::builder().label("Add to Collection").menu_model(&collections).build();
+        let more_menu = gio::Menu::new();
+        more_menu.append_submenu(Some("_Category"), &categories);
+        more_menu.append_submenu(Some("_Add to Collection"), &collections);
+        let more = gtk::MenuButton::builder().icon_name("view-more-symbolic").menu_model(&more_menu).tooltip_text("Category and Collections").build();
         let clear = gtk::Button::builder().icon_name("window-close-symbolic").tooltip_text("Clear the Selection").action_name("win.bulk-clear").css_classes(["flat"]).build();
 
         let bar = gtk::ActionBar::new();
@@ -54,10 +56,9 @@ impl BulkBar {
         bar.pack_start(&top);
         bar.pack_start(&bottom);
         bar.pack_end(&clear);
-        bar.pack_end(&add_to);
-        bar.pack_end(&category);
+        bar.pack_end(&more);
         let revealer = gtk::Revealer::builder().child(&bar).transition_type(gtk::RevealerTransitionType::SlideUp).build();
-        Self { revealer, count, collections, add_to, moves: [top, bottom] }
+        Self { revealer, count, collections, moves: [top, bottom] }
     }
 }
 
@@ -67,6 +68,22 @@ type Run = fn(&Rc<Window>);
 /// The mod index a row shows, from its `mod-N` name.
 fn row_index(row: &gtk::ListBoxRow) -> Option<usize> {
     row.widget_name().strip_prefix("mod-")?.parse().ok()
+}
+
+/// Whether the widget at `(x, y)` in `list` is a control inside a row
+/// (its switch, a button), whose clicks aren't about selecting.
+fn on_control(list: &gtk::ListBox, x: f64, y: f64) -> bool {
+    let mut widget = list.pick(x, y, gtk::PickFlags::DEFAULT);
+    while let Some(w) = widget {
+        if w.is::<gtk::ListBoxRow>() {
+            return false;
+        }
+        if w.is::<gtk::Switch>() || w.is::<gtk::CheckButton>() || w.is::<gtk::Button>() {
+            return true;
+        }
+        widget = w.parent();
+    }
+    false
 }
 
 /// Whether Ctrl or Shift is held, which adds to a selection rather than
@@ -84,6 +101,7 @@ impl Window {
         for (list, other) in [(&self.enabled_list, &self.disabled_list), (&self.disabled_list, &self.enabled_list)] {
             let weak = Rc::downgrade(self);
             let other = other.downgrade();
+            let other_for_click = other.clone();
             list.connect_selected_rows_changed(move |list| {
                 let Some(ui) = weak.upgrade() else { return };
                 if ui.restoring_marks.get() {
@@ -100,6 +118,39 @@ impl Window {
                 }
                 ui.read_marks();
             });
+
+            // A plain click selects just that row, whatever GTK did with
+            // it: it doesn't add to the selection everywhere.
+            let click = gtk::GestureClick::builder().button(gdk::BUTTON_PRIMARY).propagation_phase(gtk::PropagationPhase::Capture).build();
+            let pressed: Rc<std::cell::RefCell<Option<gtk::ListBoxRow>>> = Rc::default();
+            let (list_ref, held) = (list.downgrade(), pressed.clone());
+            click.connect_pressed(move |gesture, _, x, y| {
+                let Some(list) = list_ref.upgrade() else { return };
+                let plain = !gesture.current_event_state().intersects(gdk::ModifierType::CONTROL_MASK | gdk::ModifierType::SHIFT_MASK);
+                *held.borrow_mut() = (plain && !on_control(&list, x, y)).then(|| list.row_at_y(y as i32)).flatten();
+            });
+            let (weak, list_ref, other) = (Rc::downgrade(self), list.downgrade(), other_for_click);
+            click.connect_released(move |_, _, _, _| {
+                let Some(row) = pressed.borrow_mut().take() else { return };
+                let (weak, list_ref, other) = (weak.clone(), list_ref.clone(), other.clone());
+                // After the list has handled the click itself.
+                glib::idle_add_local_once(move || {
+                    let (Some(ui), Some(list)) = (weak.upgrade(), list_ref.upgrade()) else { return };
+                    let only_it = list.selected_rows() == [row.clone()] && other.upgrade().is_none_or(|o| o.selected_rows().is_empty());
+                    if only_it || row.parent().as_ref() != Some(list.upcast_ref()) {
+                        return;
+                    }
+                    ui.restoring_marks.set(true);
+                    if let Some(other) = other.upgrade() {
+                        other.unselect_all();
+                    }
+                    list.unselect_all();
+                    list.select_row(Some(&row));
+                    ui.restoring_marks.set(false);
+                    ui.read_marks();
+                });
+            });
+            list.add_controller(click);
         }
 
         let actions: [(&str, Run); 6] = [
@@ -220,8 +271,10 @@ impl Window {
             item.set_action_and_target_value(Some("win.bulk-add-to"), Some(&c.name.to_variant()));
             bar.collections.append_item(&item);
         }
-        bar.add_to.set_sensitive(bar.collections.n_items() > 0);
-        bar.add_to.set_tooltip_text(Some(if bar.collections.n_items() > 0 { "Add them to another collection, without enabling them here" } else { "There's no other collection to add them to" }));
+        if bar.collections.n_items() == 0 {
+            // No action, so it shows greyed out.
+            bar.collections.append(Some("No Other Collections"), None);
+        }
     }
 
     fn clear_marks(self: &Rc<Self>) {
