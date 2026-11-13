@@ -100,6 +100,20 @@ pub fn paradox_dir() -> PathBuf {
     base.join("Paradox Interactive")
 }
 
+/// A folder as a descriptor's `path=` (or `archive=`) holds it. On Windows
+/// that's with `/` separators, as the Paradox launcher writes them.
+pub fn descriptor_path(path: &Path) -> String {
+    let text = path.to_string_lossy();
+    if cfg!(windows) { text.replace('\\', "/") } else { text.into_owned() }
+}
+
+/// A path relative to a mod's or the game's folder as the game names
+/// files, and as conflicts, patches and reports key them: `/`-separated on
+/// every platform.
+pub fn game_path(relative: &Path) -> String {
+    relative.components().map(|c| c.as_os_str().to_string_lossy()).collect::<Vec<_>>().join("/")
+}
+
 /// Where `program` is installed, found through `PATH`.
 pub fn find_program(program: &str) -> Option<PathBuf> {
     let candidate = |dir: &Path| -> Option<PathBuf> {

@@ -546,7 +546,18 @@ mod tests {
         for (i, age) in [(1, old), (3, std::time::SystemTime::now())] {
             let dir = root.join(i.to_string());
             std::fs::create_dir_all(&dir).unwrap();
-            std::fs::File::open(&dir).unwrap().set_modified(age).unwrap();
+            #[cfg(windows)]
+            let folder = {
+                use std::os::windows::fs::OpenOptionsExt;
+                // Windows opens a folder only with backup semantics; asks
+                // for nothing but writing its attributes.
+                const FILE_WRITE_ATTRIBUTES: u32 = 0x100;
+                const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x0200_0000;
+                std::fs::OpenOptions::new().access_mode(FILE_WRITE_ATTRIBUTES).custom_flags(FILE_FLAG_BACKUP_SEMANTICS).open(&dir)
+            };
+            #[cfg(unix)]
+            let folder = std::fs::File::open(&dir);
+            folder.unwrap().set_modified(age).unwrap();
             s.mods[i].content = Some(dir);
         }
         let none = Default::default();

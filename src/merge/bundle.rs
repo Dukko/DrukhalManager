@@ -49,7 +49,7 @@ fn list(root: &Path, dir: &Path, out: &mut Vec<String>) -> io::Result<()> {
         if path.is_dir() {
             list(root, &path, out)?;
         } else if let Ok(relative) = path.strip_prefix(root) {
-            out.push(relative.components().map(|c| c.as_os_str().to_string_lossy()).collect::<Vec<_>>().join("/"));
+            out.push(crate::platform::game_path(relative));
         }
     }
     out.sort();

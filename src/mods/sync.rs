@@ -127,7 +127,7 @@ fn descriptor_text(raw: &str, location: &Location, id: u64) -> String {
         Location::Folder(p) => ("path", p),
         Location::Archive(p) => ("archive", p),
     };
-    out.push_str(&format!("{key}=\"{}\"\nremote_file_id=\"{id}\"\n", path.to_string_lossy()));
+    out.push_str(&format!("{key}=\"{}\"\nremote_file_id=\"{id}\"\n", crate::platform::descriptor_path(path)));
     out
 }
 
@@ -196,7 +196,7 @@ mod tests {
         assert_eq!(synced, Synced { added: vec!["New".into()], updated: vec!["Changed".into()], errors: vec![] });
 
         let written = std::fs::read_to_string(user.join("mod/ugc_1.mod")).unwrap();
-        assert_eq!(written, format!("name=\"New\"\ntags={{\n\t\"Gameplay\"\n}}\nversion=\"1.0\"\npath=\"{}\"\nremote_file_id=\"1\"\n", new.display()));
+        assert_eq!(written, format!("name=\"New\"\ntags={{\n\t\"Gameplay\"\n}}\nversion=\"1.0\"\npath=\"{}\"\nremote_file_id=\"1\"\n", crate::platform::descriptor_path(&new)));
         let d = Descriptor::parse(&written).unwrap();
         assert_eq!((d.remote_file_id, d.tags), (Some(1), vec!["Gameplay".to_owned()]));
         let updated = Descriptor::parse(&std::fs::read_to_string(user.join("mod/ugc_2.mod")).unwrap()).unwrap();

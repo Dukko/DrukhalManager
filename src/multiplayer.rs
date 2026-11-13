@@ -507,7 +507,12 @@ mod tests {
         let files = &compare(&windows, &linux).mods[0].files;
         assert!(files.contains(&FileDiff::LineEndings("common/a.txt".into())), "{files:?}");
         assert!(files.contains(&FileDiff::Changed("common/c.txt".into())), "more than line endings");
+        // A case-insensitive folder can't hold both spellings: there,
+        // `Common/` was written into `common/` and `events/e.txt` over `E.txt`.
+        #[cfg(unix)]
         assert_eq!(windows.mods[0].case, ["Common/Traits/t.txt", "events/E.txt", "events/e.txt"]);
+        #[cfg(windows)]
+        assert_eq!(windows.mods[0].case, ["common/Traits/t.txt"]);
         assert!(misnamed_folder("common/Traits/t.txt") && !misnamed_folder("common/inline_scripts/MECR/x.txt") && !misnamed_folder("common/T.txt"));
         assert_eq!(compare(&windows, &linux).case, [("M".to_owned(), windows.mods[0].case.clone())]);
         assert!(compare(&windows, &Report { build: Some(Build::Windows), ..linux.clone() }).case.is_empty(), "same build");

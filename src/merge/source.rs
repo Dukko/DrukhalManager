@@ -167,7 +167,7 @@ pub fn vanilla(game_dir: &Path, category: &str, key: &str) -> Option<Source> {
     files.into_iter().find_map(|path| {
         let src = String::from_utf8_lossy(&std::fs::read(&path).ok()?).into_owned();
         let text = extract(category, key, &src)?;
-        let file = path.strip_prefix(game_dir).ok()?.to_string_lossy().into_owned();
+        let file = crate::platform::game_path(path.strip_prefix(game_dir).ok()?);
         Some(Source { label: "Vanilla".into(), file, text })
     })
 }
@@ -195,7 +195,7 @@ pub fn vanilla_many(game_dir: &Path, category: &str, keys: &[String]) -> std::co
         }
         let Ok(bytes) = std::fs::read(&path) else { continue };
         let src = String::from_utf8_lossy(&bytes);
-        let Some(file) = path.strip_prefix(game_dir).ok().map(|f| f.to_string_lossy().into_owned()) else { continue };
+        let Some(file) = path.strip_prefix(game_dir).ok().map(crate::platform::game_path) else { continue };
         if category == "localisation" {
             localisation_lines(&src, &wanted, |key, line| {
                 found.entry(key).or_insert_with(|| Source { label: "Vanilla".into(), file: file.clone(), text: line.to_owned() });

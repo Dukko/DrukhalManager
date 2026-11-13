@@ -130,11 +130,11 @@ pub fn write(user_dir: &Path, out_dir: &Path, collection: &str, name: &str, supp
     let location = match output {
         Output::Folder => {
             write_folder(&mod_dir, collection, &files, &inner)?;
-            format!("path=\"{}\"", target.display())
+            format!("path=\"{}\"", crate::platform::descriptor_path(&target))
         }
         Output::Zip => {
             write_zip(&mod_dir, collection, &files, &inner)?;
-            format!("archive=\"{}\"", zip.display())
+            format!("archive=\"{}\"", crate::platform::descriptor_path(&zip))
         }
     };
     // The other form of an earlier merge would be left behind.
@@ -295,7 +295,7 @@ mod tests {
         assert_eq!(parsed.name, "My Game! (Merged)");
         assert_eq!(parsed.replace_path, ["common/ethics"]);
         assert_eq!(parsed.supported_version, "v4.5.*");
-        assert_eq!(parsed.path.as_deref(), Some(out.to_str().unwrap()));
+        assert_eq!(parsed.path, Some(crate::platform::descriptor_path(&out)));
 
         // Merging again replaces the earlier merge.
         let merged = write(&user, &user.join("mod"), "My Game!", &mod_name("My Game!", None), "v4.5.*", &mods[..1], Output::Folder).unwrap();

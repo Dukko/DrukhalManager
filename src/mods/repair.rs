@@ -65,7 +65,7 @@ fn rewrite_path(src: &str, new: &Path) -> Option<String> {
         Entry::Assign { key, .. } if key == "archive" => Some(("archive", r.clone())),
         _ => None,
     }))?;
-    let value = new.to_string_lossy().replace('\\', "/");
+    let value = crate::platform::descriptor_path(new);
     Some(format!("{}{key}=\"{value}\"{}", &src[..range.start], &src[range.end..]))
 }
 
@@ -119,7 +119,7 @@ mod tests {
 
         let backup = apply(&user, &root.join("backups"), &findings.stale, &findings.orphans).unwrap();
         let fixed = std::fs::read_to_string(user.join("mod/ugc_42.mod")).unwrap();
-        assert_eq!(fixed, format!("version=\"1\"\nname=\"Moved\"\npath=\"{}\"\nremote_file_id=\"42\"\n", workshop.join("42").display()));
+        assert_eq!(fixed, format!("version=\"1\"\nname=\"Moved\"\npath=\"{}\"\nremote_file_id=\"42\"\n", crate::platform::descriptor_path(&workshop.join("42"))));
         assert!(!user.join("mod/gone.mod").exists());
         assert_eq!(std::fs::read_to_string(backup.join("ugc_42.mod")).unwrap(), moved);
         assert!(backup.join("gone.mod").is_file());

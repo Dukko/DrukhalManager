@@ -621,7 +621,7 @@ fn descriptor_text(text: &str) -> String {
 }
 
 fn write_outer(user_dir: &Path, target: &Target, inner: &str) -> io::Result<()> {
-    let outer = format!("{}\npath=\"{}\"\n", inner.trim_end(), target.root(user_dir).display());
+    let outer = format!("{}\npath=\"{}\"\n", inner.trim_end(), crate::platform::descriptor_path(&target.root(user_dir)));
     write_atomic(&user_dir.join(target.id()), outer.as_bytes())
 }
 
@@ -893,7 +893,7 @@ mod tests {
         assert!(!home.root(&user).exists());
         assert!(away.root(&user).join(MANIFEST).is_file());
         let outer = std::fs::read_to_string(user.join(home.id())).unwrap();
-        assert!(outer.contains(&format!("path=\"{}\"", away.root(&user).display())), "{outer}");
+        assert!(outer.contains(&format!("path=\"{}\"", crate::platform::descriptor_path(&away.root(&user)))), "{outer}");
         assert_eq!(Patch::open(&user, &away).unwrap().manifest.merges.len(), 1);
 
         std::fs::create_dir_all(home.root(&user)).unwrap();
