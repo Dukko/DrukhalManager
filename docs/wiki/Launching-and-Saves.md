@@ -15,6 +15,10 @@ Steam updates Workshop mods on its own. Each time you launch, DrukhalManager rem
 
 Mods you enabled since the last launch don't count, since you haven't played with them yet.
 
+### Updates Steam hasn't downloaded yet
+
+DrukhalManager also asks the Workshop, every half hour or so while it's open, when your enabled mods were last updated. If a mod has a newer version than the one Steam has downloaded, a second card says so: "2 mod updates Steam hasn't downloaded yet". Those mods will change once Steam catches up, which usually happens while Steam is open and the game isn't running. **Show** lists them under **Not Downloaded Yet**, with their change notes and a **Steam Downloads** button that opens Steam's Downloads page.
+
 ## Continue
 
 **Continue** loads your last save straight away, skipping the menus. It shows the empire and date it will load.

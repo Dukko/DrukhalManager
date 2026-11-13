@@ -74,6 +74,10 @@ struct Window {
     game_info: gtk::Label,
     /// The enabled mods' versions when the game was last launched.
     last_session: RefCell<Option<crate::mods::last_session::LastSession>>,
+    /// When the Workshop last updated each enabled mod, by Workshop id, as
+    /// of the last check, and when that was.
+    published: RefCell<std::collections::HashMap<u64, u64>>,
+    published_checked: Cell<Option<std::time::Instant>>,
     /// "Last game logged 23 errors", under `game_info`.
     errors_link: gtk::Button,
     /// When the error log counted for `errors_link` was written.
@@ -495,6 +499,8 @@ pub fn build(
         view_counts,
         game_info,
         last_session: RefCell::new(crate::mods::last_session::LastSession::load(&crate::mods::last_session::path())),
+        published: RefCell::default(),
+        published_checked: Cell::new(None),
         errors_link,
         error_log_seen: Cell::new(None),
         categories_list,

@@ -56,6 +56,15 @@ impl LastSession {
     }
 }
 
+/// Of the `installed` versions (Steam's update time of each local copy),
+/// the ones the Workshop has a newer version of (`published`), with when
+/// that came out, oldest first.
+pub fn waiting(installed: &HashMap<u64, u64>, published: &HashMap<u64, u64>) -> Vec<(u64, u64)> {
+    let mut waiting: Vec<(u64, u64)> = published.iter().filter(|(id, now)| installed.get(id).is_some_and(|have| *now > have)).map(|(id, now)| (*id, *now)).collect();
+    waiting.sort_by_key(|&(id, at)| (at, id));
+    waiting
+}
+
 /// Where a Workshop item's change notes are.
 pub fn change_notes_url(id: u64) -> String {
     format!("https://steamcommunity.com/sharedfiles/filedetails/changelog/{id}")
@@ -64,6 +73,13 @@ pub fn change_notes_url(id: u64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn finds_updates_not_downloaded() {
+        let installed = HashMap::from([(1, 100), (2, 200), (3, 300)]);
+        let published = HashMap::from([(1, 100), (2, 250), (3, 260), (4, 900)]);
+        assert_eq!(waiting(&installed, &published), [(2, 250)], "only newer, and only installed mods");
+    }
 
     #[test]
     fn finds_mods_updated_since() {

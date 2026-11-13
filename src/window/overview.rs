@@ -171,6 +171,9 @@ pub(super) struct Health {
     pub frozen_updates: Vec<String>,
     /// Enabled mods Steam updated since the last launch, by name.
     pub updated_since: Vec<String>,
+    /// Enabled mods with a newer version on the Workshop than Steam has
+    /// downloaded, by name.
+    pub waiting: Vec<String>,
 }
 
 /// "3 days ago" and the like, for when a mod was updated.
@@ -351,6 +354,13 @@ impl Window {
             let text = if n == 1 { "mod updated since you last played" } else { "mods updated since you last played" };
             let card = self.health_card(&n.to_string(), text, Some(("Show", Box::new(|ui: &Rc<Window>| ui.show_session_updates()))), false);
             card.set_tooltip_text(Some(&h.updated_since.join("\n")));
+            self.health.append(&card);
+        }
+        if !h.waiting.is_empty() {
+            let n = h.waiting.len();
+            let text = if n == 1 { "mod update Steam hasn't downloaded yet" } else { "mod updates Steam hasn't downloaded yet" };
+            let card = self.health_card(&n.to_string(), text, Some(("Show", Box::new(|ui: &Rc<Window>| ui.show_session_updates()))), false);
+            card.set_tooltip_text(Some(&h.waiting.join("\n")));
             self.health.append(&card);
         }
         if !h.frozen_updates.is_empty() {

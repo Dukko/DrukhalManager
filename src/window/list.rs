@@ -18,10 +18,12 @@ impl Window {
         self.apply_requirements();
         self.fetch_requirements();
         let frozen_updates = self.frozen_updates();
-        let updated_since: Vec<String> = {
-            let updated = self.updated_since_last_session();
+        self.check_published();
+        let (updated_since, waiting): (Vec<String>, Vec<String>) = {
+            let (updated, waiting) = (self.updated_since_last_session(), self.waiting_updates());
             let state = self.state.borrow();
-            updated.iter().map(|&(i, _)| display_name(&state.mods[i]).to_owned()).collect()
+            let names = |found: Vec<(usize, u64)>| found.iter().map(|&(i, _)| display_name(&state.mods[i]).to_owned()).collect();
+            (names(updated), names(waiting))
         };
         let state = self.state.borrow();
         self.search_facts.borrow_mut().clear();
@@ -152,6 +154,7 @@ impl Window {
             stale_merges: self.stale.borrow().len(),
             frozen_updates,
             updated_since,
+            waiting,
         };
         let (enabled, total) = (state.enabled.len(), state.mods.len());
         self.syncing.set(true);
