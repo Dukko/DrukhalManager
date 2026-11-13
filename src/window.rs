@@ -71,6 +71,10 @@ struct Window {
     view_counts: Vec<(filter::View, gtk::Label)>,
     /// The game version, achievements and last save, under the views.
     game_info: gtk::Label,
+    /// "Last game logged 23 errors", under `game_info`.
+    errors_link: gtk::Button,
+    /// When the error log counted for `errors_link` was written.
+    error_log_seen: Cell<Option<std::time::SystemTime>>,
     /// The sidebar's Smart Sort categories, the one showing, if any, and
     /// each one's row and count.
     categories_list: gtk::ListBox,
@@ -202,8 +206,19 @@ pub fn build(
 
     // The menu offers to continue the last save; see `update_continue`.
     let launch_menu = gio::Menu::new();
+    // Below it, the other ways to start the game.
+    let launch_model = gio::Menu::new();
+    launch_model.append_section(None, &launch_menu);
+    let launch_more = gio::Menu::new();
+    launch_more.append(Some("_Saves…"), Some("win.saves"));
+    launch_more.append(Some("_Multiplayer Check…"), Some("win.multiplayer"));
+    launch_more.append(Some("_DLC…"), Some("win.dlc"));
+    launch_model.append_section(None, &launch_more);
+    let troubleshoot = gio::Menu::new();
+    troubleshoot.append(Some("_Find the Crashing Mod…"), Some("win.crash-hunt"));
+    launch_model.append_section(None, &troubleshoot);
     let launch = adw::SplitButton::builder()
-        .menu_model(&launch_menu)
+        .menu_model(&launch_model)
         .dropdown_tooltip("More Ways to Launch")
         .child(
             &adw::ButtonContent::builder()
@@ -219,25 +234,21 @@ pub fn build(
         .action_name("win.save")
         .tooltip_text("Save the load order for the game and the Paradox Launcher (Ctrl+S)")
         .build();
+    // Only what's about the app itself: the rest sits next to what it acts
+    // on (header buttons, the Launch menu, the health strip, the sidebar,
+    // the Conflicts page).
     let menu = gio::Menu::new();
-    menu.append(Some("_Undo"), Some("win.undo"));
-    menu.append(Some("_Redo"), Some("win.redo"));
-    menu.append(Some("Re_load Mods"), Some("win.reload"));
-    menu.append(Some("Last Game's _Errors…"), Some("win.errors"));
-    menu.append(Some("_DLC…"), Some("win.dlc"));
-    menu.append(Some("_Multiplayer Check…"), Some("win.multiplayer"));
-    menu.append(Some("Mods _Not Updated for This Game…"), Some("win.outdated-mods"));
-    menu.append(Some("Find _Compatibility Patches…"), Some("win.find-patches"));
-    menu.append(Some("_Saves…"), Some("win.saves"));
-    menu.append(Some("_Find the Crashing Mod…"), Some("win.crash-hunt"));
-    menu.append(Some("Merged Patch _Backups…"), Some("win.patch-backups"));
-    menu.append(Some("_Preferences"), Some("win.preferences"));
-    menu.append(Some("_Keyboard Shortcuts"), Some("win.shortcuts"));
+    let app_section = gio::Menu::new();
+    app_section.append(Some("_Preferences"), Some("win.preferences"));
+    app_section.append(Some("_Keyboard Shortcuts"), Some("win.shortcuts"));
+    menu.append_section(None, &app_section);
+    let about_section = gio::Menu::new();
     let troubleshooting = gio::Menu::new();
     troubleshooting.append(Some("_Copy Diagnostics"), Some("win.copy-diagnostics"));
     troubleshooting.append(Some("Open _Log Folder"), Some("win.open-log-folder"));
-    menu.append_submenu(Some("_Troubleshooting"), &troubleshooting);
-    menu.append(Some("_About DrukhalManager"), Some("win.about"));
+    about_section.append_submenu(Some("_Troubleshooting"), &troubleshooting);
+    about_section.append(Some("_About DrukhalManager"), Some("win.about"));
+    menu.append_section(None, &about_section);
     let menu_button = gtk::MenuButton::builder()
         .icon_name("open-menu-symbolic")
         .menu_model(&menu)
@@ -253,6 +264,13 @@ pub fn build(
         .tooltip_text("Collections: switch between saved load orders")
         .build();
     header.pack_start(&collection_button);
+    for (icon, tooltip, action) in [
+        ("edit-undo-symbolic", "Undo (Ctrl+Z)", "win.undo"),
+        ("edit-redo-symbolic", "Redo (Ctrl+Shift+Z)", "win.redo"),
+        ("view-refresh-symbolic", "Reload Mods (F5)", "win.reload"),
+    ] {
+        header.pack_start(&gtk::Button::builder().icon_name(icon).tooltip_text(tooltip).action_name(action).build());
+    }
     if game.is_none() {
         launch.set_tooltip_text(Some("Stellaris was not found in any Steam library"));
     }
@@ -371,8 +389,16 @@ pub fn build(
     // side panels fold away in a narrow window.
     let (views_list, view_counts, game_info) = overview::views_sidebar();
     let (categories_list, category_counts) = overview::categories_sidebar();
+    // Shown while the load order has no compatibility patches, whose
+    // header in the list offers the same.
+    let find_patches_link = overview::sidebar_link("Find Compatibility Patches…", "win.find-patches");
+    if let Some((_, row, _)) = category_counts.iter().find(|(c, _, _)| *c == Category::Patches) {
+        row.bind_property("visible", &find_patches_link, "visible").invert_boolean().sync_create().build();
+    }
+    let errors_link = overview::sidebar_link("", "win.errors");
+    errors_link.set_visible(false);
     let views_split = adw::OverlaySplitView::builder()
-        .sidebar(&overview::sidebar_page(&views_list, &categories_list, &game_info))
+        .sidebar(&overview::sidebar_page(&views_list, &categories_list, &find_patches_link, &game_info, &errors_link))
         .css_classes(["load-order-split"])
         .content(&scrolled_page(&content))
         .min_sidebar_width(200.0)
@@ -465,6 +491,8 @@ pub fn build(
         view,
         view_counts,
         game_info,
+        errors_link,
+        error_log_seen: Cell::new(None),
         categories_list,
         category,
         category_counts,

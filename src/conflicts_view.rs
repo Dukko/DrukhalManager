@@ -383,8 +383,11 @@ pub fn build(analysis: &Rc<Analysis>, rescan: gtk::Button, hooks: Rc<MergeHooks>
         let hooks = hooks.clone();
         rules.connect_clicked(move |_| (hooks.edit_rules)());
     }
+    // The window's action: the merged patch's backups.
+    let backups = gtk::Button::builder().icon_name("document-open-recent-symbolic").tooltip_text("Merged Patch Backups…").action_name("win.patch-backups").css_classes(["flat"]).build();
     footer.append(&show_ignored);
     footer.append(&rules);
+    footer.append(&backups);
     footer.append(&rescan);
 
     // A rounded card inset from the window's edges, like the code cards.
