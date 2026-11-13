@@ -116,7 +116,7 @@ pub fn write(user_dir: &Path, out_dir: &Path, collection: &str, name: &str, supp
     {
         return Err(io::Error::new(
             io::ErrorKind::StorageFull,
-            format!("the merge needs about {} but only {} is free", gtk::glib::format_size(needed), gtk::glib::format_size(free)),
+            format!("the merge needs about {} but only {} is free", size(needed), size(free)),
         ));
     }
 
@@ -227,9 +227,22 @@ fn remove_if_present(path: &Path) -> io::Result<()> {
 
 /// Free bytes on the filesystem holding `dir`, if it can be told.
 fn free_space(dir: &Path) -> Option<u64> {
-    use gtk::gio::prelude::*;
-    let info = gtk::gio::File::for_path(dir).query_filesystem_info("filesystem::free", None::<&gtk::gio::Cancellable>).ok()?;
-    info.has_attribute("filesystem::free").then(|| info.attribute_uint64("filesystem::free"))
+    fs4::available_space(dir).ok()
+}
+
+/// `bytes` for people: "1.5 GB".
+fn size(bytes: u64) -> String {
+    const UNITS: [&str; 5] = ["kB", "MB", "GB", "TB", "PB"];
+    if bytes < 1000 {
+        return format!("{bytes} bytes");
+    }
+    let mut value = bytes as f64 / 1000.0;
+    let mut unit = 0;
+    while value >= 1000.0 && unit < UNITS.len() - 1 {
+        value /= 1000.0;
+        unit += 1;
+    }
+    format!("{value:.1} {}", UNITS[unit])
 }
 
 #[cfg(test)]

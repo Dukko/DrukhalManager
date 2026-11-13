@@ -122,7 +122,7 @@ pub struct HashCache {
 
 impl HashCache {
     pub fn path() -> PathBuf {
-        gtk::glib::user_cache_dir().join("DrukhalManager/file-hashes.json")
+        crate::platform::cache_dir().join("file-hashes.json")
     }
 
     /// The cache at `path`; empty if there is none or it can't be read.

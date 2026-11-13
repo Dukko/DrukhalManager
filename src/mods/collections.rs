@@ -113,7 +113,7 @@ pub struct Collections {
 }
 
 pub fn path() -> PathBuf {
-    crate::sandbox::data_dir().join("DrukhalManager/collections.json")
+    crate::platform::data_dir().join("collections.json")
 }
 
 impl Collections {

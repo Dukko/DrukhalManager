@@ -32,7 +32,7 @@ pub struct Saves {
 }
 
 pub fn path() -> PathBuf {
-    gtk::glib::user_data_dir().join("DrukhalManager/saves.json")
+    crate::platform::private_data_dir().join("saves.json")
 }
 
 impl Saves {

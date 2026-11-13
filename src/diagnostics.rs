@@ -4,11 +4,12 @@
 //! anything that looks like a key as a last guard.
 //!
 //! The log is `drukhal-manager.log` in `~/.local/share/DrukhalManager/logs`
-//! on the host, with up to two older files beside it, each about 1 MB.
+//! on the host (`%LOCALAPPDATA%\DrukhalManager\logs` on Windows), with up
+//! to two older files beside it, each about 1 MB.
 
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Write};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -28,7 +29,7 @@ macro_rules! log {
 pub(crate) use log;
 
 pub fn dir() -> PathBuf {
-    crate::sandbox::data_dir().join("DrukhalManager/logs")
+    crate::platform::data_dir().join("logs")
 }
 
 static LOG: Mutex<Option<Log>> = Mutex::new(None);
@@ -185,16 +186,10 @@ pub fn report(facts: &[(&str, String)], lines: usize) -> String {
     text
 }
 
-/// The distribution's name, from the host's os-release in the Flatpak.
+/// The distribution's name (the host's, in the Flatpak), or the Windows
+/// version.
 pub fn distro() -> String {
-    let files: &[&Path] = if crate::sandbox::is_flatpak() { &[Path::new("/run/host/os-release"), Path::new("/run/host/usr/lib/os-release")] } else { &[Path::new("/etc/os-release"), Path::new("/usr/lib/os-release")] };
-    files
-        .iter()
-        .filter_map(|p| fs::read_to_string(p).ok())
-        .find_map(|text| {
-            text.lines().find_map(|l| l.strip_prefix("PRETTY_NAME=")).map(|v| v.trim_matches('"').to_owned())
-        })
-        .unwrap_or_else(|| "unknown".to_owned())
+    crate::platform::os_name()
 }
 
 #[cfg(test)]

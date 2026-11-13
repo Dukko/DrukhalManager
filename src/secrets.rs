@@ -1,11 +1,9 @@
 //! API keys in the system keyring: the Secret Service (GNOME Keyring,
 //! KWallet, oo7) natively, or the Secret portal's encrypted file in the
-//! Flatpak.
+//! Flatpak; Credential Manager on Windows.
 //!
 //! Every function blocks, possibly on an unlock prompt; call them off the
 //! main thread.
-
-use futures_lite::future::block_on;
 
 use crate::merge::ai::Provider;
 
@@ -20,51 +18,94 @@ pub fn kind(provider: &Provider) -> &'static str {
     }
 }
 
-fn label(kind: &str) -> String {
-    let name = match kind {
-        "anthropic" => "Claude",
-        STEAM => "Steam Web",
-        _ => "OpenAI-compatible",
-    };
-    format!("DrukhalManager {name} API key")
-}
-
-fn attributes(kind: &str) -> [(&'static str, &str); 2] {
-    [("application", crate::APP_ID), ("provider", kind)]
-}
-
-fn keyring() -> Result<oo7::Keyring, String> {
-    block_on(async {
-        let keyring = oo7::Keyring::new().await?;
-        keyring.unlock().await?;
-        Ok(keyring)
-    })
-    .map_err(|e: oo7::Error| format!("No system keyring is available ({e})"))
-}
-
 /// The key stored for `kind`, if any.
 pub fn get(kind: &str) -> Result<Option<String>, String> {
-    let keyring = keyring()?;
-    block_on(async {
-        let Some(item) = keyring.search_items(&attributes(kind)).await?.into_iter().next() else { return Ok(None) };
-        let secret = item.secret().await?;
-        Ok(Some(String::from_utf8_lossy(secret.as_bytes()).into_owned()))
-    })
-    .map_err(|e: oo7::Error| format!("Could not read the API key from the keyring: {e}"))
+    store::get(kind)
 }
 
 /// Stores `key` for `kind`, replacing any earlier one; an empty key removes
 /// it.
 pub fn set(kind: &str, key: &str) -> Result<(), String> {
-    let keyring = keyring()?;
-    block_on(async {
-        if key.is_empty() {
-            keyring.delete(&attributes(kind)).await
-        } else {
-            keyring.create_item(&label(kind), &attributes(kind), key, true).await
+    store::set(kind, key)
+}
+
+#[cfg(unix)]
+mod store {
+    use futures_lite::future::block_on;
+
+    fn label(kind: &str) -> String {
+        let name = match kind {
+            "anthropic" => "Claude",
+            super::STEAM => "Steam Web",
+            _ => "OpenAI-compatible",
+        };
+        format!("DrukhalManager {name} API key")
+    }
+
+    fn attributes(kind: &str) -> [(&'static str, &str); 2] {
+        [("application", crate::APP_ID), ("provider", kind)]
+    }
+
+    fn keyring() -> Result<oo7::Keyring, String> {
+        block_on(async {
+            let keyring = oo7::Keyring::new().await?;
+            keyring.unlock().await?;
+            Ok(keyring)
+        })
+        .map_err(|e: oo7::Error| format!("No system keyring is available ({e})"))
+    }
+
+    pub fn get(kind: &str) -> Result<Option<String>, String> {
+        let keyring = keyring()?;
+        block_on(async {
+            let Some(item) = keyring.search_items(&attributes(kind)).await?.into_iter().next() else { return Ok(None) };
+            let secret = item.secret().await?;
+            Ok(Some(String::from_utf8_lossy(secret.as_bytes()).into_owned()))
+        })
+        .map_err(|e: oo7::Error| format!("Could not read the API key from the keyring: {e}"))
+    }
+
+    pub fn set(kind: &str, key: &str) -> Result<(), String> {
+        let keyring = keyring()?;
+        block_on(async {
+            if key.is_empty() {
+                keyring.delete(&attributes(kind)).await
+            } else {
+                keyring.create_item(&label(kind), &attributes(kind), key, true).await
+            }
+        })
+        .map_err(|e| format!("Could not save the API key in the keyring: {e}"))
+    }
+}
+
+/// One generic credential per kind, named for the app and the kind
+/// (`io.github.dukko.DrukhalManager/anthropic`).
+#[cfg(windows)]
+mod store {
+    fn entry(kind: &str) -> Result<keyring::Entry, String> {
+        keyring::Entry::new_with_target(&format!("{}/{kind}", crate::APP_ID), crate::APP_ID, kind).map_err(|e| format!("Credential Manager isn't available ({e})"))
+    }
+
+    pub fn get(kind: &str) -> Result<Option<String>, String> {
+        match entry(kind)?.get_password() {
+            Ok(key) => Ok(Some(key)),
+            Err(keyring::Error::NoEntry) => Ok(None),
+            Err(e) => Err(format!("Could not read the API key from Credential Manager: {e}")),
         }
-    })
-    .map_err(|e| format!("Could not save the API key in the keyring: {e}"))
+    }
+
+    pub fn set(kind: &str, key: &str) -> Result<(), String> {
+        let entry = entry(kind)?;
+        let result = if key.is_empty() {
+            match entry.delete_credential() {
+                Err(keyring::Error::NoEntry) => Ok(()),
+                other => other,
+            }
+        } else {
+            entry.set_password(key)
+        };
+        result.map_err(|e| format!("Could not save the API key in Credential Manager: {e}"))
+    }
 }
 
 #[cfg(test)]

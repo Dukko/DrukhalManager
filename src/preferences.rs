@@ -135,7 +135,7 @@ fn steam_key_group(in_file: String, on_keyring: Box<dyn Fn(bool)>) -> (adw::Pref
 fn merge_tool_group(command: &str) -> (adw::PreferencesGroup, impl Fn() -> String + use<>) {
     use crate::merge::external;
     let mut description = "Merge Tool…, on the Conflicts page and when merging a file, opens two versions in this program, and uses what you save. {left}, {right}, {base} and {output} stand for the files.".to_owned();
-    if crate::sandbox::is_flatpak() {
+    if crate::platform::is_flatpak() {
         description.push_str(&format!(" The Flatpak needs permission to start it, given once in a terminal with: {}", external::FLATPAK_OVERRIDE));
     }
     let group = adw::PreferencesGroup::builder().title("External Merge Tool").description(glib::markup_escape_text(&description).as_str()).build();
@@ -229,7 +229,7 @@ fn path_row(title: &str, detected: Option<PathBuf>, chosen: Option<PathBuf>, fol
 /// The Game page, and the Merging page with the scan and merge options
 /// (kept apart so neither is slow to animate in).
 fn game_page(options: &GameOptions) -> (adw::PreferencesPage, adw::PreferencesPage, impl Fn() -> GameOptions + use<>) {
-    let flatpak = crate::sandbox::is_flatpak();
+    let flatpak = crate::platform::is_flatpak();
     let home = glib::home_dir();
     let detected_exe = game::find(&steam::library_folders(&home)).map(|g| g.exe);
 
@@ -547,7 +547,7 @@ fn ai_page(current: &Provider, parallel: Option<u32>) -> (adw::PreferencesPage, 
 }
 
 fn updates_page(options: &UpdateOptions) -> (adw::PreferencesPage, impl Fn() -> UpdateOptions + use<>) {
-    let flatpak = crate::sandbox::is_flatpak();
+    let flatpak = crate::platform::is_flatpak();
 
     let version = adw::PreferencesGroup::new();
     let version_row = adw::ActionRow::builder()

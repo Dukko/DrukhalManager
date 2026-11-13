@@ -27,7 +27,7 @@ pub struct Cache {
 
 impl Cache {
     pub fn path() -> PathBuf {
-        gtk::glib::user_cache_dir().join("DrukhalManager/workshop-requirements.json")
+        crate::platform::cache_dir().join("workshop-requirements.json")
     }
 
     pub fn load(path: &Path) -> Self {

@@ -23,10 +23,10 @@ pub const FLATPAK_OVERRIDE: &str = "flatpak override --user --talk-name=org.free
 /// The first preset whose program is installed, outside the Flatpak (where
 /// the host's programs can't be seen).
 pub fn detect() -> Option<&'static str> {
-    if crate::sandbox::is_flatpak() {
+    if crate::platform::is_flatpak() {
         return None;
     }
-    PRESETS.iter().find(|(_, command)| command.split(' ').next().and_then(gtk::glib::find_program_in_path).is_some()).map(|(_, c)| *c)
+    PRESETS.iter().find(|(_, command)| command.split(' ').next().and_then(crate::platform::find_program).is_some()).map(|(_, c)| *c)
 }
 
 /// One side of the merge.
@@ -39,7 +39,7 @@ pub struct Side<'a> {
 /// any) and waits for it to exit. Returns the merged text, or `None` if the
 /// tool was closed without saving. Blocks; call off the main thread.
 pub fn run(command: &str, left: Side, right: Side, base: Option<&str>) -> Result<Option<String>, String> {
-    let dir = gtk::glib::user_cache_dir().join("DrukhalManager/merge-tool").join(format!("{}-{}", std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis())));
+    let dir = crate::platform::cache_dir().join("merge-tool").join(format!("{}-{}", std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis())));
     let result = run_in(&dir, command, left, right, base);
     let _ = std::fs::remove_dir_all(&dir);
     result
@@ -61,7 +61,7 @@ fn run_in(dir: &Path, command: &str, left: Side, right: Side, base: Option<&str>
     let before = std::fs::metadata(&output_path).and_then(|m| m.modified()).ok();
 
     let args = arguments(command, &left_path, &right_path, &base_path, &output_path)?;
-    let mut process = if crate::sandbox::is_flatpak() {
+    let mut process = if crate::platform::is_flatpak() {
         let mut p = std::process::Command::new("flatpak-spawn");
         p.arg("--host").args(&args);
         p
@@ -72,7 +72,7 @@ fn run_in(dir: &Path, command: &str, left: Side, right: Side, base: Option<&str>
     };
     let output = process.stdin(std::process::Stdio::null()).output().map_err(|e| format!("Could not start {}: {e}", args[0]))?;
     let stderr = String::from_utf8_lossy(&output.stderr);
-    if crate::sandbox::is_flatpak() && !output.status.success() && (stderr.contains("org.freedesktop.Flatpak") || stderr.contains("ServiceUnknown") || stderr.contains("AccessDenied")) {
+    if crate::platform::is_flatpak() && !output.status.success() && (stderr.contains("org.freedesktop.Flatpak") || stderr.contains("ServiceUnknown") || stderr.contains("AccessDenied")) {
         return Err(format!("The Flatpak isn't allowed to start programs outside it. To use a merge tool, run this once, then restart DrukhalManager: {FLATPAK_OVERRIDE}"));
     }
     // Exit codes say little: Meld always succeeds, KDiff3 fails when not
@@ -90,12 +90,11 @@ fn run_in(dir: &Path, command: &str, left: Side, right: Side, base: Option<&str>
 
 /// The command's words, with the placeholders filled in.
 fn arguments(command: &str, left: &Path, right: &Path, base: &Path, output: &Path) -> Result<Vec<String>, String> {
-    let words = gtk::glib::shell_parse_argv(command.trim()).map_err(|e| format!("The merge tool command can't be read: {e}"))?;
+    let words = shlex::split(command.trim()).ok_or("The merge tool command can't be read: a quote isn't closed")?;
     let args: Vec<String> = words
         .iter()
         .map(|w| {
-            w.to_string_lossy()
-                .replace("{left}", &left.to_string_lossy())
+            w.replace("{left}", &left.to_string_lossy())
                 .replace("{right}", &right.to_string_lossy())
                 .replace("{base}", &base.to_string_lossy())
                 .replace("{output}", &output.to_string_lossy())
@@ -129,7 +128,7 @@ mod tests {
     #[test]
     #[cfg(unix)]
     fn reads_what_the_tool_saved() {
-        if crate::sandbox::is_flatpak() {
+        if crate::platform::is_flatpak() {
             return;
         }
         let dir = std::env::temp_dir().join(format!("drukhal-external-{}", std::process::id()));

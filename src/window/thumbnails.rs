@@ -40,7 +40,7 @@ pub(super) struct Cache {
 
 /// Where a Workshop item's downloaded preview is kept.
 fn previews_dir() -> PathBuf {
-    glib::user_cache_dir().join("DrukhalManager/previews")
+    crate::platform::cache_dir().join("previews")
 }
 
 pub(super) fn add_css() {

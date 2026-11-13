@@ -17,7 +17,7 @@ pub struct LastSession {
 }
 
 pub fn path() -> PathBuf {
-    gtk::glib::user_data_dir().join("DrukhalManager/last-session.json")
+    crate::platform::private_data_dir().join("last-session.json")
 }
 
 impl LastSession {

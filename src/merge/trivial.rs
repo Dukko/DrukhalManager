@@ -181,7 +181,7 @@ mod tests {
     #[test]
     #[ignore]
     fn time_simple_conflicts_on_real_mods() {
-        let home = gtk::glib::home_dir();
+        let home = crate::platform::home_dir();
         let user = crate::paradox::steam::stellaris_user_dir();
         let workshop = crate::paradox::steam::workshop_dirs(&home, 281990);
         let mods = crate::mods::discover(&user, &workshop).unwrap();

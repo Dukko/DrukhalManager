@@ -185,9 +185,9 @@ impl Window {
             "Launching with {} enabled mods{}{}",
             self.state.borrow().enabled.len(),
             if resume { ", continuing the last save" } else { "" },
-            if crate::sandbox::is_flatpak() { ", through Steam" } else { "" }
+            if crate::platform::is_flatpak() { ", through Steam" } else { "" }
         );
-        if crate::sandbox::is_flatpak() {
+        if crate::platform::is_flatpak() {
             // A sandboxed app can't start the game itself; Steam can, and
             // the launcher playset carries the load order.
             let id = crate::paradox::steam::STELLARIS_APP_ID;

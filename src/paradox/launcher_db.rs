@@ -126,7 +126,7 @@ fn write(db: &mut Connection, playset_name: &str, mods: &[PlaysetMod]) -> rusqli
             && m.steam_id.is_none()
             && let Some(dir) = &m.dir
         {
-            let new_id = gtk::glib::uuid_string_random().to_string();
+            let new_id = uuid::Uuid::new_v4().to_string();
             tx.execute(
                 "INSERT INTO mods (id, gameRegistryId, displayName, tags, requiredVersion, dirPath, status, source, isNew, createdDate, isMetadataApplied, metadataStatus, keepLatest)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'ready_to_play', 'local', 0, ?7, 0, 'not_applied', 1)",
@@ -148,7 +148,7 @@ fn write(db: &mut Connection, playset_name: &str, mods: &[PlaysetMod]) -> rusqli
             id
         }
         None => {
-            let id = gtk::glib::uuid_string_random().to_string();
+            let id = uuid::Uuid::new_v4().to_string();
             tx.execute("INSERT INTO playsets (id, name, isActive, loadOrder, createdOn) VALUES (?1, ?2, 0, 'custom', ?3)", params![id, playset_name, now_ms()])?;
             id
         }

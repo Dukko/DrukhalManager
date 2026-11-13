@@ -108,7 +108,7 @@ fn slug(name: &str) -> String {
 }
 
 fn unreadable(dir: &Path, e: &std::io::Error) -> String {
-    if crate::sandbox::is_flatpak() && !dir.starts_with(gtk::glib::home_dir()) {
+    if crate::platform::is_flatpak() && !dir.starts_with(crate::platform::home_dir()) {
         format!(
             "The extra mod folder {} is outside your home folder, so DrukhalManager can't see it from its sandbox. Run this once, then restart: flatpak override --user --filesystem={} io.github.dukko.DrukhalManager",
             dir.display(),

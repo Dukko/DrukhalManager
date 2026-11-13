@@ -67,7 +67,7 @@ fn today() -> u32 {
 
 impl ScanCache {
     pub fn path() -> PathBuf {
-        gtk::glib::user_cache_dir().join("DrukhalManager/conflict-scan.json")
+        crate::platform::cache_dir().join("conflict-scan.json")
     }
 
     /// The cache at `path`; empty if there is none or it can't be read.
