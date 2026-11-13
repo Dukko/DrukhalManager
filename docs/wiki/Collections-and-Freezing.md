@@ -12,6 +12,10 @@ Click the collection name at the top left. From there you can switch collections
 
 **Copy Load Order** gives you a numbered list with Workshop links, to paste to a friend.
 
+## Keeping a merged patch in the Extra Mod Folder
+
+If you keep mods in an Extra Mod Folder (**Preferences → Game**), for example on another drive, a collection's merged patch can live there too. Choose **Move Merged Patch to the Extra Mod Folder** in the collection menu. The game, backups, export and deleting the collection keep finding it there. **Move Merged Patch to the Mod Folder** brings it back.
+
 ## Freezing a collection
 
 Steam updates mods whenever their authors publish, which can break a campaign in the middle. **Freeze This Collection…**, in the collection menu, copies its Workshop mods into local mods and switches the collection to the copies.

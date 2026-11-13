@@ -28,6 +28,10 @@ pub struct Collection {
     /// The folder of its merged patch, once it has one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub patch: Option<String>,
+    /// Where the patch's folder is when not in the game's mod folder, such
+    /// as the Extra Mod Folder.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub patch_dir: Option<PathBuf>,
     /// Its frozen copies of Workshop mods, by the copies' ids.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub frozen: BTreeMap<String, super::freeze::Frozen>,
@@ -45,7 +49,7 @@ pub struct Placeholder {
 
 impl Collection {
     pub fn new(name: &str, mods: Vec<String>) -> Self {
-        Self { name: name.to_owned(), mods, names: BTreeMap::new(), patch: None, frozen: BTreeMap::new() }
+        Self { name: name.to_owned(), mods, names: BTreeMap::new(), patch: None, patch_dir: None, frozen: BTreeMap::new() }
     }
 
     /// Makes `enabled`, the load order being saved, the collection's mods.
@@ -201,8 +205,10 @@ impl Collections {
     /// Returns whether a folder was given, so the collections need saving.
     pub fn patch_target(&mut self, legacy_exists: bool, on_disk: impl Fn(&str) -> bool) -> (Target, bool) {
         let active = self.active.clone();
-        if let Some(folder) = self.get(&active).and_then(|c| c.patch.clone()) {
-            return (Target::new(&folder, &active), false);
+        if let Some(c) = self.get(&active)
+            && let Some(folder) = &c.patch
+        {
+            return (Target::new(folder, &active).in_dir(c.patch_dir.clone()), false);
         }
         let folder = if legacy_exists && !self.list.iter().any(|c| c.patch.as_deref() == Some(patch::LEGACY_FOLDER)) {
             // Its merges were made for this load order; others drop it.
