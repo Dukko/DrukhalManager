@@ -171,6 +171,7 @@ impl Window {
                 roots.insert(patch::VANILLA.to_owned(), game.dir.clone());
             }
             let version = self.game.as_ref().and_then(|g| g.version.as_deref());
+            self.update_picks(&roots);
             self.patch
                 .borrow_mut()
                 .as_mut()
@@ -178,6 +179,39 @@ impl Window {
                 .unwrap_or_default()
         };
         self.stale.replace(stale);
+    }
+
+    /// Brings "Use This Version" choices up to date when only the picked
+    /// mod changed: the answer is almost always still that mod's version.
+    /// The patch is backed up first.
+    fn update_picks(&self, roots: &std::collections::HashMap<String, std::path::PathBuf>) {
+        let picks = self.patch.borrow().as_ref().map(|p| p.picks_to_update(roots)).unwrap_or_default();
+        if picks.is_empty() {
+            return;
+        }
+        if let Err(e) = self.snapshot_patch(snapshot::BEFORE_UPDATING_PICKS) {
+            crate::diagnostics::log!("patch", "Not updating picked versions: {e}");
+            return;
+        }
+        let mut names: Vec<String> = picks.iter().map(|p| p.name.clone()).collect();
+        names.sort();
+        names.dedup();
+        let count = picks.len();
+        let version = self.game.as_ref().and_then(|g| g.version.as_deref());
+        let result = match self.patch.borrow_mut().as_mut() {
+            Some(patch) => patch.update_picks(&self.paths.user_dir, version, picks),
+            None => return,
+        };
+        match result {
+            Ok(()) => self.add_toast(
+                adw::Toast::builder()
+                    .title(format!("Updated {} to the new {} of {}", conflicts_view::plural(count, "picked version", "picked versions"), if count == 1 { "copy" } else { "copies" }, names.join(", ")))
+                    .button_label("Backups…")
+                    .action_name("win.patch-backups")
+                    .build(),
+            ),
+            Err(e) => self.toast_error_message(&format!("Could not update the picked versions: {e}")),
+        }
     }
 
     pub(super) fn remove_merge(self: &Rc<Self>, stale: &patch::Stale) {
