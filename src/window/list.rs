@@ -20,6 +20,8 @@ impl Window {
         let frozen_updates = self.frozen_updates();
         let state = self.state.borrow();
         self.search_facts.borrow_mut().clear();
+        // Rebuilding drops the selection; it's put back at the end.
+        self.restoring_marks.set(true);
         self.enabled_list.remove_all();
         self.disabled_list.remove_all();
         // Conflict counts are only shown while they match the load order.
@@ -176,11 +178,16 @@ impl Window {
                 }
                 None
             });
-            if let Some((list, row)) = found {
+            if let Some((list, row)) = found
+                && self.marked.borrow().len() < 2
+            {
                 list.select_row(Some(&row));
             }
             self.show_inspector();
         }
+        self.restoring_marks.set(false);
+        self.restore_marks();
+        self.update_bulk_bar();
         self.undo_action.set_enabled(can_undo);
         self.redo_action.set_enabled(can_redo);
         self.scan_if_stale();

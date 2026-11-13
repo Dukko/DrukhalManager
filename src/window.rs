@@ -16,6 +16,7 @@ mod reload;
 mod repair_ui;
 mod requirements_ui;
 mod saves_ui;
+mod selection_ui;
 mod shortcuts;
 mod smart_sort_ui;
 mod dlc_ui;
@@ -71,6 +72,12 @@ struct Window {
     view_counts: Vec<(filter::View, gtk::Label)>,
     /// The game version, achievements and last save, under the views.
     game_info: gtk::Label,
+    /// The mods selected together, by id, kept across list rebuilds.
+    marked: RefCell<Vec<String>>,
+    /// Set while the lists' selection is changed by the app, not the user.
+    restoring_marks: Cell<bool>,
+    bulk: selection_ui::BulkBar,
+    select_shown: gtk::Button,
     /// "Last game logged 23 errors", under `game_info`.
     errors_link: gtk::Button,
     /// When the error log counted for `errors_link` was written.
@@ -279,7 +286,8 @@ pub fn build(
     let disabled_list = boxed_list("No mods match");
     for list in [&enabled_list, &disabled_list] {
         // Clicking a row shows it in the inspector; its switch toggles it.
-        list.set_selection_mode(gtk::SelectionMode::Single);
+        // Ctrl+click and Shift+click select several (see `selection_ui`).
+        list.set_selection_mode(gtk::SelectionMode::Multiple);
         list.add_css_class("mod-list");
     }
     let missing_list = boxed_list("");
@@ -363,7 +371,14 @@ pub fn build(
         }
     ));
     let enabled_section = gtk::Box::new(gtk::Orientation::Vertical, 6);
-    enabled_section.append(&heading("Load Order"));
+    let enabled_heading = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+    let load_order_label = heading("Load Order");
+    load_order_label.set_hexpand(true);
+    enabled_heading.append(&load_order_label);
+    // While a view, category or search narrows the list.
+    let select_shown = gtk::Button::builder().label("Select All Shown").action_name("win.select-shown").tooltip_text("Select every mod listed, to change them all at once").css_classes(["flat"]).visible(false).build();
+    enabled_heading.append(&select_shown);
+    enabled_section.append(&enabled_heading);
     enabled_section.append(&enabled_list);
     content.append(&enabled_section);
     content.append(&missing_heading);
@@ -387,6 +402,7 @@ pub fn build(
 
     // Views on the left, the list, and the selected mod on the right; the
     // side panels fold away in a narrow window.
+    let bulk = selection_ui::BulkBar::new();
     let (views_list, view_counts, game_info) = overview::views_sidebar();
     let (categories_list, category_counts) = overview::categories_sidebar();
     // Shown while the load order has no compatibility patches, whose
@@ -400,7 +416,13 @@ pub fn build(
     let views_split = adw::OverlaySplitView::builder()
         .sidebar(&overview::sidebar_page(&views_list, &categories_list, &find_patches_link, &game_info, &errors_link))
         .css_classes(["load-order-split"])
-        .content(&scrolled_page(&content))
+        .content(&{
+            // The bar for several selected mods sits under the list.
+            let page = gtk::Box::new(gtk::Orientation::Vertical, 0);
+            page.append(&scrolled_page(&content));
+            page.append(&bulk.revealer);
+            page
+        })
         .min_sidebar_width(200.0)
         .max_sidebar_width(240.0)
         .build();
@@ -491,6 +513,10 @@ pub fn build(
         view,
         view_counts,
         game_info,
+        marked: RefCell::default(),
+        restoring_marks: Cell::new(false),
+        bulk,
+        select_shown,
         errors_link,
         error_log_seen: Cell::new(None),
         categories_list,
@@ -595,6 +621,7 @@ pub fn build(
     ui.update_repair_banner();
     ui.setup_collections();
     ui.setup_overview();
+    ui.setup_selection(app);
     disabled_order.set_selected(match ui.settings.borrow().disabled_order {
         settings::DisabledOrder::Name => 0,
         settings::DisabledOrder::RecentlyUpdated => 1,

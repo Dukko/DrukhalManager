@@ -73,7 +73,7 @@ This installs `drukhal-manager` with a desktop entry and icon.
 
 ## Load order
 
-Drag mods around, type a position into the number, or press **Smart Sort**. Undo, Redo and Reload sit at the top left of the window. The strip above the list counts what needs looking at, like mods that haven't been updated for your game version or mods loading before something they depend on, and each count has a button that shows you which ones. The count of mods not updated for your game also offers **Disable for Now…**, which keeps your full load order as a collection first.
+Drag mods around, type a position into the number, or press **Smart Sort**. Ctrl+click or Shift+click to select several mods, then enable, disable, move or categorise them all at once. Undo, Redo and Reload sit at the top left of the window. The strip above the list counts what needs looking at, like mods that haven't been updated for your game version or mods loading before something they depend on, and each count has a button that shows you which ones. The count of mods not updated for your game also offers **Disable for Now…**, which keeps your full load order as a collection first.
 
 Smart Sort follows the order the community guides use: unofficial patches (`~`) first, then graphics, flavor, shipsets, galaxy generation, gameplay, large overhauls, compatibility patches, UI mods, UI patches, and universal patches (`!`) last. It decides where a mod goes from its name, its dependencies and the folders it ships, because Workshop tags are often wrong. You get a preview before anything moves, and if it puts a mod in the wrong place you can move it and it'll remember.
 
