@@ -110,7 +110,7 @@ Most of the noise in a big mod list is graphics and localisation files I usually
 
 The model only ever sees the conflicting definitions, not your whole mod folder. When it returns something with broken syntax, it gets one more try with the error message before the merge counts as failed.
 
-Results go into a merged patch mod, one per collection, that loads last. If one of the mods or the game updates later, the merges that depended on it are flagged as outdated, except where you picked one mod's version and only that mod changed: those follow its update. The patch is backed up before every Merge All, and the backups button at the bottom of the Conflicts list keeps the last ten.
+Results go into a merged patch mod, one per collection, that loads last. If one of the mods or the game updates later, the merges that depended on it are flagged as outdated. Where you picked one mod's version and only that mod changed, one click takes its new version. The patch is backed up before every Merge All, and the backups button at the bottom of the Conflicts list keeps the last ten.
 
 <table>
 <tr>

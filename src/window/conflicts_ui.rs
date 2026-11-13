@@ -159,58 +159,65 @@ impl Window {
 
     /// Compares the patch's fingerprints with the enabled mods' files and
     /// the base game's.
+    /// The enabled mods' folders, and the base game's, as
+    /// [`Patch::recheck`] takes them.
+    fn stale_roots(&self) -> std::collections::HashMap<String, std::path::PathBuf> {
+        let state = self.state.borrow();
+        let mut roots: std::collections::HashMap<String, std::path::PathBuf> = state
+            .enabled
+            .iter()
+            .filter_map(|&i| Some((state.mods[i].id.clone(), archive::files(state.mods[i].content.as_deref()?).ok()?)))
+            .collect();
+        if let Some(game) = &self.game {
+            roots.insert(patch::VANILLA.to_owned(), game.dir.clone());
+        }
+        roots
+    }
+
     pub(super) fn check_stale(&self) {
-        let stale = {
-            let state = self.state.borrow();
-            let mut roots: std::collections::HashMap<String, std::path::PathBuf> = state
-                .enabled
-                .iter()
-                .filter_map(|&i| Some((state.mods[i].id.clone(), archive::files(state.mods[i].content.as_deref()?).ok()?)))
-                .collect();
-            if let Some(game) = &self.game {
-                roots.insert(patch::VANILLA.to_owned(), game.dir.clone());
-            }
-            let version = self.game.as_ref().and_then(|g| g.version.as_deref());
-            self.update_picks(&roots);
-            self.patch
-                .borrow_mut()
-                .as_mut()
-                .map(|p| p.recheck(&roots, version))
-                .unwrap_or_default()
-        };
+        let roots = self.stale_roots();
+        let version = self.game.as_ref().and_then(|g| g.version.as_deref());
+        let stale = self
+            .patch
+            .borrow_mut()
+            .as_mut()
+            .map(|p| {
+                let mut stale = p.recheck(&roots, version);
+                Patch::mark_picks(&mut stale, &p.picks_to_update(&roots));
+                stale
+            })
+            .unwrap_or_default();
         self.stale.replace(stale);
     }
 
-    /// Brings "Use This Version" choices up to date when only the picked
-    /// mod changed: the answer is almost always still that mod's version.
+    /// Replaces "Use This Version" choices whose mod changed (and nothing
+    /// else did) with that mod's new version: `only` that one, or all.
     /// The patch is backed up first.
-    fn update_picks(&self, roots: &std::collections::HashMap<String, std::path::PathBuf>) {
-        let picks = self.patch.borrow().as_ref().map(|p| p.picks_to_update(roots)).unwrap_or_default();
+    pub(super) fn update_picks(self: &Rc<Self>, only: Option<&patch::Stale>) {
+        let roots = self.stale_roots();
+        let mut picks = self.patch.borrow().as_ref().map(|p| p.picks_to_update(&roots)).unwrap_or_default();
+        if let Some(only) = only {
+            picks.retain(|p| p.matches(only));
+        }
         if picks.is_empty() {
-            return;
+            return self.toast_error_message("Nothing to update: the mods changed again since the last check");
         }
         if let Err(e) = self.snapshot_patch(snapshot::BEFORE_UPDATING_PICKS) {
-            crate::diagnostics::log!("patch", "Not updating picked versions: {e}");
-            return;
+            return self.toast_error_message(&e);
         }
-        let mut names: Vec<String> = picks.iter().map(|p| p.name.clone()).collect();
-        names.sort();
-        names.dedup();
         let count = picks.len();
-        let version = self.game.as_ref().and_then(|g| g.version.as_deref());
-        let result = match self.patch.borrow_mut().as_mut() {
-            Some(patch) => patch.update_picks(&self.paths.user_dir, version, picks),
-            None => return,
+        let what = match only {
+            Some(s) => s.object.as_ref().map_or_else(|| s.path.rsplit('/').next().unwrap_or(&s.path).to_owned(), |(_, k)| k.clone()),
+            None => conflicts_view::plural(count, "picked version", "picked versions"),
         };
+        let result = self.with_patch(|p, user_dir, version| p.update_picks(user_dir, version, picks));
         match result {
-            Ok(()) => self.add_toast(
-                adw::Toast::builder()
-                    .title(format!("Updated {} to the new {} of {}", conflicts_view::plural(count, "picked version", "picked versions"), if count == 1 { "copy" } else { "copies" }, names.join(", ")))
-                    .button_label("Backups…")
-                    .action_name("win.patch-backups")
-                    .build(),
-            ),
-            Err(e) => self.toast_error_message(&format!("Could not update the picked versions: {e}")),
+            Ok(()) => {
+                self.check_stale();
+                self.refresh();
+                self.add_toast(adw::Toast::builder().title(format!("Updated {what} to the new version")).button_label("Backups…").action_name("win.patch-backups").build());
+            }
+            Err(e) => self.toast_error_message(&format!("Could not update {what}: {e}")),
         }
     }
 
@@ -445,6 +452,12 @@ impl Window {
             }
         });
         let weak = Rc::downgrade(self);
+        let update_picks = Box::new(move |stale: Option<&patch::Stale>| {
+            if let Some(ui) = weak.upgrade() {
+                ui.update_picks(stale);
+            }
+        });
+        let weak = Rc::downgrade(self);
         let keep_merge = Box::new(move |stale: &patch::Stale| {
             if let Some(ui) = weak.upgrade() {
                 ui.keep_merge(stale);
@@ -502,6 +515,7 @@ impl Window {
             reload_stale,
             remove_merge,
             keep_merge,
+            update_picks,
             rerender,
             game_dir: self.game.as_ref().map(|g| g.dir.clone()),
             provider,

@@ -141,6 +141,9 @@ pub struct Stale {
     pub untracked: bool,
     /// Whether the base game changed it, rather than only its mods.
     pub base_game: bool,
+    /// For a "Use This Version" choice where only the picked mod changed,
+    /// that mod's name: its new version can replace the old one.
+    pub pick: Option<String>,
 }
 
 /// A "Use This Version" choice to bring up to date: the patch keeps one
@@ -158,6 +161,17 @@ pub struct Pick {
     pub contents: Vec<u8>,
     /// The merge's fingerprints with the picked mod's brought up to date.
     pub prints: Vec<Print>,
+}
+
+impl Pick {
+    /// Whether `stale` is this pick's entry.
+    pub fn matches(&self, stale: &Stale) -> bool {
+        match (&self.object, &stale.object) {
+            (Some(a), Some(b)) => a == b,
+            (None, None) => self.path.eq_ignore_ascii_case(&stale.path),
+            _ => false,
+        }
+    }
 }
 
 /// Why an untracked merge is listed.
@@ -341,6 +355,13 @@ impl Patch {
         picks
     }
 
+    /// Notes on `stale` which entries are among `picks`.
+    pub fn mark_picks(stale: &mut [Stale], picks: &[Pick]) {
+        for s in stale {
+            s.pick = picks.iter().find(|p| p.matches(s)).map(|p| p.name.clone());
+        }
+    }
+
     /// Saves each pick's new version in place of the old one.
     pub fn update_picks(&mut self, user_dir: &Path, game_version: Option<&str>, picks: Vec<Pick>) -> io::Result<()> {
         for pick in picks {
@@ -391,7 +412,7 @@ impl Patch {
         for m in &mut self.manifest.merges {
             let (category, key) = (m.category.clone(), m.key.clone());
             if m.prints.is_empty() {
-                stale.push(Stale { object: Some((category, key)), path: m.file.clone(), reasons: vec![UNTRACKED.to_owned()], untracked: true, base_game: false });
+                stale.push(Stale { object: Some((category, key)), path: m.file.clone(), reasons: vec![UNTRACKED.to_owned()], untracked: true, base_game: false, pick: None });
                 continue;
             }
             let text_of = |src: &str| super::source::extract(&category, &key, src);
@@ -424,12 +445,12 @@ impl Patch {
             }
             dirty |= check.confirm(&mut m.game_version, game_dir, game_version);
             if !check.reasons.is_empty() {
-                stale.push(Stale { object: Some((category, key)), path: m.file.clone(), base_game: check.base_game, reasons: check.reasons, untracked: false });
+                stale.push(Stale { object: Some((category, key)), path: m.file.clone(), base_game: check.base_game, reasons: check.reasons, untracked: false, pick: None });
             }
         }
         for f in &mut self.manifest.files {
             if f.prints.is_empty() {
-                stale.push(Stale { object: None, path: f.path.clone(), reasons: vec![UNTRACKED.to_owned()], untracked: true, base_game: false });
+                stale.push(Stale { object: None, path: f.path.clone(), reasons: vec![UNTRACKED.to_owned()], untracked: true, base_game: false, pick: None });
                 continue;
             }
             let text_of = |src: &str| Some(src.to_owned());
@@ -455,7 +476,7 @@ impl Patch {
             }
             dirty |= check.confirm(&mut f.game_version, game_dir, game_version);
             if !check.reasons.is_empty() {
-                stale.push(Stale { object: None, path: f.path.clone(), base_game: check.base_game, reasons: check.reasons, untracked: false });
+                stale.push(Stale { object: None, path: f.path.clone(), base_game: check.base_game, reasons: check.reasons, untracked: false, pick: None });
             }
         }
         if dirty && let Err(e) = self.write_manifest() {
@@ -850,6 +871,13 @@ mod tests {
         let picks = patch.picks_to_update(&roots);
         let found: Vec<(Option<(String, String)>, &str)> = picks.iter().map(|p| (p.object.clone(), p.name.as_str())).collect();
         assert_eq!(found, [(Some(("common/buildings".into(), "lab".into())), "A"), (None, "B")], "the hand merge of farm isn't a pick");
+        // Nothing changes until asked; the outdated list says which are picks.
+        let mut stale = patch.recheck(&roots, None);
+        Patch::mark_picks(&mut stale, &picks);
+        let marked: Vec<(String, Option<String>)> = stale.iter().map(|s| (s.path.rsplit('/').next().unwrap().to_owned(), s.pick.clone())).collect();
+        assert_eq!(marked.len(), 3);
+        assert!(marked.iter().any(|(p, pick)| p == "x.gui" && pick.as_deref() == Some("B")), "{marked:?}");
+        assert_eq!(marked.iter().filter(|(_, pick)| pick.is_none()).count(), 1, "farm is a real merge");
         patch.update_picks(&user, None, picks).unwrap();
         assert!(patch.picks_to_update(&roots).is_empty());
         assert_eq!(std::fs::read_to_string(patch.root.join("interface/x.gui")).unwrap(), "b's new gui");
