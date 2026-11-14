@@ -50,14 +50,13 @@ A translation with a missing or mistyped placeholder falls back to the English
 sentence at run time, so the app stays usable, but the checker catches it
 before release.
 
-Translations are also collected on Weblate (TODO: link once the project is
-created there); its pull requests land `.po` files here and usually need no
-code review.
+Translations are collected on
+[Weblate](https://hosted.weblate.org/projects/drukhalmanager/); its pull
+requests land `.po` files here and usually need no code review.
 
 ### Setting up Weblate (project owner)
 
-Weblate keeps its own configuration, so this is what to enter when creating
-the component:
+The project exists; it needs one component with these settings:
 
 | Setting | Value |
 | --- | --- |
