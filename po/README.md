@@ -74,7 +74,8 @@ These are its settings, also useful if it ever has to be recreated:
 | Template for new translations | `po/drukhal-manager.pot` |
 | Repository | `https://github.com/Dukko/DrukhalManager` |
 | Branch | `translations` until PR #160 merges, then `master` |
-| Push | not configured yet (see the follow-ups below) |
+| Version control system | GitHub (via Weblate GitHub app) |
+| Create merge requests | on: pushes a `weblate-…` branch and opens a pull request, never a direct push |
 
 A `.pot` cannot go in **Monolingual base language file**: that field belongs to
 Weblate's monolingual workflow, which expects a real `.po` for the source
@@ -88,13 +89,10 @@ connected, new `.po` files arrive as pull requests: CI runs
 compiles every `.po` it finds, so no other change is needed to ship a
 language.
 
-Two follow-ups for the owner:
-
-- The component currently tracks the `translations` branch, because `master`
-  gains `po/` only when PR #160 merges. Switch it to `master` after that.
-- Pushing is not configured yet, so translations stay in Weblate. Connect the
-  Weblate GitHub app (or a deploy key) to have them arrive as pull requests;
-  until then, download them from the component's *Files* page.
+One follow-up for the owner: the component currently tracks the `translations`
+branch, because `master` gains `po/` only when PR #160 merges. Switch it to
+`master` after that. Pull requests from Weblate target the tracked branch, so
+until then they land on `translations`.
 
 A repository browser of
 `https://github.com/Dukko/DrukhalManager/blob/{{branch}}/{{filename}}#L{{line}}`
