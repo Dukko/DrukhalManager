@@ -66,6 +66,8 @@ fn write(user_dir: &Path, backup_dir: &Path, key: &str, list: &[String]) -> io::
         None => None,
     };
 
+    // Before the game's first start, its folder isn't there yet.
+    std::fs::create_dir_all(user_dir)?;
     let tmp = path.with_extension("json.drukhal-tmp");
     {
         let mut file = std::fs::File::create(&tmp)?;
@@ -124,9 +126,11 @@ mod tests {
     #[test]
     fn save_creates_missing_file() {
         let dir = std::env::temp_dir().join(format!("drukhal-load-order-new-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        assert!(save(&dir, &dir.join("backups"), &["mod/a.mod".into()]).unwrap().is_none());
-        let saved: Value = serde_json::from_str(&std::fs::read_to_string(dir.join(FILE_NAME)).unwrap()).unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+        // The game's folder too, as before its first start.
+        let user = dir.join("Stellaris");
+        assert!(save(&user, &dir.join("backups"), &["mod/a.mod".into()]).unwrap().is_none());
+        let saved: Value = serde_json::from_str(&std::fs::read_to_string(user.join(FILE_NAME)).unwrap()).unwrap();
         assert_eq!(saved, serde_json::json!({"enabled_mods": ["mod/a.mod"], "disabled_dlcs": []}));
         std::fs::remove_dir_all(dir).unwrap();
     }

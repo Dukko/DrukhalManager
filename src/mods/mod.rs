@@ -78,7 +78,12 @@ pub fn discover(user_dir: &Path, workshop_dirs: &[PathBuf]) -> io::Result<Vec<Mo
 
     let states = steam::item_states(workshop_dirs);
     let mut mods = Vec::new();
-    for entry in std::fs::read_dir(user_dir.join("mod"))? {
+    // Before the game's first start there's no mod folder, and no mods.
+    let entries = match std::fs::read_dir(user_dir.join("mod")) {
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
+        entries => entries?,
+    };
+    for entry in entries {
         let path = entry?.path();
         if path.extension().is_none_or(|e| !e.eq_ignore_ascii_case("mod")) || !path.is_file() {
             continue;
@@ -145,6 +150,12 @@ fn resolve_content(d: &Descriptor, user_dir: &Path, workshop_dirs: &[PathBuf]) -
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn finds_no_mods_before_the_game_first_starts() {
+        let root = std::env::temp_dir().join(format!("drukhal-no-user-dir-{}", std::process::id()));
+        assert!(discover(&root.join("Stellaris"), &[]).unwrap().is_empty());
+    }
 
     #[test]
     fn says_what_steam_is_doing_with_workshop_mods() {
