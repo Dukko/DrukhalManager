@@ -97,8 +97,8 @@ Two follow-ups for the owner:
   until then, download them from the component's *Files* page.
 
 A repository browser of
-`https://github.com/Dukko/DrukhalManager/blob/master/{{filename}}#L{{line}}`
-links each string to its source.
+`https://github.com/Dukko/DrukhalManager/blob/{{branch}}/{{filename}}#L{{line}}`
+links each string to its source, whichever branch the component tracks.
 
 For the component's **Translation instructions**, this is enough:
 
