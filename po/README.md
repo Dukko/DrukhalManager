@@ -73,7 +73,7 @@ These are its settings, also useful if it ever has to be recreated:
 | Monolingual base language file | *(leave empty)* |
 | Template for new translations | `po/drukhal-manager.pot` |
 | Repository | `https://github.com/Dukko/DrukhalManager` |
-| Branch | `translations` until PR #160 merges, then `master` |
+| Branch | `master` |
 | Version control system | GitHub (via Weblate GitHub app) |
 | Create merge requests | on: pushes a `weblate-…` branch and opens a pull request, never a direct push |
 
@@ -83,16 +83,10 @@ language. English is the msgid here, so the template belongs in **Template for
 new translations** and the base file stays empty.
 
 The "Update PO files to match POT (msgmerge)" add-on is enabled, so the
-catalogs follow `po/drukhal-manager.pot` automatically. Once git push is
-connected, new `.po` files arrive as pull requests: CI runs
-`po/check-pot.sh` and `po/check-placeholders.sh` on them, and `build.rs`
-compiles every `.po` it finds, so no other change is needed to ship a
-language.
-
-One follow-up for the owner: the component currently tracks the `translations`
-branch, because `master` gains `po/` only when PR #160 merges. Switch it to
-`master` after that. Pull requests from Weblate target the tracked branch, so
-until then they land on `translations`.
+catalogs follow `po/drukhal-manager.pot` automatically, and new `.po` files
+arrive as pull requests against `master`: CI runs `po/check-pot.sh` and
+`po/check-placeholders.sh` on them, and `build.rs` compiles every `.po` it
+finds, so no other change is needed to ship a language.
 
 A repository browser of
 `https://github.com/Dukko/DrukhalManager/blob/{{branch}}/{{filename}}#L{{line}}`
