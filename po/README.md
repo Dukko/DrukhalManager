@@ -50,6 +50,11 @@ A translation with a missing or mistyped placeholder falls back to the English
 sentence at run time, so the app stays usable, but the checker catches it
 before release.
 
+Some button labels start with `_`, for example `_Cancel` or `_Save`: the letter
+after the underscore is the keyboard shortcut. Keep exactly one underscore,
+before a letter that suits the translation (and that no other button on the
+same dialog uses).
+
 Translations are collected on
 [Weblate](https://hosted.weblate.org/projects/drukhalmanager/); its pull
 requests land `.po` files here and usually need no code review.
@@ -74,6 +79,18 @@ catalogs follow `po/drukhal-manager.pot` automatically, and let new `.po` files
 arrive as PRs: CI runs `po/check-pot.sh` and `po/check-placeholders.sh` on
 them, and `build.rs` compiles every `.po` it finds, so no other change is
 needed to ship a language.
+
+A repository browser of
+`https://github.com/Dukko/DrukhalManager/blob/master/{{filename}}#L{{line}}`
+links each string to its source.
+
+For the component's **Translation instructions**, this is enough:
+
+> English is the source and the message id. Keep every `{name}` placeholder
+> exactly as it is; you can move it within the sentence. Keep exactly one `_`
+> before a letter in button labels such as `_Cancel`: that letter is the
+> keyboard shortcut. Keep button labels short, and ask in a comment when a
+> string needs more context.
 
 ## For developers
 
