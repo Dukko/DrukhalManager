@@ -1,0 +1,61 @@
+name: Windows bundle
+
+# Builds DrukhalManager for Windows with the GTK it runs on
+# (packaging/windows/bundle.sh), checks it starts outside MSYS2 and uploads
+# the folder as an artifact to try out. Runs by hand, on PRs that touch the
+# packaging, and from release workflows through workflow_call.
+
+on:
+  workflow_dispatch:
+  workflow_call:
+  pull_request:
+    paths:
+      - packaging/windows/**
+      - build.rs
+      - .github/workflows/windows-bundle.yml
+
+permissions:
+  contents: read
+
+jobs:
+  bundle:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: >-
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-pkgconf
+            mingw-w64-ucrt-x86_64-gtk4
+            mingw-w64-ucrt-x86_64-libadwaita
+            mingw-w64-ucrt-x86_64-librsvg
+            mingw-w64-ucrt-x86_64-adwaita-icon-theme
+            mingw-w64-ucrt-x86_64-rust
+      - name: Bundle
+        run: packaging/windows/bundle.sh target/windows-bundle/DrukhalManager
+      - name: Show the loader cache
+        run: grep '^"' target/windows-bundle/DrukhalManager/lib/gdk-pixbuf-2.0/2.10.0/loaders.cache
+      # Without MSYS2 on PATH, a missing DLL stops the app at once. Still
+      # running after a while means it got as far as its window.
+      - name: Starts outside MSYS2
+        shell: pwsh
+        run: |
+          $env:PATH = "C:\Windows\System32;C:\Windows"
+          $app = Start-Process -PassThru -FilePath target\windows-bundle\DrukhalManager\bin\DrukhalManager.exe
+          Start-Sleep -Seconds 20
+          if ($app.HasExited) {
+            Write-Error ("DrukhalManager exited with code 0x{0:X8}" -f $app.ExitCode)
+            exit 1
+          }
+          Stop-Process -Id $app.Id -Force
+      - uses: actions/upload-artifact@v4
+        with:
+          name: DrukhalManager-windows
+          path: target/windows-bundle
+          if-no-files-found: error
