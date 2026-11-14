@@ -65,14 +65,19 @@ The project exists; it needs one component with these settings:
 
 | Setting | Value |
 | --- | --- |
-| Component type | gettext PO file |
+| File format | Gettext PO file (bilingual) |
 | Source language | English |
-| Source language file | `po/drukhal-manager.pot` |
 | File mask | `po/*.po` |
-| Monolingual translations | no |
+| Monolingual base language file | *(leave empty)* |
+| Template for new translations | `po/drukhal-manager.pot` |
 | Repository | `https://github.com/Dukko/DrukhalManager` |
 | Branch | `master` |
 | Push | open a pull request per translation change (no direct pushes to `master`) |
+
+A `.pot` cannot go in **Monolingual base language file**: that field belongs to
+Weblate's monolingual workflow, which expects a real `.po` for the source
+language. English is the msgid here, so the template belongs in **Template for
+new translations** and the base file stays empty.
 
 Turn on Weblate's "Update PO files to match POT (msgmerge)" add-on so the
 catalogs follow `po/drukhal-manager.pot` automatically, and let new `.po` files
