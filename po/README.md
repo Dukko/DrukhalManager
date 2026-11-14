@@ -56,12 +56,14 @@ before a letter that suits the translation (and that no other button on the
 same dialog uses).
 
 Translations are collected on
-[Weblate](https://hosted.weblate.org/projects/drukhalmanager/); its pull
+[Weblate](https://hosted.weblate.org/projects/drukhalmanager/drukhalmanager/); its pull
 requests land `.po` files here and usually need no code review.
 
-### Setting up Weblate (project owner)
+### Weblate component (project owner)
 
-The project exists; it needs one component with these settings:
+The component is set up at
+[hosted.weblate.org/projects/drukhalmanager/drukhalmanager](https://hosted.weblate.org/projects/drukhalmanager/drukhalmanager/).
+These are its settings, also useful if it ever has to be recreated:
 
 | Setting | Value |
 | --- | --- |
@@ -71,19 +73,28 @@ The project exists; it needs one component with these settings:
 | Monolingual base language file | *(leave empty)* |
 | Template for new translations | `po/drukhal-manager.pot` |
 | Repository | `https://github.com/Dukko/DrukhalManager` |
-| Branch | `master` |
-| Push | open a pull request per translation change (no direct pushes to `master`) |
+| Branch | `translations` until PR #160 merges, then `master` |
+| Push | not configured yet (see the follow-ups below) |
 
 A `.pot` cannot go in **Monolingual base language file**: that field belongs to
 Weblate's monolingual workflow, which expects a real `.po` for the source
 language. English is the msgid here, so the template belongs in **Template for
 new translations** and the base file stays empty.
 
-Turn on Weblate's "Update PO files to match POT (msgmerge)" add-on so the
-catalogs follow `po/drukhal-manager.pot` automatically, and let new `.po` files
-arrive as PRs: CI runs `po/check-pot.sh` and `po/check-placeholders.sh` on
-them, and `build.rs` compiles every `.po` it finds, so no other change is
-needed to ship a language.
+The "Update PO files to match POT (msgmerge)" add-on is enabled, so the
+catalogs follow `po/drukhal-manager.pot` automatically. Once git push is
+connected, new `.po` files arrive as pull requests: CI runs
+`po/check-pot.sh` and `po/check-placeholders.sh` on them, and `build.rs`
+compiles every `.po` it finds, so no other change is needed to ship a
+language.
+
+Two follow-ups for the owner:
+
+- The component currently tracks the `translations` branch, because `master`
+  gains `po/` only when PR #160 merges. Switch it to `master` after that.
+- Pushing is not configured yet, so translations stay in Weblate. Connect the
+  Weblate GitHub app (or a deploy key) to have them arrive as pull requests;
+  until then, download them from the component's *Files* page.
 
 A repository browser of
 `https://github.com/Dukko/DrukhalManager/blob/master/{{filename}}#L{{line}}`
