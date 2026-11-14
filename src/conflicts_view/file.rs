@@ -9,7 +9,7 @@ use adw::prelude::*;
 use gtk::{gio, glib};
 
 use super::object::keep_alive;
-use super::{Item, Page, diff_bar, file_folder, file_name, merge_controls, note, option_toggle, plural};
+use super::{Item, Page, diff_bar, file_folder, file_name, merge_controls, note, option_toggle};
 use crate::diff_view::{Compare, Header, Pair};
 use crate::merge::file_merge;
 use crate::merge::patch;
@@ -38,9 +38,9 @@ struct Version {
     /// The mod's scanned position; `None` for the base game.
     position: Option<usize>,
     /// The text, or why it can't be shown.
-    text: Result<String, &'static str>,
+    text: Result<String, String>,
     /// For an image, the copy, or why it can't be shown.
-    image: Option<Result<ImageCopy, &'static str>>,
+    image: Option<Result<ImageCopy, String>>,
 }
 
 pub struct FileView {
@@ -83,22 +83,22 @@ impl FileView {
         let view = self.clone();
         glib::spawn_future_local(async move {
             let versions = gio::spawn_blocking(move || {
-                let read_image = |dir: &std::path::Path| -> Result<ImageCopy, &'static str> {
-                    let bytes = std::fs::read(dir.join(&path)).map_err(|_| "Could not read this copy")?;
+                let read_image = |dir: &std::path::Path| -> Result<ImageCopy, String> {
+                    let bytes = std::fs::read(dir.join(&path)).map_err(|_| t!("Could not read this copy"))?;
                     if bytes.len() > MAX_IMAGE_SIZE {
-                        return Err("Too big to show");
+                        return Err(t!("Too big to show"));
                     }
                     let decoded = if bytes.starts_with(b"DDS ") { Some(crate::dds::decode(&bytes)?) } else { None };
                     Ok(ImageCopy { bytes, decoded })
                 };
-                let image_of = |dir: Option<&std::path::Path>| image.then(|| dir.map_or(Err("The mod's files weren't found"), read_image));
-                let read = |dir: &std::path::Path| -> Result<String, &'static str> {
-                    let bytes = std::fs::read(dir.join(&path)).map_err(|_| "Could not read this copy")?;
+                let image_of = |dir: Option<&std::path::Path>| image.then(|| dir.map_or(Err(t!("The mod's files weren't found")), read_image));
+                let read = |dir: &std::path::Path| -> Result<String, String> {
+                    let bytes = std::fs::read(dir.join(&path)).map_err(|_| t!("Could not read this copy"))?;
                     if bytes.len() > MAX_SIZE {
-                        return Err("Too big to show");
+                        return Err(t!("Too big to show"));
                     }
                     if bytes[..bytes.len().min(8192)].contains(&0) {
-                        return Err("Not a text file");
+                        return Err(t!("Not a text file"));
                     }
                     Ok(String::from_utf8_lossy(&bytes).into_owned())
                 };
@@ -106,10 +106,10 @@ impl FileView {
                 if let Some(dir) = &game_dir
                     && dir.join(&path).is_file()
                 {
-                    versions.push(Version { label: "Base Game".into(), position: None, text: read(dir), image: image_of(Some(dir)) });
+                    versions.push(Version { label: t!("Base Game"), position: None, text: read(dir), image: image_of(Some(dir)) });
                 }
                 for (label, position, root) in mods {
-                    let text = root.as_deref().map_or(Err("The mod's files weren't found"), read);
+                    let text = root.as_deref().map_or(Err(t!("The mod's files weren't found")), read);
                     versions.push(Version { label, position, text, image: image_of(root.as_deref()) });
                 }
                 versions
@@ -129,7 +129,9 @@ impl FileView {
         let c = &analysis.report.files[self.index];
         let winner = *c.mods.last().unwrap();
         let folder = file_folder(&c.path);
-        let subtitle = format!("Overridden file · {} · {} · {} wins", if folder.is_empty() { "top level" } else { folder }, plural(c.mods.len(), "mod ships it", "mods ship it"), analysis.name(winner));
+        let where_ = if folder.is_empty() { t!("top level") } else { folder.to_owned() };
+        let mods = tnf!("{count} mod ships it", "{count} mods ship it", count = c.mods.len());
+        let subtitle = tf!("Overridden file · {where_} · {mods} · {name} wins", where_ = &where_, mods = &mods, name = analysis.name(winner));
         let header = page.detail_header(file_name(&c.path), &subtitle);
         header.actions.append(&page.ignore_button(self.item));
         let merged = (hooks.is_file_merged)(&c.path);
@@ -137,7 +139,7 @@ impl FileView {
         if file_merge::mergeable(&c.path) {
             let (_, button) = merge_controls(merged, stale.as_deref());
             button.set_css_classes(&["suggested-action"]);
-            button.set_tooltip_text(Some("Combine the copies object by object, using AI only where they disagree"));
+            button.set_tooltip_text(Some(&t!("Combine the copies object by object, using AI only where they disagree")));
             page.bind_key("merge-ai", &button);
             let weak = Rc::downgrade(self);
             let index = self.index;
@@ -164,10 +166,10 @@ impl FileView {
         while let Some(child) = self.notes.first_child() {
             self.notes.remove(&child);
         }
-        self.notes.append(&note(&format!("The game only uses the copy from {}, the mod loaded last. The others' changes to this file are lost.", analysis.name(winner)), None));
+        self.notes.append(&note(&tf!("The game only uses the copy from {name}, the mod loaded last. The others' changes to this file are lost.", name = analysis.name(winner)), None));
         match (&stale, merged) {
-            (Some(reasons), _) => self.notes.append(&note(&format!("The merged patch's copy is out of date: {}.", reasons.join("; ")), Some("warning"))),
-            (None, true) => self.notes.append(&note("The merged patch holds its own copy, which is used instead of all of these.", Some("success"))),
+            (Some(reasons), _) => self.notes.append(&note(&tf!("The merged patch's copy is out of date: {reasons}.", reasons = reasons.join("; ")), Some("warning"))),
+            (None, true) => self.notes.append(&note(&t!("The merged patch holds its own copy, which is used instead of all of these."), Some("success"))),
             _ => {}
         }
         if let Some(error) = &*self.error.borrow() {
@@ -185,7 +187,7 @@ impl FileView {
                     header.chips.insert(&super::arrow(), -1);
                 }
                 let class = if i == left || i == right { "current" } else { "later" };
-                let button = gtk::Button::builder().child(&super::chip(&v.label, v.position, class)).css_classes(["flat", "chip-button"]).tooltip_text(format!("Compare {} with the copy before it", v.label)).build();
+                let button = gtk::Button::builder().child(&super::chip(&v.label, v.position, class)).css_classes(["flat", "chip-button"]).tooltip_text(tf!("Compare {name} with the copy before it", name = &v.label)).build();
                 let weak = Rc::downgrade(self);
                 button.connect_clicked(move |_| {
                     if let Some(view) = weak.upgrade() {
@@ -197,7 +199,7 @@ impl FileView {
             }
             self.body.set_child(Some(&self.cards(&page, &versions[left], &versions[right], versions.first().filter(|v| v.position.is_none()))));
         } else if versions.is_some() {
-            self.body.set_child(Some(&adw::StatusPage::builder().icon_name("dialog-warning-symbolic").title("Nothing to Compare").description("The mods' copies of this file weren't found. Rescan, in case the mods changed.").build()));
+            self.body.set_child(Some(&adw::StatusPage::builder().icon_name("dialog-warning-symbolic").title(t!("Nothing to Compare")).description(t!("The mods' copies of this file weren't found. Rescan, in case the mods changed.")).build()));
         }
         self.header.set_child(Some(&header.widget));
     }
@@ -207,9 +209,9 @@ impl FileView {
             return self.image_cards(page, left, right);
         }
         let (Ok(left_text), Ok(right_text)) = (&left.text, &right.text) else {
-            let reason = left.text.as_ref().err().or(right.text.as_ref().err()).copied().unwrap_or_default();
-            let lines: Vec<String> = [left, right].iter().map(|v| format!("{}: {}", v.label, v.text.as_ref().err().copied().unwrap_or("text"))).collect();
-            return adw::StatusPage::builder().icon_name("text-x-generic-symbolic").title(reason).description(format!("These copies can't be shown side by side.\n{}", lines.join("\n"))).build().upcast();
+            let reason = left.text.as_ref().err().or(right.text.as_ref().err()).cloned().unwrap_or_default();
+            let lines: Vec<String> = [left, right].iter().map(|v| tf!("{name}: {reason}", name = &v.label, reason = v.text.as_ref().err().cloned().unwrap_or_else(|| t!("text")))).collect();
+            return adw::StatusPage::builder().icon_name("text-x-generic-symbolic").title(reason).description(tf!("These copies can't be shown side by side.\n{lines}", lines = lines.join("\n"))).build().upcast();
         };
         let analysis = &page.analysis;
         let c = &analysis.report.files[self.index];
@@ -217,17 +219,17 @@ impl FileView {
         let pair = Pair::new(false);
         for (card, v, key) in [(&pair.left, left, "use-left"), (&pair.right, right, "use-right")] {
             let header = match v.position {
-                None => Header { title: v.label.clone(), subtitle: "The game's own copy".into(), color: None, badge: None },
+                None => Header { title: v.label.clone(), subtitle: t!("The game's own copy"), color: None, badge: None },
                 Some(p) => Header {
                     title: v.label.clone(),
                     subtitle: analysis.origin(p, &c.path),
                     color: Some(p),
-                    badge: Some(if p == winner { ("Used in game".into(), Some("success")) } else { ("Overridden".into(), None) }),
+                    badge: Some(if p == winner { (t!("Used in game"), Some("success")) } else { (t!("Overridden"), None) }),
                 },
             };
             card.set_header(&header);
             if let Some(p) = v.position.filter(|&p| p != winner) {
-                let use_it = gtk::Button::builder().label("Use This Version").tooltip_text(format!("Save this copy to the merged patch, so it's used instead of {}'s", analysis.name(winner))).build();
+                let use_it = gtk::Button::builder().label(t!("Use This Version")).tooltip_text(tf!("Save this copy to the merged patch, so it's used instead of {name}'s", name = analysis.name(winner))).build();
                 let (weak, text) = (Rc::downgrade(self), v.text.clone().unwrap_or_default());
                 use_it.connect_clicked(move |_| {
                     if let Some(view) = weak.upgrade() {
@@ -250,10 +252,10 @@ impl FileView {
         };
         bar.extra.append(&self.merge_tool_button(page, left, right, base.and_then(|b| b.text.clone().ok())));
         if has_base {
-            bar.extra.append(&option_toggle(&page.hooks, "Base Game", "Mark what each copy changed from the base game, instead of the differences between the two", |s| s.compare_base, |s, v| s.compare_base = v, rerender.clone()));
+            bar.extra.append(&option_toggle(&page.hooks, &t!("Base Game"), &t!("Mark what each copy changed from the base game, instead of the differences between the two"), |s| s.compare_base, |s, v| s.compare_base = v, rerender.clone()));
         }
-        bar.extra.append(&option_toggle(&page.hooks, "Changed Lines Only", "Fold runs of lines that are the same in both, keeping a few around each difference. Click a fold to open it", |s| s.fold_unchanged, |s, v| s.fold_unchanged = v, rerender.clone()));
-        bar.extra.append(&option_toggle(&page.hooks, "Ignore Spacing", "Don't count lines that only differ in spacing or indentation", |s| s.ignore_whitespace, |s, v| s.ignore_whitespace = v, rerender));
+        bar.extra.append(&option_toggle(&page.hooks, &t!("Changed Lines Only"), &t!("Fold runs of lines that are the same in both, keeping a few around each difference. Click a fold to open it"), |s| s.fold_unchanged, |s, v| s.fold_unchanged = v, rerender.clone()));
+        bar.extra.append(&option_toggle(&page.hooks, &t!("Ignore Spacing"), &t!("Don't count lines that only differ in spacing or indentation"), |s| s.ignore_whitespace, |s, v| s.ignore_whitespace = v, rerender));
         let session = page.hooks.session.borrow();
         let compare = match base.and_then(|b| b.text.as_ref().ok()) {
             Some(b) if has_base && session.compare_base => Compare::Base(b.clone()),
@@ -283,13 +285,13 @@ impl FileView {
             let titles = gtk::Box::builder().orientation(gtk::Orientation::Vertical).hexpand(true).build();
             titles.append(&gtk::Label::builder().label(&v.label).xalign(0.0).ellipsize(gtk::pango::EllipsizeMode::End).css_classes(["heading"]).build());
             let origin = match v.position {
-                None => "The game's own copy".to_owned(),
+                None => t!("The game's own copy"),
                 Some(p) => analysis.origin(p, &c.path),
             };
             titles.append(&gtk::Label::builder().label(&origin).xalign(0.0).ellipsize(gtk::pango::EllipsizeMode::Middle).css_classes(["dim-label", "caption"]).build());
             top.append(&titles);
             if let Some(p) = v.position {
-                let (label, class) = if p == winner { ("Used in game", "success") } else { ("Overridden", "dim-label") };
+                let (label, class) = if p == winner { (t!("Used in game"), "success") } else { (t!("Overridden"), "dim-label") };
                 top.append(&gtk::Label::builder().label(label).valign(gtk::Align::Center).css_classes(["caption", class]).build());
             }
             inner.append(&top);
@@ -305,13 +307,13 @@ impl FileView {
                             inner.append(&picture);
                             inner.append(&gtk::Label::builder().label(format!("{} × {} · {}", texture.width(), texture.height(), glib::format_size(copy.bytes.len() as u64))).css_classes(["dim-label", "caption", "numeric"]).build());
                         }
-                        Err(_) => inner.append(&image_problem("GTK can't read this image", copy.bytes.len())),
+                        Err(_) => inner.append(&image_problem(&t!("GTK can't read this image"), copy.bytes.len())),
                     }
                 }
                 Err(reason) => inner.append(&image_problem(reason, 0)),
             }
             if let (Some(p), Ok(copy)) = (v.position.filter(|&p| p != winner), v.image.as_ref().expect("an image version")) {
-                let use_it = gtk::Button::builder().label("Use This Version").halign(gtk::Align::Center).tooltip_text(format!("Save this copy to the merged patch, so it's used instead of {}'s", analysis.name(winner))).build();
+                let use_it = gtk::Button::builder().label(t!("Use This Version")).halign(gtk::Align::Center).tooltip_text(tf!("Save this copy to the merged patch, so it's used instead of {name}'s", name = analysis.name(winner))).build();
                 let (weak, bytes) = (Rc::downgrade(self), copy.bytes.clone());
                 use_it.connect_clicked(move |_| {
                     if let Some(view) = weak.upgrade() {
@@ -331,7 +333,7 @@ impl FileView {
             return row.upcast();
         }
         let body = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(8).build();
-        body.append(&note("These two copies are identical.", Some("success")));
+        body.append(&note(&t!("These two copies are identical."), Some("success")));
         body.append(&row);
         body.upcast()
     }
@@ -339,14 +341,14 @@ impl FileView {
     /// Opens the two copies in the external merge tool, and saves what's
     /// saved there to the patch.
     fn merge_tool_button(self: &Rc<Self>, page: &Rc<Page>, left: &Version, right: &Version, base: Option<String>) -> gtk::Button {
-        let button = gtk::Button::builder().label("Merge Tool…").tooltip_text("Merge these two copies in your merge tool; what you save there goes into the merged patch").css_classes(["flat"]).build();
+        let button = gtk::Button::builder().label(t!("Merge Tool…")).tooltip_text(t!("Merge these two copies in your merge tool; what you save there goes into the merged patch")).css_classes(["flat"]).build();
         let (left, right) = ((left.label.clone(), left.text.clone().unwrap_or_default()), (right.label.clone(), right.text.clone().unwrap_or_default()));
         let (weak, page_ref) = (Rc::downgrade(self), Rc::downgrade(page));
         button.connect_clicked(move |button| {
             let (Some(view), Some(page)) = (weak.upgrade(), page_ref.upgrade()) else { return };
             let command = (page.hooks.merge_tool)();
             if command.is_empty() {
-                (page.hooks.toast)("Choose a merge tool in Preferences first");
+                (page.hooks.toast)(&t!("Choose a merge tool in Preferences first"));
                 return (page.hooks.open_merge_tool_settings)();
             }
             let tool = super::merge_tool_name(&command);
@@ -358,9 +360,9 @@ impl FileView {
                 match result {
                     Ok(Some(merged)) => {
                         let name = file_name(&page.analysis.report.files[view.index].path).to_owned();
-                        view.save_copy(merged.as_bytes(), &format!("Saved your merge of {name}"));
+                        view.save_copy(merged.as_bytes(), &tf!("Saved your merge of {name}", name = name));
                     }
-                    Ok(None) => (page.hooks.toast)(&format!("{tool} was closed without saving, so nothing changed")),
+                    Ok(None) => (page.hooks.toast)(&tf!("{tool} was closed without saving, so nothing changed", tool = tool)),
                     Err(message) => {
                         view.error.replace(Some(message));
                         view.render();
@@ -375,7 +377,7 @@ impl FileView {
     /// mod's.
     fn use_version(self: &Rc<Self>, position: usize, contents: &[u8]) {
         let Some(page) = self.page.upgrade() else { return };
-        let message = format!("Using {}'s copy of {}", page.analysis.name(position), file_name(&page.analysis.report.files[self.index].path));
+        let message = tf!("Using {name}'s copy of {file}", name = page.analysis.name(position), file = file_name(&page.analysis.report.files[self.index].path));
         self.save_copy(contents, &message);
     }
 

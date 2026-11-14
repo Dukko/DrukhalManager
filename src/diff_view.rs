@@ -354,7 +354,7 @@ impl Card {
         let free = self.bubbles.borrow().iter().find(|(b, _)| !b.is_visible()).cloned();
         let (bubble, on_click) = free.unwrap_or_else(|| {
             let bubble = gtk::Button::builder()
-                .tooltip_text("Show these lines")
+                .tooltip_text(t!("Show these lines"))
                 .css_classes(["fold-bubble"])
                 .cursor(&gtk::gdk::Cursor::from_name("pointer", None).expect("the pointer cursor exists"))
                 .build();
@@ -560,7 +560,7 @@ impl Pair {
         group.add_action(&action);
         self.left.code.insert_action_group("diff", Some(&group));
         let menu = gio::Menu::new();
-        menu.append(Some("Put This In"), Some("diff.put-in"));
+        menu.append(Some(&t!("Put This In")), Some("diff.put-in"));
         self.left.code.set_extra_menu(Some(&menu));
 
         // Before the text view opens its menu, note what's under the pointer.

@@ -8,31 +8,30 @@ use std::rc::Rc;
 use adw::prelude::*;
 
 use super::Window;
-use crate::conflicts_view::plural;
 use crate::mods::load_order;
 use crate::paradox::dlc;
 
 impl Window {
     pub(super) fn show_dlcs(self: &Rc<Self>) {
         let Some(game) = &self.game else {
-            return self.add_toast(adw::Toast::new("Stellaris wasn't found, so its DLCs can't be listed"));
+            return self.add_toast(adw::Toast::new(&t!("Stellaris wasn't found, so its DLCs can't be listed")));
         };
         let dlcs = dlc::installed(&game.dir);
         if dlcs.is_empty() {
-            return self.add_toast(adw::Toast::new("No DLCs are installed"));
+            return self.add_toast(adw::Toast::new(&t!("No DLCs are installed")));
         }
         let before: BTreeSet<String> = match load_order::DlcLoad::read(&self.paths.user_dir) {
             Ok(load) => load.disabled_dlcs.into_iter().collect(),
-            Err(e) => return self.add_toast(adw::Toast::new(&format!("Could not read the DLC settings: {e}"))),
+            Err(e) => return self.add_toast(adw::Toast::new(&tf!("Could not read the DLC settings: {e}", e = e))),
         };
         let disabled = Rc::new(RefCell::new(before.clone()));
 
         let page = adw::PreferencesPage::new();
         let all = adw::PreferencesGroup::builder()
-            .description("DLCs that are off aren't loaded by the game. In multiplayer, every player needs the same DLCs on, except content packs such as portraits and music. Changes are saved when this closes.")
+            .description(t!("DLCs that are off aren't loaded by the game. In multiplayer, every player needs the same DLCs on, except content packs such as portraits and music. Changes are saved when this closes."))
             .build();
         page.add(&all);
-        let groups = [("Expansions", &["expansion"][..]), ("Story Packs", &["story_pack"]), ("Species Packs", &["species_pack"]), ("Content Packs", &["content_pack"])];
+        let groups: Vec<(String, &[&str])> = vec![(t!("Expansions"), &["expansion"][..]), (t!("Story Packs"), &["story_pack"]), (t!("Species Packs"), &["species_pack"]), (t!("Content Packs"), &["content_pack"])];
         let known: Vec<&str> = groups.iter().flat_map(|(_, c)| c.iter().copied()).collect();
         let mut switches = Vec::new();
         for (title, categories) in groups {
@@ -41,7 +40,7 @@ impl Window {
             if members.is_empty() {
                 continue;
             }
-            let group = adw::PreferencesGroup::builder().title(title).build();
+            let group = adw::PreferencesGroup::builder().title(&title).build();
             for d in members {
                 let row = adw::SwitchRow::builder().title(&d.name).active(!disabled.borrow().contains(&d.id)).use_markup(false).build();
                 let image = gtk::Image::builder().pixel_size(40).css_classes(["mod-thumbnail"]).build();
@@ -63,7 +62,7 @@ impl Window {
             }
             page.add(&group);
         }
-        let on = gtk::Button::builder().label("Turn All On").build();
+        let on = gtk::Button::builder().label(t!("Turn All On")).build();
         let switches = Rc::new(switches);
         on.connect_clicked({
             let switches = switches.clone();
@@ -74,7 +73,7 @@ impl Window {
         let toolbar = adw::ToolbarView::new();
         toolbar.add_top_bar(&header);
         toolbar.set_content(Some(&page));
-        let dialog = adw::Dialog::builder().title("DLC").content_width(560).content_height(680).child(&toolbar).build();
+        let dialog = adw::Dialog::builder().title(t!("DLC")).content_width(560).content_height(680).child(&toolbar).build();
 
         let weak = Rc::downgrade(self);
         dialog.connect_closed(move |_| {
@@ -85,9 +84,9 @@ impl Window {
             }
             let list: Vec<String> = after.iter().cloned().collect();
             match load_order::save_disabled_dlcs(&ui.paths.user_dir, &ui.paths.backup_dir, &list) {
-                Ok(_) if list.is_empty() => ui.add_toast(adw::Toast::new("Every DLC is on")),
-                Ok(_) => ui.add_toast(adw::Toast::new(&format!("{} off", plural(list.len(), "DLC is", "DLCs are")))),
-                Err(e) => ui.add_toast(adw::Toast::builder().title(format!("Could not save the DLC settings: {e}")).timeout(0).build()),
+                Ok(_) if list.is_empty() => ui.add_toast(adw::Toast::new(&t!("Every DLC is on"))),
+                Ok(_) => ui.add_toast(adw::Toast::new(&tnf!("{count} DLC is off", "{count} DLCs are off", count = list.len()))),
+                Err(e) => ui.add_toast(adw::Toast::builder().title(tf!("Could not save the DLC settings: {e}", e = e)).timeout(0).build()),
             }
         });
         dialog.present(Some(&self.window));

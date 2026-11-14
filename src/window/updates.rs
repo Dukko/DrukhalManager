@@ -38,7 +38,7 @@ impl Window {
             .application_name("DrukhalManager")
             .application_icon(crate::APP_ID)
             .version(update::CURRENT)
-            .comments("Manage Stellaris mods and merge their conflicts")
+            .comments(t!("Manage Stellaris mods and merge their conflicts"))
             .developer_name("Dukko")
             .license_type(gtk::License::MitX11)
             .website("https://github.com/Dukko/DrukhalManager")
@@ -46,7 +46,7 @@ impl Window {
             .debug_info(self.diagnostics())
             .debug_info_filename("DrukhalManager diagnostics.txt")
             .build();
-        about.add_acknowledgement_section(Some("A Fork Of"), &["Irony Mod Manager by Mario (bcssov) https://github.com/bcssov/IronyModManager"]);
+        about.add_acknowledgement_section(Some(&t!("A Fork Of")), &["Irony Mod Manager by Mario (bcssov) https://github.com/bcssov/IronyModManager"]);
         about.add_legal_section("Irony Mod Manager", Some("© 2020 Mario"), gtk::License::MitX11, None);
         about.present(Some(&self.window));
     }
@@ -76,13 +76,13 @@ impl Window {
 
     fn copy_diagnostics(self: &Rc<Self>) {
         self.window.clipboard().set_text(&self.diagnostics());
-        self.add_toast(adw::Toast::new("Copied the diagnostics; paste them into your bug report"));
+        self.add_toast(adw::Toast::new(&t!("Copied the diagnostics; paste them into your bug report")));
     }
 
     fn open_log_folder(self: &Rc<Self>) {
         let dir = crate::diagnostics::dir();
         if let Err(e) = std::fs::create_dir_all(&dir) {
-            return self.add_toast(adw::Toast::builder().title(format!("Could not open the log folder: {e}")).timeout(0).build());
+            return self.add_toast(adw::Toast::builder().title(tf!("Could not open the log folder: {error}", error = e)).timeout(0).build());
         }
         gtk::FileLauncher::new(Some(&gio::File::for_path(dir))).launch(Some(&self.window), None::<&gio::Cancellable>, |_| {});
     }
@@ -130,14 +130,14 @@ impl Window {
             return;
         }
         let title = match release {
-            Some(r) if r.prerelease => format!("Test version {} of DrukhalManager is available", r.version),
-            Some(r) => format!("DrukhalManager {} is available", r.version),
-            None => "A new version of DrukhalManager is available".to_owned(),
+            Some(r) if r.prerelease => tf!("Test version {version} of DrukhalManager is available", version = &r.version),
+            Some(r) => tf!("DrukhalManager {version} is available", version = &r.version),
+            None => t!("A new version of DrukhalManager is available"),
         };
         // Test versions aren't in the Flatpak repository; Preferences says
         // how to get one.
         let installable = crate::platform::is_flatpak() && !release.is_some_and(|r| r.prerelease);
-        let (label, action) = if installable { ("Update", "win.install-update") } else { ("Details", "win.show-update") };
+        let (label, action) = if installable { (t!("Update"), "win.install-update") } else { (t!("Details"), "win.show-update") };
         self.add_toast(adw::Toast::builder().title(title).button_label(label).action_name(action).timeout(0).build());
     }
 
@@ -149,7 +149,7 @@ impl Window {
         let monitor = match update::Monitor::new().await {
             Ok(m) => Rc::new(m),
             Err(e) => {
-                self.add_toast(adw::Toast::builder().title(format!("Could not reach Flatpak to update: {}", e.message())).timeout(0).build());
+                self.add_toast(adw::Toast::builder().title(tf!("Could not reach Flatpak to update: {error}", error = e.message())).timeout(0).build());
                 return None;
             }
         };
@@ -183,7 +183,7 @@ impl Window {
                 // desktops without a portal dialog for that (niri, sway…) the
                 // question can't be shown.
                 let message = if e.matches(gio::DBusError::ServiceUnknown) || e.message().contains("ServiceUnknown") {
-                    "Flatpak could not ask whether DrukhalManager may update itself. Run “flatpak update io.github.dukko.DrukhalManager” instead".to_owned()
+                    t!("Flatpak could not ask whether DrukhalManager may update itself. Run “flatpak update io.github.dukko.DrukhalManager” instead")
                 } else {
                     e.message().to_owned()
                 };
@@ -203,16 +203,16 @@ impl Window {
         });
         match progress {
             Progress::Running(percent) => {
-                toast.set_title(&format!("Updating DrukhalManager… {percent}%"));
+                toast.set_title(&tf!("Updating DrukhalManager… {percent}%", percent = percent));
                 return;
             }
             Progress::Done => {
-                toast.set_title("DrukhalManager was updated. Restart to use the new version.");
-                toast.set_button_label(Some("Restart"));
+                toast.set_title(&t!("DrukhalManager was updated. Restart to use the new version."));
+                toast.set_button_label(Some(&t!("Restart")));
                 toast.set_action_name(Some("win.restart"));
             }
             Progress::NothingToDo => {
-                toast.set_title("No update to install yet. A new release can take a few minutes to reach Flatpak.");
+                toast.set_title(&t!("No update to install yet. A new release can take a few minutes to reach Flatpak."));
                 toast.set_timeout(8);
             }
             Progress::Failed(message) => toast.set_title(&failure(&message)),
@@ -240,7 +240,7 @@ impl Window {
                 }
                 Err(e) => ui.add_toast(
                     adw::Toast::builder()
-                        .title(format!("Could not restart: {}. Close DrukhalManager and open it again.", e.message()))
+                        .title(tf!("Could not restart: {error}. Close DrukhalManager and open it again.", error = e.message()))
                         .timeout(0)
                         .build(),
                 ),
@@ -254,9 +254,9 @@ impl Window {
 /// those, from a terminal or a software centre.
 fn failure(message: &str) -> String {
     if message.to_lowercase().contains("permission") {
-        return "This update needs a new permission, which only you can approve. Run “flatpak update io.github.dukko.DrukhalManager” in a terminal, or update from your software centre".to_owned();
+        return t!("This update needs a new permission, which only you can approve. Run “flatpak update io.github.dukko.DrukhalManager” in a terminal, or update from your software centre");
     }
-    format!("Could not update: {message}")
+    tf!("Could not update: {error}", error = message)
 }
 
 #[cfg(test)]

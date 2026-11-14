@@ -10,7 +10,6 @@ use adw::prelude::*;
 use gtk::{gio, glib};
 
 use super::Window;
-use crate::conflicts_view::plural;
 use crate::merge::patch;
 use crate::mods::smart_sort::{self, Category, Placement, Profile};
 use crate::mods::{Mod, archive};
@@ -32,28 +31,28 @@ impl Window {
             (state.mods.clone(), state.enabled.clone())
         };
         if enabled.is_empty() {
-            return self.add_toast(adw::Toast::new("No mods are enabled"));
+            return self.add_toast(adw::Toast::new(&t!("No mods are enabled")));
         }
         let overrides: Rc<RefCell<HashMap<String, Category>>> = Rc::new(RefCell::new(
             self.settings.borrow().sort_categories.iter().filter_map(|(id, key)| Some((id.clone(), Category::from_key(key)?))).collect(),
         ));
 
-        let cancel = gtk::Button::with_label("Cancel");
-        let apply = gtk::Button::builder().label("Apply").css_classes(["suggested-action"]).sensitive(false).build();
+        let cancel = gtk::Button::with_label(&t!("Cancel"));
+        let apply = gtk::Button::builder().label(t!("Apply")).css_classes(["suggested-action"]).sensitive(false).build();
         let header = adw::HeaderBar::builder().show_start_title_buttons(false).show_end_title_buttons(false).build();
         header.pack_start(&cancel);
         header.pack_end(&apply);
         let groups = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(24).margin_top(12).margin_bottom(24).margin_start(12).margin_end(12).build();
         let clamp = adw::Clamp::builder().maximum_size(720).child(&groups).build();
         let scroll = gtk::ScrolledWindow::builder().hscrollbar_policy(gtk::PolicyType::Never).vexpand(true).child(&clamp).build();
-        let loading = adw::StatusPage::builder().title("Reading Mods…").child(&adw::Spinner::new()).build();
+        let loading = adw::StatusPage::builder().title(t!("Reading Mods…")).child(&adw::Spinner::new()).build();
         let stack = gtk::Stack::new();
         stack.add_named(&loading, Some("loading"));
         stack.add_named(&scroll, Some("plan"));
         let toolbar = adw::ToolbarView::new();
         toolbar.add_top_bar(&header);
         toolbar.set_content(Some(&stack));
-        let dialog = adw::Dialog::builder().title("Smart Sort").content_width(720).content_height(760).child(&toolbar).build();
+        let dialog = adw::Dialog::builder().title(t!("Smart Sort")).content_width(720).content_height(760).child(&toolbar).build();
         cancel.connect_clicked(glib::clone!(
             #[weak]
             dialog,
@@ -79,11 +78,12 @@ impl Window {
                 let moved = order.iter().zip(&input.enabled).filter(|(a, b)| a != b).count();
                 let intro = gtk::Label::builder()
                     .label(if moved == 0 {
-                        "Your load order already follows this order.".to_owned()
+                        t!("Your load order already follows this order.")
                     } else {
-                        format!(
-                            "Mods are grouped by what they change, the way the Stellaris community's load order guides suggest; {} change place. Sub-mods go directly below the mod they need, and every mod still loads after its dependencies. If a mod is in the wrong section, choose another for it; it's remembered.",
-                            plural(moved, "mod", "mods")
+                        tnf!(
+                            "Mods are grouped by what they change, the way the Stellaris community's load order guides suggest; {count} mod changes place. Sub-mods go directly below the mod they need, and every mod still loads after its dependencies. If a mod is in the wrong section, choose another for it; it's remembered.",
+                            "Mods are grouped by what they change, the way the Stellaris community's load order guides suggest; {count} mods change place. Sub-mods go directly below the mod they need, and every mod still loads after its dependencies. If a mod is in the wrong section, choose another for it; it's remembered.",
+                            count = moved
                         )
                     })
                     .wrap(true)
@@ -99,14 +99,14 @@ impl Window {
                     if members.is_empty() {
                         continue;
                     }
-                    let group = adw::PreferencesGroup::builder().title(glib::markup_escape_text(&format!("{} · {}", category.title(), members.len())).as_str()).description(category.description()).build();
+                    let group = adw::PreferencesGroup::builder().title(glib::markup_escape_text(&tf!("{category} · {count}", category = category.title(), count = members.len())).as_str()).description(category.description()).build();
                     for p in members {
                         position += 1;
                         let m = &input.mods[p.index];
                         let was = input.enabled.iter().position(|&i| i == p.index).map_or(0, |at| at + 1);
                         let mut subtitle = p.reason.clone();
                         if was != position {
-                            subtitle.push_str(&format!(" · was {was}"));
+                            subtitle.push_str(&tf!(" · was {position}", position = was));
                         }
                         let row = adw::ActionRow::builder().title(m.descriptor.name.trim()).subtitle(&subtitle).use_markup(false).build();
                         row.add_prefix(&gtk::Label::builder().label(position.to_string()).width_chars(3).xalign(1.0).css_classes(["dim-label", "numeric"]).build());
@@ -140,7 +140,7 @@ impl Window {
                 dialog.close();
                 if ui.state.borrow_mut().reorder(order) {
                     ui.refresh();
-                    ui.offer_undo("Sorted the load order into sections");
+                    ui.offer_undo(&t!("Sorted the load order into sections"));
                 }
             }
         ));
@@ -170,16 +170,17 @@ impl Window {
 /// A drop-down to put the mod with `id` in another section, or back in the
 /// one Smart Sort finds for it.
 fn section_picker(p: &Placement, id: &str, overrides: &Rc<RefCell<HashMap<String, Category>>>, render: std::rc::Weak<Render>) -> gtk::DropDown {
-    let mut labels = vec!["Automatic"];
-    labels.extend(Category::ALL.iter().map(|c| c.title()));
+    let mut labels = vec![t!("Automatic")];
+    labels.extend(Category::ALL.iter().map(|c| c.title().to_owned()));
+    let labels: Vec<&str> = labels.iter().map(String::as_str).collect();
     let picker = gtk::DropDown::from_strings(&labels);
     picker.set_valign(gtk::Align::Center);
-    picker.set_tooltip_text(Some("Which section this mod goes in"));
+    picker.set_tooltip_text(Some(&t!("Which section this mod goes in")));
     let chosen = overrides.borrow().get(id).copied();
     picker.set_selected(chosen.and_then(|c| Category::ALL.iter().position(|&x| x == c)).map_or(0, |at| at as u32 + 1));
     if chosen.is_none() {
         // Shows the section it's in, while still following the rules.
-        picker.set_tooltip_text(Some(&format!("Automatic: {}", p.category.title())));
+        picker.set_tooltip_text(Some(&tf!("Automatic: {category}", category = p.category.title())));
     }
     let (overrides, id) = (overrides.clone(), id.to_owned());
     picker.connect_selected_notify(move |picker| {

@@ -68,17 +68,19 @@ impl Build {
         if exe.extension().is_some_and(|e| e.eq_ignore_ascii_case("exe")) { Self::Windows } else { Self::Linux }
     }
 
-    pub fn describe(self) -> &'static str {
+    pub fn describe(self) -> String {
         match self {
-            Self::Linux => "Native Linux build",
-            Self::Windows => "Windows build",
+            Self::Linux => t!("Native Linux build"),
+            Self::Windows => t!("Windows build"),
         }
     }
 }
 
 /// Why players on different builds may not be able to play together, and
 /// what helps.
-pub const BUILDS_DIFFER: &str = "Players report that the native Linux build's checksum doesn't match the Windows build's, even with the same mods and files. Whoever runs the native Linux build can switch to the Windows build through Proton: in Steam, open Stellaris's Properties, and under Compatibility force a Proton version.";
+pub fn builds_differ() -> String {
+    t!("Players report that the native Linux build's checksum doesn't match the Windows build's, even with the same mods and files. Whoever runs the native Linux build can switch to the Windows build through Proton: in Steam, open Stellaris's Properties, and under Compatibility force a Proton version.")
+}
 
 #[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ModReport {

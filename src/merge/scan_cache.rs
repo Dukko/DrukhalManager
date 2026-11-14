@@ -16,7 +16,7 @@ use sha2::{Digest, Sha256};
 
 /// Caches of another version, or written by another version of the app
 /// (whose parsing may differ), are started again.
-const VERSION: u32 = 1;
+const VERSION: u32 = 2;
 const APP: &str = env!("CARGO_PKG_VERSION");
 /// Verdicts not used for this many days are dropped.
 const KEEP_DAYS: u32 = 30;
@@ -35,6 +35,22 @@ pub struct ScanCache {
     changed: bool,
 }
 
+/// Why a file couldn't be read or parsed.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ScanError {
+    pub message: String,
+    /// The line the parser failed at, when the file was read but didn't
+    /// parse. Read failures have none, so the UI can tell a broken file from
+    /// one it lacks the rights to open.
+    pub line: Option<usize>,
+}
+
+impl From<std::io::Error> for ScanError {
+    fn from(e: std::io::Error) -> Self {
+        Self { message: e.to_string(), line: None }
+    }
+}
+
 /// The objects a file defines, as of its size and modification time.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct FileKeys {
@@ -43,7 +59,7 @@ struct FileKeys {
     /// The folder it was read as, which decides how it's parsed.
     category: String,
     /// Its object keys, or why it couldn't be parsed.
-    keys: Result<Vec<String>, String>,
+    keys: Result<Vec<String>, ScanError>,
 }
 
 /// Why a conflict needs no AI to merge, or `None` when it does.
@@ -100,8 +116,8 @@ impl ScanCache {
     /// The object keys of the file at `path`, read as `category`: from the
     /// cache while the file is unchanged, else read and given to `parse`.
     /// A file that can't be read isn't kept, so it's tried again next time.
-    pub fn keys(&mut self, path: &Path, category: &str, parse: impl FnOnce(&str) -> Result<Vec<String>, String>) -> Result<Vec<String>, String> {
-        let read = || std::fs::read(path).map(|b| String::from_utf8_lossy(&b).into_owned()).map_err(|e| e.to_string());
+    pub fn keys(&mut self, path: &Path, category: &str, parse: impl FnOnce(&str) -> Result<Vec<String>, ScanError>) -> Result<Vec<String>, ScanError> {
+        let read = || std::fs::read(path).map(|b| String::from_utf8_lossy(&b).into_owned()).map_err(ScanError::from);
         let Some((size, modified)) = stamp(path) else { return parse(&read()?) };
         if let Some(f) = self.files.get(path)
             && (f.size, f.modified) == (size, modified)

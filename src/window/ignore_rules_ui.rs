@@ -9,14 +9,9 @@ use adw::prelude::*;
 use gtk::glib;
 
 use super::Window;
-use crate::conflicts_view::{Analysis, plural};
+use crate::conflicts_view::Analysis;
 use crate::merge::ignore_rules::Rules;
 use crate::settings;
-
-const HELP: &str = "One rule per line. A file override matches by its path, an object conflict by its folder and name (common/buildings/building_lab), or by its files when they all match.\n\
-* matches within a folder, ** across folders, and a folder alone matches everything in it. Add | Mod A | Mod B to apply a rule only when exactly those mods conflict. Start a line with ! to show conflicts again, or # for a comment. Later lines win.";
-
-const PLACEHOLDER: &str = "# For example:\ngfx/**\nlocalisation/*\n!gfx/portraits/**";
 
 impl Window {
     pub(super) fn edit_ignore_rules(self: &Rc<Self>, analysis: &Rc<Analysis>) {
@@ -33,7 +28,7 @@ impl Window {
             .build();
         // A hint while it's empty, as an entry's placeholder.
         let placeholder = gtk::Label::builder()
-            .label(PLACEHOLDER)
+            .label(t!("# For example:\ngfx/**\nlocalisation/*\n!gfx/portraits/**"))
             .xalign(0.0)
             .yalign(0.0)
             .margin_top(10)
@@ -74,30 +69,31 @@ impl Window {
         let dependency_count = analysis.report.files.iter().filter(|c| c.builds_on_dependencies(&analysis.depends_on)).count()
             + analysis.report.objects.iter().filter(|c| c.builds_on_dependencies(&analysis.depends_on)).count();
         let hide_dependencies = adw::SwitchRow::builder()
-            .title("Hide Conflicts With Dependencies")
-            .subtitle(format!(
-                "Patches and submods are meant to override the mods they depend on. This hides {}.",
-                plural(dependency_count, "conflict", "conflicts")
+            .title(t!("Hide Conflicts With Dependencies"))
+            .subtitle(tnf!(
+                "Patches and submods are meant to override the mods they depend on. This hides {count} conflict.",
+                "Patches and submods are meant to override the mods they depend on. This hides {count} conflicts.",
+                count = dependency_count
             ))
             .active(!self.settings.borrow().show_dependency_conflicts)
             .build();
         let options = gtk::ListBox::builder().selection_mode(gtk::SelectionMode::None).css_classes(["boxed-list"]).build();
         options.append(&hide_dependencies);
         body.append(&options);
-        body.append(&gtk::Label::builder().label(HELP).wrap(true).xalign(0.0).css_classes(["dim-label"]).build());
+        body.append(&gtk::Label::builder().label(t!("One rule per line. A file override matches by its path, an object conflict by its folder and name (common/buildings/building_lab), or by its files when they all match.\n* matches within a folder, ** across folders, and a folder alone matches everything in it. Add | Mod A | Mod B to apply a rule only when exactly those mods conflict. Start a line with ! to show conflicts again, or # for a comment. Later lines win.")).wrap(true).xalign(0.0).css_classes(["dim-label"]).build());
         body.append(&crate::resize_grip::resizable(&editor));
         body.append(&summary);
         body.append(&preview_scroll);
 
-        let cancel = gtk::Button::with_mnemonic("_Cancel");
-        let save = gtk::Button::builder().use_underline(true).label("_Save").css_classes(["suggested-action"]).build();
+        let cancel = gtk::Button::with_mnemonic(&t!("_Cancel"));
+        let save = gtk::Button::builder().use_underline(true).label(t!("_Save")).css_classes(["suggested-action"]).build();
         let header = adw::HeaderBar::builder().show_start_title_buttons(false).show_end_title_buttons(false).build();
         header.pack_start(&cancel);
         header.pack_end(&save);
         let toolbar = adw::ToolbarView::new();
         toolbar.add_top_bar(&header);
         toolbar.set_content(Some(&body));
-        let dialog = adw::Dialog::builder().title("Ignore Rules").content_width(680).content_height(620).child(&toolbar).build();
+        let dialog = adw::Dialog::builder().title(t!("Ignore Rules")).content_width(680).content_height(620).child(&toolbar).build();
 
         let update = {
             let (analysis, buffer, placeholder) = (analysis.clone(), buffer.clone(), placeholder.clone());
@@ -137,7 +133,7 @@ impl Window {
                 settings.ignore_rules = rules;
                 settings.show_dependency_conflicts = !hide_dependencies.is_active();
                 if let Err(e) = settings.save(&settings::path()) {
-                    ui.add_toast(adw::Toast::builder().title(format!("Could not save the ignore rules: {e}")).timeout(0).build());
+                    ui.add_toast(adw::Toast::builder().title(tf!("Could not save the ignore rules: {error}", error = e)).timeout(0).build());
                     return;
                 }
             }
@@ -176,15 +172,15 @@ fn show_preview(analysis: &Analysis, source: &str, summary: &gtk::Label, list: &
         hidden += usize::from(hides);
     }
     let total = report.files.len() + report.objects.len();
-    summary.set_label(&format!("Hides {hidden} of {}", plural(total, "conflict", "conflicts")));
+    summary.set_label(&tf!("Hides {hidden} of {total}", hidden = hidden, total = tnf!("{count} conflict", "{count} conflicts", count = total)));
 
     let lines: Vec<&str> = source.lines().collect();
     for (line, hides) in rules.lines() {
         let n = decided.get(&line).copied().unwrap_or(0);
         let effect = match (n, hides) {
-            (0, _) => "Matches no conflicts".to_owned(),
-            (n, true) => format!("Hides {}", plural(n, "conflict", "conflicts")),
-            (n, false) => format!("Shows {} again", plural(n, "conflict", "conflicts")),
+            (0, _) => t!("Matches no conflicts"),
+            (n, true) => tnf!("Hides {count} conflict", "Hides {count} conflicts", count = n),
+            (n, false) => tnf!("Shows {count} conflict again", "Shows {count} conflicts again", count = n),
         };
         let row = adw::ActionRow::builder()
             .title(lines.get(line).map_or("", |l| l.trim()))

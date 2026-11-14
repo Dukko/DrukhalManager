@@ -90,7 +90,7 @@ fn run_in(dir: &Path, command: &str, left: Side, right: Side, base: Option<&str>
 
 /// The command's words, with the placeholders filled in.
 fn arguments(command: &str, left: &Path, right: &Path, base: &Path, output: &Path) -> Result<Vec<String>, String> {
-    let words = shlex::split(command.trim()).ok_or("The merge tool command can't be read: a quote isn't closed")?;
+    let words = shlex::split(command.trim()).ok_or(t!("The merge tool command can't be read: a quote isn't closed"))?;
     let args: Vec<String> = words
         .iter()
         .map(|w| {
@@ -101,7 +101,7 @@ fn arguments(command: &str, left: &Path, right: &Path, base: &Path, output: &Pat
         })
         .collect();
     if args.is_empty() {
-        return Err("No merge tool is set".into());
+        return Err(t!("No merge tool is set"));
     }
     Ok(args)
 }

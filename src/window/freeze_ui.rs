@@ -8,7 +8,6 @@ use adw::prelude::*;
 use gtk::{gio, glib};
 
 use super::Window;
-use crate::conflicts_view::plural;
 use crate::mods::freeze::{self, Frozen};
 use crate::mods::{self, collections};
 use crate::paradox::steam;
@@ -33,16 +32,12 @@ impl Window {
                 .collect()
         };
         if to_copy.is_empty() {
-            return self.toast_error_message(&format!("“{name}” has no Workshop mods to freeze"));
+            return self.toast_error_message(&tf!("“{name}” has no Workshop mods to freeze", name = &name));
         }
-        let size = freeze::size(&to_copy.iter().map(|m| m.3.as_path()).collect::<Vec<_>>());
-        let body = format!(
-            "Copies its {} ({}) into local mods, and switches “{name}” to the copies, so Steam updates can't change it in the middle of a campaign.\n\nFixes their authors publish are missed too, until you unfreeze it. Unfreezing switches back to the Workshop mods and deletes the copies.",
-            plural(to_copy.len(), "Workshop mod", "Workshop mods"),
-            glib::format_size(size)
-        );
-        let dialog = adw::AlertDialog::new(Some(&format!("Freeze “{name}”?")), Some(&body));
-        dialog.add_responses(&[("cancel", "_Cancel"), ("freeze", "_Freeze")]);
+        let size = glib::format_size(freeze::size(&to_copy.iter().map(|m| m.3.as_path()).collect::<Vec<_>>()));
+        let body = tf!("Copies its {mods} ({size}) into local mods, and switches “{name}” to the copies, so Steam updates can't change it in the middle of a campaign.\n\nFixes their authors publish are missed too, until you unfreeze it. Unfreezing switches back to the Workshop mods and deletes the copies.", mods = tnf!("{count} Workshop mod", "{count} Workshop mods", count = to_copy.len()), size = size, name = &name);
+        let dialog = adw::AlertDialog::new(Some(&tf!("Freeze “{name}”?", name = &name)), Some(&body));
+        dialog.add_responses(&[("cancel", &t!("_Cancel")), ("freeze", &t!("_Freeze"))]);
         dialog.set_response_appearance("freeze", adw::ResponseAppearance::Suggested);
         dialog.set_default_response(Some("freeze"));
         dialog.set_close_response("cancel");
@@ -58,7 +53,7 @@ impl Window {
         // Unfreezing deletes a collection's folder, so one in use exists.
         let base = self.paths.user_dir.join("mod").join(freeze::FOLDER);
         let folder = freeze::folder_name(&name, |f| base.join(f).exists());
-        let toast = adw::Toast::builder().title(format!("Copying {}…", plural(to_copy.len(), "mod", "mods"))).timeout(0).build();
+        let toast = adw::Toast::builder().title(tf!("Copying {mods}…", mods = tnf!("{count} mod", "{count} mods", count = to_copy.len()))).timeout(0).build();
         self.show_progress(&toast);
         let user_dir = self.paths.user_dir.clone();
         let weak = Rc::downgrade(self);
@@ -69,12 +64,12 @@ impl Window {
                 freeze::freeze(&user_dir, &folder, &sources, &updated).map_err(|e| e.to_string())
             })
             .await
-            .unwrap_or_else(|_| Err("Copying failed".into()));
+            .unwrap_or_else(|_| Err(t!("Copying failed")));
             toast.dismiss();
             let Some(ui) = weak.upgrade() else { return };
             let frozen = match copied {
                 Ok(f) => f,
-                Err(e) => return ui.toast_error_message(&format!("Could not freeze “{name}”, so nothing changed: {e}")),
+                Err(e) => return ui.toast_error_message(&tf!("Could not freeze “{name}”, so nothing changed: {e}", name = &name, e = e)),
             };
             let count = frozen.len();
             let map: HashMap<&str, &str> = frozen.iter().map(|(copy, f)| (f.workshop.as_str(), copy.as_str())).collect();
@@ -90,7 +85,7 @@ impl Window {
             // The copies' descriptors show up once the mods are read again.
             ui.reload(move |ui| {
                 ui.apply_collection_mods(&mods);
-                ui.add_toast(adw::Toast::new(&format!("Froze “{name}”: {} copied", plural(count, "Workshop mod", "Workshop mods"))));
+                ui.add_toast(adw::Toast::new(&tf!("Froze “{name}”: {mods} copied", name = &name, mods = tnf!("{count} Workshop mod", "{count} Workshop mods", count = count))));
             });
         });
     }
@@ -103,9 +98,9 @@ impl Window {
         if count == 0 {
             return;
         }
-        let body = format!("“{name}” switches back to the {}, as Steam has them now, and the copies are deleted.", plural(count, "Workshop mod", "Workshop mods"));
-        let dialog = adw::AlertDialog::new(Some(&format!("Unfreeze “{name}”?")), Some(&body));
-        dialog.add_responses(&[("cancel", "_Cancel"), ("unfreeze", "_Unfreeze")]);
+        let body = tf!("“{name}” switches back to the {mods}, as Steam has them now, and the copies are deleted.", name = &name, mods = tnf!("{count} Workshop mod", "{count} Workshop mods", count = count));
+        let dialog = adw::AlertDialog::new(Some(&tf!("Unfreeze “{name}”?", name = &name)), Some(&body));
+        dialog.add_responses(&[("cancel", &t!("_Cancel")), ("unfreeze", &t!("_Unfreeze"))]);
         dialog.set_default_response(Some("unfreeze"));
         dialog.set_close_response("cancel");
         let weak = Rc::downgrade(self);
@@ -131,14 +126,14 @@ impl Window {
         if let Err(e) = freeze::unfreeze(&self.paths.user_dir, &frozen) {
             // The collection is back on the Workshop mods either way; only
             // copies may be left over.
-            self.toast_error_message(&format!("Some frozen copies couldn't be deleted: {e}"));
+            self.toast_error_message(&tf!("Some frozen copies couldn't be deleted: {e}", e = e));
         }
         self.save_collections();
         self.rebuild_collection_menu();
         let (name, count) = (name.to_owned(), frozen.len());
         self.reload(move |ui| {
             ui.apply_collection_mods(&mods);
-            ui.add_toast(adw::Toast::new(&format!("Unfroze “{name}”: back to {}", plural(count, "Workshop mod", "Workshop mods"))));
+            ui.add_toast(adw::Toast::new(&tf!("Unfroze “{name}”: back to {mods}", name = &name, mods = tnf!("{count} Workshop mod", "{count} Workshop mods", count = count))));
         });
     }
 
@@ -163,13 +158,11 @@ impl Window {
     pub(super) fn show_frozen_updates(self: &Rc<Self>) {
         let updated = self.frozen_updates();
         let name = self.collections.borrow().active.clone();
-        let body = format!(
-            "Steam has newer versions of {} than “{name}” uses:\n\n{}\n\nThe collection keeps its copies until you unfreeze it.",
-            if updated.len() == 1 { "this mod" } else { "these mods" },
-            updated.iter().map(|n| format!("• {n}")).collect::<Vec<_>>().join("\n")
-        );
-        let dialog = adw::AlertDialog::new(Some("Updated on the Workshop"), Some(&body));
-        dialog.add_responses(&[("close", "_Close"), ("unfreeze", "_Unfreeze…")]);
+        let mods = if updated.len() == 1 { t!("this mod") } else { t!("these mods") };
+        let list = updated.iter().map(|n| format!("• {n}")).collect::<Vec<_>>().join("\n");
+        let body = tf!("Steam has newer versions of {mods} than “{name}” uses:\n\n{list}\n\nThe collection keeps its copies until you unfreeze it.", mods = &mods, name = &name, list = &list);
+        let dialog = adw::AlertDialog::new(Some(&t!("Updated on the Workshop")), Some(&body));
+        dialog.add_responses(&[("close", &t!("_Close")), ("unfreeze", &t!("_Unfreeze…"))]);
         dialog.set_close_response("close");
         let weak = Rc::downgrade(self);
         dialog.connect_response(None, move |_, response| {

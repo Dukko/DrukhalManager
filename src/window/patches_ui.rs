@@ -14,7 +14,6 @@ use gtk::{gio, glib};
 use super::overview::ago;
 use super::requirements_ui::steam_key;
 use super::{Window, display_name};
-use crate::conflicts_view::plural;
 use crate::mods::patches::{self, Cache, Suggestion};
 use crate::paradox::workshop::{self, Dependent};
 
@@ -50,14 +49,14 @@ const MAX_WEEKS: u32 = 260;
 
 impl Window {
     pub(super) fn find_patches(self: &Rc<Self>) {
-        let title = adw::WindowTitle::new("Compatibility Patches", "");
-        let refresh = gtk::Button::builder().icon_name("view-refresh-symbolic").tooltip_text("Search Again").build();
+        let title = adw::WindowTitle::new(&t!("Compatibility Patches"), "");
+        let refresh = gtk::Button::builder().icon_name("view-refresh-symbolic").tooltip_text(t!("Search Again")).build();
         let header = adw::HeaderBar::new();
         header.set_title_widget(Some(&title));
         header.pack_start(&refresh);
 
         let progress = gtk::ProgressBar::builder().show_text(false).width_request(240).halign(gtk::Align::Center).build();
-        let searching = adw::StatusPage::builder().icon_name("system-search-symbolic").title("Searching the Workshop").child(&progress).build();
+        let searching = adw::StatusPage::builder().icon_name("system-search-symbolic").title(t!("Searching the Workshop")).child(&progress).build();
         let problem = adw::StatusPage::new();
         let results = adw::Bin::new();
         let stack = gtk::Stack::new();
@@ -102,9 +101,9 @@ impl Window {
             let state = self.state.borrow();
             patches::enabled_ids(&state.mods, &state.enabled)
         };
-        d.title.set_subtitle(&format!("For {} from the Workshop", plural(ids.len(), "enabled mod", "enabled mods")));
+        d.title.set_subtitle(&tnf!("For {count} enabled mod from the Workshop", "For {count} enabled mods from the Workshop", count = ids.len()));
         if ids.is_empty() {
-            return show_problem(d, "No Workshop Mods Enabled", "Patches are found through the Workshop mods you run", None);
+            return show_problem(d, &t!("No Workshop Mods Enabled"), &t!("Patches are found through the Workshop mods you run"), None);
         }
         let stale = self.dependents.borrow().stale(&ids, again);
         if stale.is_empty() {
@@ -114,7 +113,7 @@ impl Window {
         d.stack.set_visible_child_name("searching");
         let total = stale.len();
         d.progress.set_fraction(0.0);
-        d.searching.set_description(Some(&format!("Checked 0 of {}", plural(total, "mod", "mods"))));
+        d.searching.set_description(Some(&tnf!("Checked 0 of {count} mod", "Checked 0 of {count} mods", count = total)));
 
         let (tx, rx) = async_channel::unbounded();
         let cancel = d.cancel.clone();
@@ -153,7 +152,7 @@ impl Window {
                         done += 1;
                         if let Some(d) = dw.upgrade() {
                             d.progress.set_fraction(done as f64 / total as f64);
-                            d.searching.set_description(Some(&format!("Checked {done} of {}", plural(total, "mod", "mods"))));
+                            d.searching.set_description(Some(&tf!("Checked {done} of {mods}", done = done, mods = tnf!("{count} mod", "{count} mods", count = total))));
                         }
                     }
                     Progress::NoKey => failed = Some(None),
@@ -172,7 +171,7 @@ impl Window {
             d.refresh.set_sensitive(true);
             match failed {
                 Some(None) => {
-                    let open = gtk::Button::builder().label("_Open Preferences").use_underline(true).halign(gtk::Align::Center).css_classes(["pill", "suggested-action"]).build();
+                    let open = gtk::Button::builder().label(t!("_Open Preferences")).use_underline(true).halign(gtk::Align::Center).css_classes(["pill", "suggested-action"]).build();
                     let (dialog, window) = (d.dialog.downgrade(), ui.window.downgrade());
                     open.connect_clicked(move |_| {
                         if let Some(dialog) = dialog.upgrade() {
@@ -182,18 +181,18 @@ impl Window {
                             WidgetExt::activate_action(&window, "win.preferences", None).ok();
                         }
                     });
-                    show_problem(&d, "A Steam Web API Key Is Needed", "Steam tells only apps with a key which Workshop items need a mod. Add yours in Preferences › Steam.", Some(open.upcast()));
+                    show_problem(&d, &t!("A Steam Web API Key Is Needed"), &t!("Steam tells only apps with a key which Workshop items need a mod. Add yours in Preferences › Steam."), Some(open.upcast()));
                 }
                 Some(Some(e)) => {
                     crate::diagnostics::log!("patches", "Could not search the Workshop: {e}");
-                    let again = gtk::Button::builder().label("_Try Again").use_underline(true).halign(gtk::Align::Center).css_classes(["pill"]).build();
+                    let again = gtk::Button::builder().label(t!("_Try Again")).use_underline(true).halign(gtk::Align::Center).css_classes(["pill"]).build();
                     let (weak, dw) = (Rc::downgrade(&ui), Rc::downgrade(&d));
                     again.connect_clicked(move |_| {
                         if let (Some(ui), Some(d)) = (weak.upgrade(), dw.upgrade()) {
                             ui.search_patches(&d, false);
                         }
                     });
-                    show_problem(&d, "Couldn't Search the Workshop", &format!("{e}. What was found so far is kept."), Some(again.upcast()));
+                    show_problem(&d, &t!("Couldn't Search the Workshop"), &tf!("{error}. What was found so far is kept.", error = e), Some(again.upcast()));
                 }
                 None => ui.show_patches(&d),
             }
@@ -214,7 +213,7 @@ impl Window {
 
         let page = adw::PreferencesPage::new();
         let options = adw::PreferencesGroup::builder()
-            .description("Patches for recent versions of the mods you run are usually updated with them, so older ones are hidden. Some mods that haven't been updated in years still work fine, but this list is meant for recent compatibility patches.")
+            .description(t!("Patches for recent versions of the mods you run are usually updated with them, so older ones are hidden. Some mods that haven't been updated in years still work fine, but this list is meant for recent compatibility patches."))
             .build();
         let weeks = self.settings.borrow().patch_weeks.clamp(MIN_WEEKS, MAX_WEEKS);
         let scale = gtk::Scale::with_range(gtk::Orientation::Horizontal, f64::from(MIN_WEEKS), f64::from(MAX_WEEKS), 1.0);
@@ -224,19 +223,28 @@ impl Window {
         scale.set_hexpand(true);
         scale.set_valign(gtk::Align::Center);
         scale.set_width_request(220);
-        for (at, mark) in [(4, None), (26, None), (52, Some("1 year")), (104, Some("2 years")), (156, None), (208, None), (MAX_WEEKS, Some("5 years"))] {
-            scale.add_mark(f64::from(at), gtk::PositionType::Bottom, mark);
+        let marks: [(u32, Option<String>); 7] = [
+            (4, None),
+            (26, None),
+            (52, Some(t!("1 year"))),
+            (104, Some(t!("2 years"))),
+            (156, None),
+            (208, None),
+            (MAX_WEEKS, Some(t!("5 years"))),
+        ];
+        for (at, mark) in marks {
+            scale.add_mark(f64::from(at), gtk::PositionType::Bottom, mark.as_deref());
         }
-        scale.update_property(&[gtk::accessible::Property::Label("Updated within, in weeks")]);
-        let age = adw::ActionRow::builder().title("Updated Within").subtitle(weeks_text(weeks)).build();
+        scale.update_property(&[gtk::accessible::Property::Label(&t!("Updated within, in weeks"))]);
+        let age = adw::ActionRow::builder().title(t!("Updated Within")).subtitle(weeks_text(weeks)).build();
         age.add_suffix(&scale);
         options.add(&age);
-        let all = adw::SwitchRow::builder().title("Show Everything That Needs Only Enabled Mods").subtitle("Also items whose names don't say they're patches").active(d.show_all.get()).build();
+        let all = adw::SwitchRow::builder().title(t!("Show Everything That Needs Only Enabled Mods")).subtitle(t!("Also items whose names don't say they're patches")).active(d.show_all.get()).build();
         options.add(&all);
         page.add(&options);
 
         let group = adw::PreferencesGroup::builder()
-            .description("Workshop items made for mods you run, all of whose required items are enabled. After subscribing, reload the mods (F5): Smart Sort places patches after the mods they patch.")
+            .description(t!("Workshop items made for mods you run, all of whose required items are enabled. After subscribing, reload the mods (F5): Smart Sort places patches after the mods they patch."))
             .build();
         let none = adw::ActionRow::builder().css_classes(["dim-label"]).build();
         group.add(&none);
@@ -263,12 +271,17 @@ impl Window {
                     shown += usize::from(kind && recent);
                     too_old += usize::from(kind && !recent);
                 }
-                group.set_title(&if shown == 0 { "Nothing to Suggest".to_owned() } else { plural(shown, "Suggestion", "Suggestions") });
+                group.set_title(&if shown == 0 { t!("Nothing to Suggest") } else { tn!("{count} Suggestion", "{count} Suggestions", shown) });
                 none.set_visible(shown == 0);
                 none.set_title(&if too_old > 0 {
-                    format!("{} for your enabled mods {} not been updated within {}", plural(too_old, "patch", "patches"), if too_old == 1 { "has" } else { "have" }, weeks_text(weeks))
+                    tnf!(
+                        "{count} patch for your enabled mods has not been updated within {weeks}",
+                        "{count} patches for your enabled mods have not been updated within {weeks}",
+                        count = too_old,
+                        weeks = weeks_text(weeks)
+                    )
                 } else {
-                    "Every patch found for your enabled mods is installed or dismissed".to_owned()
+                    t!("Every patch found for your enabled mods is installed or dismissed")
                 });
             })
         };
@@ -298,7 +311,7 @@ impl Window {
         let dismissed = self.settings.borrow().dismissed_patches.len();
         if dismissed > 0 {
             let restore_group = adw::PreferencesGroup::new();
-            let restore = adw::ButtonRow::builder().title(format!("Show {} Again", plural(dismissed, "Dismissed Item", "Dismissed Items"))).build();
+            let restore = adw::ButtonRow::builder().title(tnf!("Show {count} Dismissed Item Again", "Show {count} Dismissed Items Again", count = dismissed)).build();
             let (weak, dw) = (Rc::downgrade(self), Rc::downgrade(d));
             restore.connect_activated(move |_| {
                 if let (Some(ui), Some(d)) = (weak.upgrade(), dw.upgrade()) {
@@ -316,15 +329,16 @@ impl Window {
 
     fn patch_row(self: &Rc<Self>, d: &Rc<Dialog>, group: &adw::PreferencesGroup, s: &Suggestion, names: &[String]) -> adw::ActionRow {
         let item = &s.item;
-        let title = if item.title.is_empty() { format!("Workshop item {}", item.id) } else { item.title.clone() };
-        let mut facts = vec![format!("{} {}", thousands(item.subscriptions), if item.subscriptions == 1 { "subscriber" } else { "subscribers" })];
+        let title = if item.title.is_empty() { tf!("Workshop item {id}", id = item.id) } else { item.title.clone() };
+        let subscribers = tn!("subscriber", "subscribers", item.subscriptions);
+        let mut facts = vec![tf!("{count} {kind}", count = thousands(item.subscriptions), kind = subscribers)];
         if item.updated > 0 {
-            facts.push(format!("updated {}", ago(UNIX_EPOCH + Duration::from_secs(item.updated))));
+            facts.push(tf!("updated {when}", when = ago(UNIX_EPOCH + Duration::from_secs(item.updated))));
         }
         let row = adw::ActionRow::builder().title(&title).use_markup(false).subtitle(format!("{}\n{}", needs(names), facts.join(" · "))).subtitle_lines(0).build();
         row.add_prefix(&self.workshop_thumbnail(item.id, 48));
 
-        let open = gtk::Button::builder().icon_name("web-browser-symbolic").tooltip_text("Open Workshop Page").valign(gtk::Align::Center).css_classes(["flat"]).build();
+        let open = gtk::Button::builder().icon_name("web-browser-symbolic").tooltip_text(t!("Open Workshop Page")).valign(gtk::Align::Center).css_classes(["flat"]).build();
         let id = item.id;
         let window = self.window.downgrade();
         open.connect_clicked(move |_| {
@@ -341,7 +355,7 @@ impl Window {
         });
         row.add_suffix(&open);
 
-        let dismiss = gtk::Button::builder().icon_name("window-close-symbolic").tooltip_text("Dismiss").valign(gtk::Align::Center).css_classes(["flat"]).build();
+        let dismiss = gtk::Button::builder().icon_name("window-close-symbolic").tooltip_text(t!("Dismiss")).valign(gtk::Align::Center).css_classes(["flat"]).build();
         let (weak, dw) = (Rc::downgrade(self), Rc::downgrade(d));
         let (group, row_ref) = (group.downgrade(), row.downgrade());
         dismiss.connect_clicked(move |_| {
@@ -356,7 +370,7 @@ impl Window {
             if let Some(filter) = filter {
                 filter();
             }
-            let toast = adw::Toast::builder().title(format!("Dismissed “{title}”")).button_label("_Undo").build();
+            let toast = adw::Toast::builder().title(tf!("Dismissed “{title}”", title = &title)).button_label(t!("_Undo")).build();
             let (weak, dw) = (Rc::downgrade(&ui), Rc::downgrade(&d));
             toast.connect_button_clicked(move |_| {
                 if let (Some(ui), Some(d)) = (weak.upgrade(), dw.upgrade()) {
@@ -383,9 +397,9 @@ fn show_problem(d: &Dialog, title: &str, description: &str, action: Option<gtk::
 /// "26 weeks", or in years when it's whole years.
 fn weeks_text(weeks: u32) -> String {
     match weeks {
-        52 => "1 year".to_owned(),
-        w if w % 52 == 0 => format!("{} years", w / 52),
-        w => plural(w as usize, "week", "weeks"),
+        52 => t!("1 year"),
+        w if w % 52 == 0 => tnf!("{count} year", "{count} years", count = w / 52),
+        w => tnf!("{count} week", "{count} weeks", count = w),
     }
 }
 
@@ -394,14 +408,14 @@ fn needs(names: &[String]) -> String {
     let list = match names {
         [] => String::new(),
         [one] => one.clone(),
-        [rest @ .., last] => format!("{} and {last}", rest.join(", ")),
+        [rest @ .., last] => tf!("{list} and {last}", list = rest.join(", "), last = last),
     };
     let all = match names.len() {
-        1 => "enabled",
-        2 => "both enabled",
-        _ => "all enabled",
+        1 => t!("enabled"),
+        2 => t!("both enabled"),
+        _ => t!("all enabled"),
     };
-    format!("Needs {list}, {all}")
+    tf!("Needs {list}, {status}", list = list, status = all)
 }
 
 /// 12345 as "12,345".

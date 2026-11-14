@@ -47,14 +47,14 @@ pub enum View {
 impl View {
     pub const ALL: [View; 6] = [View::All, View::Attention, View::Outdated, View::Conflicts, View::NoAchievements, View::Disabled];
 
-    pub fn title(self) -> &'static str {
+    pub fn title(self) -> String {
         match self {
-            View::All => "Load Order",
-            View::Attention => "Needs Attention",
-            View::Outdated => "Not Updated for This Game",
-            View::Conflicts => "Has Conflicts",
-            View::NoAchievements => "Turns Off Achievements",
-            View::Disabled => "Disabled",
+            View::All => t!("Load Order"),
+            View::Attention => t!("Needs Attention"),
+            View::Outdated => t!("Not Updated for This Game"),
+            View::Conflicts => t!("Has Conflicts"),
+            View::NoAchievements => t!("Turns Off Achievements"),
+            View::Disabled => t!("Disabled"),
         }
     }
 

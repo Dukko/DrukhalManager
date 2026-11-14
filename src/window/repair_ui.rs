@@ -6,7 +6,6 @@ use adw::prelude::*;
 
 use super::Window;
 use crate::paradox::steam::ItemState;
-use crate::conflicts_view;
 use crate::mods;
 
 impl Window {
@@ -14,9 +13,10 @@ impl Window {
         let findings = mods::repair::find(&self.paths.user_dir, &self.state.borrow().mods);
         let mut parts = Vec::new();
         if !findings.stale.is_empty() {
-            parts.push(format!(
-                "{} point to folders that no longer exist",
-                conflicts_view::plural(findings.stale.len(), "mod descriptor", "mod descriptors")
+            parts.push(tnf!(
+                "{count} mod descriptor points to a folder that no longer exists",
+                "{count} mod descriptors point to folders that no longer exist",
+                count = findings.stale.len()
             ));
         }
         if !findings.orphans.is_empty() {
@@ -27,22 +27,25 @@ impl Window {
                 .filter(|o| state.mods.iter().any(|m| m.id == o.id && m.steam == Some(ItemState::Unsubscribed)))
                 .count();
             parts.push(match unsubscribed {
-                0 => format!(
-                    "{} belong to mods whose files are gone",
-                    conflicts_view::plural(findings.orphans.len(), "descriptor", "descriptors")
+                0 => tnf!(
+                    "{count} descriptor belongs to a mod whose files are gone",
+                    "{count} descriptors belong to mods whose files are gone",
+                    count = findings.orphans.len()
                 ),
-                n if n == findings.orphans.len() => format!(
-                    "{} you unsubscribed from in Steam {} still listed",
-                    conflicts_view::plural(n, "mod", "mods"),
-                    if n == 1 { "is" } else { "are" }
+                n if n == findings.orphans.len() => tnf!(
+                    "{count} mod you unsubscribed from in Steam is still listed",
+                    "{count} mods you unsubscribed from in Steam are still listed",
+                    count = n
                 ),
-                n => format!(
-                    "{} belong to mods whose files are gone, {n} of them unsubscribed in Steam",
-                    conflicts_view::plural(findings.orphans.len(), "descriptor", "descriptors")
+                n => tnf!(
+                    "{count} descriptor belongs to a mod whose files are gone, {unsubscribed} of them unsubscribed in Steam",
+                    "{count} descriptors belong to mods whose files are gone, {unsubscribed} of them unsubscribed in Steam",
+                    count = findings.orphans.len(),
+                    unsubscribed = n
                 ),
             });
         }
-        self.repair_banner.set_title(&parts.join("; "));
+        self.repair_banner.set_title(&parts.join(&t!("; ")));
         self.repair_banner.set_revealed(!findings.is_empty());
     }
 
@@ -54,9 +57,10 @@ impl Window {
         }
         let mut body = Vec::new();
         if !findings.stale.is_empty() {
-            body.push(format!(
-                "{} will point to where the mods actually are, so the game can find them even when Steam doesn't say.",
-                conflicts_view::plural(findings.stale.len(), "descriptor", "descriptors")
+            body.push(tnf!(
+                "{count} descriptor will point to where the mod actually is, so the game can find it even when Steam doesn't say.",
+                "{count} descriptors will point to where the mods actually are, so the game can find them even when Steam doesn't say.",
+                count = findings.stale.len()
             ));
         }
         if !findings.orphans.is_empty() {
@@ -67,35 +71,36 @@ impl Window {
                 .map(|o| o.name.as_str())
                 .collect();
             let more = findings.orphans.len().saturating_sub(names.len());
-            body.push(format!(
-                "These descriptors have no mod files behind them and can be removed: {}{}.",
-                names.join(", "),
-                if more > 0 {
-                    format!(" and {more} more")
-                } else {
-                    String::new()
-                }
+            let more_text = if more > 0 {
+                tnf!(" and {count} more", " and {count} more", count = more)
+            } else {
+                String::new()
+            };
+            body.push(tf!(
+                "These descriptors have no mod files behind them and can be removed: {names}{more}.",
+                names = names.join(", "),
+                more = more_text
             ));
         }
-        body.push("Changed or removed descriptors are backed up first.".to_owned());
+        body.push(t!("Changed or removed descriptors are backed up first."));
 
         let dialog =
-            adw::AlertDialog::new(Some("Repair Mod Descriptors?"), Some(&body.join("\n\n")));
-        dialog.add_response("cancel", "_Cancel");
+            adw::AlertDialog::new(Some(&t!("Repair Mod Descriptors?")), Some(&body.join("\n\n")));
+        dialog.add_response("cancel", &t!("_Cancel"));
         match (findings.stale.is_empty(), findings.orphans.is_empty()) {
             (false, false) => {
-                dialog.add_response("fix", "_Fix Paths Only");
-                dialog.add_response("all", "Fix and _Remove");
+                dialog.add_response("fix", &t!("_Fix Paths Only"));
+                dialog.add_response("all", &t!("Fix and _Remove"));
                 dialog.set_response_appearance("all", adw::ResponseAppearance::Suggested);
                 dialog.set_default_response(Some("all"));
             }
             (false, true) => {
-                dialog.add_response("fix", "_Fix Paths");
+                dialog.add_response("fix", &t!("_Fix Paths"));
                 dialog.set_response_appearance("fix", adw::ResponseAppearance::Suggested);
                 dialog.set_default_response(Some("fix"));
             }
             (true, _) => {
-                dialog.add_response("all", "_Remove");
+                dialog.add_response("all", &t!("_Remove"));
                 dialog.set_response_appearance("all", adw::ResponseAppearance::Destructive);
             }
         }
@@ -136,22 +141,16 @@ impl Window {
                 self.update_repair_banner();
                 let mut done = Vec::new();
                 if !stale.is_empty() {
-                    done.push(format!(
-                        "fixed {}",
-                        conflicts_view::plural(stale.len(), "path", "paths")
-                    ));
+                    done.push(tnf!("fixed {count} path", "fixed {count} paths", count = stale.len()));
                 }
                 if !remove.is_empty() {
-                    done.push(format!(
-                        "removed {}",
-                        conflicts_view::plural(remove.len(), "descriptor", "descriptors")
-                    ));
+                    done.push(tnf!("removed {count} descriptor", "removed {count} descriptors", count = remove.len()));
                 }
                 let toast = adw::Toast::builder()
-                    .title(format!(
-                        "Repaired descriptors: {}. Backup in {}",
-                        done.join(", "),
-                        backup.display()
+                    .title(tf!(
+                        "Repaired descriptors: {done}. Backup in {backup}",
+                        done = done.join(&t!(", ")),
+                        backup = backup.display()
                     ))
                     .timeout(8)
                     .build();
@@ -159,7 +158,7 @@ impl Window {
             }
             Err(e) => self.add_toast(
                 adw::Toast::builder()
-                    .title(format!("Could not repair descriptors: {e}"))
+                    .title(tf!("Could not repair descriptors: {error}", error = e))
                     .timeout(0)
                     .build(),
             ),

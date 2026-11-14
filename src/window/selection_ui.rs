@@ -9,7 +9,6 @@ use adw::prelude::*;
 use gtk::{gdk, gio, glib};
 
 use super::Window;
-use crate::conflicts_view::plural;
 use crate::mods::smart_sort::Category;
 
 /// The bar shown while several mods are selected.
@@ -24,30 +23,30 @@ impl BulkBar {
     pub(super) fn new() -> Self {
         let count = gtk::Label::builder().css_classes(["heading"]).build();
         let button = |label: &str, action: &str| gtk::Button::builder().label(label).action_name(action).build();
-        let enable = button("Enable", "win.bulk-enable");
-        let disable = button("Disable", "win.bulk-disable");
+        let enable = button(&t!("Enable"), "win.bulk-enable");
+        let disable = button(&t!("Disable"), "win.bulk-disable");
         // Icons keep the bar narrow, so it never makes the window wider.
         let icon = |icon: &str, tip: &str, action: &str| gtk::Button::builder().icon_name(icon).tooltip_text(tip).action_name(action).build();
-        let top = icon("go-top-symbolic", "Move to Top", "win.bulk-top");
-        let bottom = icon("go-bottom-symbolic", "Move to Bottom", "win.bulk-bottom");
+        let top = icon("go-top-symbolic", &t!("Move to Top"), "win.bulk-top");
+        let bottom = icon("go-bottom-symbolic", &t!("Move to Bottom"), "win.bulk-bottom");
 
         let categories = gio::Menu::new();
-        let item = gio::MenuItem::new(Some("Let Smart Sort Decide"), None);
+        let item = gio::MenuItem::new(Some(&t!("Let Smart Sort Decide")), None);
         item.set_action_and_target_value(Some("win.bulk-category"), Some(&"".to_variant()));
         categories.append_item(&item);
         let named = gio::Menu::new();
         for c in Category::ALL {
-            let item = gio::MenuItem::new(Some(c.title()), None);
+            let item = gio::MenuItem::new(Some(&c.title()), None);
             item.set_action_and_target_value(Some("win.bulk-category"), Some(&c.key().to_variant()));
             named.append_item(&item);
         }
         categories.append_section(None, &named);
         let collections = gio::Menu::new();
         let more_menu = gio::Menu::new();
-        more_menu.append_submenu(Some("_Category"), &categories);
-        more_menu.append_submenu(Some("_Add to Collection"), &collections);
-        let more = gtk::MenuButton::builder().icon_name("view-more-symbolic").menu_model(&more_menu).tooltip_text("Category and Collections").build();
-        let clear = gtk::Button::builder().icon_name("window-close-symbolic").tooltip_text("Clear the Selection").action_name("win.bulk-clear").css_classes(["flat"]).build();
+        more_menu.append_submenu(Some(&t!("_Category")), &categories);
+        more_menu.append_submenu(Some(&t!("_Add to Collection")), &collections);
+        let more = gtk::MenuButton::builder().icon_name("view-more-symbolic").menu_model(&more_menu).tooltip_text(t!("Category and Collections")).build();
+        let clear = gtk::Button::builder().icon_name("window-close-symbolic").tooltip_text(t!("Clear the Selection")).action_name("win.bulk-clear").css_classes(["flat"]).build();
 
         let bar = gtk::ActionBar::new();
         bar.pack_start(&count);
@@ -255,7 +254,7 @@ impl Window {
         if let Some(clear) = self.window.lookup_action("bulk-clear").and_downcast::<gio::SimpleAction>() {
             clear.set_enabled(indices.len() > 1);
         }
-        bar.count.set_label(&format!("{} selected", indices.len()));
+        bar.count.set_label(&tnf!("{count} selected", "{count} selected", count = indices.len()));
         let any_enabled = {
             let state = self.state.borrow();
             indices.iter().any(|i| state.enabled.contains(i))
@@ -273,7 +272,7 @@ impl Window {
         }
         if bar.collections.n_items() == 0 {
             // No action, so it shows greyed out.
-            bar.collections.append(Some("No Other Collections"), None);
+            bar.collections.append(Some(&t!("No Other Collections")), None);
         }
     }
 
@@ -311,7 +310,8 @@ impl Window {
             return;
         }
         self.refresh();
-        self.offer_undo(&format!("{} {}", if on { "Enabled" } else { "Disabled" }, plural(changed, "mod", "mods")));
+        let mods = tnf!("{count} mod", "{count} mods", count = changed);
+        self.offer_undo(&if on { tf!("Enabled {mods}", mods = &mods) } else { tf!("Disabled {mods}", mods = &mods) });
     }
 
     fn bulk_move(self: &Rc<Self>, to_top: bool) {
@@ -321,7 +321,9 @@ impl Window {
         }
         self.refresh();
         let moved = indices.iter().filter(|i| self.state.borrow().enabled.contains(i)).count();
-        self.offer_undo(&format!("Moved {} to the {}", plural(moved, "mod", "mods"), if to_top { "top" } else { "bottom" }));
+        let mods = tnf!("{count} mod", "{count} mods", count = moved);
+        let to = if to_top { t!("top") } else { t!("bottom") };
+        self.offer_undo(&tf!("Moved {mods} to the {to}", mods = &mods, to = &to));
     }
 
     /// Puts the selected mods in a Smart Sort section, or lets Smart Sort
@@ -340,10 +342,18 @@ impl Window {
         }
         self.save_settings("the mods' categories");
         self.refresh();
-        let what = plural(ids.len(), "mod", "mods");
         self.add_toast(adw::Toast::new(&match Category::from_key(key) {
-            Some(c) => format!("Smart Sort will put {what} in {}", c.title()),
-            None => format!("Smart Sort will choose where {what} go"),
+            Some(c) => tnf!(
+                "Smart Sort will put {count} mod in {category}",
+                "Smart Sort will put {count} mods in {category}",
+                count = ids.len(),
+                category = c.title()
+            ),
+            None => tnf!(
+                "Smart Sort will choose where {count} mod goes",
+                "Smart Sort will choose where {count} mods go",
+                count = ids.len()
+            ),
         }));
     }
 
@@ -358,9 +368,9 @@ impl Window {
             new.len()
         };
         if added == 0 {
-            return self.add_toast(adw::Toast::new(&format!("“{name}” already has them")));
+            return self.add_toast(adw::Toast::new(&tf!("“{name}” already has them", name = name)));
         }
         self.save_collections();
-        self.add_toast(adw::Toast::new(&format!("Added {} to “{name}”", plural(added, "mod", "mods"))));
+        self.add_toast(adw::Toast::new(&tnf!("Added {count} mod to “{name}”", "Added {count} mods to “{name}”", count = added, name = name)));
     }
 }

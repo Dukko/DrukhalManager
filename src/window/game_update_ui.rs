@@ -7,7 +7,6 @@ use adw::prelude::*;
 use gtk::glib;
 
 use super::{Window, display_name};
-use crate::conflicts_view::plural;
 use crate::mods::game_update::{self, Outdated};
 
 impl Window {
@@ -32,7 +31,7 @@ impl Window {
     pub(super) fn show_outdated_mods(self: &Rc<Self>, after_update: bool) {
         let Some(game) = self.game.clone() else { return };
         let Some(version) = game.version.clone() else {
-            return self.add_toast(adw::Toast::new("The game's version couldn't be read"));
+            return self.add_toast(adw::Toast::new(&t!("The game's version couldn't be read")));
         };
         // When Steam last updated the game.
         let game_updated = std::fs::metadata(&game.exe).and_then(|m| m.modified()).ok();
@@ -43,26 +42,35 @@ impl Window {
         let short = format!("v{}", game_update::major_minor(&version));
         if outdated.is_empty() {
             if !after_update {
-                self.add_toast(adw::Toast::new(&format!("Every enabled mod supports Stellaris {short}")));
+                self.add_toast(adw::Toast::new(&tf!("Every enabled mod supports Stellaris {version}", version = &short)));
             }
             return;
         }
         let stale_merges = self.stale.borrow().iter().filter(|s| s.base_game).count();
-        let mut body = format!(
-            "{} enabled {} Stellaris {short} yet. Mods often still work, but some break saves or crash the game until their authors update them.",
-            plural(outdated.len(), "mod", "mods"),
-            if outdated.len() == 1 { "doesn't say it supports" } else { "don't say they support" },
+        let mut body = tnf!(
+            "{count} enabled mod doesn't say it supports Stellaris {version} yet. Mods often still work, but some break saves or crash the game until their authors update them.",
+            "{count} enabled mods don't say they support Stellaris {version} yet. Mods often still work, but some break saves or crash the game until their authors update them.",
+            count = outdated.len(),
+            version = &short
         );
         if stale_merges > 0 {
-            body.push_str(&format!(" The update also changed files behind {} in the merged patch; they're listed on the Conflicts page.", plural(stale_merges, "merge", "merges")));
+            body.push_str(&tnf!(
+                " The update also changed files behind {count} merge in the merged patch; they're listed on the Conflicts page.",
+                " The update also changed files behind {count} merges in the merged patch; they're listed on the Conflicts page.",
+                count = stale_merges
+            ));
         }
-        body.push_str("\n\nTo keep playing as before, you can roll the game back in Steam: Stellaris › Properties › Betas lists the previous versions.");
+        body.push_str(&t!("\n\nTo keep playing as before, you can roll the game back in Steam: Stellaris › Properties › Betas lists the previous versions."));
         let dialog = adw::AlertDialog::builder()
-            .heading(if after_update { format!("Stellaris Updated to {short}") } else { format!("Mods Not Updated for {short}") })
+            .heading(if after_update {
+                tf!("Stellaris Updated to {version}", version = &short)
+            } else {
+                tf!("Mods Not Updated for {version}", version = &short)
+            })
             .body(body)
             .build();
         dialog.set_extra_child(Some(&self.outdated_list(&outdated)));
-        dialog.add_responses(&[("close", "_Keep Them Enabled"), ("disable", "_Disable Them for Now")]);
+        dialog.add_responses(&[("close", &t!("_Keep Them Enabled")), ("disable", &t!("_Disable Them for Now"))]);
         dialog.set_response_appearance("disable", adw::ResponseAppearance::Suggested);
         dialog.set_default_response(Some("close"));
         dialog.set_close_response("close");
@@ -81,13 +89,13 @@ impl Window {
         let state = self.state.borrow();
         for o in outdated {
             let m = &state.mods[o.index];
-            let mut subtitle = format!("Supports {}", o.supported);
+            let mut subtitle = tf!("Supports {version}", version = &o.supported);
             if o.updated_since {
-                subtitle.push_str(" · Updated since the game was");
+                subtitle.push_str(&t!(" · Updated since the game was"));
             }
             let row = adw::ActionRow::builder().title(glib::markup_escape_text(display_name(m))).subtitle(subtitle).build();
             if m.descriptor.remote_file_id.is_some() {
-                let button = gtk::Button::builder().icon_name("web-browser-symbolic").tooltip_text("Open Workshop Page").valign(gtk::Align::Center).css_classes(["flat"]).build();
+                let button = gtk::Button::builder().icon_name("web-browser-symbolic").tooltip_text(t!("Open Workshop Page")).valign(gtk::Align::Center).css_classes(["flat"]).build();
                 let weak = Rc::downgrade(self);
                 let index = o.index;
                 button.connect_clicked(move |_| {
@@ -106,7 +114,7 @@ impl Window {
     /// `indices` and saves.
     fn disable_outdated(self: &Rc<Self>, indices: &[usize], short: &str) {
         let ids = self.state.borrow().enabled_ids();
-        let kept = self.collections.borrow_mut().add(&format!("Before Stellaris {short}"), ids);
+        let kept = self.collections.borrow_mut().add(&tf!("Before Stellaris {version}", version = &short), ids);
         self.save_collections();
         self.rebuild_collection_menu();
         {
@@ -115,7 +123,7 @@ impl Window {
             state.reorder(order);
         }
         if self.save() {
-            self.add_toast(adw::Toast::new(&format!("Disabled {}; “{kept}” has the full load order", plural(indices.len(), "mod", "mods"))));
+            self.add_toast(adw::Toast::new(&tnf!("Disabled {count} mod; “{name}” has the full load order", "Disabled {count} mods; “{name}” has the full load order", count = indices.len(), name = kept)));
         }
     }
 }

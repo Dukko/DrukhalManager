@@ -211,8 +211,8 @@ pub fn build(
         Ok(found) => found,
         Err(e) => {
             toolbar.set_content(Some(&status_page(
-                "Could Not Read Mods",
-                &format!("{}: {e}", paths.user_dir.display()),
+                &t!("Could Not Read Mods"),
+                &tf!("{path}: {error}", path = paths.user_dir.display(), error = e),
             )));
             window.present();
             return;
@@ -225,49 +225,49 @@ pub fn build(
     let launch_model = gio::Menu::new();
     launch_model.append_section(None, &launch_menu);
     let launch_more = gio::Menu::new();
-    launch_more.append(Some("_Saves…"), Some("win.saves"));
-    launch_more.append(Some("_Multiplayer Check…"), Some("win.multiplayer"));
-    launch_more.append(Some("_DLC…"), Some("win.dlc"));
+    launch_more.append(Some(&t!("_Saves…")), Some("win.saves"));
+    launch_more.append(Some(&t!("_Multiplayer Check…")), Some("win.multiplayer"));
+    launch_more.append(Some(&t!("_DLC…")), Some("win.dlc"));
     launch_model.append_section(None, &launch_more);
     let troubleshoot = gio::Menu::new();
-    troubleshoot.append(Some("_Find the Crashing Mod…"), Some("win.crash-hunt"));
+    troubleshoot.append(Some(&t!("_Find the Crashing Mod…")), Some("win.crash-hunt"));
     launch_model.append_section(None, &troubleshoot);
     let launch = adw::SplitButton::builder()
         .menu_model(&launch_model)
-        .dropdown_tooltip("More Ways to Launch")
+        .dropdown_tooltip(t!("More Ways to Launch"))
         .child(
             &adw::ButtonContent::builder()
                 .icon_name("media-playback-start-symbolic")
-                .label("Launch")
+                .label(t!("Launch"))
                 .build(),
         )
         .action_name("win.launch")
         .css_classes(["suggested-action"])
         .build();
     let save = gtk::Button::builder()
-        .label("Save")
+        .label(t!("Save"))
         .action_name("win.save")
-        .tooltip_text("Save the load order for the game and the Paradox Launcher (Ctrl+S)")
+        .tooltip_text(t!("Save the load order for the game and the Paradox Launcher (Ctrl+S)"))
         .build();
     // Only what's about the app itself: the rest sits next to what it acts
     // on (header buttons, the Launch menu, the health strip, the sidebar,
     // the Conflicts page).
     let menu = gio::Menu::new();
     let app_section = gio::Menu::new();
-    app_section.append(Some("_Preferences"), Some("win.preferences"));
-    app_section.append(Some("_Keyboard Shortcuts"), Some("win.shortcuts"));
+    app_section.append(Some(&t!("_Preferences")), Some("win.preferences"));
+    app_section.append(Some(&t!("_Keyboard Shortcuts")), Some("win.shortcuts"));
     menu.append_section(None, &app_section);
     let about_section = gio::Menu::new();
     let troubleshooting = gio::Menu::new();
-    troubleshooting.append(Some("_Copy Diagnostics"), Some("win.copy-diagnostics"));
-    troubleshooting.append(Some("Open _Log Folder"), Some("win.open-log-folder"));
-    about_section.append_submenu(Some("_Troubleshooting"), &troubleshooting);
-    about_section.append(Some("_About DrukhalManager"), Some("win.about"));
+    troubleshooting.append(Some(&t!("_Copy Diagnostics")), Some("win.copy-diagnostics"));
+    troubleshooting.append(Some(&t!("Open _Log Folder")), Some("win.open-log-folder"));
+    about_section.append_submenu(Some(&t!("_Troubleshooting")), &troubleshooting);
+    about_section.append(Some(&t!("_About DrukhalManager")), Some("win.about"));
     menu.append_section(None, &about_section);
     let menu_button = gtk::MenuButton::builder()
         .icon_name("open-menu-symbolic")
         .menu_model(&menu)
-        .tooltip_text("Main Menu")
+        .tooltip_text(t!("Main Menu"))
         .primary(true)
         .build();
     header.pack_end(&menu_button);
@@ -276,7 +276,7 @@ pub fn build(
     header.pack_end(&launch);
     header.pack_end(&save);
     let collection_button = gtk::MenuButton::builder()
-        .tooltip_text("Collections: switch between saved load orders")
+        .tooltip_text(t!("Collections: switch between saved load orders"))
         .build();
     header.pack_start(&collection_button);
     for (icon, tooltip, action) in [
@@ -287,11 +287,11 @@ pub fn build(
         header.pack_start(&gtk::Button::builder().icon_name(icon).tooltip_text(tooltip).action_name(action).build());
     }
     if game.is_none() {
-        launch.set_tooltip_text(Some("Stellaris was not found in any Steam library"));
+        launch.set_tooltip_text(Some(&t!("Stellaris was not found in any Steam library")));
     }
 
-    let enabled_list = boxed_list("No mods match");
-    let disabled_list = boxed_list("No mods match");
+    let enabled_list = boxed_list(&t!("No mods match"));
+    let disabled_list = boxed_list(&t!("No mods match"));
     for list in [&enabled_list, &disabled_list] {
         // Clicking a row shows it in the inspector; its switch toggles it.
         // Ctrl+click and Shift+click select several (see `selection_ui`).
@@ -299,27 +299,27 @@ pub fn build(
         list.add_css_class("mod-list");
     }
     let missing_list = boxed_list("");
-    let missing_heading = heading("Not Installed");
+    let missing_heading = heading(&t!("Not Installed"));
     let content = gtk::Box::new(gtk::Orientation::Vertical, 12);
     let all_toggle = gtk::CheckButton::builder()
-        .label("Enable All")
-        .tooltip_text("Enable or disable every mod")
+        .label(t!("Enable All"))
+        .tooltip_text(t!("Enable or disable every mod"))
         .valign(gtk::Align::Center)
         .build();
     let sort_menu = gio::Menu::new();
-    sort_menu.append(Some("Sort A–Z, Dependencies First"), Some("win.sort-alphabetically"));
-    sort_menu.append(Some("Show _Category Headers"), Some("win.category-headers"));
+    sort_menu.append(Some(&t!("Sort A–Z, Dependencies First")), Some("win.sort-alphabetically"));
+    sort_menu.append(Some(&t!("Show _Category Headers")), Some("win.category-headers"));
     let sort_alpha_button = adw::SplitButton::builder()
-        .child(&adw::ButtonContent::builder().icon_name("view-sort-ascending-symbolic").label("Smart Sort…").build())
-        .tooltip_text("Sort into sections by what each mod changes, keeping sub-mods below their mods and every mod after its dependencies")
-        .dropdown_tooltip("More ways to sort")
+        .child(&adw::ButtonContent::builder().icon_name("view-sort-ascending-symbolic").label(t!("Smart Sort…")).build())
+        .tooltip_text(t!("Sort into sections by what each mod changes, keeping sub-mods below their mods and every mod after its dependencies"))
+        .dropdown_tooltip(t!("More ways to sort"))
         .menu_model(&sort_menu)
         .valign(gtk::Align::Center)
         .build();
     // What's wrong and what to do about it, at a glance; see `refresh_health`.
     let health = gtk::Box::builder().spacing(8).homogeneous(true).build();
     let search = gtk::SearchEntry::builder()
-        .placeholder_text("Search mods (Ctrl+F), or try source:local or enabled:no")
+        .placeholder_text(t!("Search mods (Ctrl+F), or try source:local or enabled:no"))
         .hexpand(true)
         .build();
     let search_row = gtk::Box::new(gtk::Orientation::Horizontal, 6);
@@ -329,17 +329,17 @@ pub fn build(
     search_row.append(&all_toggle);
     // Banner titles are plain text: mod names can contain markup characters.
     let repair_banner = adw::Banner::builder()
-        .button_label("Repair…")
+        .button_label(t!("Repair…"))
         .use_markup(false)
         .build();
     toolbar.add_top_bar(&repair_banner);
     let restore_banner = adw::Banner::builder()
-        .button_label("Restore")
+        .button_label(t!("Restore"))
         .use_markup(false)
         .build();
     toolbar.add_top_bar(&restore_banner);
     let hunt_banner = adw::Banner::builder()
-        .button_label("Launch")
+        .button_label(t!("Launch"))
         .use_markup(false)
         .build();
     toolbar.add_top_bar(&hunt_banner);
@@ -380,11 +380,11 @@ pub fn build(
     ));
     let enabled_section = gtk::Box::new(gtk::Orientation::Vertical, 6);
     let enabled_heading = gtk::Box::new(gtk::Orientation::Horizontal, 6);
-    let load_order_label = heading("Load Order");
+    let load_order_label = heading(&t!("Load Order"));
     load_order_label.set_hexpand(true);
     enabled_heading.append(&load_order_label);
     // While a view, category or search narrows the list.
-    let select_shown = gtk::Button::builder().label("Select All Shown").action_name("win.select-shown").tooltip_text("Select every mod listed, to change them all at once").css_classes(["flat"]).visible(false).build();
+    let select_shown = gtk::Button::builder().label(t!("Select All Shown")).action_name("win.select-shown").tooltip_text(t!("Select every mod listed, to change them all at once")).css_classes(["flat"]).visible(false).build();
     enabled_heading.append(&select_shown);
     enabled_section.append(&enabled_heading);
     enabled_section.append(&enabled_list);
@@ -392,16 +392,16 @@ pub fn build(
     content.append(&missing_heading);
     content.append(&missing_list);
     let disabled_order = gtk::DropDown::builder()
-        .model(&gtk::StringList::new(&["Name", "Recently Updated"]))
-        .tooltip_text("Order of the disabled mods")
+        .model(&gtk::StringList::new(&[&t!("Name"), &t!("Recently Updated")]))
+        .tooltip_text(t!("Order of the disabled mods"))
         .valign(gtk::Align::Center)
         .css_classes(["flat"])
         .build();
     let disabled_heading = gtk::Box::new(gtk::Orientation::Horizontal, 6);
-    let label = heading("Disabled");
+    let label = heading(&t!("Disabled"));
     label.set_hexpand(true);
     disabled_heading.append(&label);
-    disabled_heading.append(&gtk::Label::builder().label("Sort by").css_classes(["dim-label"]).build());
+    disabled_heading.append(&gtk::Label::builder().label(t!("Sort by")).css_classes(["dim-label"]).build());
     disabled_heading.append(&disabled_order);
     let disabled_section = gtk::Box::new(gtk::Orientation::Vertical, 6);
     disabled_section.append(&disabled_heading);
@@ -445,7 +445,7 @@ pub fn build(
         .build();
     let views_toggle = gtk::ToggleButton::builder()
         .icon_name("sidebar-show-symbolic")
-        .tooltip_text("Show Views")
+        .tooltip_text(t!("Show Views"))
         .build();
     views_split.bind_property("show-sidebar", &views_toggle, "active").bidirectional().sync_create().build();
     views_split.bind_property("collapsed", &views_toggle, "visible").sync_create().build();
@@ -458,7 +458,7 @@ pub fn build(
     stack.add_titled_with_icon(
         &inspector_split,
         Some("load-order"),
-        "Load Order",
+        &t!("Load Order"),
         "view-list-symbolic",
     );
     let conflicts_page = adw::Bin::new();
@@ -466,7 +466,7 @@ pub fn build(
     stack.add_titled_with_icon(
         &conflicts_page,
         Some("conflicts"),
-        "Conflicts",
+        &t!("Conflicts"),
         "dialog-warning-symbolic",
     );
     toolbar.set_content(Some(&stack));
@@ -645,7 +645,7 @@ pub fn build(
             return;
         }
         ui.settings.borrow_mut().disabled_order = order;
-        ui.save_settings("the Disabled list's order");
+        ui.save_settings(&t!("the Disabled list's order"));
         ui.refresh();
     });
     let weak = Rc::downgrade(&ui);
@@ -927,7 +927,7 @@ impl Window {
         if let Err(e) = self.settings.borrow().save(&settings::path()) {
             self.add_toast(
                 adw::Toast::builder()
-                    .title(format!("Could not save {what}: {e}"))
+                    .title(tf!("Could not save {what}: {e}", what = what, e = e))
                     .timeout(0)
                     .build(),
             );
@@ -963,14 +963,14 @@ impl Window {
         self.settings.borrow_mut().key_in_keyring = true;
         let weak = Rc::downgrade(self);
         glib::spawn_future_local(async move {
-            let stored = gio::spawn_blocking(move || secrets::set(kind, &key)).await.unwrap_or_else(|_| Err("The keyring call failed".into()));
+            let stored = gio::spawn_blocking(move || secrets::set(kind, &key)).await.unwrap_or_else(|_| Err(t!("The keyring call failed")));
             let Some(ui) = weak.upgrade() else { return };
             ui.settings.borrow_mut().key_in_keyring = stored.is_ok();
             ui.save_settings("preferences");
             if let Err(e) = stored {
                 ui.add_toast(
                     adw::Toast::builder()
-                        .title(format!("{e}. The API key is saved in settings.json, readable only by you."))
+                        .title(tf!("{error}. The API key is saved in settings.json, readable only by you.", error = e))
                         .timeout(0)
                         .build(),
                 );
@@ -997,31 +997,35 @@ fn boxed_list(placeholder: &str) -> gtk::ListBox {
 
 /// A "Filters" button whose popover sets the search's `key:value` terms.
 fn filter_button(search: &gtk::SearchEntry) -> gtk::MenuButton {
-    // Each key's title, and its values with their labels.
-    type Choice = (&'static str, &'static str, &'static [(&'static str, &'static str)]);
+    // Each key's title, and its values with their labels. The keys stay as
+    // they are (they are the search syntax); the titles and labels are shown.
+    type Choice = (&'static str, String, Vec<(&'static str, String)>);
     let choices: [Choice; 4] = [
-        ("enabled", "Enabled", &[("yes", "Yes"), ("no", "No")]),
-        ("source", "Source", &[("workshop", "Workshop"), ("local", "Local")]),
-        ("achievements", "Achievements", &[("yes", "Keeps Them On"), ("no", "Turns Them Off")]),
-        ("conflicts", "Conflicts", &[("yes", "Has Conflicts"), ("no", "None")]),
+        ("enabled", t!("Enabled"), vec![("yes", t!("Yes")), ("no", t!("No"))]),
+        ("source", t!("Source"), vec![("workshop", t!("Workshop")), ("local", t!("Local"))]),
+        ("achievements", t!("Achievements"), vec![("yes", t!("Keeps Them On")), ("no", t!("Turns Them Off"))]),
+        ("conflicts", t!("Conflicts"), vec![("yes", t!("Has Conflicts")), ("no", t!("None"))]),
     ];
     debug_assert!(choices.iter().map(|c| c.0).eq(filter::KEYS));
     let grid = gtk::Grid::builder().row_spacing(6).column_spacing(12).margin_top(6).margin_bottom(6).margin_start(6).margin_end(6).build();
     let mut pickers = Vec::new();
     // Set while the pickers are shown what the search says.
     let syncing = Rc::new(Cell::new(false));
+    let rows = choices.len();
     for (row, (key, title, values)) in choices.into_iter().enumerate() {
-        let mut labels = vec!["Any"];
-        labels.extend(values.iter().map(|v| v.1));
+        let mut labels = vec![t!("Any")];
+        labels.extend(values.iter().map(|v| v.1.clone()));
+        let labels: Vec<&str> = labels.iter().map(String::as_str).collect();
         let picker = gtk::DropDown::from_strings(&labels);
-        grid.attach(&gtk::Label::builder().label(title).xalign(0.0).build(), 0, row as i32, 1, 1);
+        grid.attach(&gtk::Label::builder().label(&title).xalign(0.0).build(), 0, row as i32, 1, 1);
         grid.attach(&picker, 1, row as i32, 1, 1);
         let (search, syncing) = (search.clone(), syncing.clone());
+        let value_keys: Vec<&'static str> = values.iter().map(|v| v.0).collect();
         picker.connect_selected_notify(move |picker| {
             if syncing.get() {
                 return;
             }
-            let value = (picker.selected() as usize).checked_sub(1).and_then(|i| values.get(i)).map(|v| v.0);
+            let value = (picker.selected() as usize).checked_sub(1).and_then(|i| value_keys.get(i)).copied();
             let text = filter::with_value(&search.text(), key, value);
             if text != search.text() {
                 search.set_text(&text);
@@ -1030,13 +1034,13 @@ fn filter_button(search: &gtk::SearchEntry) -> gtk::MenuButton {
         pickers.push((key, values, picker));
     }
     let hint = gtk::Label::builder()
-        .label("Or type them: version:3.12, -- to leave out (source:--local), || for either")
+        .label(t!("Or type them: version:3.12, -- to leave out (source:--local), || for either"))
         .wrap(true)
         .max_width_chars(32)
         .xalign(0.0)
         .css_classes(["dim-label", "caption"])
         .build();
-    grid.attach(&hint, 0, choices.len() as i32, 2, 1);
+    grid.attach(&hint, 0, rows as i32, 2, 1);
     let popover = gtk::Popover::builder().child(&grid).build();
     // Shows what the search already says when opened.
     popover.connect_show(glib::clone!(
@@ -1053,8 +1057,8 @@ fn filter_button(search: &gtk::SearchEntry) -> gtk::MenuButton {
         }
     ));
     gtk::MenuButton::builder()
-        .label("Filters")
-        .tooltip_text("Filter the mods by state")
+        .label(t!("Filters"))
+        .tooltip_text(t!("Filter the mods by state"))
         .popover(&popover)
         .build()
 }

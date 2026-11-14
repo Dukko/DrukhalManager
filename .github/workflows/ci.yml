@@ -23,6 +23,7 @@ jobs:
           dnf install -y --setopt=install_weak_deps=False \
             gcc pkg-config \
             gtk4-devel libadwaita-devel \
+            gettext \
             git ca-certificates
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -35,6 +36,11 @@ jobs:
         run: cargo test --locked
       - name: cargo clippy
         run: cargo clippy --all-targets --locked
+      - name: Translation template is current
+        run: |
+          cargo install xtr --version 0.1.11 --locked
+          po/check-pot.sh
+          po/check-placeholders.sh
       - name: Keep non-UI code free of GTK
         # So a native Windows UI could reuse it later (#153).
         run: |
@@ -61,10 +67,31 @@ jobs:
             mingw-w64-ucrt-x86_64-pkgconf
             mingw-w64-ucrt-x86_64-gtk4
             mingw-w64-ucrt-x86_64-libadwaita
+            mingw-w64-ucrt-x86_64-gettext
             mingw-w64-ucrt-x86_64-rust
+            diffutils
       - name: cargo build
         run: cargo build --locked
       - name: cargo test
         run: cargo test --locked
       - name: cargo clippy
-        run: cargo clippy --all-targets --locked
+        # Use MSYS2's cargo and clippy through their absolute paths, and name
+        # the GNU target: the runner image also has rustup's MSVC shims on
+        # PATH, and `cargo clippy` otherwise lints the MSVC target, where
+        # gettext-sys cannot use the system library.
+        env:
+          # Naming the target makes pkg-config treat the build as a cross
+          # build, even though the target is the environment's own.
+          PKG_CONFIG_ALLOW_CROSS: 1
+          PKG_CONFIG_PATH: /ucrt64/lib/pkgconfig:/ucrt64/share/pkgconfig
+        run: |
+          export PATH="/ucrt64/bin:$PATH"
+          /ucrt64/bin/cargo clippy --all-targets --locked --target x86_64-pc-windows-gnu
+      - name: Translation template is current
+        run: |
+          # Install xtr under the workspace: MSYS2's PATH does not include
+          # cargo's Windows bin folder, so the script would not find it.
+          cargo install xtr --version 0.1.11 --locked --root target/xtr
+          export PATH="$PWD/target/xtr/bin:$PATH"
+          po/check-pot.sh
+          po/check-placeholders.sh

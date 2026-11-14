@@ -1,6 +1,8 @@
 // Release builds on Windows open without a console window.
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
+#[macro_use]
+mod i18n;
 mod conflicts_view;
 mod dds;
 mod diagnostics;
@@ -34,6 +36,8 @@ use paradox::{game, steam};
 pub const APP_ID: &str = "io.github.dukko.DrukhalManager";
 
 fn main() -> gtk::glib::ExitCode {
+    // Before any UI, so the first string the app shows is translated too.
+    i18n::init();
     let app = adw::Application::builder().application_id(APP_ID).build();
     app.connect_activate(build_ui);
     app.run()

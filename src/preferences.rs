@@ -83,15 +83,20 @@ fn collect_groups(widget: &gtk::Widget, out: &mut Vec<adw::PreferencesGroup>) {
 
 /// Where an API key is kept, for a group's description: the keyring, or
 /// without one the settings file.
-fn key_storage(keyring: bool) -> &'static str {
+fn key_storage(keyring: bool) -> String {
     if keyring {
-        "The key is kept in your system keyring."
+        t!("The key is kept in your system keyring.")
     } else {
-        "No keyring is available, so the key is kept in DrukhalManager's settings file, readable only by you."
+        t!("No keyring is available, so the key is kept in DrukhalManager's settings file, readable only by you.")
     }
 }
 
-const STEAM_DESCRIPTION: &str = "With your own Steam Web API key, the mod list also checks the Workshop's “Required items” of enabled mods, which many mods list only there, and Find Compatibility Patches can search the Workshop for patches between your mods. Get a key at <a href=\"https://steamcommunity.com/dev/apikey\">steamcommunity.com/dev/apikey</a>.";
+fn steam_description(keyring: bool) -> String {
+    tf!(
+        "With your own Steam Web API key, the mod list also checks the Workshop's “Required items” of enabled mods, which many mods list only there, and Find Compatibility Patches can search the Workshop for patches between your mods. Get a key at <a href=\"https://steamcommunity.com/dev/apikey\">steamcommunity.com/dev/apikey</a>. {storage}",
+        storage = key_storage(keyring)
+    )
+}
 
 /// The Steam Web API key, which lets DrukhalManager read mods' Workshop
 /// "Required items". Loaded from the keyring in the background, or with no
@@ -99,8 +104,8 @@ const STEAM_DESCRIPTION: &str = "With your own Steam Web API key, the mod list a
 /// if it was changed. `on_keyring` hears whether there is a keyring, once
 /// that's known.
 fn steam_key_group(in_file: String, on_keyring: Box<dyn Fn(bool)>) -> (adw::PreferencesGroup, impl Fn() -> Option<String> + use<>) {
-    let group = adw::PreferencesGroup::builder().title("Steam Workshop").description(format!("{STEAM_DESCRIPTION} {}", key_storage(true))).build();
-    let row = adw::PasswordEntryRow::builder().title("Steam Web API Key").build();
+    let group = adw::PreferencesGroup::builder().title(t!("Steam Workshop")).description(steam_description(true)).build();
+    let row = adw::PasswordEntryRow::builder().title(t!("Steam Web API Key")).build();
     group.add(&row);
     let loaded: Rc<RefCell<Option<String>>> = Rc::default();
     glib::spawn_future_local(glib::clone!(
@@ -111,9 +116,9 @@ fn steam_key_group(in_file: String, on_keyring: Box<dyn Fn(bool)>) -> (adw::Pref
         #[strong]
         loaded,
         async move {
-            let found = gio::spawn_blocking(|| crate::secrets::get(crate::secrets::STEAM)).await.unwrap_or_else(|_| Err("The keyring call failed".into()));
+            let found = gio::spawn_blocking(|| crate::secrets::get(crate::secrets::STEAM)).await.unwrap_or_else(|_| Err(t!("The keyring call failed")));
             let keyring = found.is_ok();
-            group.set_description(Some(&format!("{STEAM_DESCRIPTION} {}", key_storage(keyring))));
+            group.set_description(Some(&steam_description(keyring)));
             on_keyring(keyring);
             let key = found.ok().flatten().filter(|k| !k.is_empty()).unwrap_or(in_file);
             // Not if the user typed something meanwhile.
@@ -134,20 +139,20 @@ fn steam_key_group(in_file: String, on_keyring: Box<dyn Fn(bool)>) -> (adw::Pref
 /// The external merge tool's command, with presets for common tools.
 fn merge_tool_group(command: &str) -> (adw::PreferencesGroup, impl Fn() -> String + use<>) {
     use crate::merge::external;
-    let mut description = "Merge Tool…, on the Conflicts page and when merging a file, opens two versions in this program, and uses what you save. {left}, {right}, {base} and {output} stand for the files.".to_owned();
+    let mut description = t!("Merge Tool…, on the Conflicts page and when merging a file, opens two versions in this program, and uses what you save. {left}, {right}, {base} and {output} stand for the files.");
     if crate::platform::is_flatpak() {
-        description.push_str(&format!(" The Flatpak needs permission to start it, given once in a terminal with: {}", external::FLATPAK_OVERRIDE));
+        description.push_str(&tf!(" The Flatpak needs permission to start it, given once in a terminal with: {command}", command = external::FLATPAK_OVERRIDE));
     }
-    let group = adw::PreferencesGroup::builder().title("External Merge Tool").description(glib::markup_escape_text(&description).as_str()).build();
+    let group = adw::PreferencesGroup::builder().title(t!("External Merge Tool")).description(glib::markup_escape_text(&description).as_str()).build();
     let initial = if command.is_empty() { external::detect().unwrap_or_default() } else { command };
-    let row = adw::EntryRow::builder().title("Command").text(initial).build();
+    let row = adw::EntryRow::builder().title(t!("Command")).text(initial).build();
     let presets = gio::Menu::new();
     for (i, (name, _)) in external::PRESETS.iter().enumerate() {
         let item = gio::MenuItem::new(Some(name), None);
         item.set_action_and_target_value(Some("tool.preset"), Some(&(i as u32).to_variant()));
         presets.append_item(&item);
     }
-    let button = gtk::MenuButton::builder().icon_name("view-more-symbolic").tooltip_text("Use a common tool").menu_model(&presets).valign(gtk::Align::Center).css_classes(["flat"]).build();
+    let button = gtk::MenuButton::builder().icon_name("view-more-symbolic").tooltip_text(t!("Use a common tool")).menu_model(&presets).valign(gtk::Align::Center).css_classes(["flat"]).build();
     row.add_suffix(&button);
     let actions = gio::SimpleActionGroup::new();
     let preset = gio::SimpleAction::new("preset", Some(glib::VariantTy::UINT32));
@@ -176,10 +181,11 @@ fn icon_button(icon: &str, tooltip: &str) -> gtk::Button {
 
 /// A row showing a path that is detected unless the user picks another.
 /// Returns the row and the chosen path (`None` = detected).
-fn path_row(title: &str, detected: Option<PathBuf>, chosen: Option<PathBuf>, folder: bool, unset: &'static str) -> (adw::ActionRow, Rc<RefCell<Option<PathBuf>>>) {
+fn path_row(title: &str, detected: Option<PathBuf>, chosen: Option<PathBuf>, folder: bool, unset: &str) -> (adw::ActionRow, Rc<RefCell<Option<PathBuf>>>) {
+    let unset = unset.to_owned();
     let row = adw::ActionRow::builder().title(title).subtitle_selectable(true).build();
-    let reset = icon_button("edit-undo-symbolic", if detected.is_some() { "Use the detected location" } else { "Don't use a folder" });
-    let choose = icon_button("document-open-symbolic", if folder { "Choose a folder" } else { "Choose a file" });
+    let reset = icon_button("edit-undo-symbolic", &if detected.is_some() { t!("Use the detected location") } else { t!("Don't use a folder") });
+    let choose = icon_button("document-open-symbolic", &if folder { t!("Choose a folder") } else { t!("Choose a file") });
     row.add_suffix(&reset);
     row.add_suffix(&choose);
     let chosen = Rc::new(RefCell::new(chosen));
@@ -189,8 +195,8 @@ fn path_row(title: &str, detected: Option<PathBuf>, chosen: Option<PathBuf>, fol
         move || {
             let subtitle = match (&*chosen.borrow(), &detected) {
                 (Some(p), _) => p.display().to_string(),
-                (None, Some(p)) => format!("{} (detected)", p.display()),
-                (None, None) => unset.to_owned(),
+                (None, Some(p)) => tf!("{path} (detected)", path = p.display()),
+                (None, None) => unset.clone(),
             };
             row.set_subtitle(&glib::markup_escape_text(&subtitle));
             reset.set_visible(chosen.borrow().is_some());
@@ -234,17 +240,17 @@ fn game_page(options: &GameOptions) -> (adw::PreferencesPage, adw::PreferencesPa
     let detected_exe = game::find(&steam::library_folders(&home)).map(|g| g.exe);
 
     let folders = adw::PreferencesGroup::builder()
-        .title("Locations")
-        .description("A new game executable or data directory takes effect the next time DrukhalManager starts.")
+        .title(t!("Locations"))
+        .description(t!("A new game executable or data directory takes effect the next time DrukhalManager starts."))
         .build();
-    let (exe_row, exe) = path_row("Game Executable", detected_exe, options.executable.clone(), false, "Not found");
-    let (data_row, data_dir) = path_row("Data Directory", Some(steam::stellaris_user_dir()), options.data_dir.clone(), true, "Not found");
-    data_row.set_tooltip_text(Some("Where Stellaris keeps mod descriptors, saves and the load order"));
-    let (extra_row, extra_dir) = path_row("Extra Mod Folder", None, options.extra_mod_dir.clone(), true, "None");
-    extra_row.set_tooltip_text(Some("Mods in this folder's subfolders are listed and loaded like the rest, e.g. local mods on another drive or in a git checkout"));
+    let (exe_row, exe) = path_row(&t!("Game Executable"), detected_exe, options.executable.clone(), false, &t!("Not found"));
+    let (data_row, data_dir) = path_row(&t!("Data Directory"), Some(steam::stellaris_user_dir()), options.data_dir.clone(), true, &t!("Not found"));
+    data_row.set_tooltip_text(Some(&t!("Where Stellaris keeps mod descriptors, saves and the load order")));
+    let (extra_row, extra_dir) = path_row(&t!("Extra Mod Folder"), None, options.extra_mod_dir.clone(), true, &t!("None"));
+    extra_row.set_tooltip_text(Some(&t!("Mods in this folder's subfolders are listed and loaded like the rest, e.g. local mods on another drive or in a git checkout")));
     let merge_extra_row = adw::SwitchRow::builder()
-        .title("Write Merged Mods There")
-        .subtitle("Merge into One Mod writes into the extra mod folder instead of the game's")
+        .title(t!("Write Merged Mods There"))
+        .subtitle(t!("Merge into One Mod writes into the extra mod folder instead of the game's"))
         .active(options.merge_to_extra)
         .build();
     folders.add(&exe_row);
@@ -259,25 +265,25 @@ fn game_page(options: &GameOptions) -> (adw::PreferencesPage, adw::PreferencesPa
     sync_merge_row();
     extra_row.connect_subtitle_notify(move |_| sync_merge_row());
 
-    let launching = adw::PreferencesGroup::builder().title("Launching").build();
-    let args_row = adw::EntryRow::builder().title("Game Launch Options").text(&options.launch_args).build();
+    let launching = adw::PreferencesGroup::builder().title(t!("Launching")).build();
+    let args_row = adw::EntryRow::builder().title(t!("Game Launch Options")).text(&options.launch_args).build();
     let refresh_row = adw::SwitchRow::builder()
-        .title("Refresh Descriptors Before Playing")
-        .subtitle("Point mod descriptors at their mods' folders again if they moved")
+        .title(t!("Refresh Descriptors Before Playing"))
+        .subtitle(t!("Point mod descriptors at their mods' folders again if they moved"))
         .active(options.refresh_descriptors)
         .build();
-    let close_row = adw::SwitchRow::builder().title("Close After Launching Game").active(options.close_after_launch).build();
+    let close_row = adw::SwitchRow::builder().title(t!("Close After Launching Game")).active(options.close_after_launch).build();
     launching.add(&args_row);
     launching.add(&refresh_row);
     launching.add(&close_row);
     if flatpak {
         // The sandbox can't run the game itself; Steam starts it.
         exe_row.set_sensitive(false);
-        exe_row.set_subtitle("Steam starts the game in the Flatpak");
+        exe_row.set_subtitle(&t!("Steam starts the game in the Flatpak"));
         args_row.set_sensitive(false);
-        launching.set_description(Some("In the Flatpak, Steam starts the game, so set launch options in Steam: right-click Stellaris, choose Properties, then Launch Options."));
+        launching.set_description(Some(&t!("In the Flatpak, Steam starts the game, so set launch options in Steam: right-click Stellaris, choose Properties, then Launch Options.")));
     } else {
-        args_row.set_tooltip_text(Some("Added after the launcher's own arguments, e.g. -debug_mode"));
+        args_row.set_tooltip_text(Some(&t!("Added after the launcher's own arguments, e.g. -debug_mode")));
     }
 
     // Which localisation the conflict scan reads, like Irony's Allowed
@@ -290,11 +296,11 @@ fn game_page(options: &GameOptions) -> (adw::PreferencesPage, adw::PreferencesPa
         o.languages(&user_dir)
     };
     let scan = adw::PreferencesGroup::builder()
-        .title("Conflict Scan")
-        .description("Localisation in languages you don't play in adds conflicts you don't need to solve. Changes apply on the next scan.")
+        .title(t!("Conflict Scan"))
+        .description(t!("Localisation in languages you don't play in adds conflicts you don't need to solve. Changes apply on the next scan."))
         .build();
     let localisation = adw::ExpanderRow::builder()
-        .title("Localisation")
+        .title(t!("Localisation"))
         .show_enable_switch(true)
         .enable_expansion(!options.skip_localisation)
         .build();
@@ -304,7 +310,7 @@ fn game_page(options: &GameOptions) -> (adw::PreferencesPage, adw::PreferencesPa
             let check = gtk::CheckButton::builder().active(chosen.contains(*id)).valign(gtk::Align::Center).build();
             let row = adw::ActionRow::builder().title(*name).activatable_widget(&check).build();
             if *id == game_language {
-                row.set_subtitle("The game's language");
+                row.set_subtitle(&t!("The game's language"));
             }
             row.add_prefix(&check);
             localisation.add_row(&row);
@@ -317,10 +323,10 @@ fn game_page(options: &GameOptions) -> (adw::PreferencesPage, adw::PreferencesPa
         move || {
             let names: Vec<&str> = LANGUAGES.iter().zip(checks.iter()).filter(|(_, (_, c))| c.is_active()).map(|((_, name), _)| *name).collect();
             localisation.set_subtitle(&match (localisation.enables_expansion(), names.len()) {
-                (false, _) | (true, 0) => "Not scanned".to_owned(),
-                (true, n) if n == LANGUAGES.len() => "Every language".to_owned(),
+                (false, _) | (true, 0) => t!("Not scanned"),
+                (true, n) if n == LANGUAGES.len() => t!("Every language"),
                 (true, n) if n <= 2 => names.join(", "),
-                (true, n) => format!("{n} languages"),
+                (true, n) => tf!("{count} languages", count = n),
             });
         }
     };
@@ -333,12 +339,12 @@ fn game_page(options: &GameOptions) -> (adw::PreferencesPage, adw::PreferencesPa
     scan.add(&localisation);
 
     let merging = adw::PreferencesGroup::builder()
-        .title("Merge into One Mod")
-        .description("{Name} stands for the collection's name. Applies to the next merge.")
+        .title(t!("Merge into One Mod"))
+        .description(t!("{Name} stands for the collection's name. Applies to the next merge."))
         .build();
     let template = options.merged_name.clone().unwrap_or_else(|| collection::DEFAULT_TEMPLATE.to_owned());
-    let name_row = adw::EntryRow::builder().title("Merged Mod Name").text(&template).build();
-    let reset_name = icon_button("edit-undo-symbolic", "Use the default name");
+    let name_row = adw::EntryRow::builder().title(t!("Merged Mod Name")).text(&template).build();
+    let reset_name = icon_button("edit-undo-symbolic", &t!("Use the default name"));
     name_row.add_suffix(&reset_name);
     let check_name = |row: &adw::EntryRow, reset: &gtk::Button| {
         let text = row.text();
@@ -348,7 +354,7 @@ fn game_page(options: &GameOptions) -> (adw::PreferencesPage, adw::PreferencesPa
             row.set_tooltip_text(None);
         } else {
             row.add_css_class("error");
-            row.set_tooltip_text(Some("Needs {Name}, or every collection's merge gets the same name"));
+            row.set_tooltip_text(Some(&t!("Needs {Name}, or every collection's merge gets the same name")));
         }
         reset.set_visible(text.trim() != collection::DEFAULT_TEMPLATE);
     };
@@ -365,10 +371,10 @@ fn game_page(options: &GameOptions) -> (adw::PreferencesPage, adw::PreferencesPa
     ));
     merging.add(&name_row);
 
-    let page = page("Game", "game", "input-gaming-symbolic");
+    let page = page(&t!("Game"), "game", "input-gaming-symbolic");
     page.add(&folders);
     page.add(&launching);
-    let merging_page = self::page("Merging", MERGING_PAGE, "view-dual-symbolic");
+    let merging_page = self::page(&t!("Merging"), MERGING_PAGE, "view-dual-symbolic");
     merging_page.add(&scan);
     merging_page.add(&merging);
     // Chosen in the merge dialog, not here.
@@ -396,8 +402,14 @@ fn game_page(options: &GameOptions) -> (adw::PreferencesPage, adw::PreferencesPa
     (page, merging_page, read)
 }
 
-const CLAUDE_DESCRIPTION: &str = "Leave the key empty to use the ANTHROPIC_API_KEY environment variable.";
-const COMPATIBLE_DESCRIPTION: &str = "OpenRouter, or a local server such as Ollama (http://localhost:11434/v1) or LM Studio (http://localhost:1234/v1). Use a model that's good at code; small local models often produce broken merges.";
+fn claude_description() -> String {
+    t!("Leave the key empty to use the ANTHROPIC_API_KEY environment variable.")
+}
+
+fn compatible_description() -> String {
+    t!("OpenRouter, or a local server such as Ollama (http://localhost:11434/v1) or LM Studio (http://localhost:1234/v1). Use a model that's good at code; small local models often produce broken merges.")
+}
+
 
 /// A price per million tokens: "$4", "$0.10".
 fn dollars(amount: f64) -> String {
@@ -407,8 +419,8 @@ fn dollars(amount: f64) -> String {
 /// What the chosen Claude model costs, under its row.
 fn price_text(model: &str) -> String {
     match ai::claude_price(model) {
-        Some(p) => format!("{} per million input tokens, {} per million output tokens", dollars(p.input), dollars(p.output)),
-        None => "Its price isn't known here, so merges show no cost estimate".to_owned(),
+        Some(p) => tf!("{input} per million input tokens, {output} per million output tokens", input = dollars(p.input), output = dollars(p.output)),
+        None => t!("Its price isn't known here, so merges show no cost estimate"),
     }
 }
 
@@ -425,7 +437,7 @@ fn claude_model_row(current: &str, api_key: &str) -> (adw::ComboRow, impl Fn() -
     let models = Rc::new(RefCell::new(with_current(ai::builtin_claude_models(), current)));
     let names = gtk::StringList::new(&models.borrow().iter().map(|m| m.name.as_str()).collect::<Vec<_>>());
     let selected = models.borrow().iter().position(|m| m.id == current).unwrap_or(0);
-    let row = adw::ComboRow::builder().title("Model").model(&names).selected(selected as u32).build();
+    let row = adw::ComboRow::builder().title(t!("Model")).model(&names).selected(selected as u32).build();
     let chosen = {
         let (row, models) = (row.clone(), models.clone());
         move || models.borrow().get(row.selected() as usize).map(|m| m.id.clone()).unwrap_or_else(|| ai::CLAUDE_MODEL.to_owned())
@@ -473,32 +485,32 @@ fn ai_page(current: &Provider, parallel: Option<u32>) -> (adw::PreferencesPage, 
     let Provider::OpenAiCompatible { base_url, model, api_key: openai_key } = openai else { unreachable!() };
 
     let provider = adw::ComboRow::builder()
-        .title("Provider")
-        .model(&gtk::StringList::new(&["Claude (Anthropic API)", "OpenAI-compatible"]))
+        .title(t!("Provider"))
+        .model(&gtk::StringList::new(&[&t!("Claude (Anthropic API)"), &t!("OpenAI-compatible")]))
         .selected(u32::from(matches!(current, Provider::OpenAiCompatible { .. })))
         .build();
 
     let anthropic = adw::PreferencesGroup::builder()
-        .title("Claude")
-        .description(format!("{} {CLAUDE_DESCRIPTION}", key_storage(true)))
+        .title(t!("Claude"))
+        .description(tf!("{storage} {note}", storage = key_storage(true), note = claude_description()))
         .build();
-    let anthropic_key_row = adw::PasswordEntryRow::builder().title("API Key").text(&anthropic_key).build();
+    let anthropic_key_row = adw::PasswordEntryRow::builder().title(t!("API Key")).text(&anthropic_key).build();
     let (model_choice, read_claude_model) = claude_model_row(&claude_model, &anthropic_key);
     anthropic.add(&anthropic_key_row);
     anthropic.add(&model_choice);
 
     let compatible = adw::PreferencesGroup::builder()
-        .title("OpenAI-Compatible Endpoint")
-        .description(format!("{COMPATIBLE_DESCRIPTION} {}", key_storage(true)))
+        .title(t!("OpenAI-Compatible Endpoint"))
+        .description(tf!("{note} {storage}", note = compatible_description(), storage = key_storage(true)))
         .build();
-    let url_row = adw::EntryRow::builder().title("Base URL").text(&base_url).build();
-    let model_row = adw::EntryRow::builder().title("Model ID, as the provider names it").text(&model).build();
-    let key_row = adw::PasswordEntryRow::builder().title("API Key (optional for local servers)").text(&openai_key).build();
+    let url_row = adw::EntryRow::builder().title(t!("Base URL")).text(&base_url).build();
+    let model_row = adw::EntryRow::builder().title(t!("Model ID, as the provider names it")).text(&model).build();
+    let key_row = adw::PasswordEntryRow::builder().title(t!("API Key (optional for local servers)")).text(&openai_key).build();
     compatible.add(&url_row);
     compatible.add(&model_row);
     compatible.add(&key_row);
 
-    let choice = adw::PreferencesGroup::builder().title("AI Merging").description("Merging sends the conflicting definitions to the provider you choose.").build();
+    let choice = adw::PreferencesGroup::builder().title(t!("AI Merging")).description(t!("Merging sends the conflicting definitions to the provider you choose.")).build();
     choice.add(&provider);
 
     let sync = {
@@ -511,14 +523,14 @@ fn ai_page(current: &Provider, parallel: Option<u32>) -> (adw::PreferencesPage, 
     sync(&provider);
     provider.connect_selected_notify(sync);
 
-    let merge_all = adw::PreferencesGroup::builder().title("Merge All").build();
+    let merge_all = adw::PreferencesGroup::builder().title(t!("Merge All")).build();
     let parallel_row = adw::SpinRow::with_range(1.0, f64::from(settings::MAX_PARALLEL), 1.0);
-    parallel_row.set_title("Merges at Once");
-    parallel_row.set_subtitle("How many objects Merge All sends to the provider at the same time. Lower it if the provider rate-limits you.");
+    parallel_row.set_title(&t!("Merges at Once"));
+    parallel_row.set_subtitle(&t!("How many objects Merge All sends to the provider at the same time. Lower it if the provider rate-limits you."));
     parallel_row.set_value(f64::from(parallel.unwrap_or_else(|| settings::default_parallel(current))));
     merge_all.add(&parallel_row);
 
-    let page = page("AI Merging", AI_PAGE, "applications-science-symbolic");
+    let page = page(&t!("AI Merging"), AI_PAGE, "applications-science-symbolic");
     page.add(&choice);
     page.add(&anthropic);
     page.add(&compatible);
@@ -540,8 +552,8 @@ fn ai_page(current: &Provider, parallel: Option<u32>) -> (adw::PreferencesPage, 
     // Says where the keys really are, once it's known whether there's a
     // keyring.
     let keyring = move |available: bool| {
-        anthropic.set_description(Some(&format!("{} {CLAUDE_DESCRIPTION}", key_storage(available))));
-        compatible.set_description(Some(&format!("{COMPATIBLE_DESCRIPTION} {}", key_storage(available))));
+        anthropic.set_description(Some(&tf!("{storage} {note}", storage = key_storage(available), note = claude_description())));
+        compatible.set_description(Some(&tf!("{note} {storage}", note = compatible_description(), storage = key_storage(available))));
     };
     (page, read, read_parallel, keyring)
 }
@@ -551,31 +563,31 @@ fn updates_page(options: &UpdateOptions) -> (adw::PreferencesPage, impl Fn() -> 
 
     let version = adw::PreferencesGroup::new();
     let version_row = adw::ActionRow::builder()
-        .title("DrukhalManager")
-        .subtitle(format!("Version {}{}", update::CURRENT, if flatpak { " (Flatpak)" } else { "" }))
+        .title(t!("DrukhalManager"))
+        .subtitle(tf!("Version {version}{flatpak}", version = update::CURRENT, flatpak = if flatpak { t!(" (Flatpak)") } else { String::new() }))
         .subtitle_selectable(true)
         .build();
     version_row.add_prefix(&gtk::Image::builder().icon_name("io.github.dukko.DrukhalManager").pixel_size(32).build());
     version.add(&version_row);
 
-    let group = adw::PreferencesGroup::builder().title("Updates").build();
+    let group = adw::PreferencesGroup::builder().title(t!("Updates")).build();
     let startup_row = adw::SwitchRow::builder()
-        .title("Check for Updates at Startup")
+        .title(t!("Check for Updates at Startup"))
         .subtitle(if flatpak {
-            "Flatpak checks DrukhalManager's repository and offers to install new versions"
+            t!("Flatpak checks DrukhalManager's repository and offers to install new versions")
         } else {
-            "Asks GitHub for the latest release. Your package manager installs it."
+            t!("Asks GitHub for the latest release. Your package manager installs it.")
         })
         .active(options.check_at_startup)
         .build();
     let prerelease_row = adw::SwitchRow::builder()
-        .title("Include Test Versions")
-        .subtitle("Also offers betas and release candidates, which may have bugs")
+        .title(t!("Include Test Versions"))
+        .subtitle(t!("Also offers betas and release candidates, which may have bugs"))
         .active(options.prereleases)
         .build();
-    let check_row = adw::ActionRow::builder().title("Check for Updates").build();
+    let check_row = adw::ActionRow::builder().title(t!("Check for Updates")).build();
     let spinner = adw::Spinner::builder().visible(false).build();
-    let check = gtk::Button::builder().label("Check").valign(gtk::Align::Center).build();
+    let check = gtk::Button::builder().label(t!("Check")).valign(gtk::Align::Center).build();
     check_row.add_suffix(&spinner);
     check_row.add_suffix(&check);
     check_row.set_activatable_widget(Some(&check));
@@ -598,9 +610,9 @@ fn updates_page(options: &UpdateOptions) -> (adw::PreferencesPage, impl Fn() -> 
     let notes_card = gtk::Box::builder().css_classes(["card"]).margin_bottom(12).build();
     notes_card.append(&notes);
     let buttons = gtk::Box::builder().spacing(12).halign(gtk::Align::End).build();
-    let ignore = gtk::ToggleButton::builder().label("Ignore This Version").build();
-    let open_page = gtk::Button::builder().label("Open Release Page").build();
-    let install = gtk::Button::builder().label("Install Update").action_name("win.install-update").css_classes(["suggested-action"]).visible(flatpak).build();
+    let ignore = gtk::ToggleButton::builder().label(t!("Ignore This Version")).build();
+    let open_page = gtk::Button::builder().label(t!("Open Release Page")).build();
+    let install = gtk::Button::builder().label(t!("Install Update")).action_name("win.install-update").css_classes(["suggested-action"]).visible(flatpak).build();
     buttons.append(&ignore);
     buttons.append(&open_page);
     buttons.append(&install);
@@ -636,18 +648,18 @@ fn updates_page(options: &UpdateOptions) -> (adw::PreferencesPage, impl Fn() -> 
             let (button, check_row, spinner, release, notes, ignore, found, skipped, install) =
                 (button.clone(), check_row.clone(), spinner.clone(), release.clone(), notes.clone(), ignore.clone(), found.clone(), skipped.clone(), install.clone());
             glib::spawn_future_local(async move {
-                let result = gio::spawn_blocking(move || update::latest(prereleases)).await.unwrap_or_else(|_| Err("The check failed".to_owned()));
+                let result = gio::spawn_blocking(move || update::latest(prereleases)).await.unwrap_or_else(|_| Err(t!("The check failed")));
                 button.set_sensitive(true);
                 spinner.set_visible(false);
                 match result {
                     Ok(latest) if update::is_newer(&latest.version, update::CURRENT) => {
-                        check_row.set_subtitle(&format!("{} {} is available", if latest.prerelease { "Test version" } else { "Version" }, latest.version));
-                        release.set_title(&format!("What's New in {}", latest.version));
-                        let mut text = if latest.notes.is_empty() { "No release notes.".to_owned() } else { latest.notes.replace("**", "") };
+                        check_row.set_subtitle(&if latest.prerelease { tf!("Test version {version} is available", version = &latest.version) } else { tf!("Version {version} is available", version = &latest.version) });
+                        release.set_title(&tf!("What's New in {version}", version = &latest.version));
+                        let mut text = if latest.notes.is_empty() { t!("No release notes.") } else { latest.notes.replace("**", "") };
                         // The repository Flatpak updates from only has
                         // stable releases.
                         if latest.prerelease && flatpak {
-                            text.push_str("\n\nTest versions aren't in DrukhalManager's Flatpak repository. To try this one, download DrukhalManager.flatpak from its release page and run “flatpak install --reinstall DrukhalManager.flatpak”. The next stable release replaces it as usual.");
+                            text.push_str(&t!("\n\nTest versions aren't in DrukhalManager's Flatpak repository. To try this one, download DrukhalManager.flatpak from its release page and run “flatpak install --reinstall DrukhalManager.flatpak”. The next stable release replaces it as usual."));
                         }
                         notes.set_label(&text);
                         install.set_visible(flatpak && !latest.prerelease);
@@ -656,7 +668,7 @@ fn updates_page(options: &UpdateOptions) -> (adw::PreferencesPage, impl Fn() -> 
                         found.replace(Some(latest));
                     }
                     Ok(_) => {
-                        check_row.set_subtitle("DrukhalManager is up to date");
+                        check_row.set_subtitle(&t!("DrukhalManager is up to date"));
                         release.set_visible(false);
                     }
                     Err(e) => check_row.set_subtitle(&glib::markup_escape_text(&e)),
@@ -665,7 +677,7 @@ fn updates_page(options: &UpdateOptions) -> (adw::PreferencesPage, impl Fn() -> 
         }
     });
 
-    let page = page("Updates", UPDATES_PAGE, "software-update-available-symbolic");
+    let page = page(&t!("Updates"), UPDATES_PAGE, "software-update-available-symbolic");
     page.add(&version);
     page.add(&group);
     page.add(&release);

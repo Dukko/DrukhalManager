@@ -49,6 +49,7 @@ jobs:
             mingw-w64-ucrt-x86_64-libadwaita
             mingw-w64-ucrt-x86_64-librsvg
             mingw-w64-ucrt-x86_64-adwaita-icon-theme
+            mingw-w64-ucrt-x86_64-gettext
             mingw-w64-ucrt-x86_64-rust
       - name: Bundle
         run: packaging/windows/bundle.sh target/windows-bundle/DrukhalManager

@@ -63,7 +63,7 @@ pub fn link(user_dir: &Path, extra: Option<&Path>) -> Linked {
                     match write_descriptor(&folder, &target) {
                         Ok(true) => linked.added += 1,
                         Ok(false) => {}
-                        Err(e) => linked.errors.push(format!("Could not list the mod in {}: {e}", folder.display())),
+                        Err(e) => linked.errors.push(tf!("Could not list the mod in {folder}: {error}", folder = folder.display(), error = e)),
                     }
                 }
             }
@@ -73,7 +73,7 @@ pub fn link(user_dir: &Path, extra: Option<&Path>) -> Linked {
         if !wanted.contains(&path) {
             match std::fs::remove_file(&path) {
                 Ok(()) => linked.removed += 1,
-                Err(e) => linked.errors.push(format!("Could not remove {}: {e}", path.display())),
+                Err(e) => linked.errors.push(tf!("Could not remove {path}: {error}", path = path.display(), error = e)),
             }
         }
     }
@@ -109,13 +109,12 @@ fn slug(name: &str) -> String {
 
 fn unreadable(dir: &Path, e: &std::io::Error) -> String {
     if crate::platform::is_flatpak() && !dir.starts_with(crate::platform::home_dir()) {
-        format!(
-            "The extra mod folder {} is outside your home folder, so DrukhalManager can't see it from its sandbox. Run this once, then restart: flatpak override --user --filesystem={} io.github.dukko.DrukhalManager",
-            dir.display(),
-            dir.display()
+        tf!(
+            "The extra mod folder {folder} is outside your home folder, so DrukhalManager can't see it from its sandbox. Run this once, then restart: flatpak override --user --filesystem={folder} io.github.dukko.DrukhalManager",
+            folder = dir.display()
         )
     } else {
-        format!("Could not read the extra mod folder {}: {e}", dir.display())
+        tf!("Could not read the extra mod folder {folder}: {error}", folder = dir.display(), error = e)
     }
 }
 

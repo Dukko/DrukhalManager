@@ -62,13 +62,13 @@ pub fn latest(prereleases: bool) -> Result<Release, String> {
         .header("accept", "application/vnd.github+json")
         .header("user-agent", &format!("DrukhalManager/{CURRENT}"))
         .call()
-        .map_err(|e| format!("Could not reach GitHub: {e}"))?;
-    let unexpected = |e: ureq::Error| format!("Unexpected reply from GitHub: {e}");
+        .map_err(|e| tf!("Could not reach GitHub: {error}", error = e))?;
+    let unexpected = |e: ureq::Error| tf!("Unexpected reply from GitHub: {error}", error = e);
     if !prereleases {
         return Ok(response.body_mut().read_json::<GithubRelease>().map_err(unexpected)?.into());
     }
     let releases: Vec<GithubRelease> = response.body_mut().read_json().map_err(unexpected)?;
-    newest(releases.into_iter().filter(|r| !r.draft).map(Release::from)).ok_or_else(|| "No releases are published yet".to_owned())
+    newest(releases.into_iter().filter(|r| !r.draft).map(Release::from)).ok_or_else(|| t!("No releases are published yet"))
 }
 
 /// The release with the highest version.

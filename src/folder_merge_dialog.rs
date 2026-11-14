@@ -17,7 +17,6 @@ use std::rc::Rc;
 use adw::prelude::*;
 use gtk::{gio, glib};
 
-use crate::conflicts_view::plural;
 use crate::file_merge_dialog;
 use crate::merge::ai::{self, Estimate, Price, Provider, Usage};
 use crate::merge::file_merge::{self, Plan, Status};
@@ -129,14 +128,15 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
     let request = Rc::new(request);
     let model = request.provider.as_ref().map(|p| p.model_name().to_owned());
 
-    let start = gtk::Button::builder().label("Merge").css_classes(["suggested-action"]).sensitive(false).build();
-    let stop = gtk::Button::builder().label("Stop").visible(false).tooltip_text("Stop after the object being merged").build();
+    let start = gtk::Button::builder().label(t!("Merge")).css_classes(["suggested-action"]).sensitive(false).build();
+    let stop = gtk::Button::builder().label(t!("Stop")).visible(false).tooltip_text(t!("Stop after the object being merged")).build();
     let header = adw::HeaderBar::new();
-    header.set_title_widget(Some(&adw::WindowTitle::new(&format!("Merge {}", request.title()), model.as_deref().map_or("No AI provider set up".to_owned(), |m| format!("with {m}")).as_str())));
+    let subtitle = model.as_deref().map_or(t!("No AI provider set up"), |m| tf!("with {model}", model = m));
+    header.set_title_widget(Some(&adw::WindowTitle::new(&tf!("Merge {title}", title = request.title()), &subtitle)));
     header.pack_end(&start);
     header.pack_end(&stop);
 
-    let summary = gtk::Label::builder().xalign(0.0).wrap(true).label("Reading every version…").build();
+    let summary = gtk::Label::builder().xalign(0.0).wrap(true).label(t!("Reading every version…")).build();
     let detail = gtk::Label::builder().xalign(0.0).wrap(true).css_classes(["dim-label", "caption"]).build();
     let progress = gtk::ProgressBar::builder().show_text(true).visible(false).build();
     let top = gtk::Box::new(gtk::Orientation::Vertical, 6);
@@ -147,11 +147,11 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
     overview.add(&top);
     let files = matches!(request.items, Items::Files { .. });
     let objects = adw::PreferencesGroup::builder()
-        .title(if files { "Files" } else { "Objects" })
+        .title(if files { t!("Files") } else { t!("Objects") })
         .description(if files {
-            "Each file is saved to the patch as soon as its conflicting objects are merged. Review any of them later from its conflict."
+            t!("Each file is saved to the patch as soon as its conflicting objects are merged. Review any of them later from its conflict.")
         } else {
-            "Each merge is saved to the patch as soon as it's done. Review any of them later with Edit Merge."
+            t!("Each merge is saved to the patch as soon as it's done. Review any of them later with Edit Merge.")
         })
         .build();
 
@@ -188,45 +188,50 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
             let n = chosen.len();
             let free = chosen.iter().filter(|r| r.free).count();
             let calls = chosen.iter().map(|r| r.calls).sum::<usize>();
-            let (one, many) = if files { ("File", "Files") } else { ("Object", "Objects") };
-            start.set_label(&if n == 0 { "Merge".to_owned() } else { format!("Merge {}", plural(n, one, many)) });
+            let merge_label = if n == 0 {
+                t!("Merge")
+            } else if files {
+                tnf!("Merge {count} File", "Merge {count} Files", count = n)
+            } else {
+                tnf!("Merge {count} Object", "Merge {count} Objects", count = n)
+            };
+            start.set_label(&merge_label);
             start.set_sensitive(n > 0);
             if calls > 0 && !has_provider {
-                start.set_label("Set Up AI…");
+                start.set_label(&t!("Set Up AI…"));
             }
             if n == 0 {
-                summary.set_label("Nothing selected to merge");
+                summary.set_label(&t!("Nothing selected to merge"));
                 detail.set_label("");
                 return;
             }
-            let without_ai = if free > 0 { format!(" · {free} without AI") } else { String::new() };
+            let without_ai = if free > 0 { tf!(" · {count} without AI", count = free) } else { String::new() };
             if calls == 0 {
                 if files {
-                    summary.set_label(&format!("No AI calls needed · {} can be combined as they are", plural(free, "file", "files")));
-                    detail.set_label("In each of these, every object is the same in every copy, only in some of them, or changed by only one mod.");
+                    summary.set_label(&tnf!("No AI calls needed · {count} file can be combined as they are", "No AI calls needed · {count} files can be combined as they are", count = free));
+                    detail.set_label(&t!("In each of these, every object is the same in every copy, only in some of them, or changed by only one mod."));
                 } else {
-                    summary.set_label(&format!("No AI calls needed · {} can be used as they are", plural(free, "version", "versions")));
-                    detail.set_label("Each of these was changed by only one mod, or is the same in every mod.");
+                    summary.set_label(&tnf!("No AI calls needed · {count} version can be used as it is", "No AI calls needed · {count} versions can be used as they are", count = free));
+                    detail.set_label(&t!("Each of these was changed by only one mod, or is the same in every mod."));
                 }
                 return;
             }
-            summary.set_label(&format!(
-                "{}{without_ai} · about {} tokens in, {}–{} out",
-                plural(calls, "AI call", "AI calls"),
-                tokens(total.input),
-                tokens(total.output_low),
-                tokens(total.output_high)
+            let calls = tnf!("{count} AI call", "{count} AI calls", count = calls);
+            summary.set_label(&tf!(
+                "{calls}{without_ai} · about {input} tokens in, {low}–{high} out",
+                calls = &calls, without_ai = &without_ai,
+                input = tokens(total.input), low = tokens(total.output_low), high = tokens(total.output_high)
             ));
             detail.set_label(&match (price.get(), price_known.get()) {
-                (Some(p), _) => format!(
-                    "Estimated cost: {} to {}, depending on how much the model thinks. Prices: ${:.3} per million tokens in, ${:.3} out.",
-                    dollars(p.cost(total.input, total.output_low)),
-                    dollars(p.cost(total.input, total.output_high)),
-                    p.input,
-                    p.output
+                (Some(p), _) => tf!(
+                    "Estimated cost: {low} to {high}, depending on how much the model thinks. Prices: ${input:.3} per million tokens in, ${output:.3} out.",
+                    low = dollars(p.cost(total.input, total.output_low)),
+                    high = dollars(p.cost(total.input, total.output_high)),
+                    input = p.input,
+                    output = p.output
                 ),
-                (None, true) => "The provider doesn't publish this model's price, so the cost can't be estimated.".to_owned(),
-                (None, false) => "Looking up the model's price…".to_owned(),
+                (None, true) => t!("The provider doesn't publish this model's price, so the cost can't be estimated."),
+                (None, false) => t!("Looking up the model's price…"),
             });
         })
     };
@@ -261,7 +266,7 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
                     .iter()
                     .map(|(path, origins)| {
                         if !file_merge::mergeable(path) {
-                            return Err("This kind of file can't be merged object by object".to_owned());
+                            return Err(t!("This kind of file can't be merged object by object"));
                         }
                         file_merge_dialog::load(path, origins, game_dir.as_deref()).map(|(plan, prints)| Unit::File { plan, prints })
                     })
@@ -282,13 +287,13 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
                     Items::Files { .. } => name.rsplit_once('/').map_or(name, |(_, f)| f),
                 };
                 let row = adw::ExpanderRow::builder().title(title).use_markup(false).subtitle_lines(3).build();
-                let check = gtk::CheckButton::builder().valign(gtk::Align::Center).tooltip_text(if files { "Merge this file" } else { "Merge this object" }).build();
+                let check = gtk::CheckButton::builder().valign(gtk::Align::Center).tooltip_text(if files { t!("Merge this file") } else { t!("Merge this object") }).build();
                 row.add_prefix(&check);
                 let state = gtk::Stack::builder().valign(gtk::Align::Center).build();
                 row.add_suffix(&state);
                 let show = gtk::ToggleButton::builder()
                     .icon_name("view-reveal-symbolic")
-                    .tooltip_text("Show the merged result")
+                    .tooltip_text(t!("Show the merged result"))
                     .valign(gtk::Align::Center)
                     .css_classes(["flat"])
                     .sensitive(false)
@@ -322,21 +327,21 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
                     revealer,
                     move |show| {
                         revealer.set_reveal_child(show.is_active());
-                        show.set_tooltip_text(Some(if show.is_active() { "Hide the merged result" } else { "Show the merged result" }));
+                        show.set_tooltip_text(Some(&if show.is_active() { t!("Hide the merged result") } else { t!("Show the merged result") }));
                         if show.is_active() {
                             row.set_enable_expansion(true);
                             row.set_expanded(true);
                         }
                     }
                 ));
-                let already = |subtitle: String| if merged { format!("Already merged · {subtitle}") } else { subtitle };
+                let already = |subtitle: String| if merged { tf!("Already merged · {subtitle}", subtitle = &subtitle) } else { subtitle };
                 let mut estimate = Estimate::default();
                 let (unit, free, calls) = match unit {
                     Ok(Unit::Object { loaded, resolved }) if loaded.mergeable() => {
                         let names: Vec<&str> = loaded.sources.iter().map(|s| s.label.as_str()).collect();
                         let mut subtitle = names.join(" · ");
                         if let Some(r) = &resolved {
-                            subtitle = format!("No AI needed: {} · {subtitle}", r.reason);
+                            subtitle = tf!("No AI needed: {reason} · {subtitle}", reason = &r.reason, subtitle = &subtitle);
                         } else {
                             estimate = ai::estimate(&request.category(i), name, loaded.vanilla.as_ref(), &loaded.sources);
                         }
@@ -345,7 +350,7 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
                         (Unit::Object { loaded, resolved }, free, usize::from(!free))
                     }
                     Ok(Unit::Object { loaded, .. }) => {
-                        row.set_subtitle(&if loaded.missing.is_empty() { "Nothing to merge".to_owned() } else { format!("Could not find it in: {}", loaded.missing.join(", ")) });
+                        row.set_subtitle(&if loaded.missing.is_empty() { t!("Nothing to merge") } else { tf!("Could not find it in: {mods}", mods = loaded.missing.join(", ")) });
                         (Unit::None, false, 0)
                     }
                     Ok(Unit::File { plan, prints }) => {
@@ -401,7 +406,7 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
         move |stop| {
             cancelled.set(true);
             stop.set_sensitive(false);
-            stop.set_label("Stopping…");
+            stop.set_label(&t!("Stopping…"));
         }
     ));
     // Closing stops the run once the merges in progress finish; what's done
@@ -482,26 +487,26 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
                 running.set(false);
                 progress.set_fraction(1.0);
                 let skipped = total - saved - failed;
-                progress.set_text(Some(&if skipped > 0 { format!("Stopped · {skipped} not merged") } else { "Done".to_owned() }));
+                progress.set_text(Some(&if skipped > 0 { tf!("Stopped · {count} not merged", count = skipped) } else { t!("Done") }));
                 stop.set_visible(false);
-                let mut line = format!("Merged {saved} of {total}");
+                let mut line = tf!("Merged {saved} of {total}", saved = saved, total = total);
                 if without_ai > 0 {
-                    line.push_str(&format!(" · {without_ai} without AI"));
+                    line.push_str(&tf!(" · {count} without AI", count = without_ai));
                 }
                 if partial > 0 {
-                    line.push_str(&format!(" · {partial} with objects left unmerged"));
+                    line.push_str(&tf!(" · {count} with objects left unmerged", count = partial));
                 }
                 if failed > 0 {
-                    line.push_str(&format!(" · {failed} failed"));
+                    line.push_str(&tf!(" · {count} failed", count = failed));
                 }
                 summary.set_label(&line);
                 detail.set_label(&if ai_calls == 0 {
-                    "No AI calls were needed".to_owned()
+                    t!("No AI calls were needed")
                 } else if counted {
-                    let cost = used.cost.map(|c| format!(" · cost {}", dollars(c))).unwrap_or_default();
-                    format!("Used {} tokens in and {} out{cost}", tokens(used.input), tokens(used.output))
+                    let cost = used.cost.map(|c| tf!(" · cost {cost}", cost = dollars(c))).unwrap_or_default();
+                    tf!("Used {input} tokens in and {output} out{cost}", input = tokens(used.input), output = tokens(used.output), cost = &cost)
                 } else {
-                    "The provider didn't report token usage".to_owned()
+                    t!("The provider didn't report token usage")
                 });
                 if saved > 0 {
                     (request.on_done)(saved);
@@ -569,9 +574,9 @@ impl Run {
         let totals = self.totals.borrow();
         self.progress.set_fraction(totals.finished as f64 / self.total as f64);
         let text = match totals.active.as_slice() {
-            [] => format!("{} of {} done", totals.finished, self.total),
-            [key] => format!("Merging {} of {}: {}", totals.finished + 1, self.total, key.rsplit_once('/').map_or(key.as_str(), |(_, f)| f)),
-            keys => format!("{} of {} done · merging {} at once", totals.finished, self.total, keys.len()),
+            [] => tf!("{done} of {total} done", done = totals.finished, total = self.total),
+            [key] => tf!("Merging {done} of {total}: {key}", done = totals.finished + 1, total = self.total, key = key.rsplit_once('/').map_or(key.as_str(), |(_, f)| f)),
+            keys => tf!("{done} of {total} done · merging {count} at once", done = totals.finished, total = self.total, count = keys.len()),
         };
         self.progress.set_text(Some(&text));
     }
@@ -655,7 +660,7 @@ impl Run {
                 self.totals.borrow_mut().without_ai += 1;
             }
             return self.finish(i, match outcome {
-                Ok(()) => Outcome::Saved { note: format!("Used as it is: {}", resolved.reason), tooltip: "Saved to the patch without AI".into() },
+                Ok(()) => Outcome::Saved { note: tf!("Used as it is: {reason}", reason = &resolved.reason), tooltip: t!("Saved to the patch without AI") },
                 Err(e) => Outcome::Failed(e),
             });
         }
@@ -667,20 +672,20 @@ impl Run {
             ai::merge_checked(&provider, &c, &k, vanilla.as_ref(), &sources, &check, on)
         })
         .await
-        .unwrap_or_else(|| Err("The merge failed unexpectedly".into()));
+        .unwrap_or_else(|| Err(t!("The merge failed unexpectedly")));
         // Keep the reasoning, but folded, once the object is done.
         thinking.widget.set_expanded(false);
         let outcome = result.and_then(|checked| {
             self.count(&checked);
             // Shown even when rejected, to see what went wrong.
             self.rows.borrow()[i].set_result(&checked.merged.script);
-            let script = checked.script.map_err(|e| format!("The model's result was rejected, even after a correction: {e}"))?;
+            let script = checked.script.map_err(|e| tf!("The model's result was rejected, even after a correction: {error}", error = e))?;
             (self.request.save)(&key, &script, prints)?;
             let notes = checked.merged.notes;
-            Ok(if checked.retried { format!("Corrected after a rejected first try. {notes}").trim_end().to_owned() } else { notes })
+            Ok(if checked.retried { tf!("Corrected after a rejected first try. {notes}", notes = &notes).trim_end().to_owned() } else { notes })
         });
         self.finish(i, match outcome {
-            Ok(note) => Outcome::Saved { note, tooltip: "Merged into the patch".into() },
+            Ok(note) => Outcome::Saved { note, tooltip: t!("Merged into the patch") },
             Err(e) => Outcome::Failed(e),
         });
     }
@@ -700,7 +705,7 @@ impl Run {
         for &c in &conflicts {
             let (Some(thinking), Some(provider)) = (&thinking, self.provider.clone()) else { break };
             if self.cancelled.get() {
-                problems.push(format!("{}: not reached before the run was stopped", plan.items[c].key));
+                problems.push(tf!("{key}: not reached before the run was stopped", key = &plan.items[c].key));
                 continue;
             }
             let Status::Conflict { sources, vanilla } = plan.items[c].status.clone() else { continue };
@@ -711,10 +716,10 @@ impl Run {
                 ai::merge_checked(&provider, &cat, &k, vanilla.as_ref(), &sources, &check, on)
             })
             .await
-            .unwrap_or_else(|| Err("failed unexpectedly".into()));
+            .unwrap_or_else(|| Err(t!("failed unexpectedly")));
             let text = result.and_then(|checked| {
                 self.count(&checked);
-                checked.script.map_err(|e| format!("rejected, even after a correction: {e}"))?;
+                checked.script.map_err(|e| tf!("rejected, even after a correction: {error}", error = e))?;
                 plan.validate_item(c, &checked.merged.script)
             });
             match text {
@@ -723,7 +728,7 @@ impl Run {
                     plan.items[c].resolved = true;
                     merged += 1;
                 }
-                Err(e) => problems.push(format!("{key}: {e}")),
+                Err(e) => problems.push(tf!("{key}: {error}", key = &key, error = e)),
             }
         }
         if let Some(thinking) = &thinking {
@@ -738,13 +743,13 @@ impl Run {
         self.finish(i, match saved {
             Err(e) => Outcome::Failed(e),
             Ok(()) if problems.is_empty() => Outcome::Saved {
-                note: if conflicts.is_empty() { "Combined without AI".to_owned() } else { format!("Merged {}", plural(merged, "conflicting object", "conflicting objects")) },
-                tooltip: "Merged into the patch".into(),
+                note: if conflicts.is_empty() { t!("Combined without AI") } else { tnf!("Merged {count} conflicting object", "Merged {count} conflicting objects", count = merged) },
+                tooltip: t!("Merged into the patch"),
             },
-            Ok(()) => Outcome::Partial(format!(
-                "Saved, but {} the last mod's version: {}",
-                if problems.len() == 1 { "1 object keeps".to_owned() } else { format!("{} objects keep", problems.len()) },
-                problems.join("; ")
+            Ok(()) => Outcome::Partial(tf!(
+                "Saved, but {objects} the last mod's version: {problems}",
+                objects = tnf!("{count} object keeps", "{count} objects keep", count = problems.len()),
+                problems = problems.join("; ")
             )),
         });
     }
@@ -767,7 +772,7 @@ fn tokens(n: u64) -> String {
 }
 
 fn dollars(d: f64) -> String {
-    if d < 0.01 { "under $0.01".to_owned() } else { format!("${d:.2}") }
+    if d < 0.01 { t!("under $0.01") } else { format!("${d:.2}") }
 }
 
 #[cfg(test)]

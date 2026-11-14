@@ -10,7 +10,6 @@ use gtk::{gio, glib};
 
 use super::overview::ago;
 use super::{Window, display_name};
-use crate::conflicts_view::plural;
 use crate::mods::last_session::{self, LastSession};
 use crate::paradox::{steam, workshop};
 
@@ -89,7 +88,7 @@ impl Window {
     }
 
     fn notes_button(&self, id: u64) -> gtk::Button {
-        let notes = gtk::Button::builder().label("Change Notes").valign(gtk::Align::Center).css_classes(["flat"]).tooltip_text("Open its Workshop change notes in the browser").build();
+        let notes = gtk::Button::builder().label(t!("Change Notes")).valign(gtk::Align::Center).css_classes(["flat"]).tooltip_text(t!("Open its Workshop change notes in the browser")).build();
         let window = self.window.downgrade();
         notes.connect_clicked(move |_| {
             gtk::UriLauncher::new(&last_session::change_notes_url(id)).launch(window.upgrade().as_ref(), None::<&gio::Cancellable>, |_| {});
@@ -107,10 +106,10 @@ impl Window {
         let page = adw::PreferencesPage::new();
         if !waiting.is_empty() {
             let group = adw::PreferencesGroup::builder()
-                .title("Not Downloaded Yet")
-                .description(format!("The Workshop has newer versions of {} than Steam has downloaded. Steam usually fetches them while it's open and the game isn't running, so they may change before your next session.", plural(waiting.len(), "mod", "mods")))
+                .title(t!("Not Downloaded Yet"))
+                .description(tnf!("The Workshop has a newer version of {count} mod than Steam has downloaded. Steam usually fetches it while it's open and the game isn't running, so it may change before your next session.", "The Workshop has newer versions of {count} mods than Steam has downloaded. Steam usually fetches them while it's open and the game isn't running, so they may change before your next session.", count = waiting.len()))
                 .build();
-            let downloads = gtk::Button::builder().label("Steam Downloads").valign(gtk::Align::Center).css_classes(["flat"]).tooltip_text("Open Steam's Downloads page").build();
+            let downloads = gtk::Button::builder().label(t!("Steam Downloads")).valign(gtk::Align::Center).css_classes(["flat"]).tooltip_text(t!("Open Steam's Downloads page")).build();
             let window = self.window.downgrade();
             downloads.connect_clicked(move |_| {
                 gtk::UriLauncher::new("steam://open/downloads").launch(window.upgrade().as_ref(), None::<&gio::Cancellable>, |_| {});
@@ -119,7 +118,7 @@ impl Window {
             let state = self.state.borrow();
             for &(index, at) in &waiting {
                 let m = &state.mods[index];
-                let row = adw::ActionRow::builder().title(display_name(m)).use_markup(false).subtitle(format!("Updated on the Workshop {}", ago(UNIX_EPOCH + Duration::from_secs(at)))).build();
+                let row = adw::ActionRow::builder().title(display_name(m)).use_markup(false).subtitle(tf!("Updated on the Workshop {when}", when = ago(UNIX_EPOCH + Duration::from_secs(at)))).build();
                 if let Some(id) = m.descriptor.remote_file_id {
                     row.add_suffix(&self.notes_button(id));
                 }
@@ -129,14 +128,14 @@ impl Window {
             page.add(&group);
         }
         let group = adw::PreferencesGroup::builder()
-            .title("Updated Since You Last Played")
-            .description(format!("Steam updated {} since you last launched the game, {since}. Read what changed before continuing a campaign: an update can break saves.", plural(updated.len(), "mod", "mods")))
+            .title(t!("Updated Since You Last Played"))
+            .description(tnf!("Steam updated {count} mod since you last launched the game, {since}. Read what changed before continuing a campaign: an update can break saves.", "Steam updated {count} mods since you last launched the game, {since}. Read what changed before continuing a campaign: an update can break saves.", count = updated.len(), since = since))
             .build();
         {
             let state = self.state.borrow();
             for &(index, at) in &updated {
                 let m = &state.mods[index];
-                let row = adw::ActionRow::builder().title(display_name(m)).use_markup(false).subtitle(format!("Updated {}", ago(UNIX_EPOCH + Duration::from_secs(at)))).build();
+                let row = adw::ActionRow::builder().title(display_name(m)).use_markup(false).subtitle(tf!("Updated {when}", when = ago(UNIX_EPOCH + Duration::from_secs(at)))).build();
                 let Some(id) = m.descriptor.remote_file_id else { continue };
                 row.add_suffix(&self.notes_button(id));
                 group.add(&row);
@@ -150,8 +149,8 @@ impl Window {
         let frozen = !self.collections.borrow().active().frozen.is_empty();
         if !frozen {
             let freeze = adw::ActionRow::builder()
-                .title("Freeze This Collection…")
-                .subtitle("Keep the versions you have now, so later updates can't change a campaign in progress")
+                .title(t!("Freeze This Collection…"))
+                .subtitle(t!("Keep the versions you have now, so later updates can't change a campaign in progress"))
                 .activatable(true)
                 .build();
             freeze.add_suffix(&gtk::Image::from_icon_name("go-next-symbolic"));
@@ -166,7 +165,7 @@ impl Window {
                 }
             });
         }
-        let seen = adw::ButtonRow::builder().title("Mark as Seen").visible(!updated.is_empty()).build();
+        let seen = adw::ButtonRow::builder().title(t!("Mark as Seen")).visible(!updated.is_empty()).build();
         let weak = Rc::downgrade(self);
         let ids: Vec<u64> = {
             let state = self.state.borrow();
@@ -195,6 +194,6 @@ impl Window {
         let toolbar = adw::ToolbarView::new();
         toolbar.add_top_bar(&header);
         toolbar.set_content(Some(&page));
-        adw::Dialog::builder().title("Mod Updates").content_width(560).content_height(520).child(&toolbar).build().present(Some(&self.window));
+        adw::Dialog::builder().title(t!("Mod Updates")).content_width(560).content_height(520).child(&toolbar).build().present(Some(&self.window));
     }
 }

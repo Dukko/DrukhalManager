@@ -6,7 +6,6 @@ use std::path::PathBuf;
 use adw::prelude::*;
 use gtk::gio;
 
-use crate::conflicts_view::plural;
 use crate::paradox::error_log::{Group, Report};
 
 /// Rows shown per group; the rest are summarised.
@@ -16,13 +15,14 @@ const ROWS_PER_GROUP: usize = 200;
 /// errors mention.
 pub fn present(parent: &impl IsA<gtk::Widget>, report: &Report, log: PathBuf, modified: Option<String>, roots: std::collections::HashMap<String, PathBuf>) {
     let page = adw::PreferencesPage::new();
-    let mut description = format!("{} in error.log", plural(report.lines, "line", "lines"));
-    if let Some(when) = modified {
-        description.push_str(&format!(", written {when}"));
-    }
-    description.push_str(&format!(". {} come from your mods.", plural(report.from_mods(), "error", "errors")));
+    let lines = tnf!("{count} line in error.log", "{count} lines in error.log", count = report.lines);
+    let errors = tnf!("{count} error comes from your mods", "{count} errors come from your mods", count = report.from_mods());
+    let description = match modified {
+        Some(when) => tf!("{lines}, written {when}. {errors}.", lines = &lines, when = when, errors = &errors),
+        None => tf!("{lines}. {errors}.", lines = &lines, errors = &errors),
+    };
     let summary = adw::PreferencesGroup::builder().description(description).build();
-    let open_log = gtk::Button::builder().label("Open error.log").css_classes(["flat"]).valign(gtk::Align::Center).build();
+    let open_log = gtk::Button::builder().label(t!("Open error.log")).css_classes(["flat"]).valign(gtk::Align::Center).build();
     open_log.connect_clicked(move |b| open(b, &log));
     summary.set_header_suffix(Some(&open_log));
     page.add(&summary);
@@ -33,13 +33,13 @@ pub fn present(parent: &impl IsA<gtk::Widget>, report: &Report, log: PathBuf, mo
     }
     page.add(&groups);
     if report.groups.is_empty() {
-        let empty = adw::StatusPage::builder().icon_name("emblem-ok-symbolic").title("No Errors").description("The game didn't log any errors last time").build();
+        let empty = adw::StatusPage::builder().icon_name("emblem-ok-symbolic").title(t!("No Errors")).description(t!("The game didn't log any errors last time")).build();
         summary.set_description(None);
         groups.add(&empty);
     }
 
     let header = adw::HeaderBar::new();
-    header.set_title_widget(Some(&adw::WindowTitle::new("Game Errors", "From the last time Stellaris ran")));
+    header.set_title_widget(Some(&adw::WindowTitle::new(&t!("Game Errors"), &t!("From the last time Stellaris ran"))));
     let toolbar = adw::ToolbarView::new();
     toolbar.add_top_bar(&header);
     toolbar.set_content(Some(&page));
@@ -49,12 +49,12 @@ pub fn present(parent: &impl IsA<gtk::Widget>, report: &Report, log: PathBuf, mo
 fn group_row(g: &Group, root: Option<PathBuf>) -> adw::ExpanderRow {
     let row = adw::ExpanderRow::builder()
         .title(&g.label)
-        .subtitle(format!("{} · {}", plural(g.total(), "error", "errors"), plural(g.entries.len(), "kind", "kinds")))
+        .subtitle(tf!("{errors} · {kinds}", errors = tnf!("{count} error", "{count} errors", count = g.total()), kinds = tnf!("{count} kind", "{count} kinds", count = g.entries.len())))
         .use_markup(false)
         .build();
     if g.is_patch {
-        row.add_prefix(&gtk::Image::builder().icon_name("dialog-warning-symbolic").tooltip_text("Errors from your merges and fixes").css_classes(["warning"]).build());
-        row.set_subtitle(&format!("{} · from your merges and fixes", plural(g.total(), "error", "errors")));
+        row.add_prefix(&gtk::Image::builder().icon_name("dialog-warning-symbolic").tooltip_text(t!("Errors from your merges and fixes")).css_classes(["warning"]).build());
+        row.set_subtitle(&tf!("{errors} · from your merges and fixes", errors = tnf!("{count} error", "{count} errors", count = g.total())));
     }
     for e in g.entries.iter().take(ROWS_PER_GROUP) {
         let mut subtitle = Vec::new();
@@ -69,14 +69,14 @@ fn group_row(g: &Group, root: Option<PathBuf>) -> adw::ExpanderRow {
             && root.join(file).is_file()
         {
             let path = root.join(file);
-            let button = gtk::Button::builder().icon_name("document-open-symbolic").tooltip_text("Open this file").valign(gtk::Align::Center).css_classes(["flat"]).build();
+            let button = gtk::Button::builder().icon_name("document-open-symbolic").tooltip_text(t!("Open this file")).valign(gtk::Align::Center).css_classes(["flat"]).build();
             button.connect_clicked(move |b| open(b, &path));
             entry.add_suffix(&button);
         }
         row.add_row(&entry);
     }
     if g.entries.len() > ROWS_PER_GROUP {
-        row.add_row(&adw::ActionRow::builder().title(format!("…and {} more kinds", g.entries.len() - ROWS_PER_GROUP)).css_classes(["dim-label"]).build());
+        row.add_row(&adw::ActionRow::builder().title(tnf!("…and {count} more kind", "…and {count} more kinds", count = g.entries.len() - ROWS_PER_GROUP)).css_classes(["dim-label"]).build());
     }
     row
 }

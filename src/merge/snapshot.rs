@@ -119,7 +119,7 @@ pub fn list(backup_dir: &Path, target: &Target) -> Vec<Snapshot> {
 pub fn restore(user_dir: &Path, target: &Target, backup_dir: &Path, snapshot: &Snapshot) -> io::Result<()> {
     let source = snapshot.dir.join(COPY);
     if !source.is_dir() {
-        return Err(io::Error::new(io::ErrorKind::NotFound, "The backup is gone"));
+        return Err(io::Error::new(io::ErrorKind::NotFound, t!("The backup is gone")));
     }
     take(user_dir, target, backup_dir, BEFORE_RESTORING)?;
     let result = replace_patch(user_dir, target, &source);

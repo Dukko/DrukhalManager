@@ -7,7 +7,6 @@ use adw::prelude::*;
 use gtk::glib;
 
 use super::{Window, display_name};
-use crate::conflicts_view::plural;
 use crate::mods::saves::{self, Played, Saves};
 use crate::paradox::session;
 
@@ -51,41 +50,49 @@ impl Window {
         if difference.is_empty() {
             return go(self);
         }
-        let empire = glib::markup_escape_text(&last.empire);
         let mut body = if played.collection == now.collection {
-            format!("{empire} was last played with “{}”, which has changed since:", glib::markup_escape_text(&played.collection))
+            tf!(
+                "{empire} was last played with “{collection}”, which has changed since:",
+                empire = glib::markup_escape_text(&last.empire),
+                collection = glib::markup_escape_text(&played.collection)
+            )
         } else {
-            format!("{empire} was last played with “{}”. “{}” is active:", glib::markup_escape_text(&played.collection), glib::markup_escape_text(&now.collection))
+            tf!(
+                "{empire} was last played with “{collection}”. “{active}” is active:",
+                empire = glib::markup_escape_text(&last.empire),
+                collection = glib::markup_escape_text(&played.collection),
+                active = glib::markup_escape_text(&now.collection)
+            )
         };
         let name = |id: &String| glib::markup_escape_text(played.names.get(id).or_else(|| now.names.get(id)).map_or(id.as_str(), String::as_str)).to_string();
         let list = |ids: &[String]| {
             let mut names: Vec<String> = ids.iter().take(5).map(name).collect();
             if ids.len() > 5 {
-                names.push(format!("{} more", ids.len() - 5));
+                names.push(tnf!("{count} more", "{count} more", count = ids.len() - 5));
             }
             names.join(", ")
         };
         if !difference.added.is_empty() {
-            body.push_str(&format!("\n• {} added: {}", plural(difference.added.len(), "mod", "mods"), list(&difference.added)));
+            body.push_str(&tnf!("\n• {count} mod added: {names}", "\n• {count} mods added: {names}", count = difference.added.len(), names = list(&difference.added)));
         }
         if !difference.removed.is_empty() {
-            body.push_str(&format!("\n• {} missing: {}", plural(difference.removed.len(), "mod", "mods"), list(&difference.removed)));
+            body.push_str(&tnf!("\n• {count} mod missing: {names}", "\n• {count} mods missing: {names}", count = difference.removed.len(), names = list(&difference.removed)));
         }
         if difference.reordered {
-            body.push_str("\n• The load order is different");
+            body.push_str(&t!("\n• The load order is different"));
         }
-        body.push_str("\n\nLoading a save with other mods can break it.");
-        let dialog = adw::AlertDialog::builder().heading("Different Mods Than Last Time").body(body).body_use_markup(true).build();
-        dialog.add_response("cancel", "_Cancel");
+        body.push_str(&t!("\n\nLoading a save with other mods can break it."));
+        let dialog = adw::AlertDialog::builder().heading(t!("Different Mods Than Last Time")).body(body).body_use_markup(true).build();
+        dialog.add_response("cancel", &t!("_Cancel"));
         let can_switch = played.collection != now.collection && self.collections.borrow().get(&played.collection).is_some();
         if can_switch {
-            dialog.add_response("switch", &format!("_Switch to “{}”", played.collection));
+            dialog.add_response("switch", &tf!("_Switch to “{collection}”", collection = &played.collection));
             dialog.set_response_appearance("switch", adw::ResponseAppearance::Suggested);
             dialog.set_default_response(Some("switch"));
         } else {
             dialog.set_default_response(Some("cancel"));
         }
-        dialog.add_response("launch", "_Launch Anyway");
+        dialog.add_response("launch", &t!("_Launch Anyway"));
         dialog.set_close_response("cancel");
         let weak = Rc::downgrade(self);
         dialog.connect_response(None, move |_, response| {
@@ -110,18 +117,18 @@ impl Window {
     pub(super) fn show_saves(self: &Rc<Self>) {
         let saves = Saves::load(&saves::path());
         if saves.campaigns.is_empty() {
-            return self.add_toast(adw::Toast::new("No saves yet: games played from DrukhalManager are listed here"));
+            return self.add_toast(adw::Toast::new(&t!("No saves yet: games played from DrukhalManager are listed here")));
         }
         let active = self.collections.borrow().active.clone();
         let current = self.playing().mods;
         let list = gtk::ListBox::builder().selection_mode(gtk::SelectionMode::None).css_classes(["boxed-list"]).build();
         for (_, played) in saves.recent() {
             let difference = saves::compare(&played.mods, &current);
-            let mut subtitle = format!("{} · {}", played.collection, plural(played.mods.len(), "mod", "mods"));
+            let mut subtitle = tf!("{collection} · {mods}", collection = &played.collection, mods = tnf!("{count} mod", "{count} mods", count = played.mods.len()));
             if !difference.is_empty() {
-                subtitle.push_str(if played.collection == active { " · Changed since" } else { " · Not active" });
+                subtitle.push_str(&if played.collection == active { t!(" · Changed since") } else { t!(" · Not active") });
             }
-            let title = if played.date.is_empty() { played.empire.clone() } else { format!("{}, {}", played.empire, played.date) };
+            let title = if played.date.is_empty() { played.empire.clone() } else { tf!("{empire}, {date}", empire = &played.empire, date = &played.date) };
             let row = adw::ExpanderRow::builder().title(glib::markup_escape_text(&title)).subtitle(glib::markup_escape_text(&subtitle)).build();
             for id in &played.mods {
                 let name = played.names.get(id).map_or(id.as_str(), String::as_str);
@@ -130,9 +137,9 @@ impl Window {
             list.append(&row);
         }
         let scrolled = gtk::ScrolledWindow::builder().child(&list).hscrollbar_policy(gtk::PolicyType::Never).propagate_natural_height(true).max_content_height(420).build();
-        let dialog = adw::AlertDialog::builder().heading("Saves").body("The mods each campaign was last played with from DrukhalManager.").build();
+        let dialog = adw::AlertDialog::builder().heading(t!("Saves")).body(t!("The mods each campaign was last played with from DrukhalManager.")).build();
         dialog.set_extra_child(Some(&scrolled));
-        dialog.add_response("close", "_Close");
+        dialog.add_response("close", &t!("_Close"));
         dialog.present(Some(&self.window));
     }
 }

@@ -265,11 +265,12 @@ impl Window {
         }
         self.state.borrow_mut().set_all(enable);
         self.refresh();
-        let verb = if enable { "Enabled" } else { "Disabled" };
-        self.offer_undo(&format!(
-            "{verb} {}",
-            conflicts_view::plural(changed, "mod", "mods")
-        ));
+        let undo = if enable {
+            tnf!("Enabled {count} mod", "Enabled {count} mods", count = changed)
+        } else {
+            tnf!("Disabled {count} mod", "Disabled {count} mods", count = changed)
+        };
+        self.offer_undo(&undo);
     }
 
     pub(super) fn sort_by_dependencies(self: &Rc<Self>) {
@@ -277,30 +278,27 @@ impl Window {
             return;
         }
         self.refresh();
-        self.offer_undo("Sorted mods after their dependencies");
+        self.offer_undo(&t!("Sorted mods after their dependencies"));
     }
 
     pub(super) fn sort_alphabetically(self: &Rc<Self>) {
         if !self.state.borrow_mut().sort_alphabetically() {
-            return self.add_toast(adw::Toast::new("Already in alphabetical order"));
+            return self.add_toast(adw::Toast::new(&t!("Already in alphabetical order")));
         }
         self.refresh();
-        self.offer_undo("Sorted mods alphabetically, after their dependencies");
+        self.offer_undo(&t!("Sorted mods alphabetically, after their dependencies"));
     }
 
     /// Shows `title` with an Undo button that undoes the last change.
     pub(super) fn offer_undo(self: &Rc<Self>, title: &str) {
+        // `win.undo` does the work when the toast's button is clicked. The
+        // bell tells Undo toasts apart by that action rather than the
+        // translated label.
         let toast = adw::Toast::builder()
             .title(title)
-            .button_label("Undo")
+            .button_label(t!("Undo"))
+            .action_name("win.undo")
             .build();
-        let weak = Rc::downgrade(self);
-        toast.connect_button_clicked(move |_| {
-            if let Some(ui) = weak.upgrade() {
-                ui.state.borrow_mut().undo();
-                ui.refresh();
-            }
-        });
         self.add_toast(toast);
     }
 
@@ -320,20 +318,20 @@ impl Window {
     /// a link to get it, and a button to drop it from the collection.
     fn placeholder_row(self: &Rc<Self>, p: mods::collections::Placeholder) -> adw::ActionRow {
         let subtitle = match &p.after {
-            Some(after) => format!("Loads after {after} once it's installed"),
-            None => "Loads first once it's installed".to_owned(),
+            Some(after) => tf!("Loads after {name} once it's installed", name = after),
+            None => t!("Loads first once it's installed"),
         };
         let row = adw::ActionRow::builder().title(&p.name).subtitle(subtitle).use_markup(false).css_classes(["dim-label"]).build();
-        row.add_prefix(&gtk::Image::builder().icon_name("action-unavailable-symbolic").tooltip_text("Not installed, so it's left out of the game's load order").build());
+        row.add_prefix(&gtk::Image::builder().icon_name("action-unavailable-symbolic").tooltip_text(t!("Not installed, so it's left out of the game's load order")).build());
         if let Some(steam_id) = p.steam_id {
-            let open = gtk::Button::builder().icon_name("adw-external-link-symbolic").tooltip_text("Open on the Steam Workshop to subscribe").valign(gtk::Align::Center).css_classes(["flat"]).build();
+            let open = gtk::Button::builder().icon_name("adw-external-link-symbolic").tooltip_text(t!("Open on the Steam Workshop to subscribe")).valign(gtk::Align::Center).css_classes(["flat"]).build();
             let window = self.window.downgrade();
             open.connect_clicked(move |_| {
                 gtk::UriLauncher::new(&crate::paradox::workshop::page_url(steam_id)).launch(window.upgrade().as_ref(), None::<&gio::Cancellable>, |_| {});
             });
             row.add_suffix(&open);
         }
-        let remove = gtk::Button::builder().icon_name("user-trash-symbolic").tooltip_text("Remove from Collection").valign(gtk::Align::Center).css_classes(["flat"]).build();
+        let remove = gtk::Button::builder().icon_name("user-trash-symbolic").tooltip_text(t!("Remove from Collection")).valign(gtk::Align::Center).css_classes(["flat"]).build();
         let weak = Rc::downgrade(self);
         let id = p.id.clone();
         remove.connect_clicked(move |_| {
@@ -354,7 +352,7 @@ impl Window {
             (m.id.clone(), display_name(m).trim().to_owned())
         };
         let current = self.settings.borrow().aliases.get(&id).cloned().unwrap_or_else(|| real.clone());
-        self.ask_text("Rename Mod", "Name", &current, "_Rename", move |ui, name| {
+        self.ask_text(&t!("Rename Mod"), &t!("Name"), &current, &t!("_Rename"), move |ui, name| {
             {
                 let mut settings = ui.settings.borrow_mut();
                 if name.is_empty() || name == real {
@@ -387,16 +385,16 @@ impl Window {
             .right_margin(10)
             .build();
         text.buffer().set_text(current.as_deref().unwrap_or(""));
-        text.update_property(&[gtk::accessible::Property::Label("Note")]);
+        text.update_property(&[gtk::accessible::Property::Label(&t!("Note"))]);
         let scrolled = gtk::ScrolledWindow::builder().child(&text).hscrollbar_policy(gtk::PolicyType::Never).min_content_height(110).max_content_height(260).propagate_natural_height(true).css_classes(["card"]).build();
-        let dialog = adw::AlertDialog::new(Some(if current.is_some() { "Edit Note" } else { "Add Note" }), Some(&name));
+        let dialog = adw::AlertDialog::new(Some(&if current.is_some() { t!("Edit Note") } else { t!("Add Note") }), Some(&name));
         dialog.set_extra_child(Some(&scrolled));
-        dialog.add_response("cancel", "_Cancel");
+        dialog.add_response("cancel", &t!("_Cancel"));
         if current.is_some() {
-            dialog.add_response("remove", "_Remove");
+            dialog.add_response("remove", &t!("_Remove"));
             dialog.set_response_appearance("remove", adw::ResponseAppearance::Destructive);
         }
-        dialog.add_response("save", "_Save");
+        dialog.add_response("save", &t!("_Save"));
         dialog.set_response_appearance("save", adw::ResponseAppearance::Suggested);
         dialog.set_default_response(Some("save"));
         dialog.set_close_response("cancel");
@@ -456,15 +454,15 @@ impl Window {
         let alias = self.settings.borrow().aliases.get(&m.id).cloned();
         let name = alias.as_deref().unwrap_or(display_name(m));
         let source = match m.source {
-            mods::Source::Workshop => "Workshop",
-            mods::Source::Local => "Local",
+            mods::Source::Workshop => t!("Workshop"),
+            mods::Source::Local => t!("Local"),
         };
         let mut tooltip = Vec::new();
         if alias.is_some() {
             // The real name, which search also matches.
             tooltip.push(display_name(m).trim().to_owned());
         }
-        tooltip.push(source.to_owned());
+        tooltip.push(source.clone());
         if !d.tags.is_empty() {
             tooltip.push(d.tags.join(", "));
         }
@@ -497,7 +495,7 @@ impl Window {
                 .width_chars(7)
                 .xalign(0.0)
                 .valign(gtk::Align::Center)
-                .tooltip_text(if outdated { "Doesn't say it supports this game version" } else { "The game version it supports" })
+                .tooltip_text(if outdated { t!("Doesn't say it supports this game version") } else { t!("The game version it supports") })
                 .css_classes(["caption", "numeric", if outdated { "warning" } else { "dim-label" }])
                 .build();
             row.add_suffix(&version);
@@ -505,14 +503,14 @@ impl Window {
         if conflicts > 0 {
             let badge = gtk::Label::builder()
                 .label(conflicts.to_string())
-                .tooltip_text(format!("{}; see the Conflicts page (Alt+2)", conflicts_view::plural(conflicts, "conflict", "conflicts")))
+                .tooltip_text(tnf!("{count} conflict; see the Conflicts page (Alt+2)", "{count} conflicts; see the Conflicts page (Alt+2)", count = conflicts))
                 .valign(gtk::Align::Center)
                 .css_classes(["caption", "numeric", "conflict-count"])
                 .build();
             row.add_suffix(&badge);
         }
         let no_achievements = changes_checksum(m);
-        let mut text = vec![name.to_owned(), display_name(m).to_owned(), source.to_owned(), d.tags.join(" ")];
+        let mut text = vec![name.to_owned(), display_name(m).to_owned(), source, d.tags.join(" ")];
         text.extend(d.remote_file_id.map(|id| id.to_string()));
         text.extend(note);
         self.search_facts.borrow_mut().insert(
@@ -536,15 +534,15 @@ impl Window {
             row.add_suffix(
                 &gtk::Image::builder()
                     .icon_name("action-unavailable-symbolic")
-                    .tooltip_text("Turns off achievements: it changes files the game checksums")
+                    .tooltip_text(t!("Turns off achievements: it changes files the game checksums"))
                     .css_classes(["dim-label"])
                     .build(),
             );
         }
         if let Some((label, tooltip, class)) = steam_badge(m.steam) {
             let badge = gtk::Label::builder()
-                .label(label)
-                .tooltip_text(tooltip)
+                .label(&label)
+                .tooltip_text(&tooltip)
                 .valign(gtk::Align::Center)
                 .css_classes([class, "caption"])
                 .build();
@@ -553,19 +551,19 @@ impl Window {
         let is_patch = patch::is_patch(&m.id);
         // One icon for everything wrong with this mod, worst first.
         let mut problems = self.extra_problems(m);
-        problems.extend(issues.iter().map(|i| (i.severity, i.message.clone())));
-        problems.sort_by(|a, b| b.0.cmp(&a.0));
+        problems.extend(issues.iter().map(|i| (i.severity, i.message.clone(), false)));
+        problems.sort_by_key(|a| std::cmp::Reverse(a.0));
         if let Some(f) = self.search_facts.borrow_mut().get_mut(&index) {
-            f.attention = problems.iter().any(|(s, _)| *s == checks::Severity::Warning);
+            f.attention = problems.iter().any(|(s, _, _)| *s == checks::Severity::Warning);
         }
-        if let Some((worst, _)) = problems.first() {
+        if let Some((worst, _, _)) = problems.first() {
             let (icon, class) = match worst {
                 checks::Severity::Warning => ("dialog-warning-symbolic", "warning"),
                 checks::Severity::Info => ("dialog-information-symbolic", "dim-label"),
             };
             let tooltip = problems
                 .iter()
-                .map(|(_, m)| m.as_str())
+                .map(|(_, m, _)| m.as_str())
                 .collect::<Vec<_>>()
                 .join("\n");
             row.add_suffix(
@@ -595,7 +593,7 @@ impl Window {
             // Pinned: no handle, no editable position.
             let lock = gtk::Image::builder()
                 .icon_name("changes-prevent-symbolic")
-                .tooltip_text("Always loads last, so its merges and fixes win")
+                .tooltip_text(t!("Always loads last, so its merges and fixes win"))
                 .css_classes(["dim-label"])
                 .build();
             let number = gtk::Label::builder()
@@ -620,10 +618,13 @@ impl Window {
 
     /// Problems with the mod that aren't load order checks: an unreadable
     /// descriptor, and for the merged patch, merges that need a look.
-    pub(super) fn extra_problems(&self, m: &Mod) -> Vec<(checks::Severity, String)> {
+    /// Warnings about a mod. The flag says whether the Conflicts page has
+    /// the details, so the inspector can offer to open it without reading
+    /// the translated message.
+    pub(super) fn extra_problems(&self, m: &Mod) -> Vec<(checks::Severity, String, bool)> {
         let mut problems = Vec::new();
         if let Some(error) = &m.error {
-            problems.push((checks::Severity::Warning, error.clone()));
+            problems.push((checks::Severity::Warning, error.clone(), false));
         }
         let is_patch = patch::is_patch(&m.id);
         let (outdated, untracked) = if is_patch {
@@ -636,20 +637,23 @@ impl Window {
         if untracked > 0 {
             problems.push((
                 checks::Severity::Warning,
-                format!(
-                    "{} saved by an older version {} checking; see the Conflicts page",
-                    conflicts_view::plural(untracked, "merge", "merges"),
-                    if untracked == 1 { "needs" } else { "need" }
+                tnf!(
+                    "{count} merge saved by an older version needs checking; see the Conflicts page",
+                    "{count} merges saved by an older version need checking; see the Conflicts page",
+                    count = untracked
                 ),
+                true,
             ));
         }
         if outdated > 0 {
             problems.push((
                 checks::Severity::Warning,
-                format!(
-                    "{} out of date because mods changed; see the Conflicts page",
-                    conflicts_view::plural(outdated, "merge or fix is", "merges or fixes are")
+                tnf!(
+                    "{count} merge or fix is out of date because mods changed; see the Conflicts page",
+                    "{count} merges or fixes are out of date because mods changed; see the Conflicts page",
+                    count = outdated
                 ),
+                true,
             ));
         }
         problems
@@ -664,49 +668,49 @@ impl Window {
         if position.is_some() && !is_patch {
             let moves = gio::Menu::new();
             for (label, action) in [
-                ("Move to _Top", "win.move-top"),
-                ("Move to _Bottom", "win.move-bottom"),
+                (t!("Move to _Top"), "win.move-top"),
+                (t!("Move to _Bottom"), "win.move-bottom"),
             ] {
-                let item = gio::MenuItem::new(Some(label), None);
+                let item = gio::MenuItem::new(Some(&label), None);
                 item.set_action_and_target_value(Some(action), Some(&index_variant));
                 moves.append_item(&item);
             }
             menu.append_section(None, &moves);
         }
-        if position.is_some() && issues.iter().any(|i| i.message.starts_with("Requires “")) {
-            let item = gio::MenuItem::new(Some("_Get Required Mods"), None);
+        if position.is_some() && issues.iter().any(|i| i.requirement.is_some()) {
+            let item = gio::MenuItem::new(Some(&t!("_Get Required Mods")), None);
             item.set_action_and_target_value(Some("win.get-requirements"), Some(&index_variant));
             menu.append_item(&item);
         }
-        let item = gio::MenuItem::new(Some("_Rename…"), None);
+        let item = gio::MenuItem::new(Some(&t!("_Rename…")), None);
         item.set_action_and_target_value(Some("win.rename-mod"), Some(&index_variant));
         menu.append_item(&item);
         let has_note = self.settings.borrow().notes.contains_key(&m.id);
-        let item = gio::MenuItem::new(Some(if has_note { "Edit _Note…" } else { "Add _Note…" }), None);
+        let item = gio::MenuItem::new(Some(&if has_note { t!("Edit _Note…") } else { t!("Add _Note…") }), None);
         item.set_action_and_target_value(Some("win.edit-note"), Some(&index_variant));
         menu.append_item(&item);
         if m.content.is_some() {
-            let item = gio::MenuItem::new(Some("Open Folder"), None);
+            let item = gio::MenuItem::new(Some(&t!("Open Folder")), None);
             item.set_action_and_target_value(Some("win.open-folder"), Some(&index_variant));
             menu.append_item(&item);
         }
         if conflicts > 0 {
-            let item = gio::MenuItem::new(Some("Show _Conflicts"), None);
+            let item = gio::MenuItem::new(Some(&t!("Show _Conflicts")), None);
             item.set_action_and_target_value(Some("win.show-conflicts"), Some(&index_variant));
             menu.append_item(&item);
         }
         if m.descriptor.remote_file_id.is_some() {
             let workshop = gio::Menu::new();
             for (label, action) in [
-                ("Open in _Steam", "win.open-in-steam"),
-                ("Open Workshop Page in _Browser", "win.open-workshop"),
-                ("Copy _Workshop Link", "win.copy-workshop-link"),
-                ("_Unsubscribe in Steam…", "win.unsubscribe"),
+                (t!("Open in _Steam"), "win.open-in-steam"),
+                (t!("Open Workshop Page in _Browser"), "win.open-workshop"),
+                (t!("Copy _Workshop Link"), "win.copy-workshop-link"),
+                (t!("_Unsubscribe in Steam…"), "win.unsubscribe"),
             ] {
                 if action == "win.unsubscribe" && m.steam == Some(ItemState::Unsubscribed) {
                     continue;
                 }
-                let item = gio::MenuItem::new(Some(label), None);
+                let item = gio::MenuItem::new(Some(&label), None);
                 item.set_action_and_target_value(Some(action), Some(&index_variant));
                 workshop.append_item(&item);
             }
@@ -740,7 +744,7 @@ impl Window {
             .xalign(1.0)
             .input_purpose(gtk::InputPurpose::Digits)
             .valign(gtk::Align::Center)
-            .tooltip_text("Load position: type a number to move this mod there")
+            .tooltip_text(t!("Load position: type a number to move this mod there"))
             .css_classes(["numeric", "flat"])
             .build();
         let apply = {
@@ -822,18 +826,18 @@ fn changes_checksum(m: &Mod) -> bool {
 
 /// A label for what Steam is doing with a Workshop mod, if it's worth
 /// knowing before playing: its text, tooltip and style class.
-fn steam_badge(state: Option<ItemState>) -> Option<(&'static str, &'static str, &'static str)> {
+fn steam_badge(state: Option<ItemState>) -> Option<(String, String, &'static str)> {
     match state? {
         ItemState::Installed => None,
         ItemState::UpdatePending => Some((
-            "Update pending",
-            "Steam has a newer version it hasn't finished downloading. Let it finish before playing, or the game may load a half-updated mod.",
+            t!("Update pending"),
+            t!("Steam has a newer version it hasn't finished downloading. Let it finish before playing, or the game may load a half-updated mod."),
             "warning",
         )),
-        ItemState::Downloading => Some(("Downloading", "Steam hasn't finished downloading this mod", "warning")),
+        ItemState::Downloading => Some((t!("Downloading"), t!("Steam hasn't finished downloading this mod"), "warning")),
         ItemState::Unsubscribed => Some((
-            "Unsubscribed",
-            "You're no longer subscribed to this mod in Steam. Once Steam removes its files, Repair in the banner above the list can remove it from the list.",
+            t!("Unsubscribed"),
+            t!("You're no longer subscribed to this mod in Steam. Once Steam removes its files, Repair in the banner above the list can remove it from the list."),
             "dim-label",
         )),
     }

@@ -7,7 +7,6 @@ use adw::prelude::*;
 use gtk::{gio, glib};
 
 use super::Window;
-use crate::conflicts_view::plural;
 use crate::mods;
 use crate::paradox::steam;
 
@@ -50,12 +49,12 @@ impl Window {
                 mods::discover(&user_dir, &workshop_dirs).map(|found| (found, synced.updated, linked.errors)).map_err(|e| e.to_string())
             })
             .await
-            .unwrap_or_else(|_| Err("the reload failed".to_owned()));
+            .unwrap_or_else(|_| Err(t!("the reload failed")));
             action.set_enabled(true);
             let Some(ui) = weak.upgrade() else { return };
             let (found, updated, extra_errors) = match found {
                 Ok(found) => found,
-                Err(e) => return ui.toast_error_message(&format!("Could not reload mods: {e}")),
+                Err(e) => return ui.toast_error_message(&tf!("Could not reload mods: {e}", e = e)),
             };
             if let Some(error) = extra_errors.first() {
                 ui.toast_error_message(error);
@@ -78,7 +77,7 @@ impl Window {
             }
             let mut title = summary(&added, &updated, &removed);
             if !restored.is_empty() {
-                title.push_str(&format!(" · back in the load order: {}", names(&restored)));
+                title.push_str(&tf!(" · back in the load order: {names}", names = names(&restored)));
             }
             ui.add_toast(adw::Toast::builder().title(title).timeout(8).build());
             then(&ui);
@@ -90,18 +89,18 @@ impl Window {
 fn summary(added: &[String], updated: &[String], removed: &[String]) -> String {
     let mut parts = Vec::new();
     if !added.is_empty() {
-        parts.push(format!("{}: {}", plural(added.len(), "new mod", "new mods"), names(added)));
+        parts.push(tnf!("{count} new mod: {names}", "{count} new mods: {names}", count = added.len(), names = names(added)));
     }
     if !updated.is_empty() {
-        parts.push(format!("{} updated: {}", updated.len(), names(updated)));
+        parts.push(tf!("{count} updated: {names}", count = updated.len(), names = names(updated)));
     }
     match removed.len() {
         0 => {}
-        1 => parts.push(format!("{} was removed", removed[0])),
-        n => parts.push(format!("{n} mods were removed: {}", names(removed))),
+        1 => parts.push(tf!("{name} was removed", name = &removed[0])),
+        n => parts.push(tf!("{count} mods were removed: {names}", count = n, names = names(removed))),
     }
     if parts.is_empty() {
-        "Mods reloaded, none added or removed".to_owned()
+        t!("Mods reloaded, none added or removed")
     } else {
         parts.join(" · ")
     }
@@ -111,7 +110,7 @@ fn summary(added: &[String], updated: &[String], removed: &[String]) -> String {
 fn names(names: &[String]) -> String {
     match names {
         [first, second, third, rest @ ..] if !rest.is_empty() => {
-            format!("{first}, {second}, {third} and {} more", rest.len())
+            tf!("{first}, {second}, {third} and {count} more", first = first, second = second, third = third, count = rest.len())
         }
         _ => names.join(", "),
     }

@@ -75,35 +75,35 @@ impl Category {
         Self::ALL.into_iter().find(|c| c.key() == key)
     }
 
-    pub fn title(self) -> &'static str {
+    pub fn title(self) -> String {
         match self {
-            Category::Unofficial => "Unofficial Patches",
-            Category::Graphics => "Graphics & Sound",
-            Category::Flavor => "Flavor & Cosmetics",
-            Category::Shipsets => "Shipsets",
-            Category::Galaxy => "Galaxy Generation",
-            Category::Gameplay => "Gameplay",
-            Category::Overhaul => "Large Overhauls",
-            Category::Patches => "Compatibility Patches",
-            Category::Ui => "UI Mods",
-            Category::UiPatches => "UI Patches",
-            Category::Universal => "Universal Patches",
+            Category::Unofficial => t!("Unofficial Patches"),
+            Category::Graphics => t!("Graphics & Sound"),
+            Category::Flavor => t!("Flavor & Cosmetics"),
+            Category::Shipsets => t!("Shipsets"),
+            Category::Galaxy => t!("Galaxy Generation"),
+            Category::Gameplay => t!("Gameplay"),
+            Category::Overhaul => t!("Large Overhauls"),
+            Category::Patches => t!("Compatibility Patches"),
+            Category::Ui => t!("UI Mods"),
+            Category::UiPatches => t!("UI Patches"),
+            Category::Universal => t!("Universal Patches"),
         }
     }
 
-    pub fn description(self) -> &'static str {
+    pub fn description(self) -> String {
         match self {
-            Category::Unofficial => "Fixes to the base game, loaded first so every other mod builds on them.",
-            Category::Graphics => "Models, effects, backgrounds and sounds.",
-            Category::Flavor => "Portraits, name lists, flags, pre-scripted empires and text.",
-            Category::Shipsets => "Ship models and their graphical cultures.",
-            Category::Galaxy => "Galaxy shapes, systems, planets and fallen empires.",
-            Category::Gameplay => "Mods that change the rules: buildings, events, civics, technologies and more.",
-            Category::Overhaul => "Very large mods that change much of the game.",
-            Category::Patches => "Patches between two or more mods, below the mods they patch.",
-            Category::Ui => "Interface mods, below gameplay mods so their interface files win.",
-            Category::UiPatches => "Add-ons and compatibility patches for the UI mods.",
-            Category::Universal => "Universal and global patches, loaded last to override everything.",
+            Category::Unofficial => t!("Fixes to the base game, loaded first so every other mod builds on them."),
+            Category::Graphics => t!("Models, effects, backgrounds and sounds."),
+            Category::Flavor => t!("Portraits, name lists, flags, pre-scripted empires and text."),
+            Category::Shipsets => t!("Ship models and their graphical cultures."),
+            Category::Galaxy => t!("Galaxy shapes, systems, planets and fallen empires."),
+            Category::Gameplay => t!("Mods that change the rules: buildings, events, civics, technologies and more."),
+            Category::Overhaul => t!("Very large mods that change much of the game."),
+            Category::Patches => t!("Patches between two or more mods, below the mods they patch."),
+            Category::Ui => t!("Interface mods, below gameplay mods so their interface files win."),
+            Category::UiPatches => t!("Add-ons and compatibility patches for the UI mods."),
+            Category::Universal => t!("Universal and global patches, loaded last to override everything."),
         }
     }
 }
@@ -202,22 +202,22 @@ pub fn plan(mods: &[Mod], enabled: &[usize], profiles: &HashMap<usize, Profile>,
             continue;
         }
         if let Some(&category) = overrides.get(&mods[i].id) {
-            placed.push(Placement { index: i, category, parent: None, reason: "Chosen by you".into(), chosen: true });
+            placed.push(Placement { index: i, category, parent: None, reason: t!("Chosen by you"), chosen: true });
             continue;
         }
         let (category, reason) = base[&i].clone();
         let deps = deps_of(i);
         let name = |d: usize| format!("“{}”", mods[d].descriptor.name.trim());
         let placement = match deps.as_slice() {
-            [parent] => Placement { index: i, category, parent: Some(*parent), reason: format!("Needs {}, so it goes directly below it", name(*parent)), chosen: false },
+            [parent] => Placement { index: i, category, parent: Some(*parent), reason: tf!("Needs {name}, so it goes directly below it", name = name(*parent)), chosen: false },
             [] => {
                 let lower = mods[i].descriptor.name.to_lowercase();
                 let patch_name = ["patch", "compat", "bridge"].iter().any(|w| lower.contains(w)) || plus_joined(&lower);
                 match category {
-                    Category::Ui if mentions_uiod(&lower) && !is_uiod(&lower) => Placement { index: i, category: Category::UiPatches, parent: None, reason: "An add-on or patch for UI Overhaul Dynamic".into(), chosen: false },
-                    Category::Ui if patch_name => Placement { index: i, category: Category::UiPatches, parent: None, reason: "A patch for an interface mod".into(), chosen: false },
+                    Category::Ui if mentions_uiod(&lower) && !is_uiod(&lower) => Placement { index: i, category: Category::UiPatches, parent: None, reason: t!("An add-on or patch for UI Overhaul Dynamic"), chosen: false },
+                    Category::Ui if patch_name => Placement { index: i, category: Category::UiPatches, parent: None, reason: t!("A patch for an interface mod"), chosen: false },
                     Category::Unofficial | Category::Universal | Category::Ui => Placement { index: i, category, parent: None, reason, chosen: false },
-                    _ if patch_name && lower.contains("patch") => Placement { index: i, category: Category::Patches, parent: None, reason: "Its name says it's a patch".into(), chosen: false },
+                    _ if patch_name && lower.contains("patch") => Placement { index: i, category: Category::Patches, parent: None, reason: t!("Its name says it's a patch"), chosen: false },
                     _ => Placement { index: i, category, parent: None, reason, chosen: false },
                 }
             }
@@ -229,7 +229,7 @@ pub fn plan(mods: &[Mod], enabled: &[usize], profiles: &HashMap<usize, Profile>,
                     _ if ui => Category::UiPatches,
                     _ => Category::Patches,
                 };
-                Placement { index: i, category, parent: None, reason: format!("Patches {names}"), chosen: false }
+                Placement { index: i, category, parent: None, reason: tf!("Patches {names}", names = names), chosen: false }
             }
         };
         placed.push(placement);
@@ -290,7 +290,7 @@ pub fn plan(mods: &[Mod], enabled: &[usize], profiles: &HashMap<usize, Profile>,
     order
         .into_iter()
         .filter_map(|i| {
-            by_index.remove(&i).or_else(|| pinned(&mods[i].id).then(|| Placement { index: i, category: Category::Universal, parent: None, reason: "The merged patch always loads last".into(), chosen: false }))
+            by_index.remove(&i).or_else(|| pinned(&mods[i].id).then(|| Placement { index: i, category: Category::Universal, parent: None, reason: t!("The merged patch always loads last"), chosen: false }))
         })
         .collect()
 }
@@ -385,19 +385,19 @@ fn base_category(m: &Mod, p: &Profile) -> (Category, String) {
     let lower = name.to_lowercase();
     let tagged = |t: &str| m.descriptor.tags.iter().any(|tag| tag.eq_ignore_ascii_case(t));
     if name.starts_with('~') {
-        return (Category::Unofficial, "Its name starts with ~".into());
+        return (Category::Unofficial, t!("Its name starts with ~"));
     }
     if lower.contains("unofficial patch") {
-        return (Category::Unofficial, "An unofficial patch".into());
+        return (Category::Unofficial, t!("An unofficial patch"));
     }
     if name.starts_with('!') {
-        return (Category::Universal, "Its name starts with !, which goes towards the bottom".into());
+        return (Category::Universal, t!("Its name starts with !, which goes towards the bottom"));
     }
     if (lower.contains("universal") || lower.contains("global")) && ["patch", "fix", "compat"].iter().any(|w| lower.contains(w)) || lower.contains("merger of rules") {
-        return (Category::Universal, "A universal patch".into());
+        return (Category::Universal, t!("A universal patch"));
     }
     if mentions_uiod(&lower) {
-        return (Category::Ui, "Part of UI Overhaul Dynamic".into());
+        return (Category::Ui, t!("Part of UI Overhaul Dynamic"));
     }
 
     let events = p.has("events");
@@ -405,14 +405,14 @@ fn base_category(m: &Mod, p: &Profile) -> (Category, String) {
     let cosmetic_only = !events && mechanics.is_empty();
     let interface = p.has("interface") || p.has("fonts");
     if p.top.is_empty() {
-        return (Category::Gameplay, "Its files couldn't be read".into());
+        return (Category::Gameplay, t!("Its files couldn't be read"));
     }
     let ui_gfx = |g: &String| ["interface", "fonts", "keyicons", "replace", "shipview"].contains(&g.as_str()) || g.starts_with("ui_");
     if interface && cosmetic_only && p.common.iter().all(|c| c == "frontend_backgrounds") && p.gfx.iter().all(ui_gfx) {
-        return (Category::Ui, "Only changes the interface".into());
+        return (Category::Ui, t!("Only changes the interface"));
     }
     if p.common.len() >= OVERHAUL_FOLDERS || tagged("Total Conversion") {
-        return (Category::Overhaul, format!("Changes {} kinds of game objects", p.common.len()));
+        return (Category::Overhaul, tnf!("Changes {count} kind of game object", "Changes {count} kinds of game objects", count = p.common.len()));
     }
     if cosmetic_only {
         let galaxy = p.common.iter().any(|c| GALAXY.contains(&c.as_str()) && c != "solar_system_initializers") || p.has("map");
@@ -422,27 +422,27 @@ fn base_category(m: &Mod, p: &Profile) -> (Category, String) {
             || p.gfx.contains("portraits") && !p.gfx.contains("models");
         let ships = lower.contains("ship") || tagged("Spaceships") && (p.gfx.contains("models") || p.common.contains("graphical_culture"));
         if ships {
-            return (Category::Shipsets, "Changes ship models".into());
+            return (Category::Shipsets, t!("Changes ship models"));
         }
         if galaxy && !flavor {
-            return (Category::Galaxy, "Changes how the galaxy is made".into());
+            return (Category::Galaxy, t!("Changes how the galaxy is made"));
         }
         if flavor || p.gfx.contains("portraits") || (p.top.iter().all(|t| t == "localisation" || t == "localisation_synced")) {
-            return (Category::Flavor, "Changes portraits, names or text".into());
+            return (Category::Flavor, t!("Changes portraits, names or text"));
         }
-        return (Category::Graphics, if p.top.iter().all(|t| t == "sound" || t == "music") { "Only changes sounds".into() } else { "Only changes graphics".into() });
+        return (Category::Graphics, if p.top.iter().all(|t| t == "sound" || t == "music") { t!("Only changes sounds") } else { t!("Only changes graphics") });
     }
     // Species packs ship a few scripts with their portraits.
     if (p.common.contains("portrait_sets") || p.common.contains("species_classes")) && mechanics.len() <= 4 {
-        return (Category::Flavor, "Adds species: portraits, names and the like".into());
+        return (Category::Flavor, t!("Adds species: portraits, names and the like"));
     }
     let galaxy_only = !events && mechanics.iter().all(|c| ["defines", "scripted_effects", "scripted_triggers"].contains(&c.as_str())) && p.common.iter().any(|c| GALAXY.contains(&c.as_str()));
     if galaxy_only {
-        return (Category::Galaxy, "Changes how the galaxy is made".into());
+        return (Category::Galaxy, t!("Changes how the galaxy is made"));
     }
     let sample: Vec<&str> = mechanics.iter().take(3).map(|s| s.as_str()).collect();
     let what = if sample.is_empty() { "events".to_owned() } else { sample.join(", ").replace('_', " ") };
-    (Category::Gameplay, format!("Changes game rules ({what}…)"))
+    (Category::Gameplay, tf!("Changes game rules ({what}…)", what = what))
 }
 
 #[cfg(test)]

@@ -149,8 +149,8 @@ impl Window {
                     let detail = panic.downcast_ref::<String>().map(String::as_str).or_else(|| panic.downcast_ref::<&str>().copied()).unwrap_or("unknown error");
                     crate::diagnostics::log!("scan", "Scan failed: {detail}");
                     ui.conflicts_page.set_child(Some(&status_page(
-                        "Scan Failed",
-                        &format!("Something went wrong while reading the mods' files. Please report this: {detail}"),
+                        &t!("Scan Failed"),
+                        &tf!("Something went wrong while reading the mods' files. Please report this: {error}", error = detail),
                     )));
                 }
             }
@@ -200,7 +200,7 @@ impl Window {
             picks.retain(|p| p.matches(only));
         }
         if picks.is_empty() {
-            return self.toast_error_message("Nothing to update: the mods changed again since the last check");
+            return self.toast_error_message(&t!("Nothing to update: the mods changed again since the last check"));
         }
         if let Err(e) = self.snapshot_patch(snapshot::BEFORE_UPDATING_PICKS) {
             return self.toast_error_message(&e);
@@ -208,16 +208,16 @@ impl Window {
         let count = picks.len();
         let what = match only {
             Some(s) => s.object.as_ref().map_or_else(|| s.path.rsplit('/').next().unwrap_or(&s.path).to_owned(), |(_, k)| k.clone()),
-            None => conflicts_view::plural(count, "picked version", "picked versions"),
+            None => tnf!("{count} picked version", "{count} picked versions", count = count),
         };
         let result = self.with_patch(|p, user_dir, version| p.update_picks(user_dir, version, picks));
         match result {
             Ok(()) => {
                 self.check_stale();
                 self.refresh();
-                self.add_toast(adw::Toast::builder().title(format!("Updated {what} to the new version")).button_label("Backups…").action_name("win.patch-backups").build());
+                self.add_toast(adw::Toast::builder().title(tf!("Updated {what} to the new version", what = what)).button_label(t!("Backups…")).action_name("win.patch-backups").build());
             }
-            Err(e) => self.toast_error_message(&format!("Could not update {what}: {e}")),
+            Err(e) => self.toast_error_message(&tf!("Could not update {what}: {error}", what = &what, error = e)),
         }
     }
 
@@ -237,7 +237,7 @@ impl Window {
                     .object
                     .as_ref()
                     .map_or(stale.path.as_str(), |(_, k)| k.as_str());
-                self.add_toast(adw::Toast::new(&format!("Removed {what} from the patch")));
+                self.add_toast(adw::Toast::new(&tf!("Removed {what} from the patch", what = what)));
             }
             Err(e) => self.toast_error_message(&e),
         }
@@ -278,7 +278,7 @@ impl Window {
             None => true,
         };
         if empty {
-            return self.toast_error_message(&format!("The mods {what} was merged from no longer conflict over it. Remove it from the patch, or enable them and rescan."));
+            return self.toast_error_message(&tf!("The mods {what} was merged from no longer conflict over it. Remove it from the patch, or enable them and rescan.", what = &what));
         }
         let game_dir = self.game.as_ref().map(|g| g.dir.clone());
         let (object, path) = (stale.object.clone(), stale.path.clone());
@@ -297,7 +297,7 @@ impl Window {
                 Ok(()) => {
                     ui.check_stale();
                     ui.render_conflicts();
-                    ui.add_toast(adw::Toast::new(&format!("Kept {what}; changes to its mods will be noticed from now on")));
+                    ui.add_toast(adw::Toast::new(&tf!("Kept {what}; changes to its mods will be noticed from now on", what = &what)));
                 }
                 Err(e) => ui.toast_error_message(&e),
             }
@@ -343,7 +343,7 @@ impl Window {
             if let Err(e) = settings.save(&settings::path()) {
                 self.add_toast(
                     adw::Toast::builder()
-                        .title(format!("Could not save ignored conflicts: {e}"))
+                        .title(tf!("Could not save ignored conflicts: {error}", error = e))
                         .timeout(0)
                         .build(),
                 );
@@ -747,7 +747,7 @@ impl Window {
         let legacy = patch::Target::new(patch::LEGACY_FOLDER, "").root(user_dir).is_dir();
         let (target, given) = self.collections.borrow_mut().patch_target(legacy, |folder| user_dir.join("mod").join(folder).exists());
         if given && let Err(e) = self.collections.borrow().save(&crate::mods::collections::path()) {
-            self.add_toast(adw::Toast::new(&format!("Could not save collections: {e}")));
+            self.add_toast(adw::Toast::new(&tf!("Could not save collections: {error}", error = e)));
         }
         target
     }
@@ -762,10 +762,10 @@ impl Window {
         }
         // Renamed: the launcher shows the patch by its collection's name.
         if open.as_ref().is_some_and(|o| o.folder == target.folder) {
-            patch::link(&self.paths.user_dir, &target).map_err(|e| format!("Could not rename the merged patch: {e}"))?;
+            patch::link(&self.paths.user_dir, &target).map_err(|e| tf!("Could not rename the merged patch: {error}", error = e))?;
         }
         self.patch.replace(None);
-        let opened = Patch::open(&self.paths.user_dir, &target).map_err(|e| format!("Could not read the merged patch: {e}"))?;
+        let opened = Patch::open(&self.paths.user_dir, &target).map_err(|e| tf!("Could not read the merged patch: {error}", error = e))?;
         self.patch.replace(Some(opened));
         Ok(())
     }
@@ -779,7 +779,7 @@ impl Window {
         let mut patch = self.patch.borrow_mut();
         let version = self.game.as_ref().and_then(|g| g.version.as_deref());
         f(patch.as_mut().unwrap(), &self.paths.user_dir, version)
-            .map_err(|e| format!("Could not save the merged patch: {e}"))
+            .map_err(|e| tf!("Could not save the merged patch: {error}", error = e))
     }
 
     pub(super) fn save_merge(
@@ -829,14 +829,14 @@ impl Window {
                     a.revision.set(state.revision);
                 }
             }
-            (!was_enabled).then_some("added to the end of the load order")
+            (!was_enabled).then(|| t!("added to the end of the load order"))
         };
         self.refresh();
-        let toast = adw::Toast::builder().title(format!("Saved to {}", target.name));
+        let toast = adw::Toast::builder().title(tf!("Saved to {name}", name = &target.name));
         let toast = match added {
             Some(change) => toast
-                .title(format!("Saved to {}, which was {change}", target.name))
-                .button_label("Save Load Order")
+                .title(tf!("Saved to {name}, which was {change}", name = &target.name, change = change))
+                .button_label(t!("Save Load Order"))
                 .action_name("win.save"),
             None => toast,
         };
@@ -848,10 +848,10 @@ impl Window {
             .child(
                 &adw::ButtonContent::builder()
                     .icon_name("view-refresh-symbolic")
-                    .label("Rescan")
+                    .label(t!("Rescan"))
                     .build(),
             )
-            .tooltip_text("Scan again, e.g. after mods were updated")
+            .tooltip_text(t!("Scan again, e.g. after mods were updated"))
             .build();
         let weak = Rc::downgrade(self);
         button.connect_clicked(move |_| {

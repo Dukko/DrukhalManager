@@ -9,7 +9,6 @@ use std::sync::atomic::Ordering;
 use adw::prelude::*;
 use gtk::{gio, glib};
 
-use crate::conflicts_view::plural;
 use crate::mods::archive;
 use crate::multiplayer::{self, Build, Comparison, FileDiff, HashCache, ModInput, Progress, Report};
 
@@ -55,12 +54,13 @@ struct Busy {
 
 impl Busy {
     /// Shows the bar following `progress` until `done` is called.
-    fn start(&self, what: &'static str) -> (Arc<Progress>, impl FnOnce() + use<>) {
+    fn start(&self, what: &str) -> (Arc<Progress>, impl FnOnce() + use<>) {
+        let what = what.to_owned();
         let progress = Arc::new(Progress::default());
         let running = Rc::new(std::cell::Cell::new(true));
         self.rows.iter().for_each(|r| r.set_sensitive(false));
         self.bar.set_fraction(0.0);
-        self.bar.set_text(Some("Counting files…"));
+        self.bar.set_text(Some(&t!("Counting files…")));
         self.bar.set_visible(true);
         let (bar, tracked, still) = (self.bar.clone(), progress.clone(), running.clone());
         glib::timeout_add_local(std::time::Duration::from_millis(100), move || {
@@ -72,7 +72,7 @@ impl Busy {
                 Some(fraction) => {
                     bar.set_fraction(fraction);
                     let (done, total) = (tracked.done.load(Ordering::Relaxed), tracked.total.load(Ordering::Relaxed));
-                    bar.set_text(Some(&format!("{what}: {} of {}", done.min(total), plural(total, "file", "files"))));
+                    bar.set_text(Some(&tf!("{what}: {done} of {files}", what = &what, done = done.min(total), files = tnf!("{count} file", "{count} files", count = total))));
                 }
             }
             glib::ControlFlow::Continue
@@ -91,15 +91,15 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
     let request = Arc::new(request);
     let page = adw::PreferencesPage::new();
     let intro = adw::PreferencesGroup::builder()
-        .description("Playing together needs the same game version, mods, load order and mod files. Save your report and send it to the other players, or open one of theirs to see what differs.")
+        .description(t!("Playing together needs the same game version, mods, load order and mod files. Save your report and send it to the other players, or open one of theirs to see what differs."))
         .build();
-    let save = adw::ActionRow::builder().title("Save My Report…").subtitle(format!("{} and the game's files", plural(request.mods.len(), "enabled mod", "enabled mods"))).activatable(true).build();
+    let save = adw::ActionRow::builder().title(t!("Save My Report…")).subtitle(tnf!("{count} enabled mod and the game's files", "{count} enabled mods and the game's files", count = request.mods.len())).activatable(true).build();
     save.add_suffix(&gtk::Image::from_icon_name("document-save-symbolic"));
-    let open = adw::ActionRow::builder().title("Compare With a Report…").subtitle("Open the report another player sent you").activatable(true).build();
+    let open = adw::ActionRow::builder().title(t!("Compare With a Report…")).subtitle(t!("Open the report another player sent you")).activatable(true).build();
     open.add_suffix(&gtk::Image::from_icon_name("document-open-symbolic"));
     let all_files = adw::SwitchRow::builder()
-        .title("Include All Game Files")
-        .subtitle("Also localisation, interface and graphics, to find modified or damaged game files outside the multiplayer checksum. Slow the first time.")
+        .title(t!("Include All Game Files"))
+        .subtitle(t!("Also localisation, interface and graphics, to find modified or damaged game files outside the multiplayer checksum. Slow the first time."))
         .build();
     intro.add(&save);
     intro.add(&open);
@@ -109,7 +109,7 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
     page.add(&intro);
     // Windows players can't make a report, so say it before comparing.
     if request.build == Some(Build::Linux) {
-        page.add(&adw::PreferencesGroup::builder().title("Playing With Windows Players").description(format!("You run the native Linux build. {}", multiplayer::BUILDS_DIFFER)).build());
+        page.add(&adw::PreferencesGroup::builder().title(t!("Playing With Windows Players")).description(tf!("You run the native Linux build. {note}", note = multiplayer::builds_differ())).build());
     }
     let busy = Busy { bar, rows: [save.clone().upcast(), open.clone().upcast(), all_files.clone().upcast()] };
 
@@ -117,7 +117,7 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
     let toasts = adw::ToastOverlay::new();
     toasts.set_child(Some(&page));
     let header = adw::HeaderBar::new();
-    header.set_title_widget(Some(&adw::WindowTitle::new("Multiplayer Check", "")));
+    header.set_title_widget(Some(&adw::WindowTitle::new(&t!("Multiplayer Check"), "")));
     let toolbar = adw::ToolbarView::new();
     toolbar.add_top_bar(&header);
     toolbar.set_content(Some(&toasts));
@@ -125,7 +125,7 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
 
     let json_filter = || {
         let filter = gtk::FileFilter::new();
-        filter.set_name(Some("Multiplayer reports"));
+        filter.set_name(Some(&t!("Multiplayer reports")));
         filter.add_suffix("json");
         let filters = gio::ListStore::new::<gtk::FileFilter>();
         filters.append(&filter);
@@ -145,19 +145,19 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
         all_files,
         move |_| {
             let all_game_files = all_files.is_active();
-            let chooser = gtk::FileDialog::builder().title("Save Multiplayer Report").initial_name(DEFAULT_NAME).filters(&json_filter()).build();
+            let chooser = gtk::FileDialog::builder().title(t!("Save Multiplayer Report")).initial_name(DEFAULT_NAME).filters(&json_filter()).build();
             let window = dialog.root().and_downcast::<gtk::Window>();
             let (busy, request) = (busy.clone(), request.clone());
             chooser.save(window.as_ref(), None::<&gio::Cancellable>, move |file| {
                 let Some(path) = file.ok().and_then(|f| f.path()) else { return };
-                let (progress, done) = busy.start("Reading");
+                let (progress, done) = busy.start(&t!("Reading"));
                 glib::spawn_future_local(async move {
                     let written = gio::spawn_blocking(move || std::fs::write(&path, request.report(all_game_files, &progress).to_json()).map(|()| path)).await;
                     done();
                     let message = match written {
-                        Ok(Ok(path)) => format!("Saved {}; send it to the other players", path.file_name().unwrap_or_default().to_string_lossy()),
-                        Ok(Err(e)) => format!("Could not save the report: {e}"),
-                        Err(_) => "Could not save the report".to_owned(),
+                        Ok(Ok(path)) => tf!("Saved {name}; send it to the other players", name = path.file_name().unwrap_or_default().to_string_lossy()),
+                        Ok(Err(e)) => tf!("Could not save the report: {error}", error = e),
+                        Err(_) => t!("Could not save the report"),
                     };
                     toasts.add_toast(adw::Toast::builder().title(message).use_markup(false).build());
                 });
@@ -179,23 +179,23 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
         #[strong]
         busy,
         move |_| {
-            let chooser = gtk::FileDialog::builder().title("Open Multiplayer Report").filters(&json_filter()).build();
+            let chooser = gtk::FileDialog::builder().title(t!("Open Multiplayer Report")).filters(&json_filter()).build();
             let window = dialog.root().and_downcast::<gtk::Window>();
             let (busy, request, results) = (busy.clone(), request.clone(), results.clone());
             chooser.open(window.as_ref(), None::<&gio::Cancellable>, move |file| {
                 let Some(path) = file.ok().and_then(|f| f.path()) else { return };
                 let name = path.file_name().unwrap_or_default().to_string_lossy().into_owned();
-                let (progress, done) = busy.start("Comparing");
+                let (progress, done) = busy.start(&t!("Comparing"));
                 glib::spawn_future_local(async move {
                     let compared = gio::spawn_blocking(move || {
-                        let src = std::fs::read_to_string(&path).map_err(|e| format!("Could not read {}: {e}", path.display()))?;
+                        let src = std::fs::read_to_string(&path).map_err(|e| tf!("Could not read {file}: {error}", file = path.display(), error = e))?;
                         // Check theirs first, so a wrong file fails at once.
                         let theirs = Report::from_json(&src)?;
                         // Mine covers what theirs does, so nothing goes unchecked.
                         Ok::<_, String>(multiplayer::compare(&request.report(theirs.all_game_files, &progress), &theirs))
                     })
                     .await
-                    .unwrap_or_else(|_| Err("The comparison failed".into()));
+                    .unwrap_or_else(|_| Err(t!("The comparison failed")));
                     done();
                     match compared {
                         Ok(c) => {
@@ -223,13 +223,13 @@ fn label_row(title: &str, subtitle: &str) -> adw::ActionRow {
 
 fn file_row(f: &FileDiff) -> adw::ActionRow {
     let what = match f {
-        FileDiff::Changed(_) => "Different",
-        FileDiff::LineEndings(_) => "Only line endings differ (Windows CRLF or Linux LF)",
-        FileDiff::OnlyMine(_) => "Only in yours",
-        FileDiff::OnlyTheirs(_) => "Only in theirs",
+        FileDiff::Changed(_) => t!("Different"),
+        FileDiff::LineEndings(_) => t!("Only line endings differ (Windows CRLF or Linux LF)"),
+        FileDiff::OnlyMine(_) => t!("Only in yours"),
+        FileDiff::OnlyTheirs(_) => t!("Only in theirs"),
     };
     let checksum = multiplayer::in_checksum(f.path());
-    let row = label_row(f.path(), &if checksum { format!("{what} · in the multiplayer checksum") } else { what.to_owned() });
+    let row = label_row(f.path(), &if checksum { tf!("{what} · in the multiplayer checksum", what = &what) } else { what });
     if checksum {
         row.add_prefix(&gtk::Image::builder().icon_name("dialog-warning-symbolic").css_classes(["warning"]).build());
     }
@@ -238,11 +238,11 @@ fn file_row(f: &FileDiff) -> adw::ActionRow {
 
 fn files_expander(title: &str, files: &[FileDiff]) -> adw::ExpanderRow {
     let in_checksum = files.iter().filter(|f| multiplayer::in_checksum(f.path())).count();
-    let mut subtitle = plural(files.len(), "file differs", "files differ");
+    let mut subtitle = tnf!("{count} file differs", "{count} files differ", count = files.len());
     subtitle.push_str(&if in_checksum > 0 {
-        format!(" · {in_checksum} in the multiplayer checksum, so the game won't start together")
+        tf!(" · {count} in the multiplayer checksum, so the game won't start together", count = in_checksum)
     } else {
-        " · none in the multiplayer checksum (graphics, sound…), so it may still work".to_owned()
+        t!(" · none in the multiplayer checksum (graphics, sound…), so it may still work")
     });
     let row = adw::ExpanderRow::builder().title(title).subtitle(subtitle).use_markup(false).build();
     if in_checksum > 0 {
@@ -252,7 +252,7 @@ fn files_expander(title: &str, files: &[FileDiff]) -> adw::ExpanderRow {
         row.add_row(&file_row(f));
     }
     if files.len() > ROWS_PER_MOD {
-        row.add_row(&label_row(&format!("…and {} more", files.len() - ROWS_PER_MOD), ""));
+        row.add_row(&label_row(&tf!("…and {count} more", count = files.len() - ROWS_PER_MOD), ""));
     }
     row
 }
@@ -260,57 +260,58 @@ fn files_expander(title: &str, files: &[FileDiff]) -> adw::ExpanderRow {
 fn render(c: &Comparison, theirs: &str) -> Vec<adw::PreferencesGroup> {
     let group = |title: &str, description: &str| adw::PreferencesGroup::builder().title(title).description(description).build();
     if c.matches() {
-        let g = group(&format!("Compared With {theirs}"), "");
-        g.add(&adw::StatusPage::builder().icon_name("emblem-ok-symbolic").title("Everything Matches").description("Same game version, mods, load order and mod files").build());
+        let g = group(&tf!("Compared With {name}", name = theirs), "");
+        g.add(&adw::StatusPage::builder().icon_name("emblem-ok-symbolic").title(t!("Everything Matches")).description(t!("Same game version, mods, load order and mod files")).build());
         return vec![g];
     }
-    let mut out = vec![group(&format!("Compared With {theirs}"), "What differs between your setup and theirs. Fix these so you all have the same.")];
+    let mut out = vec![group(&tf!("Compared With {name}", name = theirs), &t!("What differs between your setup and theirs. Fix these so you all have the same."))];
 
     if c.game_version.is_some() || c.builds.is_some() || !c.game_files.is_empty() {
-        let g = group("Game", if c.builds.is_some() { multiplayer::BUILDS_DIFFER } else { "" });
+        let differing = if c.builds.is_some() { multiplayer::builds_differ() } else { String::new() };
+        let g = group(&t!("Game"), &differing);
         if let Some((mine, theirs)) = &c.game_version {
-            g.add(&label_row("Different game version", &format!("Yours: {mine} · Theirs: {theirs}")));
+            g.add(&label_row(&t!("Different game version"), &tf!("Yours: {mine} · Theirs: {theirs}", mine = mine, theirs = theirs)));
         }
         if let Some((mine, theirs)) = c.builds {
-            g.add(&label_row("Different game build", &format!("Yours: {} · Theirs: {}", mine.describe(), theirs.describe())));
+            g.add(&label_row(&t!("Different game build"), &tf!("Yours: {mine} · Theirs: {theirs}", mine = mine.describe(), theirs = theirs.describe())));
         }
         if !c.game_files.is_empty() {
-            g.add(&files_expander("Game files", &c.game_files));
+            g.add(&files_expander(&t!("Game files"), &c.game_files));
         }
         out.push(g);
     }
     if !c.only_mine.is_empty() {
-        let g = group("Only You Have", "Enabled for you but not for them");
+        let g = group(&t!("Only You Have"), &t!("Enabled for you but not for them"));
         c.only_mine.iter().for_each(|m| g.add(&label_row(m, "")));
         out.push(g);
     }
     if !c.only_theirs.is_empty() {
-        let g = group("Only They Have", "Enabled for them but not for you");
+        let g = group(&t!("Only They Have"), &t!("Enabled for them but not for you"));
         c.only_theirs.iter().for_each(|m| g.add(&label_row(m, "")));
         out.push(g);
     }
     if !c.order.is_empty() {
-        let g = group("Different Load Order", "The mods you both have load in a different order, which changes which files win");
+        let g = group(&t!("Different Load Order"), &t!("The mods you both have load in a different order, which changes which files win"));
         for (name, mine, theirs) in c.order.iter().filter(|(_, a, b)| a != b) {
-            g.add(&label_row(name, &format!("Yours: {mine} · Theirs: {theirs}")));
+            g.add(&label_row(name, &tf!("Yours: {mine} · Theirs: {theirs}", mine = mine, theirs = theirs)));
         }
         out.push(g);
     }
     if !c.mods.is_empty() {
-        let g = group("Different Mod Files", "Usually a different version of the mod: resubscribe or update so you have the same");
+        let g = group(&t!("Different Mod Files"), &t!("Usually a different version of the mod: resubscribe or update so you have the same"));
         c.mods.iter().for_each(|m| g.add(&files_expander(&m.name, &m.files)));
         out.push(g);
     }
     if !c.case.is_empty() {
         let g = group(
-            "Files the Linux Build May Skip",
-            "The native Linux build reads file and folder names exactly, unlike Windows, so it may skip these files: they're in a game folder whose name isn't lowercase, such as Common or common/Traits, or named like another file but for case. Its checksum then doesn't match. The mod's author can rename them, or whoever runs the native Linux build can switch to the Windows build through Proton.",
+            &t!("Files the Linux Build May Skip"),
+            &t!("The native Linux build reads file and folder names exactly, unlike Windows, so it may skip these files: they're in a game folder whose name isn't lowercase, such as Common or common/Traits, or named like another file but for case. Its checksum then doesn't match. The mod's author can rename them, or whoever runs the native Linux build can switch to the Windows build through Proton."),
         );
         for (name, files) in &c.case {
-            let row = adw::ExpanderRow::builder().title(name).subtitle(plural(files.len(), "file", "files")).use_markup(false).build();
+            let row = adw::ExpanderRow::builder().title(name).subtitle(tnf!("{count} file", "{count} files", count = files.len())).use_markup(false).build();
             files.iter().take(ROWS_PER_MOD).for_each(|f| row.add_row(&label_row(f, "")));
             if files.len() > ROWS_PER_MOD {
-                row.add_row(&label_row(&format!("…and {} more", files.len() - ROWS_PER_MOD), ""));
+                row.add_row(&label_row(&tf!("…and {count} more", count = files.len() - ROWS_PER_MOD), ""));
             }
             g.add(&row);
         }

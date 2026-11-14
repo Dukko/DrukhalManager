@@ -9,7 +9,7 @@ use std::rc::{Rc, Weak};
 use adw::prelude::*;
 use gtk::{gio, glib};
 
-use super::{Item, Page, chip, arrow, diff_bar, note, object_key, option_toggle, plural};
+use super::{Item, Page, chip, arrow, diff_bar, note, object_key, option_toggle};
 use crate::diff_view::{Card, Compare, Header, Pair};
 use crate::merge::ai;
 use crate::merge::conflicts::{self, ObjectConflict};
@@ -119,7 +119,7 @@ impl Steps {
         if self.left_is_first() {
             return first.clone();
         }
-        Source { label: format!("Result so far ({})", self.from.join(" + ")), file: first.file.clone(), text: self.result.clone() }
+        Source { label: tf!("Result so far ({names})", names = self.from.join(" + ")), file: first.file.clone(), text: self.result.clone() }
     }
 
     fn right(&self) -> &Source {
@@ -278,7 +278,7 @@ pub fn view(page: &Rc<Page>, index: usize) -> (gtk::Widget, Rc<dyn std::any::Any
     if page.hooks.session.borrow().steps.contains_key(&view.key) {
         view.render(gtk::StackTransitionType::None);
     } else {
-        let header = page.detail_header(&c.key, &format!("Object · {}", c.category));
+        let header = page.detail_header(&c.key, &tf!("Object · {category}", category = &c.category));
         view.header.set_child(Some(&header.widget));
         let spinner = adw::Spinner::builder().width_request(32).height_request(32).halign(gtk::Align::Center).valign(gtk::Align::Center).build();
         view.push(&spinner.upcast(), gtk::StackTransitionType::None);
@@ -289,7 +289,7 @@ pub fn view(page: &Rc<Page>, index: usize) -> (gtk::Widget, Rc<dyn std::any::Any
 
 /// The badge on the version the game uses today.
 fn in_game() -> (String, Option<&'static str>) {
-    ("In game".into(), Some("success"))
+    (t!("In game"), Some("success"))
 }
 
 /// Removes every page but the visible one.
@@ -324,7 +324,7 @@ impl ObjectView {
             let loaded = gio::spawn_blocking(move || merge_dialog::load(&category, &key, game_dir.as_deref(), for_load)).await;
             let Some(page) = view.page.upgrade() else { return };
             let Ok(loaded) = loaded else {
-                view.error.replace(Some("Could not read the mods' files".into()));
+                view.error.replace(Some(t!("Could not read the mods' files")));
                 view.header.set_child(Some(&page.detail_header(&view.name, &view.category).widget));
                 view.show_error_only();
                 return;
@@ -363,7 +363,7 @@ impl ObjectView {
 
     fn show_error_only(&self) {
         let message = self.error.borrow().clone().unwrap_or_default();
-        let status = adw::StatusPage::builder().icon_name("dialog-warning-symbolic").title("Nothing to Compare").description(message).build();
+        let status = adw::StatusPage::builder().icon_name("dialog-warning-symbolic").title(t!("Nothing to Compare")).description(message).build();
         self.push(&status.upcast(), gtk::StackTransitionType::None);
     }
 
@@ -384,10 +384,12 @@ impl ObjectView {
             _ => unreachable!(),
         };
         let n_mods = c.definitions.iter().map(|d| d.mod_position).collect::<std::collections::BTreeSet<_>>().len();
-        let mut subtitle = format!("Object · {} · {}", self.category, plural(n_mods, "mod defines this", "mods define this"));
-        if vanilla.is_some() {
-            subtitle.push_str(", and the base game");
-        }
+        let mods = tnf!("{count} mod defines this", "{count} mods define this", count = n_mods);
+        let subtitle = if vanilla.is_some() {
+            tf!("Object · {category} · {mods}, and the base game", category = &self.category, mods = &mods)
+        } else {
+            tf!("Object · {category} · {mods}", category = &self.category, mods = &mods)
+        };
         let header = page.detail_header(&self.name, &subtitle);
         let done = steps.done();
         for (i, s) in sources.iter().enumerate() {
@@ -406,7 +408,7 @@ impl ObjectView {
         header.chips.set_visible(sources.len() > 1);
         header.actions.append(&page.ignore_button(self.item));
         if !steps.history.is_empty() {
-            let undo = gtk::Button::builder().icon_name("edit-undo-symbolic").tooltip_text("Undo Last Step").sensitive(!busy).css_classes(["flat"]).build();
+            let undo = gtk::Button::builder().icon_name("edit-undo-symbolic").tooltip_text(t!("Undo Last Step")).sensitive(!busy).css_classes(["flat"]).build();
             let weak = Rc::downgrade(self);
             undo.connect_clicked(move |_| {
                 if let Some(view) = weak.upgrade() {
@@ -417,7 +419,7 @@ impl ObjectView {
             header.actions.append(&undo);
         }
         if !steps.history.is_empty() || steps.from_saved {
-            let over = gtk::Button::builder().label("Start Over").tooltip_text("Go through the versions again from the first").sensitive(!busy).css_classes(["flat"]).build();
+            let over = gtk::Button::builder().label(t!("Start Over")).tooltip_text(t!("Go through the versions again from the first")).sensitive(!busy).css_classes(["flat"]).build();
             let weak = Rc::downgrade(self);
             over.connect_clicked(move |_| {
                 if let Some(view) = weak.upgrade() {
@@ -429,10 +431,10 @@ impl ObjectView {
             header.actions.append(&over);
         }
         if !done && sources.len() > 1 {
-            let merge = gtk::Button::builder().label("Merge with AI").css_classes(["suggested-action"]).sensitive(!busy).build();
+            let merge = gtk::Button::builder().label(t!("Merge with AI")).css_classes(["suggested-action"]).sensitive(!busy).build();
             merge.set_tooltip_text(Some(&match (hooks.provider)() {
-                Some(p) => format!("Ask {} to combine these two versions", p.model_name()),
-                None => "Set up an AI provider in Preferences first".to_owned(),
+                Some(p) => tf!("Ask {model} to combine these two versions", model = p.model_name()),
+                None => t!("Set up an AI provider in Preferences first"),
             }));
             if busy {
                 merge.set_child(Some(&adw::Spinner::new()));
@@ -454,32 +456,32 @@ impl ObjectView {
         }
         if let Some((w, reason)) = c.winner().filter(|_| !(hooks.is_merged)(&self.category, &self.name)) {
             let name = analysis.name(c.definitions[w].mod_position);
-            self.notes.append(&note(&format!("In game now, {name}'s version is used: {}.", reason.explain(conflicts::is_fios(&self.category))), None));
+            self.notes.append(&note(&tf!("In game now, {name}'s version is used: {reason}.", name = name, reason = reason.explain(conflicts::is_fios(&self.category))), None));
         }
         if !steps.loaded.missing.is_empty() {
-            self.notes.append(&note(&format!("Couldn't find the definition in: {}", steps.loaded.missing.join(", ")), Some("warning")));
+            self.notes.append(&note(&tf!("Couldn't find the definition in: {mods}", mods = steps.loaded.missing.join(", ")), Some("warning")));
         }
         if let Some(reasons) = hooks.stale_object(&self.category, &self.name) {
-            self.notes.append(&note(&format!("The saved merge is out of date: {}. Saving a new one replaces it.", reasons.join("; ")), Some("warning")));
+            self.notes.append(&note(&tf!("The saved merge is out of date: {reasons}. Saving a new one replaces it.", reasons = reasons.join("; ")), Some("warning")));
         }
         if steps.from_saved {
             let sources = (hooks.existing)(&self.category, &self.name).map(|m| m.sources.join(", ")).unwrap_or_default();
-            self.notes.append(&note(&format!("This is the saved merge of {sources}. Edit and save it again, or start over to go through the versions again."), None));
+            self.notes.append(&note(&tf!("This is the saved merge of {sources}. Edit and save it again, or start over to go through the versions again.", sources = sources), None));
         }
         let suggestion = (!done && sources.len() > 1).then(|| trivial::resolve(vanilla, &[steps.left_source(), steps.right_source()])).flatten();
         if let Some(s) = &suggestion {
-            let which = if s.index == 0 { if steps.left_is_first() { sources[0].label.as_str() } else { "the result so far" } } else { steps.right().label.as_str() };
-            self.notes.append(&note(&format!("{}, so {which} keeps every change. No AI needed.", s.reason), Some("accent")));
+            let which = if s.index == 0 { if steps.left_is_first() { sources[0].label.clone() } else { t!("the result so far") } } else { steps.right().label.clone() };
+            self.notes.append(&note(&tf!("{reason}, so {which} keeps every change. No AI needed.", reason = &s.reason, which = &which), Some("accent")));
         }
         if !steps.notes.is_empty() {
-            self.notes.append(&note(&format!("Notes from the model: {}", steps.notes), None));
+            self.notes.append(&note(&tf!("Notes from the model: {notes}", notes = &steps.notes), None));
         }
         if let Some(error) = &*self.error.borrow() {
             self.notes.append(&note(error, Some("error")));
         }
 
         let body = if sources.is_empty() {
-            let status = adw::StatusPage::builder().icon_name("dialog-warning-symbolic").title("Nothing to Compare").description("The definition wasn't found in any mod's file. Rescan, in case the mods changed.").build();
+            let status = adw::StatusPage::builder().icon_name("dialog-warning-symbolic").title(t!("Nothing to Compare")).description(t!("The definition wasn't found in any mod's file. Rescan, in case the mods changed.")).build();
             status.upcast()
         } else if done {
             self.final_body(&page, steps)
@@ -507,21 +509,21 @@ impl ObjectView {
 
         let left_button = gtk::Button::builder().sensitive(!busy).build();
         let left_header = if steps.left_is_first() {
-            left_button.set_label("Use This Version");
-            left_button.set_tooltip_text(Some(&format!("Keep {}'s version and leave out {}'s changes", left.label, right.label)));
+            left_button.set_label(&t!("Use This Version"));
+            left_button.set_tooltip_text(Some(&tf!("Keep {name}'s version and leave out {other}'s changes", name = &left.label, other = &right.label)));
             Header { title: left.label.clone(), subtitle: analysis.origin(steps.positions[0], &left.file), color: Some(steps.positions[0]), badge: (winner == Some(0)).then(in_game) }
         } else {
-            left_button.set_label("Keep This");
-            left_button.set_tooltip_text(Some(&format!("Keep the result so far and leave out {}'s changes", right.label)));
+            left_button.set_label(&t!("Keep This"));
+            left_button.set_tooltip_text(Some(&tf!("Keep the result so far and leave out {name}'s changes", name = &right.label)));
             // Merged only once it holds more than one mod's changes.
             let badge = match (steps.edited, steps.from.len()) {
-                (true, _) => ("Edited", Some("accent")),
-                (false, 1) => ("Kept", None),
-                _ => ("Merged", Some("success")),
+                (true, _) => (t!("Edited"), Some("accent")),
+                (false, 1) => (t!("Kept"), None),
+                _ => (t!("Merged"), Some("success")),
             };
-            Header { title: "Result so far".into(), subtitle: steps.from.join(" + "), color: None, badge: Some((badge.0.into(), badge.1)) }
+            Header { title: t!("Result so far"), subtitle: steps.from.join(" + "), color: None, badge: Some(badge) }
         };
-        let right_button = gtk::Button::builder().label("Use This Version").tooltip_text(format!("Use {}'s version in place of the one on the left", right.label)).sensitive(!busy).build();
+        let right_button = gtk::Button::builder().label(t!("Use This Version")).tooltip_text(tf!("Use {name}'s version in place of the one on the left", name = &right.label)).sensitive(!busy).build();
         match suggested {
             Some(0) => left_button.add_css_class("suggested-action"),
             Some(_) => right_button.add_css_class("suggested-action"),
@@ -536,10 +538,10 @@ impl ObjectView {
             title: right_title.clone(),
             subtitle: right_origin.clone(),
             color: Some(right_position),
-            badge: if edited { Some(("Edited".into(), Some("accent"))) } else { right_wins.then(in_game) },
+            badge: if edited { Some((t!("Edited"), Some("accent"))) } else { right_wins.then(in_game) },
         };
         pair.right.set_header(&right_header(right_edited));
-        let revert = gtk::Button::builder().icon_name("document-revert-symbolic").tooltip_text("Undo your edits to this version").sensitive(right_edited && !busy).css_classes(["flat"]).build();
+        let revert = gtk::Button::builder().icon_name("document-revert-symbolic").tooltip_text(t!("Undo your edits to this version")).sensitive(right_edited && !busy).css_classes(["flat"]).build();
         {
             let weak = Rc::downgrade(self);
             revert.connect_clicked(move |_| {
@@ -581,7 +583,7 @@ impl ObjectView {
         }
 
         let bar = diff_bar(&pair);
-        let take = gtk::Button::builder().label("Take Change").tooltip_text("Copy the right card's side of the highlighted difference into the left card").sensitive(false).css_classes(["flat"]).build();
+        let take = gtk::Button::builder().label(t!("Take Change")).tooltip_text(t!("Copy the right card's side of the highlighted difference into the left card")).sensitive(false).css_classes(["flat"]).build();
         {
             let take_ref = take.downgrade();
             pair.connect_change(move |_, current, _| {
@@ -621,14 +623,14 @@ impl ObjectView {
     /// Opens both versions in the external merge tool; what it saves
     /// replaces the right card's version, to keep or edit further.
     fn merge_tool_button(self: &Rc<Self>, page: &Rc<Page>, left_label: &str, left: &str, right: &Source, base: Option<&str>, busy: bool) -> gtk::Button {
-        let button = gtk::Button::builder().label("Merge Tool…").tooltip_text("Merge these two versions in your merge tool; what you save there replaces the right one").sensitive(!busy).css_classes(["flat"]).build();
+        let button = gtk::Button::builder().label(t!("Merge Tool…")).tooltip_text(t!("Merge these two versions in your merge tool; what you save there replaces the right one")).sensitive(!busy).css_classes(["flat"]).build();
         let (weak, page_ref) = (Rc::downgrade(self), Rc::downgrade(page));
         let (left_label, left, right_label, right, base) = (left_label.to_owned(), left.to_owned(), right.label.clone(), right.text.clone(), base.map(str::to_owned));
         button.connect_clicked(move |button| {
             let (Some(view), Some(page)) = (weak.upgrade(), page_ref.upgrade()) else { return };
             let command = (page.hooks.merge_tool)();
             if command.is_empty() {
-                (page.hooks.toast)("Choose a merge tool in Preferences first");
+                (page.hooks.toast)(&t!("Choose a merge tool in Preferences first"));
                 return (page.hooks.open_merge_tool_settings)();
             }
             let tool = super::merge_tool_name(&command);
@@ -642,9 +644,9 @@ impl ObjectView {
                         view.error.replace(None);
                         view.with_steps(|s| s.edit_right(&merged));
                         view.render(gtk::StackTransitionType::None);
-                        (page.hooks.toast)("The merge tool's result is on the right; keep it with Use This Version");
+                        (page.hooks.toast)(&t!("The merge tool's result is on the right; keep it with Use This Version"));
                     }
-                    Ok(None) => (page.hooks.toast)(&format!("{tool} was closed without saving, so nothing changed")),
+                    Ok(None) => (page.hooks.toast)(&tf!("{tool} was closed without saving, so nothing changed", tool = tool)),
                     Err(message) => {
                         view.error.replace(Some(message));
                         view.render(gtk::StackTransitionType::None);
@@ -666,10 +668,10 @@ impl ObjectView {
             }
         };
         if has_base {
-            into.append(&option_toggle(&page.hooks, "Base Game", "Mark what each version changed from the base game, instead of the differences between the two", |s| s.compare_base, |s, v| s.compare_base = v, rerender.clone()));
+            into.append(&option_toggle(&page.hooks, &t!("Base Game"), &t!("Mark what each version changed from the base game, instead of the differences between the two"), |s| s.compare_base, |s, v| s.compare_base = v, rerender.clone()));
         }
-        into.append(&option_toggle(&page.hooks, "Changed Lines Only", "Fold runs of lines that are the same in both, keeping a few around each difference. Click a fold to open it", |s| s.fold_unchanged, |s, v| s.fold_unchanged = v, rerender.clone()));
-        into.append(&option_toggle(&page.hooks, "Ignore Spacing", "Don't count lines that only differ in spacing or indentation", |s| s.ignore_whitespace, |s, v| s.ignore_whitespace = v, rerender));
+        into.append(&option_toggle(&page.hooks, &t!("Changed Lines Only"), &t!("Fold runs of lines that are the same in both, keeping a few around each difference. Click a fold to open it"), |s| s.fold_unchanged, |s, v| s.fold_unchanged = v, rerender.clone()));
+        into.append(&option_toggle(&page.hooks, &t!("Ignore Spacing"), &t!("Don't count lines that only differ in spacing or indentation"), |s| s.ignore_whitespace, |s, v| s.ignore_whitespace = v, rerender));
     }
 
     /// The final step: the result in an editor, or compared with a version.
@@ -680,12 +682,12 @@ impl ObjectView {
         let saved = (hooks.is_merged)(&self.category, &self.name) && hooks.stale_object(&self.category, &self.name).is_none() && steps.from_saved;
 
         // What to show: the editor, or the result next to another version.
-        let mut choices = vec![(Final::Edit, "Edit the Result".to_owned())];
+        let mut choices = vec![(Final::Edit, t!("Edit the Result"))];
         if steps.loaded.vanilla.is_some() {
-            choices.push((Final::Base, "Compare with the Base Game".to_owned()));
+            choices.push((Final::Base, t!("Compare with the Base Game")));
         }
         for (i, s) in steps.loaded.sources.iter().enumerate() {
-            choices.push((Final::Source(i), format!("Compare with {}", s.label)));
+            choices.push((Final::Source(i), tf!("Compare with {name}", name = &s.label)));
         }
         let labels: Vec<&str> = choices.iter().map(|(_, l)| l.as_str()).collect();
         let dropdown = gtk::DropDown::from_strings(&labels);
@@ -707,10 +709,10 @@ impl ObjectView {
         toolbar.append(&dropdown);
 
         let result_header = Header {
-            title: "Merged Result".into(),
-            subtitle: if steps.from_saved { "Saved merge".into() } else { steps.from.join(" + ") },
+            title: t!("Merged Result"),
+            subtitle: if steps.from_saved { t!("Saved merge") } else { steps.from.join(" + ") },
             color: None,
-            badge: Some(if saved { ("Saved".into(), Some("success")) } else { ("Not saved yet".into(), None) }),
+            badge: Some(if saved { (t!("Saved"), Some("success")) } else { (t!("Not saved yet"), None) }),
         };
         let body = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(8).build();
         body.append(&toolbar);
@@ -718,7 +720,7 @@ impl ObjectView {
             Final::Edit => {
                 let card = Card::new(true);
                 card.set_header(&result_header);
-                let save = gtk::Button::builder().label("Save to Patch").css_classes(["suggested-action"]).tooltip_text("Save to the merged patch").build();
+                let save = gtk::Button::builder().label(t!("Save to Patch")).css_classes(["suggested-action"]).tooltip_text(t!("Save to the merged patch")).build();
                 card.set_actions(&[save.clone().upcast()]);
                 card.set_text(&text);
                 {
@@ -757,10 +759,10 @@ impl ObjectView {
                             _ => None,
                         },
                     },
-                    _ => Header { title: "Base Game".into(), subtitle: theirs.file.clone(), color: None, badge: None },
+                    _ => Header { title: t!("Base Game"), subtitle: theirs.file.clone(), color: None, badge: None },
                 });
                 let bar = diff_bar(&pair);
-                let take = gtk::Button::builder().label("Take Change").tooltip_text("Copy the right card's side of the highlighted difference into the result").sensitive(false).css_classes(["flat"]).build();
+                let take = gtk::Button::builder().label(t!("Take Change")).tooltip_text(t!("Copy the right card's side of the highlighted difference into the result")).sensitive(false).css_classes(["flat"]).build();
                 let take_ref = take.downgrade();
                 pair.connect_change(move |_, current, _| {
                     if let Some(t) = take_ref.upgrade() {
@@ -777,7 +779,7 @@ impl ObjectView {
                 });
                 bar.extra.append(&take);
                 let weak = Rc::downgrade(self);
-                bar.extra.append(&option_toggle(&page.hooks, "Changed Lines Only", "Fold runs of lines that are the same in both, keeping a few around each difference. Click a fold to open it", |s| s.fold_unchanged, |s, v| s.fold_unchanged = v, move || {
+                bar.extra.append(&option_toggle(&page.hooks, &t!("Changed Lines Only"), &t!("Fold runs of lines that are the same in both, keeping a few around each difference. Click a fold to open it"), |s| s.fold_unchanged, |s, v| s.fold_unchanged = v, move || {
                     if let Some(view) = weak.upgrade() {
                         view.render(gtk::StackTransitionType::None);
                     }
@@ -798,7 +800,7 @@ impl ObjectView {
         let Some(page) = self.page.upgrade() else { return };
         let hooks = page.hooks.clone();
         let Some(provider) = (hooks.provider)() else {
-            (hooks.toast)("Set up an AI provider in Preferences first");
+            (hooks.toast)(&t!("Set up an AI provider in Preferences first"));
             (hooks.open_preferences)();
             return;
         };
@@ -820,7 +822,7 @@ impl ObjectView {
                     let problem = checked.script.err();
                     view.with_steps(|s| s.merged(checked.merged.script, checked.merged.notes));
                     if let Some(problem) = problem {
-                        view.error.replace(Some(format!("The model's result still has a problem after a correction: {problem}. Fix it by hand, or undo and try again.")));
+                        view.error.replace(Some(tf!("The model's result still has a problem after a correction: {problem}. Fix it by hand, or undo and try again.", problem = problem)));
                     }
                     view.render(gtk::StackTransitionType::SlideLeft);
                 }
@@ -829,7 +831,7 @@ impl ObjectView {
                     view.render(gtk::StackTransitionType::None);
                 }
                 None => {
-                    view.error.replace(Some("The merge failed unexpectedly".into()));
+                    view.error.replace(Some(t!("The merge failed unexpectedly")));
                     view.render(gtk::StackTransitionType::None);
                 }
             }
