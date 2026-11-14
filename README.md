@@ -4,18 +4,19 @@
 
 # DrukhalManager
 
-A Stellaris mod manager for Linux that can merge conflicting mods with AI.
+A Stellaris mod manager for Linux and Windows that can merge conflicting mods with AI.
 
 [![Latest release](https://img.shields.io/github/v/release/Dukko/DrukhalManager?label=release&color=4a86cf)](https://github.com/Dukko/DrukhalManager/releases/latest)
 [![CI](https://github.com/Dukko/DrukhalManager/actions/workflows/ci.yml/badge.svg)](https://github.com/Dukko/DrukhalManager/actions/workflows/ci.yml)
-[![Flatpak](https://img.shields.io/badge/install-Flatpak-4a90d9?logo=flatpak&logoColor=white)](#installing)
+[![Flatpak](https://img.shields.io/badge/install-Flatpak-4a90d9?logo=flatpak&logoColor=white)](#flatpak-any-distro)
+[![Windows](https://img.shields.io/badge/download-Windows-0078d4)](#windows)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
 <img src="docs/screenshots/hero.png" alt="The load order, grouped by category, with the views and categories in a sidebar" width="860">
 
 </div>
 
-I play Stellaris on Linux with around 150 mods, and two things kept messing up my evenings: working out which mods overwrite each other, and fixing the load order after every Steam update. [Irony Mod Manager](https://github.com/bcssov/IronyModManager) solves the first one well, but I wanted something native to my desktop that could also do the annoying and boring parts of merging for me. DrukhalManager is an opinionated fork of Irony, rewritten in Rust and GTK 4.
+I play Stellaris on Linux with around 150 mods, and two things kept messing up my evenings: working out which mods overwrite each other, and fixing the load order after every Steam update. [Irony Mod Manager](https://github.com/bcssov/IronyModManager) solves the first one well, but I wanted something native to my desktop that could also do the annoying and boring parts of merging for me. DrukhalManager is an opinionated fork of Irony, rewritten in Rust and GTK 4. It started on Linux and now runs on Windows too, with the same interface.
 
 It does the usual mod manager things (load orders, collections, Paradox Launcher playsets) and a few **less usual** ones:
 
