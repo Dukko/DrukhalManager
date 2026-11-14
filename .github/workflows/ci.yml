@@ -77,6 +77,11 @@ jobs:
         # the GNU target: the runner image also has rustup's MSVC shims on
         # PATH, and `cargo clippy` otherwise lints the MSVC target, where
         # gettext-sys cannot use the system library.
+        env:
+          # Naming the target makes pkg-config treat the build as a cross
+          # build, even though the target is the environment's own.
+          PKG_CONFIG_ALLOW_CROSS: 1
+          PKG_CONFIG_PATH: /ucrt64/lib/pkgconfig:/ucrt64/share/pkgconfig
         run: |
           export PATH="/ucrt64/bin:$PATH"
           /ucrt64/bin/cargo clippy --all-targets --locked --target x86_64-pc-windows-gnu
