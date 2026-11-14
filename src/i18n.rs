@@ -172,8 +172,9 @@ mod tests {
     #[test]
     fn fills_named_placeholders() {
         // Without a catalog gettext returns the English message id, so this
-        // also checks that the fallback text formats.
-        assert_eq!(tf!("{name} took {count} of {total}", name = "list", count = 1, total = 2), "list took 1 of 2");
+        // also checks that the fallback text formats. The strings are ones
+        // the UI already has, so the tests don't add entries to the template.
+        assert_eq!(tf!("Last save: {empire}, {date}", empire = "Rome", date = "2200.01.01"), "Last save: Rome, 2200.01.01");
         assert_eq!(tnf!("{count} mod", "{count} mods", count = 2), "2 mods");
         assert_eq!(tnf!("{count} mod", "{count} mods", count = 1), "1 mod");
     }

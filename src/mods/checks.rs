@@ -13,12 +13,23 @@ pub enum Severity {
     Warning,
 }
 
+/// Whether a Workshop required item is missing or installed but disabled.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RequirementState {
+    Missing,
+    Disabled,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Issue {
     pub severity: Severity,
     pub message: String,
     /// The issue is fixed by sorting by dependencies.
     pub fixed_by_sorting: bool,
+    /// The Workshop required item it's about, by id, and whether it's
+    /// missing or disabled. This is what the UI acts on, so it doesn't
+    /// have to read the (translated) message.
+    pub requirement: Option<(u64, RequirementState)>,
 }
 
 /// Whether a descriptor's `supported_version` (`v4.5.*`, `4.*`, `v4.5*`,
@@ -69,7 +80,7 @@ pub fn check(mods: &[Mod], enabled: &[usize], game_version: Option<&str>) -> Has
     let names = by_name(mods);
     let position: HashMap<usize, usize> = enabled.iter().enumerate().map(|(p, &i)| (i, p)).collect();
     let mut issues: HashMap<usize, Vec<Issue>> = HashMap::new();
-    let mut add = |i: usize, severity, message: String, fixed_by_sorting| issues.entry(i).or_default().push(Issue { severity, message, fixed_by_sorting });
+    let mut add = |i: usize, severity, message: String, fixed_by_sorting, requirement| issues.entry(i).or_default().push(Issue { severity, message, fixed_by_sorting, requirement });
 
     // Mods found loading before a mod that needs them.
     let mut late = std::collections::HashSet::new();
@@ -78,12 +89,12 @@ pub fn check(mods: &[Mod], enabled: &[usize], game_version: Option<&str>) -> Has
             match names.get(&dep.trim().to_lowercase()) {
                 // Mods also list optional compatibility targets here, so a
                 // missing dependency isn't necessarily a problem.
-                None => add(i, Severity::Info, format!("Lists “{dep}” as a dependency, but it isn't installed (it may be optional)"), false),
+                None => add(i, Severity::Info, tf!("Lists “{name}” as a dependency, but it isn't installed (it may be optional)", name = dep), false, None),
                 Some(d) => match position.get(d) {
-                    None => add(i, Severity::Info, format!("Lists “{dep}” as a dependency, but it's disabled (it may be optional)"), false),
+                    None => add(i, Severity::Info, tf!("Lists “{name}” as a dependency, but it's disabled (it may be optional)", name = dep), false, None),
                     Some(&dp) if dp > p => {
                         late.insert((i, *d));
-                        add(i, Severity::Warning, format!("Should load after “{dep}”"), true);
+                        add(i, Severity::Warning, tf!("Should load after “{name}”", name = dep), true, None);
                     }
                     _ => {}
                 },
@@ -95,11 +106,29 @@ pub fn check(mods: &[Mod], enabled: &[usize], game_version: Option<&str>) -> Has
     for (p, &i) in enabled.iter().enumerate() {
         for r in &mods[i].requires {
             match steam_ids.get(&r.steam_id) {
-                None => add(i, Severity::Warning, format!("Requires “{}” from the Workshop, which isn't installed", r.name), false),
+                None => add(
+                    i,
+                    Severity::Warning,
+                    tf!("Requires “{name}” from the Workshop, which isn't installed", name = &r.name),
+                    false,
+                    Some((r.steam_id, RequirementState::Missing)),
+                ),
                 Some(d) => match position.get(d) {
-                    None => add(i, Severity::Warning, format!("Requires “{}”, which is disabled", r.name), false),
+                    None => add(
+                        i,
+                        Severity::Warning,
+                        tf!("Requires “{name}”, which is disabled", name = &r.name),
+                        false,
+                        Some((r.steam_id, RequirementState::Disabled)),
+                    ),
                     // Said once, if it's also a dependency by name.
-                    Some(&dp) if dp > p && late.insert((i, *d)) => add(i, Severity::Warning, format!("Should load after “{}”", mods[*d].descriptor.name.trim()), true),
+                    Some(&dp) if dp > p && late.insert((i, *d)) => add(
+                        i,
+                        Severity::Warning,
+                        tf!("Should load after “{name}”", name = mods[*d].descriptor.name.trim()),
+                        true,
+                        None,
+                    ),
                     _ => {}
                 },
             }
@@ -109,7 +138,13 @@ pub fn check(mods: &[Mod], enabled: &[usize], game_version: Option<&str>) -> Has
         for (i, m) in mods.iter().enumerate() {
             let supported = m.descriptor.game_version();
             if !supported.is_empty() && !version_matches(supported, game) {
-                add(i, Severity::Info, format!("Made for Stellaris {supported}; you have {game}. It may still work."), false);
+                add(
+                    i,
+                    Severity::Info,
+                    tf!("Made for Stellaris {supported}; you have {installed}. It may still work.", supported = supported, installed = game),
+                    false,
+                    None,
+                );
             }
         }
     }

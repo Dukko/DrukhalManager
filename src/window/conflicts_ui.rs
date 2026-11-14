@@ -149,8 +149,8 @@ impl Window {
                     let detail = panic.downcast_ref::<String>().map(String::as_str).or_else(|| panic.downcast_ref::<&str>().copied()).unwrap_or("unknown error");
                     crate::diagnostics::log!("scan", "Scan failed: {detail}");
                     ui.conflicts_page.set_child(Some(&status_page(
-                        "Scan Failed",
-                        &format!("Something went wrong while reading the mods' files. Please report this: {detail}"),
+                        &t!("Scan Failed"),
+                        &tf!("Something went wrong while reading the mods' files. Please report this: {error}", error = detail),
                     )));
                 }
             }
@@ -200,7 +200,7 @@ impl Window {
             picks.retain(|p| p.matches(only));
         }
         if picks.is_empty() {
-            return self.toast_error_message("Nothing to update: the mods changed again since the last check");
+            return self.toast_error_message(&t!("Nothing to update: the mods changed again since the last check"));
         }
         if let Err(e) = self.snapshot_patch(snapshot::BEFORE_UPDATING_PICKS) {
             return self.toast_error_message(&e);
@@ -208,14 +208,14 @@ impl Window {
         let count = picks.len();
         let what = match only {
             Some(s) => s.object.as_ref().map_or_else(|| s.path.rsplit('/').next().unwrap_or(&s.path).to_owned(), |(_, k)| k.clone()),
-            None => conflicts_view::plural(count, "picked version", "picked versions"),
+            None => tnf!("{count} picked version", "{count} picked versions", count = count),
         };
         let result = self.with_patch(|p, user_dir, version| p.update_picks(user_dir, version, picks));
         match result {
             Ok(()) => {
                 self.check_stale();
                 self.refresh();
-                self.add_toast(adw::Toast::builder().title(format!("Updated {what} to the new version")).button_label("Backups…").action_name("win.patch-backups").build());
+                self.add_toast(adw::Toast::builder().title(tf!("Updated {what} to the new version", what = what)).button_label(&t!("Backups…")).action_name("win.patch-backups").build());
             }
             Err(e) => self.toast_error_message(&format!("Could not update {what}: {e}")),
         }
@@ -829,14 +829,14 @@ impl Window {
                     a.revision.set(state.revision);
                 }
             }
-            (!was_enabled).then_some("added to the end of the load order")
+            (!was_enabled).then(|| t!("added to the end of the load order"))
         };
         self.refresh();
-        let toast = adw::Toast::builder().title(format!("Saved to {}", target.name));
+        let toast = adw::Toast::builder().title(tf!("Saved to {name}", name = &target.name));
         let toast = match added {
             Some(change) => toast
-                .title(format!("Saved to {}, which was {change}", target.name))
-                .button_label("Save Load Order")
+                .title(tf!("Saved to {name}, which was {change}", name = &target.name, change = change))
+                .button_label(&t!("Save Load Order"))
                 .action_name("win.save"),
             None => toast,
         };

@@ -10,7 +10,6 @@ use gtk::{gio, glib};
 
 use super::overview::ago;
 use super::{Window, display_name};
-use crate::conflicts_view::plural;
 use crate::mods::last_session::{self, LastSession};
 use crate::paradox::{steam, workshop};
 
@@ -108,7 +107,7 @@ impl Window {
         if !waiting.is_empty() {
             let group = adw::PreferencesGroup::builder()
                 .title(t!("Not Downloaded Yet"))
-                .description(format!("The Workshop has newer versions of {} than Steam has downloaded. Steam usually fetches them while it's open and the game isn't running, so they may change before your next session.", plural(waiting.len(), "mod", "mods")))
+                .description(tnf!("The Workshop has a newer version of {count} mod than Steam has downloaded. Steam usually fetches it while it's open and the game isn't running, so it may change before your next session.", "The Workshop has newer versions of {count} mods than Steam has downloaded. Steam usually fetches them while it's open and the game isn't running, so they may change before your next session.", count = waiting.len()))
                 .build();
             let downloads = gtk::Button::builder().label(t!("Steam Downloads")).valign(gtk::Align::Center).css_classes(["flat"]).tooltip_text(t!("Open Steam's Downloads page")).build();
             let window = self.window.downgrade();
@@ -119,7 +118,7 @@ impl Window {
             let state = self.state.borrow();
             for &(index, at) in &waiting {
                 let m = &state.mods[index];
-                let row = adw::ActionRow::builder().title(display_name(m)).use_markup(false).subtitle(format!("Updated on the Workshop {}", ago(UNIX_EPOCH + Duration::from_secs(at)))).build();
+                let row = adw::ActionRow::builder().title(display_name(m)).use_markup(false).subtitle(tf!("Updated on the Workshop {when}", when = ago(UNIX_EPOCH + Duration::from_secs(at)))).build();
                 if let Some(id) = m.descriptor.remote_file_id {
                     row.add_suffix(&self.notes_button(id));
                 }
@@ -130,13 +129,13 @@ impl Window {
         }
         let group = adw::PreferencesGroup::builder()
             .title(t!("Updated Since You Last Played"))
-            .description(format!("Steam updated {} since you last launched the game, {since}. Read what changed before continuing a campaign: an update can break saves.", plural(updated.len(), "mod", "mods")))
+            .description(tnf!("Steam updated {count} mod since you last launched the game, {since}. Read what changed before continuing a campaign: an update can break saves.", "Steam updated {count} mods since you last launched the game, {since}. Read what changed before continuing a campaign: an update can break saves.", count = updated.len(), since = since))
             .build();
         {
             let state = self.state.borrow();
             for &(index, at) in &updated {
                 let m = &state.mods[index];
-                let row = adw::ActionRow::builder().title(display_name(m)).use_markup(false).subtitle(format!("Updated {}", ago(UNIX_EPOCH + Duration::from_secs(at)))).build();
+                let row = adw::ActionRow::builder().title(display_name(m)).use_markup(false).subtitle(tf!("Updated {when}", when = ago(UNIX_EPOCH + Duration::from_secs(at)))).build();
                 let Some(id) = m.descriptor.remote_file_id else { continue };
                 row.add_suffix(&self.notes_button(id));
                 group.add(&row);

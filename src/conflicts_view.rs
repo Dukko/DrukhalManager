@@ -215,12 +215,12 @@ impl Analysis {
 
     /// "#3 · file", for a card's subtitle.
     fn origin(&self, position: usize, file: &str) -> String {
-        format!("#{} · {file}", self.load_positions[position] + 1)
+        tf!("#{position} · {file}", position = self.load_positions[position] + 1, file = file)
     }
 }
 
 pub fn scanning() -> gtk::Widget {
-    let page = adw::StatusPage::builder().title("Scanning Mods…").description("Reading every enabled mod's files").vexpand(true).build();
+    let page = adw::StatusPage::builder().title(&t!("Scanning Mods…")).description(&t!("Reading every enabled mod's files")).vexpand(true).build();
     page.set_paintable(Some(&adw::SpinnerPaintable::new(Some(&page))));
     page.upcast()
 }
@@ -263,15 +263,18 @@ enum Status {
 
 /// What the keyboard can do on the page: an action in the `conflicts`
 /// group, its accelerator, and its name in the Keyboard Shortcuts window.
-/// All use Alt, so none can be typed into a text field by mistake.
-pub const SHORTCUTS: &[(&str, &str, &str)] = &[
-    ("next", "<Alt>Page_Down", "Next Conflict"),
-    ("previous", "<Alt>Page_Up", "Previous Conflict"),
-    ("use-left", "<Alt>Left", "Use the Left Version"),
-    ("use-right", "<Alt>Right", "Use the Right Version"),
-    ("merge-ai", "<Alt>m", "Merge with AI"),
-    ("ignore", "<Alt>i", "Ignore the Conflict, or Stop Ignoring It"),
-];
+/// All use Alt, so none can be typed into a text field by mistake. The
+/// names are made when asked for, so they follow the language.
+pub fn shortcuts() -> Vec<(&'static str, &'static str, String)> {
+    vec![
+        ("next", "<Alt>Page_Down", t!("Next Conflict")),
+        ("previous", "<Alt>Page_Up", t!("Previous Conflict")),
+        ("use-left", "<Alt>Left", t!("Use the Left Version")),
+        ("use-right", "<Alt>Right", t!("Use the Right Version")),
+        ("merge-ai", "<Alt>m", t!("Merge with AI")),
+        ("ignore", "<Alt>i", t!("Ignore the Conflict, or Stop Ignoring It")),
+    ]
+}
 
 pub struct Page {
     pub analysis: Rc<Analysis>,
@@ -337,7 +340,7 @@ pub fn build(analysis: &Rc<Analysis>, rescan: gtk::Button, hooks: Rc<MergeHooks>
         attention.push(Item::Problems);
     }
     if !attention.is_empty() {
-        groups.push(Group { title: "needs attention".into(), folder_key: None, merge_all: false, items: attention });
+        groups.push(Group { title: t!("needs attention"), folder_key: None, merge_all: false, items: attention });
     }
     let mut by_category: BTreeMap<&str, Vec<Item>> = BTreeMap::new();
     for &i in &objects {
@@ -351,7 +354,7 @@ pub fn build(analysis: &Rc<Analysis>, rescan: gtk::Button, hooks: Rc<MergeHooks>
         by_folder.entry(file_folder(&report.files[i].path)).or_default().push(Item::File(i));
     }
     for (folder, items) in by_folder {
-        let title = if folder.is_empty() { "overridden files".to_owned() } else { format!("overridden files · {folder}") };
+        let title = if folder.is_empty() { t!("overridden files") } else { tf!("overridden files · {folder}", folder = folder) };
         let merge_all = items.iter().any(|i| matches!(i, Item::File(f) if file_merge::mergeable(&report.files[*f].path)));
         groups.push(Group { title, folder_key: Some(files_folder_key(folder)), merge_all, items });
     }
@@ -368,26 +371,26 @@ pub fn build(analysis: &Rc<Analysis>, rescan: gtk::Button, hooks: Rc<MergeHooks>
         dropdown.set_margin_top(6);
         top.append(&dropdown);
     }
-    let search = gtk::SearchEntry::builder().placeholder_text("Search conflicts").text(hooks.session.borrow().search.as_str()).build();
+    let search = gtk::SearchEntry::builder().placeholder_text(&t!("Search conflicts")).text(hooks.session.borrow().search.as_str()).build();
     top.append(&search);
 
     let list = gtk::ListBox::builder().selection_mode(gtk::SelectionMode::Single).css_classes(["navigation-sidebar", "conflict-list"]).build();
     let list_scroll = gtk::ScrolledWindow::builder().child(&list).hscrollbar_policy(gtk::PolicyType::Never).vexpand(true).build();
 
     let footer = gtk::Box::builder().spacing(6).margin_top(6).margin_bottom(6).margin_start(12).margin_end(6).build();
-    let show_ignored = gtk::CheckButton::builder().label("Show Ignored").active(hooks.show_ignored).hexpand(true).build();
+    let show_ignored = gtk::CheckButton::builder().label(&t!("Show Ignored")).active(hooks.show_ignored).hexpand(true).build();
     {
         let hooks = hooks.clone();
         show_ignored.connect_toggled(move |_| (hooks.toggle_show_ignored)());
     }
     rescan.add_css_class("flat");
-    let rules = gtk::Button::builder().label("Rules…").tooltip_text("Ignore conflicts by path, like gfx/** or localisation/*").css_classes(["flat"]).build();
+    let rules = gtk::Button::builder().label(&t!("Rules…")).tooltip_text(&t!("Ignore conflicts by path, like gfx/** or localisation/*")).css_classes(["flat"]).build();
     {
         let hooks = hooks.clone();
         rules.connect_clicked(move |_| (hooks.edit_rules)());
     }
     // The window's action: the merged patch's backups.
-    let backups = gtk::Button::builder().icon_name("document-open-recent-symbolic").tooltip_text("Merged Patch Backups…").action_name("win.patch-backups").css_classes(["flat"]).build();
+    let backups = gtk::Button::builder().icon_name("document-open-recent-symbolic").tooltip_text(&t!("Merged Patch Backups…")).action_name("win.patch-backups").css_classes(["flat"]).build();
     footer.append(&show_ignored);
     footer.append(&rules);
     footer.append(&backups);
@@ -409,10 +412,10 @@ pub fn build(analysis: &Rc<Analysis>, rescan: gtk::Button, hooks: Rc<MergeHooks>
 
     let content = adw::Bin::builder().hexpand(true).vexpand(true).build();
     let split = adw::NavigationSplitView::builder()
-        .sidebar(&adw::NavigationPage::builder().title("Conflicts").child(&sidebar).build())
+        .sidebar(&adw::NavigationPage::builder().title(&t!("Conflicts")).child(&sidebar).build())
         // Scrolls sideways when the window is too narrow for a conflict's
         // toolbar and cards, instead of asking for more width than there is.
-        .content(&adw::NavigationPage::builder().title("Conflict").child(&gtk::ScrolledWindow::builder().child(&content).hscrollbar_policy(gtk::PolicyType::Automatic).vscrollbar_policy(gtk::PolicyType::Never).build()).build())
+        .content(&adw::NavigationPage::builder().title(&t!("Conflict")).child(&gtk::ScrolledWindow::builder().child(&content).hscrollbar_policy(gtk::PolicyType::Automatic).vscrollbar_policy(gtk::PolicyType::Never).build()).build())
         .min_sidebar_width(260.0)
         .max_sidebar_width(380.0)
         .sidebar_width_fraction(0.24)
@@ -443,9 +446,9 @@ pub fn build(analysis: &Rc<Analysis>, rescan: gtk::Button, hooks: Rc<MergeHooks>
 
     if page.groups.is_empty() {
         let (title, description) = match filter {
-            Some(p) => (format!("{} Has No Conflicts", analysis.name(p)), "Choose All Mods to see the others".to_owned()),
-            None if n_ignored > 0 => ("No Conflicts Left".to_owned(), format!("{} ignored", plural(n_ignored, "conflict is", "conflicts are"))),
-            None => ("No Conflicts".to_owned(), "None of the enabled mods change the same files or objects".to_owned()),
+            Some(p) => (tf!("{name} Has No Conflicts", name = analysis.name(p)), t!("Choose All Mods to see the others")),
+            None if n_ignored > 0 => (t!("No Conflicts Left"), tnf!("{count} conflict is ignored", "{count} conflicts are ignored", count = n_ignored)),
+            None => (t!("No Conflicts"), t!("None of the enabled mods change the same files or objects")),
         };
         page.content.set_child(Some(&adw::StatusPage::builder().icon_name("emblem-ok-symbolic").title(title).description(description).build()));
     }
@@ -502,11 +505,10 @@ fn mod_filter(analysis: &Rc<Analysis>, hooks: &Rc<MergeHooks>, involved: &BTreeS
     if choices.len() <= 1 && filter.is_none() {
         return None;
     }
-    let mut labels = vec!["All Mods"];
-    labels.extend(choices.iter().map(|&p| analysis.name(p)));
-    let dropdown = gtk::DropDown::from_strings(&labels);
+    let labels: Vec<String> = std::iter::once(t!("All Mods")).chain(choices.iter().map(|&p| analysis.name(p).to_owned())).collect();
+    let dropdown = gtk::DropDown::from_strings(&labels.iter().map(String::as_str).collect::<Vec<_>>());
     dropdown.set_enable_search(true);
-    dropdown.set_tooltip_text(Some("Show only the conflicts of one mod"));
+    dropdown.set_tooltip_text(Some(&t!("Show only the conflicts of one mod")));
     dropdown.set_selected(filter.and_then(|f| choices.iter().position(|&p| p == f)).map_or(0, |i| i as u32 + 1));
     // Search by the shown text.
     dropdown.set_expression(Some(gtk::PropertyExpression::new(gtk::StringObject::static_type(), None::<gtk::Expression>, "string")));
@@ -538,9 +540,9 @@ impl Page {
         match item {
             Item::Object(i) => self.analysis.report.objects[i].key.clone(),
             Item::File(i) => file_name(&self.analysis.report.files[i].path).to_owned(),
-            Item::Problems => "Problems".into(),
-            Item::Outdated => plural(n_stale(false), "outdated merge", "outdated merges"),
-            Item::Untracked => plural(n_stale(true), "merge to check", "merges to check"),
+            Item::Problems => t!("Problems"),
+            Item::Outdated => tnf!("{count} outdated merge", "{count} outdated merges", count = n_stale(false)),
+            Item::Untracked => tnf!("{count} merge to check", "{count} merges to check", count = n_stale(true)),
         }
     }
 
@@ -600,12 +602,12 @@ impl Page {
     /// "ignored", or why it's hidden when that isn't by hand.
     fn ignored_label(&self, item: Item) -> String {
         if let Some(line) = self.hidden_by_rule(item) {
-            return format!("ignored by rule {}", line + 1);
+            return tf!("ignored by rule {line}", line = line + 1);
         }
         if self.hidden_by_dependencies(item) {
-            return "a patch of its dependency".to_owned();
+            return t!("a patch of its dependency");
         }
-        "ignored".to_owned()
+        t!("ignored")
     }
 
     fn is_saved(&self, item: Item) -> bool {
@@ -629,39 +631,39 @@ impl Page {
             Item::Object(i) => {
                 let c = &analysis.report.objects[i];
                 let mods: BTreeSet<usize> = c.definitions.iter().map(|d| d.mod_position).collect();
-                let mods = plural(mods.len(), "mod", "mods");
+                let mods = tn!("{count} mod", "{count} mods", mods.len());
                 if self.is_ignored(item) {
-                    return (Status::Ignored, format!("{mods} · {}", self.ignored_label(item)));
+                    return (Status::Ignored, tf!("{mods} · {reason}", mods = &mods, reason = self.ignored_label(item)));
                 }
                 if self.hooks.stale_object(&c.category, &c.key).is_some() {
-                    return (Status::Outdated, format!("{mods} · merge out of date"));
+                    return (Status::Outdated, tf!("{mods} · merge out of date", mods = &mods));
                 }
                 let session = self.hooks.session.borrow();
                 if let Some((step, total)) = session.steps.get(&object_key(&c.category, &c.key)).and_then(Steps::progress) {
-                    return if step > total { (Status::InProgress, format!("{mods} · ready to save")) } else { (Status::InProgress, format!("{mods} · step {step} of {total}")) };
+                    return if step > total { (Status::InProgress, tf!("{mods} · ready to save", mods = &mods)) } else { (Status::InProgress, tf!("{mods} · step {step} of {total}", mods = &mods, step = step, total = total)) };
                 }
                 if (self.hooks.is_merged)(&c.category, &c.key) {
-                    return (Status::Saved, format!("{mods} · saved to patch"));
+                    return (Status::Saved, tf!("{mods} · saved to patch", mods = &mods));
                 }
                 match analysis.simple.contains_key(&i) {
-                    true => (Status::Simple, format!("{mods} · simple, no AI needed")),
+                    true => (Status::Simple, tf!("{mods} · simple, no AI needed", mods = &mods)),
                     false => match c.winner() {
-                        Some((w, _)) => (Status::Open, format!("{mods} · {} wins", analysis.name(c.definitions[w].mod_position))),
+                        Some((w, _)) => (Status::Open, tf!("{mods} · {name} wins", mods = &mods, name = analysis.name(c.definitions[w].mod_position))),
                         None => (Status::Open, mods),
                     },
                 }
             }
             Item::File(i) => {
                 let c = &analysis.report.files[i];
-                let mods = plural(c.mods.len(), "mod", "mods");
+                let mods = tn!("{count} mod", "{count} mods", c.mods.len());
                 if self.is_ignored(item) {
-                    (Status::Ignored, format!("{mods} · {}", self.ignored_label(item)))
+                    (Status::Ignored, tf!("{mods} · {reason}", mods = &mods, reason = self.ignored_label(item)))
                 } else if self.hooks.stale_file(&c.path).is_some() {
-                    (Status::Outdated, format!("{mods} · merge out of date"))
+                    (Status::Outdated, tf!("{mods} · merge out of date", mods = &mods))
                 } else if (self.hooks.is_file_merged)(&c.path) {
-                    (Status::Saved, format!("{mods} · saved to patch"))
+                    (Status::Saved, tf!("{mods} · saved to patch", mods = &mods))
                 } else {
-                    (Status::Open, format!("{mods} · {} wins", analysis.name(*c.mods.last().unwrap())))
+                    (Status::Open, tf!("{mods} · {name} wins", mods = &mods, name = analysis.name(*c.mods.last().unwrap())))
                 }
             }
             Item::Problems => {
@@ -670,15 +672,15 @@ impl Page {
                 let skipped = analysis.report.skipped.iter().filter(|(p, _)| filter.is_none_or(|f| *p == f)).count();
                 let mut parts = Vec::new();
                 if errors > 0 {
-                    parts.push(plural(errors, "file with errors", "files with errors"));
+                    parts.push(tnf!("{count} file with errors", "{count} files with errors", count = errors));
                 }
                 if skipped > 0 {
-                    parts.push(plural(skipped, "mod not scanned", "mods not scanned"));
+                    parts.push(tnf!("{count} mod not scanned", "{count} mods not scanned", count = skipped));
                 }
                 (Status::Attention, parts.join(" · "))
             }
-            Item::Outdated => (Status::Attention, outdated_summary(&self.hooks.stale.borrow()).into()),
-            Item::Untracked => (Status::Attention, "Saved by an older version".into()),
+            Item::Outdated => (Status::Attention, outdated_summary(&self.hooks.stale.borrow())),
+            Item::Untracked => (Status::Attention, t!("Saved by an older version")),
         }
     }
 
@@ -705,14 +707,14 @@ impl Page {
             }
             if items.len() > ROWS_PER_GROUP {
                 let more = gtk::ListBoxRow::builder().selectable(false).activatable(false).build();
-                more.set_child(Some(&gtk::Label::builder().label(format!("…and {} more. Search to find them.", items.len() - ROWS_PER_GROUP)).xalign(0.0).css_classes(["dim-label", "caption"]).margin_start(12).build()));
+                more.set_child(Some(&gtk::Label::builder().label(tf!("…and {count} more. Search to find them.", count = items.len() - ROWS_PER_GROUP)).xalign(0.0).css_classes(["dim-label", "caption"]).margin_start(12).build()));
                 self.list.append(&more);
                 rows.push(None);
             }
         }
         if rows.is_empty() {
             let none = gtk::ListBoxRow::builder().selectable(false).activatable(false).build();
-            none.set_child(Some(&gtk::Label::builder().label("No matches").css_classes(["dim-label"]).margin_top(24).build()));
+            none.set_child(Some(&gtk::Label::builder().label(&t!("No matches")).css_classes(["dim-label"]).margin_top(24).build()));
             self.list.append(&none);
             rows.push(None);
         }
@@ -739,7 +741,7 @@ impl Page {
             let menu = gio::Menu::new();
             let actions = gio::SimpleActionGroup::new();
             if group.merge_all {
-                menu.append(Some("Merge All with AI…"), Some("folder.merge-all"));
+                menu.append(Some(&t!("Merge All with AI…")), Some("folder.merge-all"));
                 let action = gio::SimpleAction::new("merge-all", None);
                 let (weak, items) = (Rc::downgrade(self), group.items.clone());
                 action.connect_activate(move |_, _| {
@@ -757,7 +759,8 @@ impl Page {
                 actions.add_action(&action);
             }
             let ignored = (self.hooks.is_ignored)(folder_key);
-            menu.append(Some(if ignored { "Stop Ignoring Folder" } else { "Ignore Folder" }), Some("folder.ignore"));
+            let label = if ignored { t!("Stop Ignoring Folder") } else { t!("Ignore Folder") };
+            menu.append(Some(&label), Some("folder.ignore"));
             let action = gio::SimpleAction::new("ignore", None);
             let (weak, folder_key) = (Rc::downgrade(self), folder_key.clone());
             action.connect_activate(move |_, _| {
@@ -767,7 +770,7 @@ impl Page {
                 }
             });
             actions.add_action(&action);
-            let button = gtk::MenuButton::builder().icon_name("view-more-symbolic").menu_model(&menu).tooltip_text("Folder actions").css_classes(["flat", "circular"]).valign(gtk::Align::Center).build();
+            let button = gtk::MenuButton::builder().icon_name("view-more-symbolic").menu_model(&menu).tooltip_text(&t!("Folder actions")).css_classes(["flat", "circular"]).valign(gtk::Align::Center).build();
             button.insert_action_group("folder", Some(&actions));
             heading.append(&button);
         }
@@ -790,7 +793,7 @@ impl Page {
             Item::File(i) => self.analysis.report.files[i].path.clone(),
             Item::Object(i) => {
                 let c = &self.analysis.report.objects[i];
-                c.definitions.iter().map(|d| format!("{}: {}", self.analysis.name(d.mod_position), d.file)).collect::<Vec<_>>().join("\n")
+                c.definitions.iter().map(|d| tf!("{name}: {file}", name = self.analysis.name(d.mod_position), file = &d.file)).collect::<Vec<_>>().join("\n")
             }
             _ => title,
         }));
@@ -814,18 +817,18 @@ impl Page {
         }
         let icon = |name: &str, class: &str, tooltip: &str| gtk::Image::builder().icon_name(name).css_classes([class]).tooltip_text(tooltip).build().upcast::<gtk::Widget>();
         let widget = match status {
-            Status::Open => gtk::Box::builder().css_classes(["status-dot"]).tooltip_text("Not resolved yet").build().upcast(),
+            Status::Open => gtk::Box::builder().css_classes(["status-dot"]).tooltip_text(&t!("Not resolved yet")).build().upcast(),
             Status::Simple => {
                 let reason = match item {
                     Item::Object(i) => self.analysis.simple.get(&i).cloned().unwrap_or_default(),
                     _ => String::new(),
                 };
-                icon(SIMPLE_ICON, "accent", &format!("Simple merge, no AI needed: {reason}"))
+                icon(SIMPLE_ICON, "accent", &tf!("Simple merge, no AI needed: {reason}", reason = &reason))
             }
-            Status::InProgress => gtk::Box::builder().css_classes(["status-dot", "progress"]).tooltip_text("Being merged").build().upcast(),
-            Status::Saved => icon("emblem-ok-symbolic", "success", "Saved to the merged patch"),
-            Status::Outdated => icon("dialog-warning-symbolic", "warning", "Its mods or the base game changed since this was merged"),
-            Status::Ignored => icon("view-conceal-symbolic", "dim-label", "Ignored"),
+            Status::InProgress => gtk::Box::builder().css_classes(["status-dot", "progress"]).tooltip_text(&t!("Being merged")).build().upcast(),
+            Status::Saved => icon("emblem-ok-symbolic", "success", &t!("Saved to the merged patch")),
+            Status::Outdated => icon("dialog-warning-symbolic", "warning", &t!("Its mods or the base game changed since this was merged")),
+            Status::Ignored => icon("view-conceal-symbolic", "dim-label", &t!("Ignored")),
             Status::Attention => icon("dialog-warning-symbolic", "warning", ""),
         };
         holder.append(&widget);
@@ -839,13 +842,14 @@ impl Page {
     fn update_summary(&self) {
         let listed: Vec<Item> = self.objects.iter().map(|&i| Item::Object(i)).chain(self.files.iter().map(|&i| Item::File(i))).filter(|&i| !self.is_ignored(i)).collect();
         let saved = listed.iter().filter(|&&i| self.is_saved(i)).count();
-        self.summary.set_label(&format!("{} · {saved} saved", plural(listed.len(), "conflict", "conflicts")));
+        let conflicts = tnf!("{count} conflict", "{count} conflicts", count = listed.len());
+        self.summary.set_label(&tf!("{summary} · {saved} saved", summary = &conflicts, saved = saved));
         let mut details = match self.hooks.filter {
-            Some(p) => format!("Only {}'s conflicts", self.analysis.name(p)),
-            None => format!("{} of {} mods involved", self.involved, self.analysis.names.len()),
+            Some(p) => tf!("Only {name}'s conflicts", name = self.analysis.name(p)),
+            None => tf!("{involved} of {total} mods involved", involved = self.involved, total = self.analysis.names.len()),
         };
         if self.n_ignored > 0 {
-            details.push_str(&format!(" · {} ignored", self.n_ignored));
+            details.push_str(&tf!(" · {count} ignored", count = self.n_ignored));
         }
         self.details.set_label(&details);
         self.progress.set_fraction(if listed.is_empty() { 0.0 } else { saved as f64 / listed.len() as f64 });
@@ -866,23 +870,23 @@ impl Page {
         }
     }
 
-    /// Lets the shortcut for `action` (one of [`SHORTCUTS`]) press
+    /// Lets the shortcut for `action` (one of [`shortcuts`]) press
     /// `button`, and adds the keys to its tooltip. The last button bound
     /// wins, as views bind theirs again each time they're drawn.
     pub fn bind_key(&self, action: &'static str, button: &gtk::Button) {
-        if let Some((_, accel, _)) = SHORTCUTS.iter().find(|s| s.0 == action)
+        if let Some((_, accel, _)) = shortcuts().iter().find(|s| s.0 == action)
             && let Some((key, modifiers)) = gtk::accelerator_parse(*accel)
             && let Some(tooltip) = button.tooltip_text()
         {
-            button.set_tooltip_text(Some(&format!("{tooltip} ({})", gtk::accelerator_get_label(key, modifiers))));
+            button.set_tooltip_text(Some(&tf!("{tooltip} ({keys})", tooltip = &tooltip, keys = gtk::accelerator_get_label(key, modifiers))));
         }
         self.keys.borrow_mut().insert(action, button.downgrade());
     }
 
-    /// The `conflicts` action group behind [`SHORTCUTS`], for the window.
+    /// The `conflicts` action group behind [`shortcuts`], for the window.
     pub fn actions(self: &Rc<Self>) -> gio::SimpleActionGroup {
         let group = gio::SimpleActionGroup::new();
-        for &(name, _, _) in SHORTCUTS {
+        for (name, _, _) in shortcuts() {
             let action = gio::SimpleAction::new(name, None);
             let weak = Rc::downgrade(self);
             action.connect_activate(move |_, _| {
@@ -988,7 +992,7 @@ impl Page {
     /// The top of the main pane: a back button when collapsed, the title,
     /// subtitle, a row for chips, and the actions on the right.
     pub fn detail_header(&self, title: &str, subtitle: &str) -> DetailHeader {
-        let back = gtk::Button::builder().icon_name("go-previous-symbolic").tooltip_text("Back to the list").valign(gtk::Align::Center).css_classes(["flat"]).build();
+        let back = gtk::Button::builder().icon_name("go-previous-symbolic").tooltip_text(&t!("Back to the list")).valign(gtk::Align::Center).css_classes(["flat"]).build();
         self.split.bind_property("collapsed", &back, "visible").sync_create().build();
         let split = self.split.downgrade();
         back.connect_clicked(move |_| {
@@ -1015,10 +1019,10 @@ impl Page {
     pub fn ignore_button(self: &Rc<Self>, item: Item) -> gtk::Button {
         let ignored = self.is_ignored(item);
         let tooltip = match self.hidden_by_rule(item) {
-            Some(line) => format!("Ignored by rule {}; click to edit the ignore rules", line + 1),
-            None if self.hidden_by_dependencies(item) => "Hidden because the later mods depend on the earlier ones, as patches do; click to change this".to_owned(),
-            None if ignored => "Stop ignoring this conflict".to_owned(),
-            None => "Ignore this conflict, so it no longer shows or counts".to_owned(),
+            Some(line) => tf!("Ignored by rule {line}; click to edit the ignore rules", line = line + 1),
+            None if self.hidden_by_dependencies(item) => t!("Hidden because the later mods depend on the earlier ones, as patches do; click to change this"),
+            None if ignored => t!("Stop ignoring this conflict"),
+            None => t!("Ignore this conflict, so it no longer shows or counts"),
         };
         let button = gtk::Button::builder()
             .icon_name(if ignored { "view-reveal-symbolic" } else { "view-conceal-symbolic" })
@@ -1040,23 +1044,27 @@ impl Page {
         let report = &analysis.report;
         let hooks = &self.hooks;
         let filter = hooks.filter;
-        let header = self.detail_header("Problems", "Files the game will misread, and mods that couldn't be scanned");
+        let header = self.detail_header(&t!("Problems"), &t!("Files the game will misread, and mods that couldn't be scanned"));
         let list = boxed_list();
         for (position, reason) in report.skipped.iter().filter(|(p, _)| filter.is_none_or(|f| *p == f)) {
             list.append(&row(analysis.name(*position), reason));
         }
         for (index, e) in report.errors.iter().enumerate().filter(|(_, e)| filter.is_none_or(|p| e.mod_position == p)) {
-            let r = row(&e.file, &format!("{} · {}", analysis.name(e.mod_position), e.message));
+            let message = match e.line {
+                Some(line) => tf!("line {line}: {message}", line = line, message = &e.message),
+                None => e.message.clone(),
+            };
+            let r = row(&e.file, &tf!("{mod_name} · {message}", mod_name = analysis.name(e.mod_position), message = &message));
             r.add_prefix(&gtk::Image::builder().icon_name("dialog-warning-symbolic").css_classes(["warning"]).build());
-            // Parse errors read "line N: …"; others are read failures.
-            if e.message.starts_with("line ") && analysis.roots[e.mod_position].is_some() {
+            // Read failures can't be fixed by repairing braces.
+            if e.line.is_some() && analysis.roots[e.mod_position].is_some() {
                 let stale = hooks.stale_file(&e.file);
                 let (fixed, button) = merge_controls((hooks.is_file_merged)(&e.file), stale.as_deref());
-                fixed.set_tooltip_text(Some("Fixed through the merged patch"));
-                button.set_label(match (stale, fixed.is_visible()) {
-                    (Some(_), _) => "Fix Again…",
-                    (None, true) => "Edit Fix…",
-                    (None, false) => "Fix…",
+                fixed.set_tooltip_text(Some(&t!("Fixed through the merged patch")));
+                button.set_label(&match (stale, fixed.is_visible()) {
+                    (Some(_), _) => t!("Fix Again…"),
+                    (None, true) => t!("Edit Fix…"),
+                    (None, false) => t!("Fix…"),
                 });
                 let (fixed_ref, button_ref) = (fixed.downgrade(), button.downgrade());
                 let hooks = hooks.clone();
@@ -1069,7 +1077,7 @@ impl Page {
                                 f.set_icon_name(Some("emblem-ok-symbolic"));
                                 f.set_css_classes(&["success"]);
                                 f.set_visible(true);
-                                b.set_label("Edit Fix…");
+                                b.set_label(&t!("Edit Fix…"));
                             }
                         }),
                     )
@@ -1080,7 +1088,7 @@ impl Page {
             list.append(&r);
         }
         let intro = gtk::Label::builder()
-            .label("The game keeps reading after a missing or extra }, but everything after it gets nested inside the broken object and stops working. Fix… repairs the braces, and the fixed copy is saved through the merged patch, so the mod itself is never modified.")
+            .label(&t!("The game keeps reading after a missing or extra }, but everything after it gets nested inside the broken object and stops working. Fix… repairs the braces, and the fixed copy is saved through the merged patch, so the mod itself is never modified."))
             .wrap(true)
             .xalign(0.0)
             .css_classes(["dim-label"])
@@ -1091,20 +1099,20 @@ impl Page {
     fn stale_view(self: &Rc<Self>, untracked: bool) -> gtk::Widget {
         let all = self.hooks.stale.borrow().clone();
         let (title, subtitle, description) = if untracked {
-            ("Merges to Check", "Saved by an older version", "These were merged by an older version of DrukhalManager, which didn't record what the mods looked like, so their updates can't be noticed. If one still looks right, keep it to track changes from now on; otherwise re-merge it from the list, or remove it.".to_owned())
+            (t!("Merges to Check"), t!("Saved by an older version"), t!("These were merged by an older version of DrukhalManager, which didn't record what the mods looked like, so their updates can't be noticed. If one still looks right, keep it to track changes from now on; otherwise re-merge it from the list, or remove it."))
         } else {
-            let what = if all.iter().any(|s| !s.untracked && s.base_game) { "Mods or the base game" } else { "Mods" };
-            ("Outdated Merges", outdated_summary(&all), format!("{what} changed since these were merged or fixed, so the patch may be undoing their updates. Re-merge them from the list, or remove them from the patch."))
+            let what = if all.iter().any(|s| !s.untracked && s.base_game) { t!("Mods or the base game") } else { t!("Mods") };
+            (t!("Outdated Merges"), outdated_summary(&all), tf!("{what} changed since these were merged or fixed, so the patch may be undoing their updates. Re-merge them from the list, or remove them from the patch.", what = &what))
         };
-        let header = self.detail_header(title, subtitle);
+        let header = self.detail_header(&title, &subtitle);
         let picks = all.iter().filter(|s| !untracked && !s.untracked && s.pick.is_some()).count();
         let description = if picks > 0 {
-            format!("{description} Where you chose one mod's version and only that mod changed, you can take its new version instead.")
+            tf!("{description} Where you chose one mod's version and only that mod changed, you can take its new version instead.", description = &description)
         } else {
             description
         };
         if picks > 1 {
-            let update = gtk::Button::builder().label(format!("Use {picks} New Versions")).tooltip_text("Replace each picked version with the new one from the same mod. The patch is backed up first").css_classes(["suggested-action"]).build();
+            let update = gtk::Button::builder().label(tnf!("Use {count} New Version", "Use {count} New Versions", count = picks)).tooltip_text(&t!("Replace each picked version with the new one from the same mod. The patch is backed up first")).css_classes(["suggested-action"]).build();
             let hooks = self.hooks.clone();
             update.connect_clicked(move |_| (hooks.update_picks)(None));
             header.actions.append(&update);
@@ -1124,11 +1132,11 @@ impl Page {
                 // The heading already says why.
                 (Some((category, _)), true) => category.clone(),
                 (None, true) => s.path.clone(),
-                (Some((category, _)), false) => format!("{category} · {}", s.reasons.join("; ")),
-                (None, false) => format!("{} · {}", s.path, s.reasons.join("; ")),
+                (Some((category, _)), false) => tf!("{category} · {reasons}", category = category, reasons = s.reasons.join("; ")),
+                (None, false) => tf!("{path} · {reasons}", path = &s.path, reasons = s.reasons.join("; ")),
             };
             let subtitle = match &s.pick {
-                Some(name) => format!("{subtitle} · you picked {name}'s version"),
+                Some(name) => tf!("{subtitle} · you picked {name}'s version", subtitle = &subtitle, name = name),
                 None => subtitle,
             };
             let r = row(title, &subtitle);
@@ -1141,7 +1149,7 @@ impl Page {
                 _ => false,
             });
             if let Some(target) = target {
-                let open = gtk::Button::builder().label("Re-merge…").valign(gtk::Align::Center).css_classes(["flat"]).build();
+                let open = gtk::Button::builder().label(&t!("Re-merge…")).valign(gtk::Align::Center).css_classes(["flat"]).build();
                 let weak = Rc::downgrade(self);
                 open.connect_clicked(move |_| {
                     if let Some(page) = weak.upgrade() {
@@ -1151,18 +1159,18 @@ impl Page {
                 r.add_suffix(&open);
             }
             if let Some(name) = &s.pick {
-                let update = gtk::Button::builder().label("Use New Version").tooltip_text(format!("Replace the picked version with {name}'s new one. The patch is backed up first")).valign(gtk::Align::Center).css_classes(["flat"]).build();
+                let update = gtk::Button::builder().label(&t!("Use New Version")).tooltip_text(&tf!("Replace the picked version with {name}'s new one. The patch is backed up first", name = name)).valign(gtk::Align::Center).css_classes(["flat"]).build();
                 let (hooks, stale) = (hooks.clone(), (*s).clone());
                 update.connect_clicked(move |_| (hooks.update_picks)(Some(&stale)));
                 r.add_suffix(&update);
             }
             if s.untracked {
-                let keep = gtk::Button::builder().label("Keep As Is").tooltip_text("Track changes to its mods from their current versions").valign(gtk::Align::Center).css_classes(["flat"]).build();
+                let keep = gtk::Button::builder().label(&t!("Keep As Is")).tooltip_text(&t!("Track changes to its mods from their current versions")).valign(gtk::Align::Center).css_classes(["flat"]).build();
                 let (hooks, stale) = (hooks.clone(), (*s).clone());
                 keep.connect_clicked(move |_| (hooks.keep_merge)(&stale));
                 r.add_suffix(&keep);
             }
-            let remove = gtk::Button::builder().label("Remove from Patch").valign(gtk::Align::Center).css_classes(["flat"]).build();
+            let remove = gtk::Button::builder().label(&t!("Remove from Patch")).valign(gtk::Align::Center).css_classes(["flat"]).build();
             let (hooks, stale, row_ref) = (hooks.clone(), (*s).clone(), r.downgrade());
             remove.connect_clicked(move |_| {
                 (hooks.remove_merge)(&stale);
@@ -1207,8 +1215,8 @@ pub struct DiffBar {
 
 fn diff_bar(pair: &Rc<Pair>) -> DiffBar {
     let count = gtk::Label::builder().xalign(0.0).css_classes(["dim-label"]).build();
-    let prev = gtk::Button::builder().icon_name("go-up-symbolic").tooltip_text("Previous difference (Alt+Up)").css_classes(["flat"]).build();
-    let next = gtk::Button::builder().icon_name("go-down-symbolic").tooltip_text("Next difference (Alt+Down)").css_classes(["flat"]).build();
+    let prev = gtk::Button::builder().icon_name("go-up-symbolic").tooltip_text(&t!("Previous difference (Alt+Up)")).css_classes(["flat"]).build();
+    let next = gtk::Button::builder().icon_name("go-down-symbolic").tooltip_text(&t!("Next difference (Alt+Down)")).css_classes(["flat"]).build();
     let nav = gtk::Box::builder().css_classes(["linked"]).build();
     nav.append(&prev);
     nav.append(&next);
@@ -1222,10 +1230,10 @@ fn diff_bar(pair: &Rc<Pair>) -> DiffBar {
         pair.connect_change(move |n, current, base| {
             if let (Some(count), Some(prev), Some(next)) = (count.upgrade(), prev.upgrade(), next.upgrade()) {
                 count.set_label(&match (n, current) {
-                    _ if base => "Marking each version's changes from the base game".to_owned(),
-                    (0, _) => "No differences".to_owned(),
-                    (n, Some(i)) => format!("Difference {} of {n}", i + 1),
-                    (n, None) => plural(n, "difference", "differences"),
+                    _ if base => t!("Marking each version's changes from the base game"),
+                    (0, _) => t!("No differences"),
+                    (n, Some(i)) => tf!("Difference {number} of {total}", number = i + 1, total = n),
+                    (n, None) => tnf!("{count} difference", "{count} differences", count = n),
                 });
                 prev.set_sensitive(n > 0);
                 next.set_sensitive(n > 0);
@@ -1284,27 +1292,27 @@ fn scrolled_detail(children: &[gtk::Widget]) -> gtk::Widget {
 /// The merged-state icon and the merge button for a row. An out-of-date
 /// merge shows a warning with the reasons instead of a check mark.
 /// What changed since the outdated merges were saved.
-fn outdated_summary(stale: &[Stale]) -> &'static str {
+fn outdated_summary(stale: &[Stale]) -> String {
     let outdated = || stale.iter().filter(|s| !s.untracked);
     match (outdated().any(|s| s.base_game), outdated().all(|s| s.base_game)) {
-        (true, true) => "The base game changed since they were merged",
-        (true, false) => "Mods or the base game changed since they were merged",
-        _ => "Mods changed since they were merged",
+        (true, true) => t!("The base game changed since they were merged"),
+        (true, false) => t!("Mods or the base game changed since they were merged"),
+        _ => t!("Mods changed since they were merged"),
     }
 }
 
 fn merge_controls(is_merged: bool, stale: Option<&[String]>) -> (gtk::Image, gtk::Button) {
-    let merged = gtk::Image::builder().icon_name("emblem-ok-symbolic").tooltip_text("Merged into the patch").css_classes(["success"]).visible(is_merged).build();
+    let merged = gtk::Image::builder().icon_name("emblem-ok-symbolic").tooltip_text(&t!("Merged into the patch")).css_classes(["success"]).visible(is_merged).build();
     let label = match (stale, is_merged) {
         (Some(reasons), _) => {
             merged.set_icon_name(Some("dialog-warning-symbolic"));
             merged.set_css_classes(&["warning"]);
-            merged.set_tooltip_text(Some(&format!("Out of date: {}", reasons.join("; "))));
+            merged.set_tooltip_text(Some(&tf!("Out of date: {reasons}", reasons = reasons.join("; "))));
             merged.set_visible(true);
-            "Re-merge…"
+            t!("Re-merge…")
         }
-        (None, true) => "Edit Merge…",
-        (None, false) => "Merge…",
+        (None, true) => t!("Edit Merge…"),
+        (None, false) => t!("Merge…"),
     };
     let button = gtk::Button::builder().label(label).valign(gtk::Align::Center).css_classes(["flat"]).build();
     (merged, button)
@@ -1348,14 +1356,14 @@ pub fn run_merge_tool(button: &impl IsA<gtk::Widget>, command: String, left: Too
     let button = button.clone().upcast::<gtk::Widget>();
     let label: Option<String> = button.property("label");
     button.set_sensitive(false);
-    button.set_property("label", format!("Waiting for {}…", merge_tool_name(&command)));
+    button.set_property("label", tf!("Waiting for {tool}…", tool = merge_tool_name(&command)));
     glib::spawn_future_local(async move {
         let result = gio::spawn_blocking(move || {
             use crate::merge::external::{Side, run};
             run(&command, Side { label: &left.label, text: &left.text }, Side { label: &right.label, text: &right.text }, base.as_deref())
         })
         .await
-        .unwrap_or_else(|_| Err("The merge tool failed".into()));
+        .unwrap_or_else(|_| Err(t!("The merge tool failed")));
         button.set_property("label", label);
         button.set_sensitive(true);
         done(result);

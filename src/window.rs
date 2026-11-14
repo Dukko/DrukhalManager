@@ -212,7 +212,7 @@ pub fn build(
         Err(e) => {
             toolbar.set_content(Some(&status_page(
                 &t!("Could Not Read Mods"),
-                &tf!("{path}: {e}", path = paths.user_dir.display()),
+                &tf!("{path}: {error}", path = paths.user_dir.display(), error = e),
             )));
             window.present();
             return;

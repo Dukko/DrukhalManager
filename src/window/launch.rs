@@ -7,7 +7,6 @@ use gtk::{gio, glib};
 
 use super::Window;
 use super::display_name;
-use crate::conflicts_view;
 use crate::error_report_dialog;
 use crate::merge::patch;
 use crate::mods::archive;
@@ -37,14 +36,14 @@ impl Window {
             .collect();
         let command = format!("flatpak override --user {} {app_id}", paths.join(" "));
         let dialog = adw::AlertDialog::new(
-            Some("Allow Access to Steam"),
-            Some(&format!(
-                "Steam is installed at {}, outside your home folder, so DrukhalManager can't see it from its sandbox and can't find Stellaris. Run this once in a terminal, then restart DrukhalManager:",
-                missing
+            Some(&t!("Allow Access to Steam")),
+            Some(&tf!(
+                "Steam is installed at {paths}, outside your home folder, so DrukhalManager can't see it from its sandbox and can't find Stellaris. Run this once in a terminal, then restart DrukhalManager:",
+                paths = missing
                     .iter()
                     .map(|p| p.display().to_string())
                     .collect::<Vec<_>>()
-                    .join(" and ")
+                    .join(&t!(" and "))
             )),
         );
         let label = gtk::Label::builder()
@@ -56,7 +55,7 @@ impl Window {
             .margin_top(6)
             .build();
         dialog.set_extra_child(Some(&label));
-        dialog.add_responses(&[("close", "_Close"), ("copy", "_Copy Command")]);
+        dialog.add_responses(&[("close", &t!("_Close")), ("copy", &t!("_Copy Command"))]);
         dialog.set_response_appearance("copy", adw::ResponseAppearance::Suggested);
         dialog.set_default_response(Some("copy"));
         dialog.set_close_response("close");
@@ -111,13 +110,13 @@ impl Window {
     pub(super) fn unsubscribe_in_steam(&self, index: usize) {
         let Some(name) = self.state.borrow().mods.get(index).map(|m| super::display_name(m).to_owned()) else { return };
         self.open_in_steam(index);
-        self.add_toast(adw::Toast::builder().title(format!("Click Unsubscribe on {name}'s page in Steam, then reload the mods (F5)")).timeout(10).build());
+        self.add_toast(adw::Toast::builder().title(tf!("Click Unsubscribe on {name}'s page in Steam, then reload the mods (F5)", name = name)).timeout(10).build());
     }
 
     pub(super) fn copy_workshop_link(&self, index: usize) {
         let Some(id) = self.workshop_id(index) else { return };
         self.window.clipboard().set_text(&workshop_url(id));
-        self.add_toast(adw::Toast::new("Copied the Workshop link"));
+        self.add_toast(adw::Toast::new(&t!("Copied the Workshop link")));
     }
 
     /// Offers to continue the last save in the Launch menu, if there is one.
@@ -127,9 +126,9 @@ impl Window {
             action.set_enabled(last.is_some());
         }
         let label = match &last {
-            Some(save) if save.date.is_empty() => format!("_Continue {}", save.empire),
-            Some(save) => format!("_Continue {}, {}", save.empire, save.date),
-            None => "_Continue Last Save (none found)".to_owned(),
+            Some(save) if save.date.is_empty() => tf!("_Continue {empire}", empire = &save.empire),
+            Some(save) => tf!("_Continue {empire}, {date}", empire = &save.empire, date = &save.date),
+            None => t!("_Continue Last Save (none found)"),
         };
         self.launch_menu.remove_all();
         self.launch_menu.append(Some(&label), Some("win.launch-continue"));
@@ -159,7 +158,7 @@ impl Window {
                 Err(e) => {
                     return self.add_toast(
                         adw::Toast::builder()
-                            .title(format!("Check the game launch options in Preferences: {}", e.message()))
+                            .title(tf!("Check the game launch options in Preferences: {error}", error = e.message()))
                             .timeout(0)
                             .build(),
                     );
@@ -195,7 +194,7 @@ impl Window {
             let uri = if resume { format!("steam://run/{id}//{CONTINUE}/") } else { format!("steam://rungameid/{id}") };
             gtk::UriLauncher::new(&uri)
             .launch(Some(&self.window), None::<&gio::Cancellable>, |_| {});
-            self.add_toast(adw::Toast::new("Starting Stellaris through Steam…"));
+            self.add_toast(adw::Toast::new(&t!("Starting Stellaris through Steam…")));
             if options.close_after_launch {
                 self.window.close();
             } else {
@@ -214,7 +213,7 @@ impl Window {
                 crate::diagnostics::log!("game", "Could not start Stellaris: {e}");
                 return self.add_toast(
                     adw::Toast::builder()
-                        .title(format!("Could not start Stellaris: {e}"))
+                        .title(tf!("Could not start Stellaris: {error}", error = e))
                         .timeout(0)
                         .build(),
                 );
@@ -225,7 +224,7 @@ impl Window {
             self.window.close();
             return;
         }
-        self.add_toast(adw::Toast::new("Starting Stellaris…"));
+        self.add_toast(adw::Toast::new(&t!("Starting Stellaris…")));
         // When the game exits, point out errors it logged about the mods.
         let weak = Rc::downgrade(self);
         glib::spawn_future_local(async move {
@@ -294,18 +293,29 @@ impl Window {
             .flat_map(|r| &r.groups)
             .find(|g| g.is_patch)
             .map_or(0, |g| g.total());
-        let errors = conflicts_view::plural(from_mods, "error", "errors");
         let mut title = match (crashed, from_mods) {
-            (true, 0) => "Stellaris crashed".to_owned(),
-            (true, _) => format!("Stellaris crashed and logged {errors} from your mods"),
-            (false, _) => format!("Stellaris logged {errors} from your mods"),
+            (true, 0) => t!("Stellaris crashed"),
+            (true, _) => tnf!(
+                "Stellaris crashed and logged {count} error from your mods",
+                "Stellaris crashed and logged {count} errors from your mods",
+                count = from_mods
+            ),
+            (false, _) => tnf!(
+                "Stellaris logged {count} error from your mods",
+                "Stellaris logged {count} errors from your mods",
+                count = from_mods
+            ),
         };
         if patch > 0 {
-            title.push_str(&format!(", {patch} from the merged patch"));
+            title.push_str(&tnf!(
+                ", {count} from the merged patch",
+                ", {count} from the merged patch",
+                count = patch
+            ));
         }
         let mut toast = adw::Toast::builder().title(title).timeout(0);
         if fresh {
-            toast = toast.button_label("Show").action_name("win.errors");
+            toast = toast.button_label(&t!("Show")).action_name("win.errors");
         }
         self.add_toast(toast.build());
     }
@@ -358,9 +368,9 @@ impl Window {
     pub(super) fn show_errors(self: &Rc<Self>) {
         let log = error_log::path(&self.paths.user_dir);
         if !log.is_file() {
-            return self.add_toast(adw::Toast::new(
-                "No error.log yet; it's written when the game runs",
-            ));
+            return self.add_toast(adw::Toast::new(&t!(
+                "No error.log yet; it's written when the game runs"
+            )));
         }
         let modified = std::fs::metadata(&log)
             .and_then(|m| m.modified())
@@ -386,13 +396,13 @@ impl Window {
 
     pub(super) fn confirm_close(self: &Rc<Self>) {
         let dialog = adw::AlertDialog::new(
-            Some("Save Changes?"),
-            Some("The load order has unsaved changes. Unsaved changes will be lost if you close."),
+            Some(&t!("Save Changes?")),
+            Some(&t!("The load order has unsaved changes. Unsaved changes will be lost if you close.")),
         );
         dialog.add_responses(&[
-            ("cancel", "_Cancel"),
-            ("discard", "_Discard"),
-            ("save", "_Save"),
+            ("cancel", &t!("_Cancel")),
+            ("discard", &t!("_Discard")),
+            ("save", &t!("_Save")),
         ]);
         dialog.set_response_appearance("discard", adw::ResponseAppearance::Destructive);
         dialog.set_response_appearance("save", adw::ResponseAppearance::Suggested);

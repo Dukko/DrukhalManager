@@ -50,7 +50,7 @@ const MAX_WEEKS: u32 = 260;
 
 impl Window {
     pub(super) fn find_patches(self: &Rc<Self>) {
-        let title = adw::WindowTitle::new("Compatibility Patches", "");
+        let title = adw::WindowTitle::new(&t!("Compatibility Patches"), "");
         let refresh = gtk::Button::builder().icon_name("view-refresh-symbolic").tooltip_text(t!("Search Again")).build();
         let header = adw::HeaderBar::new();
         header.set_title_widget(Some(&title));
@@ -102,9 +102,9 @@ impl Window {
             let state = self.state.borrow();
             patches::enabled_ids(&state.mods, &state.enabled)
         };
-        d.title.set_subtitle(&format!("For {} from the Workshop", plural(ids.len(), "enabled mod", "enabled mods")));
+        d.title.set_subtitle(&tnf!("For {count} enabled mod from the Workshop", "For {count} enabled mods from the Workshop", count = ids.len()));
         if ids.is_empty() {
-            return show_problem(d, "No Workshop Mods Enabled", "Patches are found through the Workshop mods you run", None);
+            return show_problem(d, &t!("No Workshop Mods Enabled"), &t!("Patches are found through the Workshop mods you run"), None);
         }
         let stale = self.dependents.borrow().stale(&ids, again);
         if stale.is_empty() {
@@ -114,7 +114,7 @@ impl Window {
         d.stack.set_visible_child_name("searching");
         let total = stale.len();
         d.progress.set_fraction(0.0);
-        d.searching.set_description(Some(&format!("Checked 0 of {}", plural(total, "mod", "mods"))));
+        d.searching.set_description(Some(&tnf!("Checked 0 of {count} mod", "Checked 0 of {count} mods", count = total)));
 
         let (tx, rx) = async_channel::unbounded();
         let cancel = d.cancel.clone();
@@ -182,7 +182,7 @@ impl Window {
                             WidgetExt::activate_action(&window, "win.preferences", None).ok();
                         }
                     });
-                    show_problem(&d, "A Steam Web API Key Is Needed", "Steam tells only apps with a key which Workshop items need a mod. Add yours in Preferences › Steam.", Some(open.upcast()));
+                    show_problem(&d, &t!("A Steam Web API Key Is Needed"), &t!("Steam tells only apps with a key which Workshop items need a mod. Add yours in Preferences › Steam."), Some(open.upcast()));
                 }
                 Some(Some(e)) => {
                     crate::diagnostics::log!("patches", "Could not search the Workshop: {e}");
@@ -193,7 +193,7 @@ impl Window {
                             ui.search_patches(&d, false);
                         }
                     });
-                    show_problem(&d, "Couldn't Search the Workshop", &format!("{e}. What was found so far is kept."), Some(again.upcast()));
+                    show_problem(&d, &t!("Couldn't Search the Workshop"), &tf!("{error}. What was found so far is kept.", error = e), Some(again.upcast()));
                 }
                 None => ui.show_patches(&d),
             }
@@ -224,10 +224,19 @@ impl Window {
         scale.set_hexpand(true);
         scale.set_valign(gtk::Align::Center);
         scale.set_width_request(220);
-        for (at, mark) in [(4, None), (26, None), (52, Some("1 year")), (104, Some("2 years")), (156, None), (208, None), (MAX_WEEKS, Some("5 years"))] {
-            scale.add_mark(f64::from(at), gtk::PositionType::Bottom, mark);
+        let marks: [(u32, Option<String>); 7] = [
+            (4, None),
+            (26, None),
+            (52, Some(t!("1 year"))),
+            (104, Some(t!("2 years"))),
+            (156, None),
+            (208, None),
+            (MAX_WEEKS, Some(t!("5 years"))),
+        ];
+        for (at, mark) in marks {
+            scale.add_mark(f64::from(at), gtk::PositionType::Bottom, mark.as_deref());
         }
-        scale.update_property(&[gtk::accessible::Property::Label("Updated within, in weeks")]);
+        scale.update_property(&[gtk::accessible::Property::Label(&t!("Updated within, in weeks"))]);
         let age = adw::ActionRow::builder().title(t!("Updated Within")).subtitle(weeks_text(weeks)).build();
         age.add_suffix(&scale);
         options.add(&age);
@@ -263,12 +272,17 @@ impl Window {
                     shown += usize::from(kind && recent);
                     too_old += usize::from(kind && !recent);
                 }
-                group.set_title(&if shown == 0 { "Nothing to Suggest".to_owned() } else { plural(shown, "Suggestion", "Suggestions") });
+                group.set_title(&if shown == 0 { t!("Nothing to Suggest") } else { tn!("{count} Suggestion", "{count} Suggestions", shown) });
                 none.set_visible(shown == 0);
                 none.set_title(&if too_old > 0 {
-                    format!("{} for your enabled mods {} not been updated within {}", plural(too_old, "patch", "patches"), if too_old == 1 { "has" } else { "have" }, weeks_text(weeks))
+                    tnf!(
+                        "{count} patch for your enabled mods has not been updated within {weeks}",
+                        "{count} patches for your enabled mods have not been updated within {weeks}",
+                        count = too_old,
+                        weeks = weeks_text(weeks)
+                    )
                 } else {
-                    "Every patch found for your enabled mods is installed or dismissed".to_owned()
+                    t!("Every patch found for your enabled mods is installed or dismissed")
                 });
             })
         };
@@ -383,9 +397,9 @@ fn show_problem(d: &Dialog, title: &str, description: &str, action: Option<gtk::
 /// "26 weeks", or in years when it's whole years.
 fn weeks_text(weeks: u32) -> String {
     match weeks {
-        52 => "1 year".to_owned(),
-        w if w % 52 == 0 => format!("{} years", w / 52),
-        w => plural(w as usize, "week", "weeks"),
+        52 => t!("1 year"),
+        w if w % 52 == 0 => tnf!("{count} year", "{count} years", count = w / 52),
+        w => tnf!("{count} week", "{count} weeks", count = w),
     }
 }
 
@@ -394,14 +408,14 @@ fn needs(names: &[String]) -> String {
     let list = match names {
         [] => String::new(),
         [one] => one.clone(),
-        [rest @ .., last] => format!("{} and {last}", rest.join(", ")),
+        [rest @ .., last] => tf!("{list} and {last}", list = rest.join(", "), last = last),
     };
     let all = match names.len() {
-        1 => "enabled",
-        2 => "both enabled",
-        _ => "all enabled",
+        1 => t!("enabled"),
+        2 => t!("both enabled"),
+        _ => t!("all enabled"),
     };
-    format!("Needs {list}, {all}")
+    tf!("Needs {list}, {status}", list = list, status = all)
 }
 
 /// 12345 as "12,345".

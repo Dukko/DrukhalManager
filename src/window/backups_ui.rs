@@ -6,7 +6,6 @@ use adw::prelude::*;
 use gtk::glib;
 
 use super::Window;
-use crate::conflicts_view::plural;
 use crate::merge::patch::Patch;
 use crate::merge::snapshot::{self, Snapshot};
 
@@ -24,7 +23,7 @@ impl Window {
         let snapshots = snapshot::list(&self.paths.backup_dir, &target);
         let header = adw::HeaderBar::new();
         // Each collection's patch has its own backups.
-        header.set_title_widget(Some(&adw::WindowTitle::new("Merged Patch Backups", &target.name)));
+        header.set_title_widget(Some(&adw::WindowTitle::new(&t!("Merged Patch Backups"), &target.name)));
         let toolbar = adw::ToolbarView::new();
         toolbar.add_top_bar(&header);
         let dialog = adw::Dialog::builder().title(t!("Merged Patch Backups")).content_width(620).content_height(560).child(&toolbar).build();
@@ -40,9 +39,9 @@ impl Window {
         }
 
         let group = adw::PreferencesGroup::builder()
-            .description(format!(
-                "The merged patch is backed up before each Merge All, and before merges are removed from it. Restoring one replaces the patch's merges with the ones it holds; the patch as it is now is backed up first. The last {} are kept.",
-                snapshot::KEPT
+            .description(tf!(
+                "The merged patch is backed up before each Merge All, and before merges are removed from it. Restoring one replaces the patch's merges with the ones it holds; the patch as it is now is backed up first. The last {kept} are kept.",
+                kept = snapshot::KEPT
             ))
             .build();
         for s in snapshots {
@@ -65,14 +64,14 @@ impl Window {
 
     fn confirm_restore(self: &Rc<Self>, parent: &adw::Dialog, snapshot: Snapshot) {
         let alert = adw::AlertDialog::new(
-            Some("Restore This Backup?"),
-            Some(&format!(
-                "The merged patch goes back to {} from {}. Its current merges are backed up first, so you can undo this from this list.",
-                contents(&snapshot),
-                when(&snapshot)
+            Some(&t!("Restore This Backup?")),
+            Some(&tf!(
+                "The merged patch goes back to {contents} from {when}. Its current merges are backed up first, so you can undo this from this list.",
+                contents = contents(&snapshot),
+                when = when(&snapshot)
             )),
         );
-        alert.add_responses(&[("cancel", "_Cancel"), ("restore", "_Restore")]);
+        alert.add_responses(&[("cancel", &t!("_Cancel")), ("restore", &t!("_Restore"))]);
         alert.set_response_appearance("restore", adw::ResponseAppearance::Suggested);
         alert.set_close_response("cancel");
         let (weak, parent_ref) = (Rc::downgrade(self), parent.downgrade());
@@ -98,14 +97,14 @@ impl Window {
             Ok(p) => {
                 self.patch.replace(Some(p));
             }
-            Err(e) => return self.toast_error_message(&format!("Could not read the merged patch: {e}")),
+            Err(e) => return self.toast_error_message(&tf!("Could not read the merged patch: {error}", error = e)),
         }
         if let Err(e) = result {
-            return self.toast_error_message(&format!("Could not restore the backup: {e}"));
+            return self.toast_error_message(&tf!("Could not restore the backup: {error}", error = e));
         }
         self.patch_saved();
         self.render_conflicts();
-        self.add_toast(adw::Toast::new(&format!("Restored the merged patch from {}", when(snapshot))));
+        self.add_toast(adw::Toast::new(&tf!("Restored the merged patch from {when}", when = when(snapshot))));
     }
 }
 
@@ -114,18 +113,22 @@ fn when(s: &Snapshot) -> String {
     glib::DateTime::from_unix_local(i64::try_from(secs).unwrap_or_default())
         .ok()
         .and_then(|d| d.format("%x %H:%M").ok())
-        .map_or_else(|| "an unknown time".to_owned(), |s| s.to_string())
+        .map_or_else(|| t!("an unknown time"), |s| s.to_string())
 }
 
 fn contents(s: &Snapshot) -> String {
     match (s.merges, s.files) {
-        (0, 0) => "no merges".to_owned(),
-        (m, 0) => plural(m, "merged object", "merged objects"),
-        (0, f) => plural(f, "merged file", "merged files"),
-        (m, f) => format!("{} and {}", plural(m, "merged object", "merged objects"), plural(f, "file", "files")),
+        (0, 0) => t!("no merges"),
+        (m, 0) => tnf!("{count} merged object", "{count} merged objects", count = m),
+        (0, f) => tnf!("{count} merged file", "{count} merged files", count = f),
+        (m, f) => tf!(
+            "{objects} and {files}",
+            objects = tnf!("{count} merged object", "{count} merged objects", count = m),
+            files = tnf!("{count} file", "{count} files", count = f)
+        ),
     }
 }
 
 fn subtitle(s: &Snapshot) -> String {
-    format!("{} · {}", when(s), contents(s))
+    tf!("{when} · {contents}", when = when(s), contents = contents(s))
 }

@@ -9,7 +9,6 @@ use adw::prelude::*;
 use gtk::{gdk, gio, glib};
 
 use super::{Window, display_name};
-use crate::conflicts_view::plural;
 use crate::merge::patch;
 use crate::mods::checks::{self, Severity};
 use crate::mods::filter::View;
@@ -114,9 +113,9 @@ pub(super) fn sidebar_page(views: &gtk::ListBox, categories: &gtk::ListBox, find
     let page = gtk::Box::builder().orientation(gtk::Orientation::Vertical).css_classes(["side-panel"]).overflow(gtk::Overflow::Hidden).build();
     let heading = |text: &str| gtk::Label::builder().label(text).xalign(0.0).margin_start(18).margin_top(12).margin_bottom(4).css_classes(["heading", "dim-label"]).build();
     let lists = gtk::Box::new(gtk::Orientation::Vertical, 0);
-    lists.append(&heading("Views"));
+    lists.append(&heading(&t!("Views")));
     lists.append(views);
-    let categories_heading = heading("Categories");
+    let categories_heading = heading(&t!("Categories"));
     categories_heading.set_tooltip_text(Some(&t!("The sections Smart Sort puts enabled mods in")));
     lists.append(&categories_heading);
     lists.append(categories);
@@ -136,11 +135,20 @@ pub(super) fn sidebar_page(views: &gtk::ListBox, categories: &gtk::ListBox, find
 fn category_header(run: &Run) -> gtk::Widget {
     let line = gtk::Box::builder().spacing(8).css_classes(["category-header"]).build();
     line.append(&category_dot(run.category));
-    let title = if run.manual { format!("{} (manually ordered)", run.category.title()) } else { run.category.title().to_owned() };
+    let title = if run.manual {
+        tf!("{category} (manually ordered)", category = run.category.title())
+    } else {
+        run.category.title().to_owned()
+    };
     line.append(&gtk::Label::builder().label(title).xalign(0.0).css_classes(["caption-heading"]).build());
     line.append(&gtk::Label::builder().label(format!("· {}", run.len)).xalign(0.0).css_classes(["caption", "dim-label", "numeric"]).build());
     line.set_tooltip_text(Some(&if run.manual {
-        format!("Smart Sort would put {} elsewhere in {}: moved here by hand", if run.len == 1 { "this mod" } else { "these mods" }, run.category.title())
+        tnf!(
+            "Smart Sort would put this mod elsewhere in {category}: moved here by hand",
+            "Smart Sort would put these mods elsewhere in {category}: moved here by hand",
+            count = run.len,
+            category = run.category.title()
+        )
     } else {
         run.category.description().to_owned()
     }));
@@ -501,22 +509,22 @@ impl Window {
         }
         let mut line = vec![match position {
             Some(p) => format!("#{}", p + 1),
-            None => "Disabled".to_owned(),
+            None => t!("Disabled"),
         }];
         line.push(match m.source {
-            crate::mods::Source::Workshop => "Workshop".to_owned(),
-            crate::mods::Source::Local => "Local".to_owned(),
+            crate::mods::Source::Workshop => t!("Workshop"),
+            crate::mods::Source::Local => t!("Local"),
         });
         if is_patch {
-            line.push("Always loads last".to_owned());
+            line.push(t!("Always loads last"));
         }
         titles.append(&label(&line.join(" · "), &["dim-label", "caption"]));
         let mut line = Vec::new();
         if !d.game_version().is_empty() {
-            line.push(format!("Supports {}", d.game_version()));
+            line.push(tf!("Supports {version}", version = d.game_version()));
         }
         if let Some(t) = m.updated() {
-            line.push(format!("updated {}", ago(t)));
+            line.push(tf!("updated {when}", when = ago(t)));
         }
         if !line.is_empty() {
             titles.append(&label(&line.join(" · "), &["dim-label", "caption"]));
@@ -534,7 +542,7 @@ impl Window {
             card.add_css_class("inspector-note");
             card.append(&gtk::Image::builder().icon_name("document-edit-symbolic").valign(gtk::Align::Start).css_classes(["dim-label"]).build());
             let text = gtk::TextView::builder().wrap_mode(gtk::WrapMode::WordChar).accepts_tab(false).hexpand(true).build();
-            text.update_property(&[gtk::accessible::Property::Label("Note")]);
+            text.update_property(&[gtk::accessible::Property::Label(&t!("Note"))]);
             text.buffer().set_text(&note);
             let id = m.id.clone();
             let weak = Rc::downgrade(self);
@@ -581,19 +589,19 @@ impl Window {
 
         // What's wrong, each with its fix where there is one.
         let mut problems: Vec<(Severity, String, Option<gtk::Widget>)> = Vec::new();
-        for (severity, message) in self.extra_problems(m) {
-            let fix = (is_patch && message.contains("Conflicts page")).then(|| self.fix_button("Review", |ui| ui.stack.set_visible_child_name("conflicts")));
+        for (severity, message, see_conflicts) in self.extra_problems(m) {
+            let fix = (is_patch && see_conflicts).then(|| self.fix_button(&t!("Review"), |ui| ui.stack.set_visible_child_name("conflicts")));
             problems.push((severity, message, fix));
         }
         for issue in &issues {
             let fix = if issue.fixed_by_sorting {
-                Some(self.fix_button("Sort", |ui| ui.sort_by_dependencies()))
-            } else if issue.message.starts_with("Requires “") {
+                Some(self.fix_button(&t!("Sort"), |ui| ui.sort_by_dependencies()))
+            } else if let Some((steam_id, _)) = issue.requirement {
                 let get = gtk::Button::builder().label(t!("Get")).valign(gtk::Align::Center).action_name("win.get-requirements").action_target(&target).css_classes(["pill", "small"]).build();
                 let actions = gtk::Box::new(gtk::Orientation::Vertical, 4);
                 actions.append(&get);
-                if let Some(r) = m.requires.iter().find(|r| issue.message.contains(&format!("“{}”", r.name))) {
-                    let ignore = gtk::Button::builder().label(t!("Not Needed")).action_name("win.ignore-requirement").action_target(&r.steam_id.to_variant()).tooltip_text(format!("Stop treating “{}” as required", r.name)).css_classes(["flat", "small"]).build();
+                if let Some(r) = m.requires.iter().find(|r| r.steam_id == steam_id) {
+                    let ignore = gtk::Button::builder().label(t!("Not Needed")).action_name("win.ignore-requirement").action_target(&r.steam_id.to_variant()).tooltip_text(tf!("Stop treating “{name}” as required", name = &r.name)).css_classes(["flat", "small"]).build();
                     actions.append(&ignore);
                 }
                 Some(actions.upcast())
@@ -604,7 +612,7 @@ impl Window {
         }
         problems.sort_by_key(|p| std::cmp::Reverse(p.0));
         if problems.is_empty() {
-            page.append(&label("No problems found", &["success"]));
+            page.append(&label(&t!("No problems found"), &["success"]));
         }
         for (severity, message, fix) in problems {
             let card = gtk::Box::new(gtk::Orientation::Horizontal, 10);
@@ -638,42 +646,54 @@ impl Window {
         };
         let overrides = match conflicts {
             _ if position.is_none() => "—".to_owned(),
-            Some(0) => "None".to_owned(),
-            Some(n) => plural(n, "conflict", "conflicts"),
-            None => "Not scanned".to_owned(),
+            Some(0) => t!("None"),
+            Some(n) => tn!("{count} conflict", "{count} conflicts", n),
+            None => t!("Not scanned"),
         };
-        stats.append(&stat("Conflicts", &overrides));
+        stats.append(&stat(&t!("Conflicts"), &overrides));
         let facts = self.search_facts.borrow().get(&index).cloned();
-        stats.append(&stat("Achievements", if facts.is_some_and(|f| !f.achievements) { "Turns them off" } else { "Kept" }));
+        let achievements = if facts.is_some_and(|f| !f.achievements) { t!("Turns them off") } else { t!("Kept") };
+        stats.append(&stat(&t!("Achievements"), &achievements));
         page.append(&stats);
 
-        // What it needs, and whether that's there.
-        let mut needs: Vec<(String, &str)> = Vec::new();
+        // What it needs, and whether that's there. The label is translated
+        // but the state stays a value, so it can be compared and styled.
+        enum Need {
+            Missing,
+            Enabled,
+            Disabled,
+        }
+        let mut needs: Vec<(String, Need)> = Vec::new();
         let enabled_named = |name: &str| state.mods.iter().position(|x| x.descriptor.name.trim().eq_ignore_ascii_case(name.trim()));
         for dep in &d.dependencies {
             let status = match enabled_named(dep) {
-                None => "not installed",
-                Some(i) if state.enabled.contains(&i) => "enabled",
-                Some(_) => "disabled",
+                None => Need::Missing,
+                Some(i) if state.enabled.contains(&i) => Need::Enabled,
+                Some(_) => Need::Disabled,
             };
             needs.push((dep.trim().to_owned(), status));
         }
         for r in &m.requires {
             let status = match state.mods.iter().position(|x| x.descriptor.remote_file_id == Some(r.steam_id)) {
-                None => "not installed",
-                Some(i) if state.enabled.contains(&i) => "enabled",
-                Some(_) => "disabled",
+                None => Need::Missing,
+                Some(i) if state.enabled.contains(&i) => Need::Enabled,
+                Some(_) => Need::Disabled,
             };
             if !needs.iter().any(|(n, _)| n.eq_ignore_ascii_case(&r.name)) {
                 needs.push((r.name.clone(), status));
             }
         }
         if !needs.is_empty() {
-            page.append(&label("Needs", &["heading"]));
+            page.append(&label(&t!("Needs"), &["heading"]));
             let list = gtk::ListBox::builder().selection_mode(gtk::SelectionMode::None).css_classes(["boxed-list"]).build();
             for (name, status) in needs {
                 let row = adw::ActionRow::builder().title(&name).use_markup(false).build();
-                let status_label = gtk::Label::builder().label(status).css_classes(if status == "enabled" { ["dim-label", "caption"] } else { ["warning", "caption"] }).build();
+                let (label, class) = match status {
+                    Need::Missing => (t!("not installed"), "warning"),
+                    Need::Enabled => (t!("enabled"), "dim-label"),
+                    Need::Disabled => (t!("disabled"), "warning"),
+                };
+                let status_label = gtk::Label::builder().label(label).css_classes([class, "caption"]).build();
                 row.add_suffix(&status_label);
                 list.append(&row);
             }
@@ -696,30 +716,30 @@ impl Window {
             });
             actions.append(&switch);
         }
-        let mut items: Vec<(&str, &str)> = Vec::new();
+        let mut items: Vec<(String, &str)> = Vec::new();
         if d.remote_file_id.is_some() {
-            items.push(("Open Workshop Page", "win.open-workshop"));
-            items.push(("Open in Steam", "win.open-in-steam"));
+            items.push((t!("Open Workshop Page"), "win.open-workshop"));
+            items.push((t!("Open in Steam"), "win.open-in-steam"));
         }
         if m.content.is_some() {
-            items.push(("Open Folder", "win.open-folder"));
+            items.push((t!("Open Folder"), "win.open-folder"));
         }
         if conflicts.is_some_and(|n| n > 0) {
-            items.push(("Show Conflicts", "win.show-conflicts"));
+            items.push((t!("Show Conflicts"), "win.show-conflicts"));
         }
-        items.push(("Rename…", "win.rename-mod"));
+        items.push((t!("Rename…"), "win.rename-mod"));
         if !self.settings.borrow().notes.contains_key(&m.id) {
-            items.push(("Add Note…", "win.edit-note"));
+            items.push((t!("Add Note…"), "win.edit-note"));
         }
         if position.is_some() && !is_patch {
-            items.push(("Move to Top", "win.move-top"));
-            items.push(("Move to Bottom", "win.move-bottom"));
+            items.push((t!("Move to Top"), "win.move-top"));
+            items.push((t!("Move to Bottom"), "win.move-bottom"));
         }
         if d.remote_file_id.is_some() && m.steam != Some(ItemState::Unsubscribed) {
-            items.push(("Unsubscribe in Steam…", "win.unsubscribe"));
+            items.push((t!("Unsubscribe in Steam…"), "win.unsubscribe"));
         }
         for (title, action) in items {
-            let row = adw::ActionRow::builder().title(title).activatable(true).build();
+            let row = adw::ActionRow::builder().title(&title).activatable(true).build();
             row.set_action_name(Some(action));
             row.set_action_target_value(Some(&target));
             actions.append(&row);
@@ -755,5 +775,5 @@ impl Window {
 /// Facts about a warning for the health strip: whether the issue is a
 /// Workshop required item that isn't installed.
 pub(super) fn is_missing_requirement(issue: &checks::Issue) -> bool {
-    issue.message.starts_with("Requires “") && issue.message.ends_with("isn't installed")
+    matches!(issue.requirement, Some((_, checks::RequirementState::Missing)))
 }

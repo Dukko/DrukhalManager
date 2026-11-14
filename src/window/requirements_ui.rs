@@ -8,7 +8,6 @@ use adw::prelude::*;
 use gtk::{gio, glib};
 
 use super::Window;
-use crate::conflicts_view::plural;
 use crate::mods::requirements::Cache;
 use crate::paradox::workshop;
 use crate::secrets;
@@ -37,11 +36,11 @@ impl Window {
         self.save_settings("ignored requirements");
         self.refresh();
         if ignore {
-            let name = name.unwrap_or_else(|| format!("Workshop item {id}"));
+            let name = name.unwrap_or_else(|| tf!("Workshop item {id}", id = id));
             self.add_toast(
                 adw::Toast::builder()
-                    .title(format!("“{}” is no longer treated as required", name))
-                    .button_label("_Undo")
+                    .title(tf!("“{name}” is no longer treated as required", name = name))
+                    .button_label(&t!("_Undo"))
                     .action_name("win.unignore-requirement")
                     .action_target(&id.to_variant())
                     .build(),
@@ -110,7 +109,7 @@ impl Window {
         let weak = Rc::downgrade(self);
         glib::spawn_future_local(async move {
             let for_keyring = key.clone();
-            let stored = gio::spawn_blocking(move || secrets::set(secrets::STEAM, &for_keyring)).await.unwrap_or_else(|_| Err("The keyring call failed".into()));
+            let stored = gio::spawn_blocking(move || secrets::set(secrets::STEAM, &for_keyring)).await.unwrap_or_else(|_| Err(t!("The keyring call failed").into()));
             let Some(ui) = weak.upgrade() else { return };
             let in_file = if stored.is_ok() { String::new() } else { key };
             if ui.settings.borrow().steam_key != in_file {
@@ -151,15 +150,16 @@ impl Window {
                 state.reorder(sorted);
             }
             self.refresh();
-            self.offer_undo(&format!("Enabled {} this mod requires", plural(count, "mod", "mods")));
+            self.offer_undo(&tnf!("Enabled {count} mod this mod requires", "Enabled {count} mods this mod requires", count = count));
         }
         for id in &missing {
             gtk::UriLauncher::new(&format!("steam://url/CommunityFilePage/{id}")).launch(Some(&self.window), None::<&gio::Cancellable>, |_| {});
         }
         if !missing.is_empty() {
-            self.add_toast(adw::Toast::new(&format!(
-                "Opened {} in Steam: subscribe there, then reload (F5)",
-                plural(missing.len(), "Workshop page", "Workshop pages")
+            self.add_toast(adw::Toast::new(&tnf!(
+                "Opened {count} Workshop page in Steam: subscribe there, then reload (F5)",
+                "Opened {count} Workshop pages in Steam: subscribe there, then reload (F5)",
+                count = missing.len()
             )));
         }
     }

@@ -239,7 +239,9 @@ impl Window {
         if toast.timeout() == 0 {
             toast.set_timeout(BRIEF);
         }
-        if toast.button_label().is_some_and(|l| l.replace('_', "") == "Undo") {
+        // Undo offers only make sense right away; the action is what marks
+        // them, not the button's (translated) label.
+        if toast.action_name().is_some_and(|a| a == "win.undo") {
             return;
         }
         self.bell.push(toast);

@@ -1,6 +1,8 @@
 // Release builds on Windows open without a console window.
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
+#[macro_use]
+mod i18n;
 mod conflicts_view;
 mod dds;
 mod diagnostics;
@@ -12,8 +14,6 @@ mod fix_dialog;
 mod folder_merge_dialog;
 #[cfg(unix)]
 mod host_stylesheet;
-#[macro_use]
-mod i18n;
 mod merge;
 mod merge_dialog;
 mod mods;
