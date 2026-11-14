@@ -36,6 +36,18 @@
     <control>keyboard</control>
   </supports>
   <releases>
+    <release version="1.0.0" date="2026-11-13">
+      <description>
+        <p><em>DrukhalManager 1.0, now on Windows.</em> The same app, with the same interface, runs on 64-bit Windows. Download DrukhalManager-setup-x64.exe from the release to install it, or the zip to run it without installing. The downloads aren't code-signed yet, so the first time Windows SmartScreen asks: click More info, then Run anyway.</p>
+        <p><em>Change several mods at once.</em> Ctrl+click and Shift+click select mods in either list. A bar under the list enables or disables them, moves them to the top or bottom, sets their category or adds them to another collection, each as one undo step. While a view, a category or a search narrows the list, Select All Shown selects every mod in it.</p>
+        <p><em>Mod updates since you last played.</em> A card in the health strip lists the mods Steam updated since your last launch, with links to their change notes, and offers to freeze the collection. Another card lists Workshop updates Steam hasn't downloaded yet.</p>
+        <p><em>Find compatibility patches.</em> Find More… on the Compatibility Patches section asks Steam which Workshop items need your enabled mods, and suggests the patches that fit your load order. It needs a Steam Web API key in Preferences.</p>
+        <p><em>Picked versions stay current.</em> When you chose Use This Version and that mod later changes the object while nothing else does, Outdated Merges offers Use New Version instead of a new merge.</p>
+        <p><em>Merged patch in the Extra Mod Folder.</em> A collection's menu can move its merged patch to the Extra Mod Folder, and back.</p>
+        <p><em>A shorter main menu.</em> It keeps Preferences, Keyboard Shortcuts, Troubleshooting and About. The rest sits next to what it acts on: Undo, Redo and Reload in the header; Saves, Multiplayer Check, DLC and Find the Crashing Mod under Launch; Merged Patch Backups at the bottom of the Conflicts list.</p>
+        <p><em>Fixes.</em> DrukhalManager opens before the game's first start, with no mods listed, instead of stopping at "Could Not Read Mods".</p>
+      </description>
+    </release>
     <release version="0.9.0" date="2026-11-12">
       <description>
         <p><em>Notifications in one place.</em> A bell in the header keeps every notification, newest first, with its time and its button, such as Show or Restart. Dismiss them one by one, or all at once with Clear All. Repeats are folded into one, and a badge counts the new ones. Toasts no longer stay on screen until closed.</p>
