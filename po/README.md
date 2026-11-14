@@ -54,6 +54,28 @@ Translations are also collected on Weblate (TODO: link once the project is
 created there); its pull requests land `.po` files here and usually need no
 code review.
 
+### Setting up Weblate (project owner)
+
+Weblate keeps its own configuration, so this is what to enter when creating
+the component:
+
+| Setting | Value |
+| --- | --- |
+| Component type | gettext PO file |
+| Source language | English |
+| Source language file | `po/drukhal-manager.pot` |
+| File mask | `po/*.po` |
+| Monolingual translations | no |
+| Repository | `https://github.com/Dukko/DrukhalManager` |
+| Branch | `master` |
+| Push | open a pull request per translation change (no direct pushes to `master`) |
+
+Turn on Weblate's "Update PO files to match POT (msgmerge)" add-on so the
+catalogs follow `po/drukhal-manager.pot` automatically, and let new `.po` files
+arrive as PRs: CI runs `po/check-pot.sh` and `po/check-placeholders.sh` on
+them, and `build.rs` compiles every `.po` it finds, so no other change is
+needed to ship a language.
+
 ## For developers
 
 `po/drukhal-manager.pot` is generated, never edited by hand:

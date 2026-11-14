@@ -86,7 +86,12 @@ pub fn fill(template: &str, english: &str, format: impl Fn(&str) -> Result<Strin
         Ok(value) => value,
         Err(e) => {
             crate::diagnostics::log!("i18n", "Broken translation \"{template}\": {e}; using the English text");
-            format(english).unwrap_or_else(|e| panic!("the English text \"{english}\" does not format: {e}"))
+            // The English text normally formats; if it doesn't, the call site
+            // has a typo. Show it as written rather than crash the app.
+            format(english).unwrap_or_else(|e| {
+                crate::diagnostics::log!("i18n", "Broken English text \"{english}\": {e}");
+                english.to_owned()
+            })
         }
     }
 }
@@ -185,5 +190,12 @@ mod tests {
             formatx::formatx!(template, name = &"list", count = &1)
         });
         assert_eq!(text, "list took 1");
+    }
+
+    #[test]
+    fn shows_the_english_text_when_it_does_not_format_either() {
+        // A developer typo in a macro's message id: show it, don't crash.
+        let text = fill("{naem}", "{nom}", |template| formatx::formatx!(template, name = &"list"));
+        assert_eq!(text, "{nom}");
     }
 }
