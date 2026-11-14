@@ -65,9 +65,13 @@ In the Flatpak, **Launch** starts the game through Steam.
 
 ### Windows
 
-Download `DrukhalManager-windows-x64.zip` from the [latest release](https://github.com/Dukko/DrukhalManager/releases/latest), unzip it anywhere, and run `DrukhalManager\bin\DrukhalManager.exe`. Nothing gets installed: settings go in `%APPDATA%\DrukhalManager`, backups, logs and caches in `%LOCALAPPDATA%\DrukhalManager`. The app tells you when a new version is out; to update, replace the folder with the new one.
+Download `DrukhalManager-setup-x64.exe` from the [latest release](https://github.com/Dukko/DrukhalManager/releases/latest) and run it. It installs for your user only (no administrator rights needed) and adds DrukhalManager to the Start menu. The app tells you when a new version is out; run the new installer to update. Uninstall it from **Settings → Apps**.
 
-The build isn't code-signed yet, so the first time you run it Windows SmartScreen says "Windows protected your PC". Click **More info → Run anyway**.
+Prefer not to install anything? Download `DrukhalManager-windows-x64.zip` instead, unzip it anywhere, and run `DrukhalManager\bin\DrukhalManager.exe`. To update, replace the folder with the new one.
+
+Either way, settings go in `%APPDATA%\DrukhalManager`, and backups, logs and caches in `%LOCALAPPDATA%\DrukhalManager`. Uninstalling leaves them there.
+
+The downloads aren't code-signed yet, so the first time you run one Windows SmartScreen says "Windows protected your PC". Click **More info → Run anyway**.
 
 The Windows version is new and uses the same GTK interface as on Linux. If something behaves differently from Linux, please [open an issue](https://github.com/Dukko/DrukhalManager/issues).
 
@@ -171,7 +175,7 @@ On Windows, build in an [MSYS2](https://www.msys2.org/) UCRT64 shell with the pa
 1. Bump the version in `Cargo.toml` and add a `<release>` to `data/io.github.dukko.DrukhalManager.metainfo.xml`.
 2. If the release adds a permission to `flatpak/io.github.dukko.DrukhalManager.yml`, say so in the release notes: Flatpak won't let the app update itself into it, so users update with `flatpak update` or their software centre instead.
 3. If dependencies changed, regenerate `flatpak/cargo-sources.json` (see `flatpak/generate-cargo-sources.py`); the build fails if it is stale.
-4. Merge it into `master` through a pull request. The *Tag release* workflow tags `vX.Y.Z`, builds the Flatpak, publishes the signed repository to GitHub Pages and attaches `DrukhalManager.flatpak` to the release. The *Windows bundle* workflow attaches `DrukhalManager-windows-x64.zip` once the release exists.
+4. Merge it into `master` through a pull request. The *Tag release* workflow tags `vX.Y.Z`, builds the Flatpak, publishes the signed repository to GitHub Pages and attaches `DrukhalManager.flatpak` to the release. The *Windows bundle* workflow attaches the installer `DrukhalManager-setup-x64.exe` and `DrukhalManager-windows-x64.zip` once the release exists.
 
 </details>
 

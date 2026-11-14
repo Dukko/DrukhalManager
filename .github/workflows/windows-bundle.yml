@@ -3,10 +3,11 @@ name: Windows bundle
 # Builds DrukhalManager for Windows with the GTK it runs on
 # (packaging/windows/bundle.sh), checks it starts outside MSYS2 and uploads
 # the folder as an artifact to try out. Runs by hand, on PRs that touch the
-# packaging, and on a version tag. For a tag it also attaches
-# DrukhalManager-windows-x64.zip to the release. tag.yml calls it with the
-# tag it just made, since tags pushed by a workflow don't start other
-# workflows.
+# packaging, and on a version tag. It also builds the installer
+# (packaging/windows/DrukhalManager.iss). For a tag it attaches
+# DrukhalManager-setup-x64.exe and DrukhalManager-windows-x64.zip to the
+# release. tag.yml calls it with the tag it just made, since tags pushed by
+# a workflow don't start other workflows.
 
 on:
   push:
@@ -66,10 +67,35 @@ jobs:
             exit 1
           }
           Stop-Process -Id $app.Id -Force
+      - name: Installer
+        shell: pwsh
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress }
+          $version = (Select-String -Path Cargo.toml -Pattern '^version = "(.*)"' | Select-Object -First 1).Matches.Groups[1].Value
+          & $iscc /Qp "/DAppVersion=$version" "/DBundleDir=$PWD\target\windows-bundle\DrukhalManager" "/O$PWD\target\installer" packaging\windows\DrukhalManager.iss
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      - name: Installer installs and uninstalls
+        shell: pwsh
+        run: |
+          $setup = Start-Process -Wait -PassThru target\installer\DrukhalManager-setup-x64.exe -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART'
+          if ($setup.ExitCode) { throw "Setup exited with code $($setup.ExitCode)" }
+          $dir = "$env:LOCALAPPDATA\Programs\DrukhalManager"
+          if (-not (Test-Path "$dir\bin\DrukhalManager.exe")) { throw "Not installed in $dir" }
+          if (-not (Test-Path "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\DrukhalManager.lnk")) { throw "No Start menu shortcut" }
+          # The uninstaller hands over to a copy of itself and returns at once.
+          Start-Process -Wait "$dir\unins000.exe" -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES'
+          for ($i = 0; $i -lt 30 -and (Test-Path "$dir\bin"); $i++) { Start-Sleep -Seconds 1 }
+          if (Test-Path "$dir\bin") { throw "Still installed after uninstalling" }
       - uses: actions/upload-artifact@v4
         with:
           name: DrukhalManager-windows
           path: target/windows-bundle
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: DrukhalManager-windows-installer
+          path: target/installer/DrukhalManager-setup-x64.exe
           if-no-files-found: error
 
   attach:
@@ -87,15 +113,18 @@ jobs:
         with:
           name: DrukhalManager-windows
           path: bundle
+      - uses: actions/download-artifact@v4
+        with:
+          name: DrukhalManager-windows-installer
       - name: Zip
         run: cd bundle && zip -qr9 ../DrukhalManager-windows-x64.zip DrukhalManager
       # The Flatpak release workflow creates the release with its notes;
       # wait for it rather than create one without them.
-      - name: Attach the zip to the release
+      - name: Attach the zip and the installer to the release
         run: |
           for _ in $(seq 60); do
             if gh release view "$TAG" >/dev/null 2>&1; then
-              gh release upload "$TAG" DrukhalManager-windows-x64.zip --clobber
+              gh release upload "$TAG" DrukhalManager-windows-x64.zip DrukhalManager-setup-x64.exe --clobber
               exit 0
             fi
             sleep 30
