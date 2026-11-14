@@ -38,6 +38,18 @@ LANG=de_DE.UTF-8 cargo run
 uses when it runs from the source tree. The packaged builds install the same
 `.mo` files under `share/locale`.
 
+Named placeholders (`{count}`, `{name}`) must match the English text exactly.
+`po/check-placeholders.sh` checks that, and that plural entries have as many
+`msgstr[n]` lines as the catalog's `Plural-Forms` header says:
+
+```sh
+po/check-placeholders.sh po/de.po
+```
+
+A translation with a missing or mistyped placeholder falls back to the English
+sentence at run time, so the app stays usable, but the checker catches it
+before release.
+
 Translations are also collected on Weblate (TODO: link once the project is
 created there); its pull requests land `.po` files here and usually need no
 code review.
@@ -50,11 +62,13 @@ code review.
 cargo install xtr --version 0.1.11 --locked   # once
 po/update-pot.sh                              # rewrites the template
 po/check-pot.sh                               # verifies it is current
+po/check-placeholders.sh                      # checks every po/*.po
 ```
 
 Commit the template with the code that changed the strings. CI runs
-`po/check-pot.sh` and fails when they disagree, so translations are never
-offered for strings that no longer exist.
+`po/check-pot.sh` and `po/check-placeholders.sh` and fails when they disagree,
+so translations are never offered for strings that no longer exist, and a
+broken placeholder is caught before release.
 
 When a release changes strings, run `msgmerge --update po/<lang>.po
 po/drukhal-manager.pot` for the languages already there (Weblate does this

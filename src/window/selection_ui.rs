@@ -272,7 +272,7 @@ impl Window {
         }
         if bar.collections.n_items() == 0 {
             // No action, so it shows greyed out.
-            bar.collections.append(Some("No Other Collections"), None);
+            bar.collections.append(Some(&t!("No Other Collections")), None);
         }
     }
 

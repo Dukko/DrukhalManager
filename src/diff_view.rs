@@ -560,7 +560,7 @@ impl Pair {
         group.add_action(&action);
         self.left.code.insert_action_group("diff", Some(&group));
         let menu = gio::Menu::new();
-        menu.append(Some("Put This In"), Some("diff.put-in"));
+        menu.append(Some(&t!("Put This In")), Some("diff.put-in"));
         self.left.code.set_extra_menu(Some(&menu));
 
         // Before the text view opens its menu, note what's under the pointer.

@@ -40,6 +40,7 @@ jobs:
         run: |
           cargo install xtr --version 0.1.11 --locked
           po/check-pot.sh
+          po/check-placeholders.sh
       - name: Keep non-UI code free of GTK
         # So a native Windows UI could reuse it later (#153).
         run: |
@@ -93,3 +94,4 @@ jobs:
           cargo install xtr --version 0.1.11 --locked --root target/xtr
           export PATH="$PWD/target/xtr/bin:$PATH"
           po/check-pot.sh
+          po/check-placeholders.sh
