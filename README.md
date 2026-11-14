@@ -177,7 +177,7 @@ msginit --input po/drukhal-manager.pot --locale=de_DE.UTF-8 --output-file=po/de.
 LANG=de_DE.UTF-8 cargo run
 ```
 
-`po/README.md` explains the placeholders and how to try a translation without installing it. Translations are also collected on Weblate once the project there is set up; each `.po` file is compiled into the Flatpak, the Windows bundle and the Arch package.
+`po/README.md` explains the placeholders and how to try a translation without installing it. Run `po/check-placeholders.sh` before sending a translation, or `po/check-pot.sh` after changing UI strings; CI runs both. Translations are also collected on Weblate once the project there is set up; each `.po` file is compiled into the Flatpak, the Windows bundle and the Arch package.
 
 <details>
 <summary>Releasing</summary>
