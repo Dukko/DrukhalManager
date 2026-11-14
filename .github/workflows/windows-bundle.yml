@@ -3,11 +3,21 @@ name: Windows bundle
 # Builds DrukhalManager for Windows with the GTK it runs on
 # (packaging/windows/bundle.sh), checks it starts outside MSYS2 and uploads
 # the folder as an artifact to try out. Runs by hand, on PRs that touch the
-# packaging, and from release workflows through workflow_call.
+# packaging, and on a version tag. For a tag it also attaches
+# DrukhalManager-windows-x64.zip to the release. tag.yml calls it with the
+# tag it just made, since tags pushed by a workflow don't start other
+# workflows.
 
 on:
+  push:
+    tags: ['v*']
   workflow_dispatch:
   workflow_call:
+    inputs:
+      tag:
+        description: The release tag to build
+        type: string
+        required: true
   pull_request:
     paths:
       - packaging/windows/**
@@ -25,6 +35,8 @@ jobs:
         shell: msys2 {0}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
       - uses: msys2/setup-msys2@v2
         with:
           msystem: UCRT64
@@ -59,3 +71,34 @@ jobs:
           name: DrukhalManager-windows
           path: target/windows-bundle
           if-no-files-found: error
+
+  attach:
+    needs: bundle
+    if: inputs.tag != '' || startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      TAG: ${{ inputs.tag || github.ref_name }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: DrukhalManager-windows
+          path: bundle
+      - name: Zip
+        run: cd bundle && zip -qr9 ../DrukhalManager-windows-x64.zip DrukhalManager
+      # The Flatpak release workflow creates the release with its notes;
+      # wait for it rather than create one without them.
+      - name: Attach the zip to the release
+        run: |
+          for _ in $(seq 60); do
+            if gh release view "$TAG" >/dev/null 2>&1; then
+              gh release upload "$TAG" DrukhalManager-windows-x64.zip --clobber
+              exit 0
+            fi
+            sleep 30
+          done
+          echo "::error::No release for $TAG after 30 minutes"
+          exit 1
