@@ -239,7 +239,7 @@ mod tests {
 
         let sorted = sort_by_dependencies(&mods, &enabled);
         assert_eq!(sorted, [1, 2, 0, 4]);
-        assert!(check(&mods, &sorted, None).get(&0).is_none(), "sorting fixes the order issues");
+        assert!(!check(&mods, &sorted, None).contains_key(&0), "sorting fixes the order issues");
     }
 
     #[test]

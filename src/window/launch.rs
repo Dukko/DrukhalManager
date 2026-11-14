@@ -315,7 +315,7 @@ impl Window {
         }
         let mut toast = adw::Toast::builder().title(title).timeout(0);
         if fresh {
-            toast = toast.button_label(&t!("Show")).action_name("win.errors");
+            toast = toast.button_label(t!("Show")).action_name("win.errors");
         }
         self.add_toast(toast.build());
     }

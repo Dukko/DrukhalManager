@@ -296,7 +296,7 @@ impl Window {
         // translated label.
         let toast = adw::Toast::builder()
             .title(title)
-            .button_label(&t!("Undo"))
+            .button_label(t!("Undo"))
             .action_name("win.undo")
             .build();
         self.add_toast(toast);
@@ -552,7 +552,7 @@ impl Window {
         // One icon for everything wrong with this mod, worst first.
         let mut problems = self.extra_problems(m);
         problems.extend(issues.iter().map(|i| (i.severity, i.message.clone(), false)));
-        problems.sort_by(|a, b| b.0.cmp(&a.0));
+        problems.sort_by_key(|a| std::cmp::Reverse(a.0));
         if let Some(f) = self.search_facts.borrow_mut().get_mut(&index) {
             f.attention = problems.iter().any(|(s, _, _)| *s == checks::Severity::Warning);
         }

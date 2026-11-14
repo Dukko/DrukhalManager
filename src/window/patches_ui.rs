@@ -14,7 +14,6 @@ use gtk::{gio, glib};
 use super::overview::ago;
 use super::requirements_ui::steam_key;
 use super::{Window, display_name};
-use crate::conflicts_view::plural;
 use crate::mods::patches::{self, Cache, Suggestion};
 use crate::paradox::workshop::{self, Dependent};
 
@@ -153,7 +152,7 @@ impl Window {
                         done += 1;
                         if let Some(d) = dw.upgrade() {
                             d.progress.set_fraction(done as f64 / total as f64);
-                            d.searching.set_description(Some(&format!("Checked {done} of {}", plural(total, "mod", "mods"))));
+                            d.searching.set_description(Some(&tf!("Checked {done} of {mods}", done = done, mods = tnf!("{count} mod", "{count} mods", count = total))));
                         }
                     }
                     Progress::NoKey => failed = Some(None),
@@ -312,7 +311,7 @@ impl Window {
         let dismissed = self.settings.borrow().dismissed_patches.len();
         if dismissed > 0 {
             let restore_group = adw::PreferencesGroup::new();
-            let restore = adw::ButtonRow::builder().title(format!("Show {} Again", plural(dismissed, "Dismissed Item", "Dismissed Items"))).build();
+            let restore = adw::ButtonRow::builder().title(tnf!("Show {count} Dismissed Item Again", "Show {count} Dismissed Items Again", count = dismissed)).build();
             let (weak, dw) = (Rc::downgrade(self), Rc::downgrade(d));
             restore.connect_activated(move |_| {
                 if let (Some(ui), Some(d)) = (weak.upgrade(), dw.upgrade()) {

@@ -28,7 +28,7 @@ impl Window {
             .build();
         // A hint while it's empty, as an entry's placeholder.
         let placeholder = gtk::Label::builder()
-            .label(&t!("# For example:\ngfx/**\nlocalisation/*\n!gfx/portraits/**"))
+            .label(t!("# For example:\ngfx/**\nlocalisation/*\n!gfx/portraits/**"))
             .xalign(0.0)
             .yalign(0.0)
             .margin_top(10)
@@ -80,7 +80,7 @@ impl Window {
         let options = gtk::ListBox::builder().selection_mode(gtk::SelectionMode::None).css_classes(["boxed-list"]).build();
         options.append(&hide_dependencies);
         body.append(&options);
-        body.append(&gtk::Label::builder().label(&t!("One rule per line. A file override matches by its path, an object conflict by its folder and name (common/buildings/building_lab), or by its files when they all match.\n* matches within a folder, ** across folders, and a folder alone matches everything in it. Add | Mod A | Mod B to apply a rule only when exactly those mods conflict. Start a line with ! to show conflicts again, or # for a comment. Later lines win.")).wrap(true).xalign(0.0).css_classes(["dim-label"]).build());
+        body.append(&gtk::Label::builder().label(t!("One rule per line. A file override matches by its path, an object conflict by its folder and name (common/buildings/building_lab), or by its files when they all match.\n* matches within a folder, ** across folders, and a folder alone matches everything in it. Add | Mod A | Mod B to apply a rule only when exactly those mods conflict. Start a line with ! to show conflicts again, or # for a comment. Later lines win.")).wrap(true).xalign(0.0).css_classes(["dim-label"]).build());
         body.append(&crate::resize_grip::resizable(&editor));
         body.append(&summary);
         body.append(&preview_scroll);

@@ -40,7 +40,7 @@ impl Window {
             self.add_toast(
                 adw::Toast::builder()
                     .title(tf!("“{name}” is no longer treated as required", name = name))
-                    .button_label(&t!("_Undo"))
+                    .button_label(t!("_Undo"))
                     .action_name("win.unignore-requirement")
                     .action_target(&id.to_variant())
                     .build(),
@@ -109,7 +109,7 @@ impl Window {
         let weak = Rc::downgrade(self);
         glib::spawn_future_local(async move {
             let for_keyring = key.clone();
-            let stored = gio::spawn_blocking(move || secrets::set(secrets::STEAM, &for_keyring)).await.unwrap_or_else(|_| Err(t!("The keyring call failed").into()));
+            let stored = gio::spawn_blocking(move || secrets::set(secrets::STEAM, &for_keyring)).await.unwrap_or_else(|_| Err(t!("The keyring call failed")));
             let Some(ui) = weak.upgrade() else { return };
             let in_file = if stored.is_ok() { String::new() } else { key };
             if ui.settings.borrow().steam_key != in_file {

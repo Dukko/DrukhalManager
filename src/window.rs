@@ -963,7 +963,7 @@ impl Window {
         self.settings.borrow_mut().key_in_keyring = true;
         let weak = Rc::downgrade(self);
         glib::spawn_future_local(async move {
-            let stored = gio::spawn_blocking(move || secrets::set(kind, &key)).await.unwrap_or_else(|_| Err(t!("The keyring call failed").into()));
+            let stored = gio::spawn_blocking(move || secrets::set(kind, &key)).await.unwrap_or_else(|_| Err(t!("The keyring call failed")));
             let Some(ui) = weak.upgrade() else { return };
             ui.settings.borrow_mut().key_in_keyring = stored.is_ok();
             ui.save_settings("preferences");

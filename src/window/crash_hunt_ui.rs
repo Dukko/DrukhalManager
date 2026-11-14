@@ -8,7 +8,6 @@ use std::rc::Rc;
 use adw::prelude::*;
 
 use super::{Window, display_name};
-use crate::conflicts_view::plural;
 use crate::mods::checks;
 use crate::mods::crash_hunt::{Hunt, Step};
 
@@ -33,8 +32,8 @@ impl Window {
     /// The menu item: explains and starts a hunt, or offers to stop one.
     pub(super) fn crash_hunt_menu(self: &Rc<Self>) {
         if self.hunting() {
-            let dialog = adw::AlertDialog::new(Some("Stop Looking for the Crashing Mod?"), Some("Your collection and load order come back as they were."));
-            dialog.add_responses(&[("cancel", "_Keep Going"), ("stop", "_Stop")]);
+            let dialog = adw::AlertDialog::new(Some(&t!("Stop Looking for the Crashing Mod?")), Some(&t!("Your collection and load order come back as they were.")));
+            dialog.add_responses(&[("cancel", &t!("_Keep Going")), ("stop", &t!("_Stop"))]);
             dialog.set_response_appearance("stop", adw::ResponseAppearance::Destructive);
             dialog.set_close_response("cancel");
             let weak = Rc::downgrade(self);
@@ -46,20 +45,18 @@ impl Window {
             return dialog.present(Some(&self.window));
         }
         if self.game.is_none() {
-            return self.add_toast(adw::Toast::new("Stellaris wasn't found, so it can't be launched for the tests"));
+            return self.add_toast(adw::Toast::new(&t!("Stellaris wasn't found, so it can't be launched for the tests")));
         }
         let count = self.state.borrow().enabled.len();
         if count == 0 {
-            return self.add_toast(adw::Toast::new("No mods are enabled"));
+            return self.add_toast(adw::Toast::new(&t!("No mods are enabled")));
         }
         let launches = Hunt::new((0..count).collect(), HashMap::new(), &[]).estimate();
         let dialog = adw::AlertDialog::builder()
             .heading(t!("Find the Crashing Mod"))
-            .body(format!(
-                "DrukhalManager turns off part of your {count} mods at a time. Each time, launch the game, do what made it crash, and say whether it crashed. That takes about {launches} launches.\n\nStart a new game for each test, or load a save you don't mind losing, and don't save: a save loaded with mods turned off can break. Mods that others need stay on with them. Your collection and load order come back at the end."
-            ))
+            .body(tf!("DrukhalManager turns off part of your {count} mods at a time. Each time, launch the game, do what made it crash, and say whether it crashed. That takes about {launches} launches.\n\nStart a new game for each test, or load a save you don't mind losing, and don't save: a save loaded with mods turned off can break. Mods that others need stay on with them. Your collection and load order come back at the end.", count = count, launches = launches))
             .build();
-        dialog.add_responses(&[("cancel", "_Cancel"), ("start", "_Start")]);
+        dialog.add_responses(&[("cancel", &t!("_Cancel")), ("start", &t!("_Start"))]);
         dialog.set_response_appearance("start", adw::ResponseAppearance::Suggested);
         dialog.set_default_response(Some("start"));
         dialog.set_close_response("cancel");
@@ -93,7 +90,7 @@ impl Window {
         };
         let temporary = {
             let mut collections = self.collections.borrow_mut();
-            let name = collections.add("Crash Hunt", ids.clone());
+            let name = collections.add(&t!("Crash Hunt"), ids.clone());
             collections.active = name.clone();
             name
         };
@@ -113,11 +110,11 @@ impl Window {
             let Some(r) = running.as_ref() else { return };
             let ids: Vec<String> = on.iter().map(|&p| r.ids[p].clone()).collect();
             let what = if r.hunt.launches == 0 {
-                format!("Test 1: all {} mods, to see the crash happen", r.ids.len())
+                tf!("Test 1: all {count} mods, to see the crash happen", count = r.ids.len())
             } else {
-                format!("Test {}: {} of {} mods on, {} left to check", r.hunt.launches + 1, on.len(), r.ids.len(), plural(r.hunt.suspects(), "suspect", "suspects"))
+                tf!("Test {number}: {on_count} of {total} mods on, {left} left to check", number = r.hunt.launches + 1, on_count = on.len(), total = r.ids.len(), left = tnf!("{count} suspect", "{count} suspects", count = r.hunt.suspects()))
             };
-            (ids, format!("{what}. Launch, try to make it crash, then quit."))
+            (ids, tf!("{what}. Launch, try to make it crash, then quit.", what = &what))
         };
         self.state.borrow_mut().set_enabled_ids(&ids);
         self.save();
@@ -127,9 +124,9 @@ impl Window {
 
     /// After a test session: asks whether it crashed.
     pub(super) fn ask_hunt_result(self: &Rc<Self>, detected: bool) {
-        let body = if detected { "Stellaris left a crash report, so it looks like it did." } else { "Answer “Yes” if it crashed, froze, or showed the problem you're looking for." };
-        let dialog = adw::AlertDialog::new(Some("Did Stellaris Crash?"), Some(body));
-        dialog.add_responses(&[("stop", "_Stop Looking"), ("no", "_No"), ("yes", "_Yes")]);
+        let body = if detected { t!("Stellaris left a crash report, so it looks like it did.") } else { t!("Answer “Yes” if it crashed, froze, or showed the problem you're looking for.") };
+        let dialog = adw::AlertDialog::new(Some(&t!("Did Stellaris Crash?")), Some(&body));
+        dialog.add_responses(&[("stop", &t!("_Stop Looking")), ("no", &t!("_No")), ("yes", &t!("_Yes"))]);
         dialog.set_response_appearance("yes", adw::ResponseAppearance::Suggested);
         dialog.set_default_response(Some(if detected { "yes" } else { "no" }));
         // Closing it leaves the test to run again.
@@ -163,33 +160,30 @@ impl Window {
         self.save_collections();
         self.rebuild_collection_menu();
         self.apply_collection_mods(&r.mods);
-        let launches = plural(r.hunt.launches, "launch", "launches");
+        let launches = r.hunt.launches;
         let (heading, body) = match &result {
-            None => return self.add_toast(adw::Toast::new("Stopped; your load order is back")),
+            None => return self.add_toast(adw::Toast::new(&t!("Stopped; your load order is back"))),
             Some(Step::Found(p)) => (
-                format!("Found It: {}", r.names[*p]),
-                format!("After {launches}: Stellaris crashed with “{}” on and didn't without it. It may only crash together with another of your mods, but turning it off avoids the crash.\n\nYour load order is back as it was.", r.names[*p]),
+                tf!("Found It: {name}", name = &r.names[*p]),
+                tf!("After {launches}: Stellaris crashed with “{name}” on and didn't without it. It may only crash together with another of your mods, but turning it off avoids the crash.\n\nYour load order is back as it was.", launches = tnf!("{count} launch", "{count} launches", count = launches), name = &r.names[*p]),
             ),
             Some(Step::Combination(left)) => (
-                "No Single Mod".to_owned(),
-                format!(
-                    "After {launches}: the crash takes several of these together, which can't be tested apart:\n{}\n\nYour load order is back as it was.",
-                    left.iter().map(|&p| format!("• {}", r.names[p])).collect::<Vec<_>>().join("\n")
-                ),
+                t!("No Single Mod"),
+                tf!("After {launches}: the crash takes several of these together, which can't be tested apart:\n{names}\n\nYour load order is back as it was.", launches = tnf!("{count} launch", "{count} launches", count = launches), names = left.iter().map(|&p| format!("• {}", r.names[p])).collect::<Vec<_>>().join("\n")),
             ),
             Some(Step::NoCrash | Step::Test(_)) => (
-                "It Didn't Crash".to_owned(),
-                "Stellaris didn't crash with all the mods on, so there was nothing to narrow down. Try again when the crash comes back.\n\nYour load order is back as it was.".to_owned(),
+                t!("It Didn't Crash"),
+                t!("Stellaris didn't crash with all the mods on, so there was nothing to narrow down. Try again when the crash comes back.\n\nYour load order is back as it was."),
             ),
         };
         let dialog = adw::AlertDialog::new(Some(&heading), Some(&body));
-        dialog.add_response("close", "_Close");
+        dialog.add_response("close", &t!("_Close"));
         let culprit = if let Some(Step::Found(p)) = result { self.state.borrow().mods.iter().position(|m| m.id == r.ids[p]) } else { None };
         if let Some(index) = culprit {
             if self.state.borrow().mods[index].descriptor.remote_file_id.is_some() {
-                dialog.add_response("workshop", "Open _Workshop Page");
+                dialog.add_response("workshop", &t!("Open _Workshop Page"));
             }
-            dialog.add_response("disable", "_Turn It Off");
+            dialog.add_response("disable", &t!("_Turn It Off"));
             dialog.set_response_appearance("disable", adw::ResponseAppearance::Suggested);
             dialog.set_default_response(Some("disable"));
         }
@@ -201,7 +195,8 @@ impl Window {
                 "disable" => {
                     ui.state.borrow_mut().set_enabled(index, false);
                     ui.refresh();
-                    ui.offer_undo(&format!("Turned off {}", display_name(&ui.state.borrow().mods[index])));
+                    let name = display_name(&ui.state.borrow().mods[index]).to_owned();
+                    ui.offer_undo(&tf!("Turned off {name}", name = name));
                 }
                 _ => {}
             }

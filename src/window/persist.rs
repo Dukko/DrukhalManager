@@ -76,7 +76,7 @@ impl Window {
                 // Names can be long; they're listed behind Show.
                 let toast = adw::Toast::builder()
                     .title(tnf!("Load order saved. The Paradox Launcher doesn't know {count} mod yet", "Load order saved. The Paradox Launcher doesn't know {count} mods yet", count = synced.missing.len()))
-                    .button_label(&t!("Show"))
+                    .button_label(t!("Show"))
                     .timeout(0)
                     .build();
                 let window = self.window.downgrade();

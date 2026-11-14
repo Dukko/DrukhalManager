@@ -220,7 +220,7 @@ impl Analysis {
 }
 
 pub fn scanning() -> gtk::Widget {
-    let page = adw::StatusPage::builder().title(&t!("Scanning Mods…")).description(&t!("Reading every enabled mod's files")).vexpand(true).build();
+    let page = adw::StatusPage::builder().title(t!("Scanning Mods…")).description(t!("Reading every enabled mod's files")).vexpand(true).build();
     page.set_paintable(Some(&adw::SpinnerPaintable::new(Some(&page))));
     page.upcast()
 }
@@ -371,26 +371,26 @@ pub fn build(analysis: &Rc<Analysis>, rescan: gtk::Button, hooks: Rc<MergeHooks>
         dropdown.set_margin_top(6);
         top.append(&dropdown);
     }
-    let search = gtk::SearchEntry::builder().placeholder_text(&t!("Search conflicts")).text(hooks.session.borrow().search.as_str()).build();
+    let search = gtk::SearchEntry::builder().placeholder_text(t!("Search conflicts")).text(hooks.session.borrow().search.as_str()).build();
     top.append(&search);
 
     let list = gtk::ListBox::builder().selection_mode(gtk::SelectionMode::Single).css_classes(["navigation-sidebar", "conflict-list"]).build();
     let list_scroll = gtk::ScrolledWindow::builder().child(&list).hscrollbar_policy(gtk::PolicyType::Never).vexpand(true).build();
 
     let footer = gtk::Box::builder().spacing(6).margin_top(6).margin_bottom(6).margin_start(12).margin_end(6).build();
-    let show_ignored = gtk::CheckButton::builder().label(&t!("Show Ignored")).active(hooks.show_ignored).hexpand(true).build();
+    let show_ignored = gtk::CheckButton::builder().label(t!("Show Ignored")).active(hooks.show_ignored).hexpand(true).build();
     {
         let hooks = hooks.clone();
         show_ignored.connect_toggled(move |_| (hooks.toggle_show_ignored)());
     }
     rescan.add_css_class("flat");
-    let rules = gtk::Button::builder().label(&t!("Rules…")).tooltip_text(&t!("Ignore conflicts by path, like gfx/** or localisation/*")).css_classes(["flat"]).build();
+    let rules = gtk::Button::builder().label(t!("Rules…")).tooltip_text(t!("Ignore conflicts by path, like gfx/** or localisation/*")).css_classes(["flat"]).build();
     {
         let hooks = hooks.clone();
         rules.connect_clicked(move |_| (hooks.edit_rules)());
     }
     // The window's action: the merged patch's backups.
-    let backups = gtk::Button::builder().icon_name("document-open-recent-symbolic").tooltip_text(&t!("Merged Patch Backups…")).action_name("win.patch-backups").css_classes(["flat"]).build();
+    let backups = gtk::Button::builder().icon_name("document-open-recent-symbolic").tooltip_text(t!("Merged Patch Backups…")).action_name("win.patch-backups").css_classes(["flat"]).build();
     footer.append(&show_ignored);
     footer.append(&rules);
     footer.append(&backups);
@@ -412,10 +412,10 @@ pub fn build(analysis: &Rc<Analysis>, rescan: gtk::Button, hooks: Rc<MergeHooks>
 
     let content = adw::Bin::builder().hexpand(true).vexpand(true).build();
     let split = adw::NavigationSplitView::builder()
-        .sidebar(&adw::NavigationPage::builder().title(&t!("Conflicts")).child(&sidebar).build())
+        .sidebar(&adw::NavigationPage::builder().title(t!("Conflicts")).child(&sidebar).build())
         // Scrolls sideways when the window is too narrow for a conflict's
         // toolbar and cards, instead of asking for more width than there is.
-        .content(&adw::NavigationPage::builder().title(&t!("Conflict")).child(&gtk::ScrolledWindow::builder().child(&content).hscrollbar_policy(gtk::PolicyType::Automatic).vscrollbar_policy(gtk::PolicyType::Never).build()).build())
+        .content(&adw::NavigationPage::builder().title(t!("Conflict")).child(&gtk::ScrolledWindow::builder().child(&content).hscrollbar_policy(gtk::PolicyType::Automatic).vscrollbar_policy(gtk::PolicyType::Never).build()).build())
         .min_sidebar_width(260.0)
         .max_sidebar_width(380.0)
         .sidebar_width_fraction(0.24)
@@ -714,7 +714,7 @@ impl Page {
         }
         if rows.is_empty() {
             let none = gtk::ListBoxRow::builder().selectable(false).activatable(false).build();
-            none.set_child(Some(&gtk::Label::builder().label(&t!("No matches")).css_classes(["dim-label"]).margin_top(24).build()));
+            none.set_child(Some(&gtk::Label::builder().label(t!("No matches")).css_classes(["dim-label"]).margin_top(24).build()));
             self.list.append(&none);
             rows.push(None);
         }
@@ -770,7 +770,7 @@ impl Page {
                 }
             });
             actions.add_action(&action);
-            let button = gtk::MenuButton::builder().icon_name("view-more-symbolic").menu_model(&menu).tooltip_text(&t!("Folder actions")).css_classes(["flat", "circular"]).valign(gtk::Align::Center).build();
+            let button = gtk::MenuButton::builder().icon_name("view-more-symbolic").menu_model(&menu).tooltip_text(t!("Folder actions")).css_classes(["flat", "circular"]).valign(gtk::Align::Center).build();
             button.insert_action_group("folder", Some(&actions));
             heading.append(&button);
         }
@@ -817,7 +817,7 @@ impl Page {
         }
         let icon = |name: &str, class: &str, tooltip: &str| gtk::Image::builder().icon_name(name).css_classes([class]).tooltip_text(tooltip).build().upcast::<gtk::Widget>();
         let widget = match status {
-            Status::Open => gtk::Box::builder().css_classes(["status-dot"]).tooltip_text(&t!("Not resolved yet")).build().upcast(),
+            Status::Open => gtk::Box::builder().css_classes(["status-dot"]).tooltip_text(t!("Not resolved yet")).build().upcast(),
             Status::Simple => {
                 let reason = match item {
                     Item::Object(i) => self.analysis.simple.get(&i).cloned().unwrap_or_default(),
@@ -825,7 +825,7 @@ impl Page {
                 };
                 icon(SIMPLE_ICON, "accent", &tf!("Simple merge, no AI needed: {reason}", reason = &reason))
             }
-            Status::InProgress => gtk::Box::builder().css_classes(["status-dot", "progress"]).tooltip_text(&t!("Being merged")).build().upcast(),
+            Status::InProgress => gtk::Box::builder().css_classes(["status-dot", "progress"]).tooltip_text(t!("Being merged")).build().upcast(),
             Status::Saved => icon("emblem-ok-symbolic", "success", &t!("Saved to the merged patch")),
             Status::Outdated => icon("dialog-warning-symbolic", "warning", &t!("Its mods or the base game changed since this was merged")),
             Status::Ignored => icon("view-conceal-symbolic", "dim-label", &t!("Ignored")),
@@ -992,7 +992,7 @@ impl Page {
     /// The top of the main pane: a back button when collapsed, the title,
     /// subtitle, a row for chips, and the actions on the right.
     pub fn detail_header(&self, title: &str, subtitle: &str) -> DetailHeader {
-        let back = gtk::Button::builder().icon_name("go-previous-symbolic").tooltip_text(&t!("Back to the list")).valign(gtk::Align::Center).css_classes(["flat"]).build();
+        let back = gtk::Button::builder().icon_name("go-previous-symbolic").tooltip_text(t!("Back to the list")).valign(gtk::Align::Center).css_classes(["flat"]).build();
         self.split.bind_property("collapsed", &back, "visible").sync_create().build();
         let split = self.split.downgrade();
         back.connect_clicked(move |_| {
@@ -1088,7 +1088,7 @@ impl Page {
             list.append(&r);
         }
         let intro = gtk::Label::builder()
-            .label(&t!("The game keeps reading after a missing or extra }, but everything after it gets nested inside the broken object and stops working. Fix… repairs the braces, and the fixed copy is saved through the merged patch, so the mod itself is never modified."))
+            .label(t!("The game keeps reading after a missing or extra }, but everything after it gets nested inside the broken object and stops working. Fix… repairs the braces, and the fixed copy is saved through the merged patch, so the mod itself is never modified."))
             .wrap(true)
             .xalign(0.0)
             .css_classes(["dim-label"])
@@ -1112,7 +1112,7 @@ impl Page {
             description
         };
         if picks > 1 {
-            let update = gtk::Button::builder().label(tnf!("Use {count} New Version", "Use {count} New Versions", count = picks)).tooltip_text(&t!("Replace each picked version with the new one from the same mod. The patch is backed up first")).css_classes(["suggested-action"]).build();
+            let update = gtk::Button::builder().label(tnf!("Use {count} New Version", "Use {count} New Versions", count = picks)).tooltip_text(t!("Replace each picked version with the new one from the same mod. The patch is backed up first")).css_classes(["suggested-action"]).build();
             let hooks = self.hooks.clone();
             update.connect_clicked(move |_| (hooks.update_picks)(None));
             header.actions.append(&update);
@@ -1149,7 +1149,7 @@ impl Page {
                 _ => false,
             });
             if let Some(target) = target {
-                let open = gtk::Button::builder().label(&t!("Re-merge…")).valign(gtk::Align::Center).css_classes(["flat"]).build();
+                let open = gtk::Button::builder().label(t!("Re-merge…")).valign(gtk::Align::Center).css_classes(["flat"]).build();
                 let weak = Rc::downgrade(self);
                 open.connect_clicked(move |_| {
                     if let Some(page) = weak.upgrade() {
@@ -1159,18 +1159,18 @@ impl Page {
                 r.add_suffix(&open);
             }
             if let Some(name) = &s.pick {
-                let update = gtk::Button::builder().label(&t!("Use New Version")).tooltip_text(&tf!("Replace the picked version with {name}'s new one. The patch is backed up first", name = name)).valign(gtk::Align::Center).css_classes(["flat"]).build();
+                let update = gtk::Button::builder().label(t!("Use New Version")).tooltip_text(&tf!("Replace the picked version with {name}'s new one. The patch is backed up first", name = name)).valign(gtk::Align::Center).css_classes(["flat"]).build();
                 let (hooks, stale) = (hooks.clone(), (*s).clone());
                 update.connect_clicked(move |_| (hooks.update_picks)(Some(&stale)));
                 r.add_suffix(&update);
             }
             if s.untracked {
-                let keep = gtk::Button::builder().label(&t!("Keep As Is")).tooltip_text(&t!("Track changes to its mods from their current versions")).valign(gtk::Align::Center).css_classes(["flat"]).build();
+                let keep = gtk::Button::builder().label(t!("Keep As Is")).tooltip_text(t!("Track changes to its mods from their current versions")).valign(gtk::Align::Center).css_classes(["flat"]).build();
                 let (hooks, stale) = (hooks.clone(), (*s).clone());
                 keep.connect_clicked(move |_| (hooks.keep_merge)(&stale));
                 r.add_suffix(&keep);
             }
-            let remove = gtk::Button::builder().label(&t!("Remove from Patch")).valign(gtk::Align::Center).css_classes(["flat"]).build();
+            let remove = gtk::Button::builder().label(t!("Remove from Patch")).valign(gtk::Align::Center).css_classes(["flat"]).build();
             let (hooks, stale, row_ref) = (hooks.clone(), (*s).clone(), r.downgrade());
             remove.connect_clicked(move |_| {
                 (hooks.remove_merge)(&stale);
@@ -1215,8 +1215,8 @@ pub struct DiffBar {
 
 fn diff_bar(pair: &Rc<Pair>) -> DiffBar {
     let count = gtk::Label::builder().xalign(0.0).css_classes(["dim-label"]).build();
-    let prev = gtk::Button::builder().icon_name("go-up-symbolic").tooltip_text(&t!("Previous difference (Alt+Up)")).css_classes(["flat"]).build();
-    let next = gtk::Button::builder().icon_name("go-down-symbolic").tooltip_text(&t!("Next difference (Alt+Down)")).css_classes(["flat"]).build();
+    let prev = gtk::Button::builder().icon_name("go-up-symbolic").tooltip_text(t!("Previous difference (Alt+Up)")).css_classes(["flat"]).build();
+    let next = gtk::Button::builder().icon_name("go-down-symbolic").tooltip_text(t!("Next difference (Alt+Down)")).css_classes(["flat"]).build();
     let nav = gtk::Box::builder().css_classes(["linked"]).build();
     nav.append(&prev);
     nav.append(&next);
@@ -1302,7 +1302,7 @@ fn outdated_summary(stale: &[Stale]) -> String {
 }
 
 fn merge_controls(is_merged: bool, stale: Option<&[String]>) -> (gtk::Image, gtk::Button) {
-    let merged = gtk::Image::builder().icon_name("emblem-ok-symbolic").tooltip_text(&t!("Merged into the patch")).css_classes(["success"]).visible(is_merged).build();
+    let merged = gtk::Image::builder().icon_name("emblem-ok-symbolic").tooltip_text(t!("Merged into the patch")).css_classes(["success"]).visible(is_merged).build();
     let label = match (stale, is_merged) {
         (Some(reasons), _) => {
             merged.set_icon_name(Some("dialog-warning-symbolic"));

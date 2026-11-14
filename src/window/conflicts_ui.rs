@@ -215,7 +215,7 @@ impl Window {
             Ok(()) => {
                 self.check_stale();
                 self.refresh();
-                self.add_toast(adw::Toast::builder().title(tf!("Updated {what} to the new version", what = what)).button_label(&t!("Backups…")).action_name("win.patch-backups").build());
+                self.add_toast(adw::Toast::builder().title(tf!("Updated {what} to the new version", what = what)).button_label(t!("Backups…")).action_name("win.patch-backups").build());
             }
             Err(e) => self.toast_error_message(&format!("Could not update {what}: {e}")),
         }
@@ -836,7 +836,7 @@ impl Window {
         let toast = match added {
             Some(change) => toast
                 .title(tf!("Saved to {name}, which was {change}", name = &target.name, change = change))
-                .button_label(&t!("Save Load Order"))
+                .button_label(t!("Save Load Order"))
                 .action_name("win.save"),
             None => toast,
         };

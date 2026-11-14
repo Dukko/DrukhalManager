@@ -9,7 +9,6 @@ use adw::prelude::*;
 use gtk::{gdk, gio, glib};
 
 use super::Window;
-use crate::conflicts_view::plural;
 use crate::mods::smart_sort::Category;
 
 /// The bar shown while several mods are selected.
@@ -37,7 +36,7 @@ impl BulkBar {
         categories.append_item(&item);
         let named = gio::Menu::new();
         for c in Category::ALL {
-            let item = gio::MenuItem::new(Some(c.title()), None);
+            let item = gio::MenuItem::new(Some(&c.title()), None);
             item.set_action_and_target_value(Some("win.bulk-category"), Some(&c.key().to_variant()));
             named.append_item(&item);
         }
@@ -311,7 +310,8 @@ impl Window {
             return;
         }
         self.refresh();
-        self.offer_undo(&format!("{} {}", if on { "Enabled" } else { "Disabled" }, plural(changed, "mod", "mods")));
+        let mods = tnf!("{count} mod", "{count} mods", count = changed);
+        self.offer_undo(&if on { tf!("Enabled {mods}", mods = &mods) } else { tf!("Disabled {mods}", mods = &mods) });
     }
 
     fn bulk_move(self: &Rc<Self>, to_top: bool) {
@@ -321,7 +321,9 @@ impl Window {
         }
         self.refresh();
         let moved = indices.iter().filter(|i| self.state.borrow().enabled.contains(i)).count();
-        self.offer_undo(&format!("Moved {} to the {}", plural(moved, "mod", "mods"), if to_top { "top" } else { "bottom" }));
+        let mods = tnf!("{count} mod", "{count} mods", count = moved);
+        let to = if to_top { t!("top") } else { t!("bottom") };
+        self.offer_undo(&tf!("Moved {mods} to the {to}", mods = &mods, to = &to));
     }
 
     /// Puts the selected mods in a Smart Sort section, or lets Smart Sort

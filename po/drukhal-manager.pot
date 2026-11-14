@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: DrukhalManager 1.0.0\n"
 "Report-Msgid-Bugs-To: https://github.com/Dukko/DrukhalManager/issues\n"
-"POT-Creation-Date: 2026-11-14 15:35+0000\n"
+"POT-Creation-Date: 2026-11-14 16:00+0000\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -21,7 +21,7 @@ msgstr ""
 msgid "Last save: {empire}, {date}"
 msgstr ""
 
-#: src/i18n.rs:178 src/i18n.rs:179 src/conflicts_view.rs:634 src/conflicts_view.rs:658 src/window/collections_ui.rs:407 src/window/overview.rs:389 src/window/saves_ui.rs:127
+#: src/i18n.rs:178 src/i18n.rs:179 src/conflicts_view.rs:634 src/conflicts_view.rs:658 src/window/collections_ui.rs:407 src/window/overview.rs:389 src/window/patches_ui.rs:155 src/window/saves_ui.rs:127 src/window/selection_ui.rs:313 src/window/selection_ui.rs:324 src/window/freeze_ui.rs:56
 msgid "{count} mod"
 msgid_plural "{count} mods"
 msgstr[0] ""
@@ -504,6 +504,208 @@ msgstr ""
 msgid "Made for Stellaris {supported}; you have {installed}. It may still work."
 msgstr ""
 
+#: src/mods/filter.rs:52 src/window/shortcuts.rs:21 src/window/shortcuts.rs:32 src/window.rs:383 src/window.rs:461
+msgid "Load Order"
+msgstr ""
+
+#: src/mods/filter.rs:53
+msgid "Needs Attention"
+msgstr ""
+
+#: src/mods/filter.rs:54
+msgid "Not Updated for This Game"
+msgstr ""
+
+#: src/mods/filter.rs:55 src/window.rs:1007
+msgid "Has Conflicts"
+msgstr ""
+
+#: src/mods/filter.rs:56
+msgid "Turns Off Achievements"
+msgstr ""
+
+#: src/mods/filter.rs:57 src/window/overview.rs:512 src/window.rs:401
+msgid "Disabled"
+msgstr ""
+
+#: src/mods/smart_sort.rs:80
+msgid "Unofficial Patches"
+msgstr ""
+
+#: src/mods/smart_sort.rs:81
+msgid "Graphics & Sound"
+msgstr ""
+
+#: src/mods/smart_sort.rs:82
+msgid "Flavor & Cosmetics"
+msgstr ""
+
+#: src/mods/smart_sort.rs:83
+msgid "Shipsets"
+msgstr ""
+
+#: src/mods/smart_sort.rs:84
+msgid "Galaxy Generation"
+msgstr ""
+
+#: src/mods/smart_sort.rs:85
+msgid "Gameplay"
+msgstr ""
+
+#: src/mods/smart_sort.rs:86
+msgid "Large Overhauls"
+msgstr ""
+
+#: src/mods/smart_sort.rs:87 src/window/patches_ui.rs:52
+msgid "Compatibility Patches"
+msgstr ""
+
+#: src/mods/smart_sort.rs:88
+msgid "UI Mods"
+msgstr ""
+
+#: src/mods/smart_sort.rs:89
+msgid "UI Patches"
+msgstr ""
+
+#: src/mods/smart_sort.rs:90
+msgid "Universal Patches"
+msgstr ""
+
+#: src/mods/smart_sort.rs:96
+msgid "Fixes to the base game, loaded first so every other mod builds on them."
+msgstr ""
+
+#: src/mods/smart_sort.rs:97
+msgid "Models, effects, backgrounds and sounds."
+msgstr ""
+
+#: src/mods/smart_sort.rs:98
+msgid "Portraits, name lists, flags, pre-scripted empires and text."
+msgstr ""
+
+#: src/mods/smart_sort.rs:99
+msgid "Ship models and their graphical cultures."
+msgstr ""
+
+#: src/mods/smart_sort.rs:100
+msgid "Galaxy shapes, systems, planets and fallen empires."
+msgstr ""
+
+#: src/mods/smart_sort.rs:101
+msgid "Mods that change the rules: buildings, events, civics, technologies and more."
+msgstr ""
+
+#: src/mods/smart_sort.rs:102
+msgid "Very large mods that change much of the game."
+msgstr ""
+
+#: src/mods/smart_sort.rs:103
+msgid "Patches between two or more mods, below the mods they patch."
+msgstr ""
+
+#: src/mods/smart_sort.rs:104
+msgid "Interface mods, below gameplay mods so their interface files win."
+msgstr ""
+
+#: src/mods/smart_sort.rs:105
+msgid "Add-ons and compatibility patches for the UI mods."
+msgstr ""
+
+#: src/mods/smart_sort.rs:106
+msgid "Universal and global patches, loaded last to override everything."
+msgstr ""
+
+#: src/mods/smart_sort.rs:205
+msgid "Chosen by you"
+msgstr ""
+
+#: src/mods/smart_sort.rs:212
+msgid "Needs {name}, so it goes directly below it"
+msgstr ""
+
+#: src/mods/smart_sort.rs:217
+msgid "An add-on or patch for UI Overhaul Dynamic"
+msgstr ""
+
+#: src/mods/smart_sort.rs:218
+msgid "A patch for an interface mod"
+msgstr ""
+
+#: src/mods/smart_sort.rs:220
+msgid "Its name says it's a patch"
+msgstr ""
+
+#: src/mods/smart_sort.rs:232
+msgid "Patches {names}"
+msgstr ""
+
+#: src/mods/smart_sort.rs:293
+msgid "The merged patch always loads last"
+msgstr ""
+
+#: src/mods/smart_sort.rs:388
+msgid "Its name starts with ~"
+msgstr ""
+
+#: src/mods/smart_sort.rs:391
+msgid "An unofficial patch"
+msgstr ""
+
+#: src/mods/smart_sort.rs:394
+msgid "Its name starts with !, which goes towards the bottom"
+msgstr ""
+
+#: src/mods/smart_sort.rs:397
+msgid "A universal patch"
+msgstr ""
+
+#: src/mods/smart_sort.rs:400
+msgid "Part of UI Overhaul Dynamic"
+msgstr ""
+
+#: src/mods/smart_sort.rs:408
+msgid "Its files couldn't be read"
+msgstr ""
+
+#: src/mods/smart_sort.rs:412
+msgid "Only changes the interface"
+msgstr ""
+
+#: src/mods/smart_sort.rs:415
+msgid "Changes {count} kind of game object"
+msgid_plural "Changes {count} kinds of game objects"
+msgstr[0] ""
+msgstr[1] ""
+
+#: src/mods/smart_sort.rs:425
+msgid "Changes ship models"
+msgstr ""
+
+#: src/mods/smart_sort.rs:428 src/mods/smart_sort.rs:441
+msgid "Changes how the galaxy is made"
+msgstr ""
+
+#: src/mods/smart_sort.rs:431
+msgid "Changes portraits, names or text"
+msgstr ""
+
+#: src/mods/smart_sort.rs:433
+msgid "Only changes sounds"
+msgstr ""
+
+#: src/mods/smart_sort.rs:433
+msgid "Only changes graphics"
+msgstr ""
+
+#: src/mods/smart_sort.rs:437
+msgid "Adds species: portraits, names and the like"
+msgstr ""
+
+#: src/mods/smart_sort.rs:445
+msgid "Changes game rules ({what}…)"
+msgstr ""
+
 #: src/window/backups_ui.rs:26 src/window/backups_ui.rs:29
 msgid "Merged Patch Backups"
 msgstr ""
@@ -532,7 +734,7 @@ msgstr ""
 msgid "The merged patch goes back to {contents} from {when}. Its current merges are backed up first, so you can undo this from this list."
 msgstr ""
 
-#: src/window/backups_ui.rs:74 src/window/collections_ui.rs:263 src/window/collections_ui.rs:292 src/window/collections_ui.rs:360 src/window/collections_ui.rs:411 src/window/collections_ui.rs:638 src/window/collections_ui.rs:722 src/window/collections_ui.rs:794 src/window/ignore_rules_ui.rs:88 src/window/launch.rs:403 src/window/list.rs:392 src/window/repair_ui.rs:89 src/window/saves_ui.rs:86
+#: src/window/backups_ui.rs:74 src/window/collections_ui.rs:263 src/window/collections_ui.rs:292 src/window/collections_ui.rs:360 src/window/collections_ui.rs:411 src/window/collections_ui.rs:638 src/window/collections_ui.rs:722 src/window/collections_ui.rs:794 src/window/crash_hunt_ui.rs:59 src/window/ignore_rules_ui.rs:88 src/window/launch.rs:403 src/window/list.rs:392 src/window/repair_ui.rs:89 src/window/saves_ui.rs:86 src/window/freeze_ui.rs:40 src/window/freeze_ui.rs:103
 msgid "_Cancel"
 msgstr ""
 
@@ -1042,7 +1244,7 @@ msgid_plural "{exported}. The launcher only knows Workshop mods, so these local 
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/window/collections_ui.rs:917 src/window/smart_sort_ui.rs:34
+#: src/window/collections_ui.rs:917 src/window/crash_hunt_ui.rs:52 src/window/smart_sort_ui.rs:34
 msgid "No mods are enabled"
 msgstr ""
 
@@ -1106,8 +1308,141 @@ msgstr ""
 msgid "Scan again, e.g. after mods were updated"
 msgstr ""
 
-#: src/window/crash_hunt_ui.rs:57
+#: src/window/crash_hunt_ui.rs:35
+msgid "Stop Looking for the Crashing Mod?"
+msgstr ""
+
+#: src/window/crash_hunt_ui.rs:35
+msgid "Your collection and load order come back as they were."
+msgstr ""
+
+#: src/window/crash_hunt_ui.rs:36
+msgid "_Keep Going"
+msgstr ""
+
+#: src/window/crash_hunt_ui.rs:36
+msgid "_Stop"
+msgstr ""
+
+#: src/window/crash_hunt_ui.rs:48
+msgid "Stellaris wasn't found, so it can't be launched for the tests"
+msgstr ""
+
+#: src/window/crash_hunt_ui.rs:56
 msgid "Find the Crashing Mod"
+msgstr ""
+
+#: src/window/crash_hunt_ui.rs:57
+msgid "DrukhalManager turns off part of your {count} mods at a time. Each time, launch the game, do what made it crash, and say whether it crashed. That takes about {launches} launches.\n"
+"\n"
+"Start a new game for each test, or load a save you don't mind losing, and don't save: a save loaded with mods turned off can break. Mods that others need stay on with them. Your collection and load order come back at the end."
+msgstr ""
+
+#: src/window/crash_hunt_ui.rs:59
+msgid "_Start"
+msgstr ""
+
+#: src/window/crash_hunt_ui.rs:93
+msgid "Crash Hunt"
+msgstr ""
+
+#: src/window/crash_hunt_ui.rs:113
+msgid "Test 1: all {count} mods, to see the crash happen"
+msgstr ""
+
+#: src/window/crash_hunt_ui.rs:115
+msgid "Test {number}: {on_count} of {total} mods on, {left} left to check"
+msgstr ""
+
+#: src/window/crash_hunt_ui.rs:115
+msgid "{count} suspect"
+msgid_plural "{count} suspects"
+msgstr[0] ""
+msgstr[1] ""
+
+#: src/window/crash_hunt_ui.rs:117
+msgid "{what}. Launch, try to make it crash, then quit."
+msgstr ""
+
+#: src/window/crash_hunt_ui.rs:127
+msgid "Stellaris left a crash report, so it looks like it did."
+msgstr ""
+
+#: src/window/crash_hunt_ui.rs:127
+msgid "Answer “Yes” if it crashed, froze, or showed the problem you're looking for."
+msgstr ""
+
+#: src/window/crash_hunt_ui.rs:128
+msgid "Did Stellaris Crash?"
+msgstr ""
+
+#: src/window/crash_hunt_ui.rs:129
+msgid "_Stop Looking"
+msgstr ""
+
+#: src/window/crash_hunt_ui.rs:129
+msgid "_No"
+msgstr ""
+
+#: src/window/crash_hunt_ui.rs:129
+msgid "_Yes"
+msgstr ""
+
+#: src/window/crash_hunt_ui.rs:165
+msgid "Stopped; your load order is back"
+msgstr ""
+
+#: src/window/crash_hunt_ui.rs:167
+msgid "Found It: {name}"
+msgstr ""
+
+#: src/window/crash_hunt_ui.rs:168
+msgid "After {launches}: Stellaris crashed with “{name}” on and didn't without it. It may only crash together with another of your mods, but turning it off avoids the crash.\n"
+"\n"
+"Your load order is back as it was."
+msgstr ""
+
+#: src/window/crash_hunt_ui.rs:168 src/window/crash_hunt_ui.rs:172
+msgid "{count} launch"
+msgid_plural "{count} launches"
+msgstr[0] ""
+msgstr[1] ""
+
+#: src/window/crash_hunt_ui.rs:171
+msgid "No Single Mod"
+msgstr ""
+
+#: src/window/crash_hunt_ui.rs:172
+msgid "After {launches}: the crash takes several of these together, which can't be tested apart:\n"
+"{names}\n"
+"\n"
+"Your load order is back as it was."
+msgstr ""
+
+#: src/window/crash_hunt_ui.rs:175
+msgid "It Didn't Crash"
+msgstr ""
+
+#: src/window/crash_hunt_ui.rs:176
+msgid "Stellaris didn't crash with all the mods on, so there was nothing to narrow down. Try again when the crash comes back.\n"
+"\n"
+"Your load order is back as it was."
+msgstr ""
+
+#: src/window/crash_hunt_ui.rs:180 src/window/launch.rs:58 src/window/persist.rs:93 src/window/saves_ui.rs:142 src/window/freeze_ui.rs:165
+msgid "_Close"
+msgstr ""
+
+#: src/window/crash_hunt_ui.rs:184
+msgid "Open _Workshop Page"
+msgstr ""
+
+#: src/window/crash_hunt_ui.rs:186
+msgid "_Turn It Off"
+msgstr ""
+
+#: src/window/crash_hunt_ui.rs:199
+msgid "Turned off {name}"
 msgstr ""
 
 #: src/window/ignore_rules_ui.rs:31
@@ -1210,7 +1545,7 @@ msgstr ""
 msgid " · Updated since the game was"
 msgstr ""
 
-#: src/window/game_update_ui.rs:98 src/window/overview.rs:721 src/window/patches_ui.rs:341
+#: src/window/game_update_ui.rs:98 src/window/overview.rs:721 src/window/patches_ui.rs:340
 msgid "Open Workshop Page"
 msgstr ""
 
@@ -1234,10 +1569,6 @@ msgstr ""
 
 #: src/window/launch.rs:46
 msgid " and "
-msgstr ""
-
-#: src/window/launch.rs:58 src/window/persist.rs:93 src/window/saves_ui.rs:142
-msgid "_Close"
 msgstr ""
 
 #: src/window/launch.rs:58
@@ -1505,10 +1836,6 @@ msgstr ""
 msgid "Click a mod to see what's wrong with it, what it needs and what it overrides."
 msgstr ""
 
-#: src/window/overview.rs:512 src/window.rs:401
-msgid "Disabled"
-msgstr ""
-
 #: src/window/overview.rs:515 src/window/list.rs:457 src/window.rs:1005
 msgid "Workshop"
 msgstr ""
@@ -1573,7 +1900,7 @@ msgstr ""
 msgid "not installed"
 msgstr ""
 
-#: src/window/overview.rs:693 src/window/patches_ui.rs:414
+#: src/window/overview.rs:693 src/window/patches_ui.rs:413
 msgid "enabled"
 msgstr ""
 
@@ -1605,11 +1932,11 @@ msgstr ""
 msgid "Add Note…"
 msgstr ""
 
-#: src/window/overview.rs:735 src/window/selection_ui.rs:31
+#: src/window/overview.rs:735 src/window/selection_ui.rs:30
 msgid "Move to Top"
 msgstr ""
 
-#: src/window/overview.rs:736 src/window/selection_ui.rs:32
+#: src/window/overview.rs:736 src/window/selection_ui.rs:31
 msgid "Move to Bottom"
 msgstr ""
 
@@ -1618,146 +1945,152 @@ msgid "Unsubscribe in Steam…"
 msgstr ""
 
 #: src/window/patches_ui.rs:53
-msgid "Compatibility Patches"
-msgstr ""
-
-#: src/window/patches_ui.rs:54
 msgid "Search Again"
 msgstr ""
 
-#: src/window/patches_ui.rs:60
+#: src/window/patches_ui.rs:59
 msgid "Searching the Workshop"
 msgstr ""
 
-#: src/window/patches_ui.rs:105
+#: src/window/patches_ui.rs:104
 msgid "For {count} enabled mod from the Workshop"
 msgid_plural "For {count} enabled mods from the Workshop"
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/window/patches_ui.rs:107
+#: src/window/patches_ui.rs:106
 msgid "No Workshop Mods Enabled"
 msgstr ""
 
-#: src/window/patches_ui.rs:107
+#: src/window/patches_ui.rs:106
 msgid "Patches are found through the Workshop mods you run"
 msgstr ""
 
-#: src/window/patches_ui.rs:117
+#: src/window/patches_ui.rs:116
 msgid "Checked 0 of {count} mod"
 msgid_plural "Checked 0 of {count} mods"
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/window/patches_ui.rs:175
+#: src/window/patches_ui.rs:155
+msgid "Checked {done} of {mods}"
+msgstr ""
+
+#: src/window/patches_ui.rs:174
 msgid "_Open Preferences"
 msgstr ""
 
-#: src/window/patches_ui.rs:185
+#: src/window/patches_ui.rs:184
 msgid "A Steam Web API Key Is Needed"
 msgstr ""
 
-#: src/window/patches_ui.rs:185
+#: src/window/patches_ui.rs:184
 msgid "Steam tells only apps with a key which Workshop items need a mod. Add yours in Preferences › Steam."
 msgstr ""
 
-#: src/window/patches_ui.rs:189
+#: src/window/patches_ui.rs:188
 msgid "_Try Again"
 msgstr ""
 
-#: src/window/patches_ui.rs:196
+#: src/window/patches_ui.rs:195
 msgid "Couldn't Search the Workshop"
 msgstr ""
 
-#: src/window/patches_ui.rs:196
+#: src/window/patches_ui.rs:195
 msgid "{error}. What was found so far is kept."
 msgstr ""
 
-#: src/window/patches_ui.rs:217
+#: src/window/patches_ui.rs:216
 msgid "Patches for recent versions of the mods you run are usually updated with them, so older ones are hidden. Some mods that haven't been updated in years still work fine, but this list is meant for recent compatibility patches."
 msgstr ""
 
-#: src/window/patches_ui.rs:230 src/window/patches_ui.rs:400
+#: src/window/patches_ui.rs:229 src/window/patches_ui.rs:399
 msgid "1 year"
 msgstr ""
 
-#: src/window/patches_ui.rs:231
+#: src/window/patches_ui.rs:230
 msgid "2 years"
 msgstr ""
 
-#: src/window/patches_ui.rs:234
+#: src/window/patches_ui.rs:233
 msgid "5 years"
 msgstr ""
 
-#: src/window/patches_ui.rs:239
+#: src/window/patches_ui.rs:238
 msgid "Updated within, in weeks"
 msgstr ""
 
-#: src/window/patches_ui.rs:240
+#: src/window/patches_ui.rs:239
 msgid "Updated Within"
 msgstr ""
 
-#: src/window/patches_ui.rs:243
+#: src/window/patches_ui.rs:242
 msgid "Show Everything That Needs Only Enabled Mods"
 msgstr ""
 
-#: src/window/patches_ui.rs:243
+#: src/window/patches_ui.rs:242
 msgid "Also items whose names don't say they're patches"
 msgstr ""
 
-#: src/window/patches_ui.rs:248
+#: src/window/patches_ui.rs:247
 msgid "Workshop items made for mods you run, all of whose required items are enabled. After subscribing, reload the mods (F5): Smart Sort places patches after the mods they patch."
 msgstr ""
 
-#: src/window/patches_ui.rs:275
+#: src/window/patches_ui.rs:274
 msgid "Nothing to Suggest"
 msgstr ""
 
-#: src/window/patches_ui.rs:275
+#: src/window/patches_ui.rs:274
 msgid "{count} Suggestion"
 msgid_plural "{count} Suggestions"
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/window/patches_ui.rs:279
+#: src/window/patches_ui.rs:278
 msgid "{count} patch for your enabled mods has not been updated within {weeks}"
 msgid_plural "{count} patches for your enabled mods have not been updated within {weeks}"
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/window/patches_ui.rs:285
+#: src/window/patches_ui.rs:284
 msgid "Every patch found for your enabled mods is installed or dismissed"
 msgstr ""
 
-#: src/window/patches_ui.rs:358 src/window/notifications.rs:187
+#: src/window/patches_ui.rs:314
+msgid "Show {count} Dismissed Item Again"
+msgid_plural "Show {count} Dismissed Items Again"
+msgstr[0] ""
+msgstr[1] ""
+
+#: src/window/patches_ui.rs:357 src/window/notifications.rs:187
 msgid "Dismiss"
 msgstr ""
 
-#: src/window/patches_ui.rs:401
+#: src/window/patches_ui.rs:400
 msgid "{count} year"
 msgid_plural "{count} years"
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/window/patches_ui.rs:402
+#: src/window/patches_ui.rs:401
 msgid "{count} week"
 msgid_plural "{count} weeks"
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/window/patches_ui.rs:411
+#: src/window/patches_ui.rs:410
 msgid "{list} and {last}"
 msgstr ""
 
-#: src/window/patches_ui.rs:415
+#: src/window/patches_ui.rs:414
 msgid "both enabled"
 msgstr ""
 
-#: src/window/patches_ui.rs:416
+#: src/window/patches_ui.rs:415
 msgid "all enabled"
 msgstr ""
 
-#: src/window/patches_ui.rs:418
+#: src/window/patches_ui.rs:417
 msgid "Needs {list}, {status}"
 msgstr ""
 
@@ -1987,6 +2320,40 @@ msgstr ""
 
 #: src/window/persist.rs:98
 msgid "Load order saved, but the Paradox Launcher's playset wasn't updated: {error}"
+msgstr ""
+
+#: src/window/reload.rs:52
+msgid "the reload failed"
+msgstr ""
+
+#: src/window/reload.rs:57
+msgid "Could not reload mods: {e}"
+msgstr ""
+
+#: src/window/reload.rs:80
+msgid " · back in the load order: {names}"
+msgstr ""
+
+#: src/window/reload.rs:92
+msgid "{count} new mod: {names}"
+msgid_plural "{count} new mods: {names}"
+msgstr[0] ""
+msgstr[1] ""
+
+#: src/window/reload.rs:95
+msgid "{count} updated: {names}"
+msgstr ""
+
+#: src/window/reload.rs:99
+msgid "{name} was removed"
+msgstr ""
+
+#: src/window/reload.rs:100
+msgid "{count} mods were removed: {names}"
+msgstr ""
+
+#: src/window/reload.rs:103
+msgid "Mods reloaded, none added or removed"
 msgstr ""
 
 #: src/window/repair_ui.rs:17
@@ -2246,57 +2613,77 @@ msgstr ""
 msgid "Mod Updates"
 msgstr ""
 
-#: src/window/selection_ui.rs:27
+#: src/window/selection_ui.rs:26
 msgid "Enable"
 msgstr ""
 
-#: src/window/selection_ui.rs:28
+#: src/window/selection_ui.rs:27
 msgid "Disable"
 msgstr ""
 
-#: src/window/selection_ui.rs:35
+#: src/window/selection_ui.rs:34
 msgid "Let Smart Sort Decide"
 msgstr ""
 
-#: src/window/selection_ui.rs:47
+#: src/window/selection_ui.rs:46
 msgid "_Category"
 msgstr ""
 
-#: src/window/selection_ui.rs:48
+#: src/window/selection_ui.rs:47
 msgid "_Add to Collection"
 msgstr ""
 
-#: src/window/selection_ui.rs:49
+#: src/window/selection_ui.rs:48
 msgid "Category and Collections"
 msgstr ""
 
-#: src/window/selection_ui.rs:50
+#: src/window/selection_ui.rs:49
 msgid "Clear the Selection"
 msgstr ""
 
-#: src/window/selection_ui.rs:258
+#: src/window/selection_ui.rs:257
 msgid "{count} selected"
 msgid_plural "{count} selected"
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/window/selection_ui.rs:345
+#: src/window/selection_ui.rs:314
+msgid "Enabled {mods}"
+msgstr ""
+
+#: src/window/selection_ui.rs:314
+msgid "Disabled {mods}"
+msgstr ""
+
+#: src/window/selection_ui.rs:325
+msgid "top"
+msgstr ""
+
+#: src/window/selection_ui.rs:325
+msgid "bottom"
+msgstr ""
+
+#: src/window/selection_ui.rs:326
+msgid "Moved {mods} to the {to}"
+msgstr ""
+
+#: src/window/selection_ui.rs:347
 msgid "Smart Sort will put {count} mod in {category}"
 msgid_plural "Smart Sort will put {count} mods in {category}"
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/window/selection_ui.rs:351
+#: src/window/selection_ui.rs:353
 msgid "Smart Sort will choose where {count} mod goes"
 msgid_plural "Smart Sort will choose where {count} mods go"
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/window/selection_ui.rs:369
+#: src/window/selection_ui.rs:371
 msgid "“{name}” already has them"
 msgstr ""
 
-#: src/window/selection_ui.rs:372
+#: src/window/selection_ui.rs:374
 msgid "Added {count} mod to “{name}”"
 msgid_plural "Added {count} mods to “{name}”"
 msgstr[0] ""
@@ -2312,10 +2699,6 @@ msgstr ""
 
 #: src/window/shortcuts.rs:18
 msgid "Keyboard Shortcuts"
-msgstr ""
-
-#: src/window/shortcuts.rs:21 src/window/shortcuts.rs:32 src/window.rs:383 src/window.rs:461
-msgid "Load Order"
 msgstr ""
 
 #: src/window/shortcuts.rs:24
@@ -2394,16 +2777,144 @@ msgstr ""
 msgid "Automatic: {category}"
 msgstr ""
 
-#: src/window/dlc_ui.rs:32
+#: src/window/dlc_ui.rs:17
+msgid "Stellaris wasn't found, so its DLCs can't be listed"
+msgstr ""
+
+#: src/window/dlc_ui.rs:21
+msgid "No DLCs are installed"
+msgstr ""
+
+#: src/window/dlc_ui.rs:25
+msgid "Could not read the DLC settings: {e}"
+msgstr ""
+
+#: src/window/dlc_ui.rs:31
 msgid "DLCs that are off aren't loaded by the game. In multiplayer, every player needs the same DLCs on, except content packs such as portraits and music. Changes are saved when this closes."
 msgstr ""
 
-#: src/window/dlc_ui.rs:66
+#: src/window/dlc_ui.rs:34
+msgid "Expansions"
+msgstr ""
+
+#: src/window/dlc_ui.rs:34
+msgid "Story Packs"
+msgstr ""
+
+#: src/window/dlc_ui.rs:34
+msgid "Species Packs"
+msgstr ""
+
+#: src/window/dlc_ui.rs:34
+msgid "Content Packs"
+msgstr ""
+
+#: src/window/dlc_ui.rs:65
 msgid "Turn All On"
 msgstr ""
 
-#: src/window/dlc_ui.rs:77
+#: src/window/dlc_ui.rs:76
 msgid "DLC"
+msgstr ""
+
+#: src/window/dlc_ui.rs:87
+msgid "Every DLC is on"
+msgstr ""
+
+#: src/window/dlc_ui.rs:88
+msgid "{count} DLC is off"
+msgid_plural "{count} DLCs are off"
+msgstr[0] ""
+msgstr[1] ""
+
+#: src/window/dlc_ui.rs:89
+msgid "Could not save the DLC settings: {e}"
+msgstr ""
+
+#: src/window/freeze_ui.rs:35
+msgid "“{name}” has no Workshop mods to freeze"
+msgstr ""
+
+#: src/window/freeze_ui.rs:38
+msgid "Copies its {mods} ({size}) into local mods, and switches “{name}” to the copies, so Steam updates can't change it in the middle of a campaign.\n"
+"\n"
+"Fixes their authors publish are missed too, until you unfreeze it. Unfreezing switches back to the Workshop mods and deletes the copies."
+msgstr ""
+
+#: src/window/freeze_ui.rs:38 src/window/freeze_ui.rs:88 src/window/freeze_ui.rs:101 src/window/freeze_ui.rs:136
+msgid "{count} Workshop mod"
+msgid_plural "{count} Workshop mods"
+msgstr[0] ""
+msgstr[1] ""
+
+#: src/window/freeze_ui.rs:39
+msgid "Freeze “{name}”?"
+msgstr ""
+
+#: src/window/freeze_ui.rs:40
+msgid "_Freeze"
+msgstr ""
+
+#: src/window/freeze_ui.rs:56
+msgid "Copying {mods}…"
+msgstr ""
+
+#: src/window/freeze_ui.rs:67
+msgid "Copying failed"
+msgstr ""
+
+#: src/window/freeze_ui.rs:72
+msgid "Could not freeze “{name}”, so nothing changed: {e}"
+msgstr ""
+
+#: src/window/freeze_ui.rs:88
+msgid "Froze “{name}”: {mods} copied"
+msgstr ""
+
+#: src/window/freeze_ui.rs:101
+msgid "“{name}” switches back to the {mods}, as Steam has them now, and the copies are deleted."
+msgstr ""
+
+#: src/window/freeze_ui.rs:102
+msgid "Unfreeze “{name}”?"
+msgstr ""
+
+#: src/window/freeze_ui.rs:103
+msgid "_Unfreeze"
+msgstr ""
+
+#. The collection is back on the Workshop mods either way; only
+#. copies may be left over.
+#: src/window/freeze_ui.rs:129
+msgid "Some frozen copies couldn't be deleted: {e}"
+msgstr ""
+
+#: src/window/freeze_ui.rs:136
+msgid "Unfroze “{name}”: back to {mods}"
+msgstr ""
+
+#: src/window/freeze_ui.rs:161
+msgid "this mod"
+msgstr ""
+
+#: src/window/freeze_ui.rs:161
+msgid "these mods"
+msgstr ""
+
+#: src/window/freeze_ui.rs:163
+msgid "Steam has newer versions of {mods} than “{name}” uses:\n"
+"\n"
+"{list}\n"
+"\n"
+"The collection keeps its copies until you unfreeze it."
+msgstr ""
+
+#: src/window/freeze_ui.rs:164
+msgid "Updated on the Workshop"
+msgstr ""
+
+#: src/window/freeze_ui.rs:165
+msgid "_Unfreeze…"
 msgstr ""
 
 #: src/window/thumbnails.rs:93
@@ -2658,10 +3169,6 @@ msgstr ""
 
 #: src/window.rs:1006
 msgid "Turns Them Off"
-msgstr ""
-
-#: src/window.rs:1007
-msgid "Has Conflicts"
 msgstr ""
 
 #: src/window.rs:1016
