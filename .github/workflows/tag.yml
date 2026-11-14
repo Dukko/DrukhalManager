@@ -1,8 +1,8 @@
 name: Tag release
 
 # When a version bump lands on master, tags it vX.Y.Z and builds the
-# release. A release is then one PR that bumps Cargo.toml and adds its
-# <release> notes to the metainfo.
+# release: the Flatpak and the Windows zip. A release is then one PR that
+# bumps Cargo.toml and adds its <release> notes to the metainfo.
 
 on:
   push:
@@ -47,3 +47,10 @@ jobs:
     with:
       tag: ${{ needs.tag.outputs.tag }}
     secrets: inherit
+
+  windows:
+    needs: tag
+    if: needs.tag.outputs.tag != ''
+    uses: ./.github/workflows/windows-bundle.yml
+    with:
+      tag: ${{ needs.tag.outputs.tag }}

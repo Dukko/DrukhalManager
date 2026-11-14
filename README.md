@@ -4,18 +4,19 @@
 
 # DrukhalManager
 
-A Stellaris mod manager for Linux that can merge conflicting mods with AI.
+A Stellaris mod manager for Linux and Windows that can merge conflicting mods with AI.
 
 [![Latest release](https://img.shields.io/github/v/release/Dukko/DrukhalManager?label=release&color=4a86cf)](https://github.com/Dukko/DrukhalManager/releases/latest)
 [![CI](https://github.com/Dukko/DrukhalManager/actions/workflows/ci.yml/badge.svg)](https://github.com/Dukko/DrukhalManager/actions/workflows/ci.yml)
-[![Flatpak](https://img.shields.io/badge/install-Flatpak-4a90d9?logo=flatpak&logoColor=white)](#installing)
+[![Flatpak](https://img.shields.io/badge/install-Flatpak-4a90d9?logo=flatpak&logoColor=white)](#flatpak-any-distro)
+[![Windows](https://img.shields.io/badge/download-Windows-0078d4)](#windows)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
 <img src="docs/screenshots/hero.png" alt="The load order, grouped by category, with the views and categories in a sidebar" width="860">
 
 </div>
 
-I play Stellaris on Linux with around 150 mods, and two things kept messing up my evenings: working out which mods overwrite each other, and fixing the load order after every Steam update. [Irony Mod Manager](https://github.com/bcssov/IronyModManager) solves the first one well, but I wanted something native to my desktop that could also do the annoying and boring parts of merging for me. DrukhalManager is an opinionated fork of Irony, rewritten in Rust and GTK 4.
+I play Stellaris on Linux with around 150 mods, and two things kept messing up my evenings: working out which mods overwrite each other, and fixing the load order after every Steam update. [Irony Mod Manager](https://github.com/bcssov/IronyModManager) solves the first one well, but I wanted something native to my desktop that could also do the annoying and boring parts of merging for me. DrukhalManager is an opinionated fork of Irony, rewritten in Rust and GTK 4. It started on Linux and now runs on Windows too, with the same interface.
 
 It does the usual mod manager things (load orders, collections, Paradox Launcher playsets) and a few **less usual** ones:
 
@@ -61,6 +62,18 @@ flatpak override --user --filesystem=/path/to/Steam io.github.dukko.DrukhalManag
 In the Flatpak, **Launch** starts the game through Steam.
 
 </details>
+
+### Windows
+
+Download `DrukhalManager-setup-x64.exe` from the [latest release](https://github.com/Dukko/DrukhalManager/releases/latest) and run it. It installs for your user only (no administrator rights needed) and adds DrukhalManager to the Start menu. The app tells you when a new version is out; run the new installer to update. Uninstall it from **Settings → Apps**.
+
+Prefer not to install anything? Download `DrukhalManager-windows-x64.zip` instead, unzip it anywhere, and run `DrukhalManager\bin\DrukhalManager.exe`. To update, replace the folder with the new one.
+
+Either way, settings go in `%APPDATA%\DrukhalManager`, and backups, logs and caches in `%LOCALAPPDATA%\DrukhalManager`. Uninstalling leaves them there.
+
+The downloads aren't code-signed yet, so the first time you run one Windows SmartScreen says "Windows protected your PC". Click **More info → Run anyway**.
+
+The Windows version is new and uses the same GTK interface as on Linux. If something behaves differently from Linux, please [open an issue](https://github.com/Dukko/DrukhalManager/issues).
 
 ### Arch or CachyOS
 
@@ -152,6 +165,8 @@ cargo run --release
 
 To install by hand elsewhere, copy `target/release/drukhal-manager` to your `PATH`, `data/io.github.dukko.DrukhalManager.desktop` to `share/applications`, and the icon from `data/icons` to `share/icons/hicolor/scalable/apps`.
 
+On Windows, build in an [MSYS2](https://www.msys2.org/) UCRT64 shell with the packages listed in `.github/workflows/windows-bundle.yml`. `packaging/windows/bundle.sh` builds a release and gathers it with GTK into a folder that runs without MSYS2.
+
 <details>
 <summary>Releasing</summary>
 
@@ -160,7 +175,7 @@ To install by hand elsewhere, copy `target/release/drukhal-manager` to your `PAT
 1. Bump the version in `Cargo.toml` and add a `<release>` to `data/io.github.dukko.DrukhalManager.metainfo.xml`.
 2. If the release adds a permission to `flatpak/io.github.dukko.DrukhalManager.yml`, say so in the release notes: Flatpak won't let the app update itself into it, so users update with `flatpak update` or their software centre instead.
 3. If dependencies changed, regenerate `flatpak/cargo-sources.json` (see `flatpak/generate-cargo-sources.py`); the build fails if it is stale.
-4. Merge it into `master` through a pull request. The *Tag release* workflow tags `vX.Y.Z`, builds the Flatpak, publishes the signed repository to GitHub Pages and attaches `DrukhalManager.flatpak` to the release.
+4. Merge it into `master` through a pull request. The *Tag release* workflow tags `vX.Y.Z`, builds the Flatpak, publishes the signed repository to GitHub Pages and attaches `DrukhalManager.flatpak` to the release. The *Windows bundle* workflow attaches the installer `DrukhalManager-setup-x64.exe` and `DrukhalManager-windows-x64.zip` once the release exists.
 
 </details>
 
