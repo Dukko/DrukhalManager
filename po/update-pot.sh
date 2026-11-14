@@ -33,3 +33,9 @@ xtr src/main.rs \
     -k 'tnf:1,2' \
     -k 'tc:1c,2' \
     -k 'tnc:1c,2,3'
+
+# On Windows xtr writes the source references with backslashes. Keep the
+# template the same whichever platform regenerates it, so the checked-in
+# copy matches on CI.
+awk '/^#:/ {gsub(/\\/, "/")} {print}' "$output" > "$output.tmp" && mv "$output.tmp" "$output"
+
