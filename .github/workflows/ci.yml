@@ -68,6 +68,7 @@ jobs:
             mingw-w64-ucrt-x86_64-libadwaita
             mingw-w64-ucrt-x86_64-gettext
             mingw-w64-ucrt-x86_64-rust
+            diffutils
       - name: cargo build
         run: cargo build --locked
       - name: cargo test
@@ -87,5 +88,8 @@ jobs:
           /ucrt64/bin/cargo clippy --all-targets --locked --target x86_64-pc-windows-gnu
       - name: Translation template is current
         run: |
-          cargo install xtr --version 0.1.11 --locked
+          # Install xtr under the workspace: MSYS2's PATH does not include
+          # cargo's Windows bin folder, so the script would not find it.
+          cargo install xtr --version 0.1.11 --locked --root target/xtr
+          export PATH="$PWD/target/xtr/bin:$PATH"
           po/check-pot.sh
