@@ -34,6 +34,8 @@ pub struct Group {
     pub label: String,
     pub mod_id: Option<String>,
     pub is_patch: bool,
+    /// Errors that name no file, which sort after those that do.
+    pub no_file: bool,
     pub entries: Vec<Entry>,
 }
 
@@ -56,9 +58,6 @@ impl Report {
         self.groups.iter().filter(|g| g.mod_id.is_some()).map(Group::total).sum()
     }
 }
-
-const BASE_GAME: &str = "Base game or missing files";
-const NO_FILE: &str = "Not tied to a file";
 
 /// Top-level folders of game content, plus `mod/` for descriptors.
 const ROOTS: &[&str] = &["common/", "events/", "gfx/", "interface/", "localisation/", "localization/", "map/", "prescripted_countries/", "flags/", "music/", "sound/", "fonts/", "mod/"];
@@ -140,7 +139,9 @@ pub fn analyze(log: &str, mods: &[LogMod]) -> Report {
         })
     };
 
-    let mut groups: Vec<(Option<usize>, &str, Vec<Entry>, HashMap<String, usize>)> = Vec::new();
+    let base_game = t!("Base game or missing files");
+    let no_file = t!("Not tied to a file");
+    let mut groups: Vec<(Option<usize>, String, bool, Vec<Entry>, HashMap<String, usize>)> = Vec::new();
     let mut lines = 0;
     for line in log.lines().map(str::trim_end).filter(|l| !l.is_empty()) {
         lines += 1;
@@ -148,22 +149,22 @@ pub fn analyze(log: &str, mods: &[LogMod]) -> Report {
         let file = find_path(msg);
         // "Could not find files for mod: …/281990/<id>" names a workshop mod.
         let by_steam = msg.rsplit_once("/281990/").and_then(|(_, id)| id.trim().parse::<u64>().ok()).and_then(|id| mods.iter().position(|m| m.steam_id == Some(id)));
-        let (target, label) = match (by_steam, &file) {
-            (Some(i), _) => (Some(i), ""),
+        let (target, label, no_file_errors) = match (by_steam, &file) {
+            (Some(i), _) => (Some(i), String::new(), false),
             (None, Some(f)) => match owner(f) {
-                Some(i) => (Some(i), ""),
-                None => (None, BASE_GAME),
+                Some(i) => (Some(i), String::new(), false),
+                None => (None, base_game.clone(), false),
             },
-            (None, None) => (None, NO_FILE),
+            (None, None) => (None, no_file.clone(), true),
         };
         let g = match groups.iter().position(|(t, l, ..)| *t == target && *l == label) {
             Some(g) => g,
             None => {
-                groups.push((target, label, Vec::new(), HashMap::new()));
+                groups.push((target, label, no_file_errors, Vec::new(), HashMap::new()));
                 groups.len() - 1
             }
         };
-        let (_, _, entries, seen) = &mut groups[g];
+        let (_, _, _, entries, seen) = &mut groups[g];
         match seen.get(&pattern(msg)) {
             Some(&e) => entries[e].count += 1,
             None => {
@@ -175,12 +176,12 @@ pub fn analyze(log: &str, mods: &[LogMod]) -> Report {
 
     let mut out: Vec<Group> = groups
         .into_iter()
-        .map(|(target, label, entries, _)| match target {
-            Some(i) => Group { label: mods[i].name.clone(), mod_id: Some(mods[i].id.clone()), is_patch: mods[i].is_patch, entries },
-            None => Group { label: label.to_owned(), mod_id: None, is_patch: false, entries },
+        .map(|(target, label, no_file, entries, _)| match target {
+            Some(i) => Group { label: mods[i].name.clone(), mod_id: Some(mods[i].id.clone()), is_patch: mods[i].is_patch, no_file, entries },
+            None => Group { label, mod_id: None, is_patch: false, no_file, entries },
         })
         .collect();
-    out.sort_by_key(|g| (!g.is_patch, g.mod_id.is_none(), g.label == NO_FILE, std::cmp::Reverse(g.total())));
+    out.sort_by_key(|g| (!g.is_patch, g.mod_id.is_none(), g.no_file, std::cmp::Reverse(g.total())));
     for g in &mut out {
         g.entries.sort_by_key(|e| std::cmp::Reverse(e.count));
     }
@@ -227,7 +228,7 @@ mod tests {
         let r = analyze(log, &mods);
         assert_eq!(r.lines, 7);
         let summary: Vec<(&str, usize)> = r.groups.iter().map(|g| (g.label.as_str(), g.total())).collect();
-        assert_eq!(summary, [("Patch", 1), ("B", 3), ("A", 1), (BASE_GAME, 1), (NO_FILE, 1)]);
+        assert_eq!(summary, [("Patch", 1), ("B", 3), ("A", 1), ("Base game or missing files", 1), ("Not tied to a file", 1)]);
         assert_eq!(r.groups[1].entries[0].count, 2, "repeats are counted, not listed");
         let numbered = "[05:00:00][g.cpp:1]: Failed to read key in file: common/x/shared.txt line: 1\n[05:00:01][g.cpp:1]: Failed to read key in file: common/x/shared.txt line: 72\n";
         assert_eq!(analyze(numbered, &mods).groups[0].entries.len(), 1, "errors differing only in numbers are one entry");

@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: DrukhalManager 1.0.0\n"
 "Report-Msgid-Bugs-To: https://github.com/Dukko/DrukhalManager/issues\n"
-"POT-Creation-Date: 2026-11-14 18:50+0000\n"
+"POT-Creation-Date: 2026-11-14 19:01+0000\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -1987,6 +1987,14 @@ msgstr ""
 
 #: src/multiplayer_dialog.rs:308
 msgid "The native Linux build reads file and folder names exactly, unlike Windows, so it may skip these files: they're in a game folder whose name isn't lowercase, such as Common or common/Traits, or named like another file but for case. Its checksum then doesn't match. The mod's author can rename them, or whoever runs the native Linux build can switch to the Windows build through Proton."
+msgstr ""
+
+#: src/paradox/error_log.rs:142
+msgid "Base game or missing files"
+msgstr ""
+
+#: src/paradox/error_log.rs:143
+msgid "Not tied to a file"
 msgstr ""
 
 #: src/secrets.rs:55
