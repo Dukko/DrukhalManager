@@ -65,7 +65,13 @@ In the Flatpak, **Launch** starts the game through Steam.
 
 ### Windows
 
-Download `DrukhalManager-setup-x64.exe` from the [latest release](https://github.com/Dukko/DrukhalManager/releases/latest) and run it. It installs for your user only (no administrator rights needed) and adds DrukhalManager to the Start menu. The app tells you when a new version is out; run the new installer to update. Uninstall it from **Settings → Apps**.
+Install it with [winget](https://learn.microsoft.com/windows/package-manager/winget/):
+
+```
+winget install drukhalmanager
+```
+
+or download `DrukhalManager-setup-x64.exe` from the [latest release](https://github.com/Dukko/DrukhalManager/releases/latest) and run it. It installs for your user only (no administrator rights needed) and adds DrukhalManager to the Start menu. The app tells you when a new version is out; run the new installer, or `winget upgrade drukhalmanager`, to update. Uninstall it from **Settings → Apps**.
 
 Prefer not to install anything? Download `DrukhalManager-windows-x64.zip` instead, unzip it anywhere, and run `DrukhalManager\bin\DrukhalManager.exe`. To update, replace the folder with the new one.
 
@@ -175,7 +181,7 @@ On Windows, build in an [MSYS2](https://www.msys2.org/) UCRT64 shell with the pa
 1. Bump the version in `Cargo.toml` and add a `<release>` to `data/io.github.dukko.DrukhalManager.metainfo.xml`.
 2. If the release adds a permission to `flatpak/io.github.dukko.DrukhalManager.yml`, say so in the release notes: Flatpak won't let the app update itself into it, so users update with `flatpak update` or their software centre instead.
 3. If dependencies changed, regenerate `flatpak/cargo-sources.json` (see `flatpak/generate-cargo-sources.py`); the build fails if it is stale.
-4. Merge it into `master` through a pull request. The *Tag release* workflow tags `vX.Y.Z`, builds the Flatpak, publishes the signed repository to GitHub Pages and attaches `DrukhalManager.flatpak` to the release. The *Windows bundle* workflow attaches the installer `DrukhalManager-setup-x64.exe` and `DrukhalManager-windows-x64.zip` once the release exists.
+4. Merge it into `master` through a pull request. The *Tag release* workflow tags `vX.Y.Z`, builds the Flatpak, publishes the signed repository to GitHub Pages and attaches `DrukhalManager.flatpak` to the release. The *Windows bundle* workflow attaches the installer `DrukhalManager-setup-x64.exe` and `DrukhalManager-windows-x64.zip` once the release exists. For a stable version it then opens the PR that adds it to winget, using the `WINGET_TOKEN` secret (a classic token with `public_repo` scope; replace it when it expires).
 
 </details>
 

@@ -54,3 +54,5 @@ jobs:
     uses: ./.github/workflows/windows-bundle.yml
     with:
       tag: ${{ needs.tag.outputs.tag }}
+    # WINGET_TOKEN, for the winget update PR.
+    secrets: inherit
