@@ -1,6 +1,6 @@
 [package]
 name = "drukhal-manager"
-version = "0.9.0"
+version = "1.0.0"
 edition = "2024"
 license = "MIT"
 description = "Stellaris mod manager for Linux and Windows, a fork of Irony Mod Manager"
