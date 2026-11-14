@@ -73,12 +73,13 @@ jobs:
       - name: cargo test
         run: cargo test --locked
       - name: cargo clippy
-        # Call MSYS2's cargo and clippy from its prefix: the runner image also
-        # has rustup's MSVC shims on PATH, and `cargo clippy` can otherwise
-        # pick those up, then lint the MSVC target and rebuild everything.
+        # Use MSYS2's cargo and clippy through their absolute paths, and name
+        # the GNU target: the runner image also has rustup's MSVC shims on
+        # PATH, and `cargo clippy` otherwise lints the MSVC target, where
+        # gettext-sys cannot use the system library.
         run: |
-          export PATH="${MINGW_PREFIX}/bin:$PATH"
-          "${MINGW_PREFIX}/bin/cargo" clippy --all-targets --locked
+          export PATH="/ucrt64/bin:$PATH"
+          /ucrt64/bin/cargo clippy --all-targets --locked --target x86_64-pc-windows-gnu
       - name: Translation template is current
         run: |
           cargo install xtr --version 0.1.11 --locked
