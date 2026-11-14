@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: DrukhalManager 1.0.0\n"
 "Report-Msgid-Bugs-To: https://github.com/Dukko/DrukhalManager/issues\n"
-"POT-Creation-Date: 2026-11-14 19:01+0000\n"
+"POT-Creation-Date: 2026-11-14 20:15+0000\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -814,6 +814,10 @@ msgstr ""
 
 #: src/diff_view.rs:357
 msgid "Show these lines"
+msgstr ""
+
+#: src/diff_view.rs:563
+msgid "Put This In"
 msgstr ""
 
 #: src/error_report_dialog.rs:18
@@ -4335,6 +4339,11 @@ msgid "{count} selected"
 msgid_plural "{count} selected"
 msgstr[0] ""
 msgstr[1] ""
+
+#. No action, so it shows greyed out.
+#: src/window/selection_ui.rs:275
+msgid "No Other Collections"
+msgstr ""
 
 #: src/window/selection_ui.rs:314
 msgid "Enabled {mods}"
