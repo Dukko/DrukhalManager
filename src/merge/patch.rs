@@ -512,7 +512,7 @@ impl Patch {
             Some((category, key)) => self.manifest.merges.iter_mut().find(|m| &m.category == category && &m.key == key).map(|m| (&mut m.prints, &mut m.game_version)),
             None => self.manifest.files.iter_mut().find(|f| f.path.eq_ignore_ascii_case(path)).map(|f| (&mut f.prints, &mut f.game_version)),
         };
-        let Some((slot, version)) = slot else { return Err(io::Error::new(io::ErrorKind::NotFound, "It is no longer in the patch")) };
+        let Some((slot, version)) = slot else { return Err(io::Error::new(io::ErrorKind::NotFound, t!("It is no longer in the patch"))) };
         *slot = prints;
         *version = game_version.map(str::to_owned);
         self.write_manifest()

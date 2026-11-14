@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: DrukhalManager 1.0.0\n"
 "Report-Msgid-Bugs-To: https://github.com/Dukko/DrukhalManager/issues\n"
-"POT-Creation-Date: 2026-11-14 20:36+0000\n"
+"POT-Creation-Date: 2026-11-14 20:47+0000\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -1467,6 +1467,10 @@ msgstr ""
 msgid "The base game added this file in {version}"
 msgstr ""
 
+#: src/merge/patch.rs:515
+msgid "It is no longer in the patch"
+msgstr ""
+
 #: src/merge/patch.rs:653
 msgid "{name} isn't enabled any more"
 msgstr ""
@@ -1477,6 +1481,10 @@ msgstr ""
 
 #: src/merge/patch.rs:658
 msgid "{name} changed it"
+msgstr ""
+
+#: src/merge/snapshot.rs:122
+msgid "The backup is gone"
 msgstr ""
 
 #: src/merge/trivial.rs:29
