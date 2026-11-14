@@ -92,17 +92,17 @@ pub fn discover(user_dir: &Path, workshop_dirs: &[PathBuf]) -> io::Result<Vec<Mo
         let (descriptor, error) = match std::fs::read(&path) {
             Ok(bytes) => match Descriptor::parse(&String::from_utf8_lossy(&bytes)) {
                 Ok(d) => (d, None),
-                Err(e) => (Descriptor::default(), Some(format!("Invalid descriptor: {e}"))),
+                Err(e) => (Descriptor::default(), Some(tf!("Invalid descriptor: {error}", error = e))),
             },
-            Err(e) => (Descriptor::default(), Some(format!("Unreadable descriptor: {e}"))),
+            Err(e) => (Descriptor::default(), Some(tf!("Unreadable descriptor: {error}", error = e))),
         };
         let content = resolve_content(&descriptor, user_dir, workshop_dirs);
         let steam = descriptor.remote_file_id.zip(states.as_ref()).map(|(id, states)| states.get(&id).copied().unwrap_or(ItemState::Unsubscribed));
         let error = error.or_else(|| {
             content.is_none().then(|| match steam {
-                Some(ItemState::Unsubscribed) => "Unsubscribed in Steam, so its files are gone".to_owned(),
-                Some(ItemState::Downloading) => "Steam hasn't downloaded it yet".to_owned(),
-                _ => "Mod files not found".to_owned(),
+                Some(ItemState::Unsubscribed) => t!("Unsubscribed in Steam, so its files are gone"),
+                Some(ItemState::Downloading) => t!("Steam hasn't downloaded it yet"),
+                _ => t!("Mod files not found"),
             })
         });
         let source = if descriptor.remote_file_id.is_some() { Source::Workshop } else { Source::Local };
@@ -116,7 +116,7 @@ pub fn discover(user_dir: &Path, workshop_dirs: &[PathBuf]) -> io::Result<Vec<Mo
     for (position, id) in load.enabled_mods.iter().enumerate() {
         if !known.contains(id) {
             let descriptor = Descriptor { name: id.clone(), ..Descriptor::default() };
-            let error = Some("Descriptor file not found".to_owned());
+            let error = Some(t!("Descriptor file not found"));
             mods.push(Mod { id: id.clone(), descriptor, content: None, source: Source::Local, load_position: Some(position), error, steam: None, requires: Vec::new() });
         }
     }

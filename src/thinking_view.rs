@@ -47,14 +47,14 @@ impl ThinkingView {
             .build();
         let scroll = gtk::ScrolledWindow::builder().child(&view).hscrollbar_policy(gtk::PolicyType::Never).min_content_height(80).max_content_height(260).propagate_natural_height(true).css_classes(["card"]).margin_top(6).build();
         let widget = gtk::Expander::builder().label_widget(&header).child(&crate::resize_grip::resizable(&scroll)).visible(false).build();
-        widget.set_tooltip_text(Some("What the model is thinking. Click to expand."));
+        widget.set_tooltip_text(Some(&t!("What the model is thinking. Click to expand.")));
         Rc::new(Self { widget, title, spinner, view, buffer, words: Cell::new(0), output: Cell::new(0), reasoned: Cell::new(false) })
     }
 
     fn begin(&self, heading: Option<&str>) {
         self.widget.set_visible(true);
         self.spinner.set_visible(true);
-        self.title.set_label("Waiting for the model…");
+        self.title.set_label(&t!("Waiting for the model…"));
         self.output.set(0);
         self.reasoned.set(false);
         if let Some(heading) = heading {
@@ -78,11 +78,11 @@ impl ThinkingView {
                 // The header previews the latest line of reasoning.
                 let all = self.buffer.text(&self.buffer.start_iter(), &self.buffer.end_iter(), false);
                 let latest = all.lines().rev().map(str::trim).find(|l| !l.is_empty()).unwrap_or_default();
-                self.title.set_label(&format!("Thinking: {latest}"));
+                self.title.set_label(&tf!("Thinking: {thought}", thought = latest));
             }
             Progress::Output(text) => {
                 self.output.set(self.output.get() + text.chars().count());
-                self.title.set_label(&format!("Writing the result… {} characters", self.output.get()));
+                self.title.set_label(&tf!("Writing the result… {count} characters", count = self.output.get()));
             }
         }
     }
@@ -91,8 +91,8 @@ impl ThinkingView {
         self.spinner.set_visible(false);
         let words = self.words.get();
         self.title.set_label(&match (words, self.reasoned.get()) {
-            (0, _) => "This model didn't share its reasoning".to_owned(),
-            (w, _) => format!("Reasoning ({w} words)"),
+            (0, _) => t!("This model didn't share its reasoning"),
+            (w, _) => tf!("Reasoning ({count} words)", count = w),
         });
         if words == 0 {
             self.widget.set_expanded(false);

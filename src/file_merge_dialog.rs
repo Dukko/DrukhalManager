@@ -9,7 +9,6 @@ use std::rc::Rc;
 use adw::prelude::*;
 use gtk::{gio, glib};
 
-use crate::conflicts_view::plural;
 use crate::merge::ai::{self, Provider};
 use crate::merge::file_merge::{self, Plan, Status, Version};
 use crate::merge::patch::{Print, VANILLA};
@@ -34,8 +33,8 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
     let request = Rc::new(request);
     let plan: Rc<RefCell<Option<Plan>>> = Rc::default();
 
-    let merge_button = gtk::Button::builder().label("Merge Conflicts").css_classes(["suggested-action"]).sensitive(false).build();
-    let save_button = gtk::Button::builder().label("Save to Patch").sensitive(false).build();
+    let merge_button = gtk::Button::builder().label(t!("Merge Conflicts")).css_classes(["suggested-action"]).sensitive(false).build();
+    let save_button = gtk::Button::builder().label(t!("Save to Patch")).sensitive(false).build();
     let file_name = request.path.rsplit_once('/').map_or(request.path.as_str(), |(_, f)| f);
     let header = adw::HeaderBar::new();
     header.set_title_widget(Some(&adw::WindowTitle::new(file_name, &request.path)));
@@ -49,11 +48,11 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
     save_button.bind_property("sensitive", &tool_button, "sensitive").sync_create().build();
     header.pack_start(&tool_button);
 
-    let summary = adw::PreferencesGroup::builder().title("Objects").description("Reading each mod's copy…").build();
+    let summary = adw::PreferencesGroup::builder().title(t!("Objects")).description(t!("Reading each mod's copy…")).build();
     let editor_scroll = gtk::ScrolledWindow::builder().child(&editor).min_content_height(320).css_classes(["card"]).build();
     let result = adw::PreferencesGroup::builder()
-        .title("Merged File")
-        .description("Review and edit before saving. Merging conflicts rebuilds this from the objects above, replacing manual edits.")
+        .title(t!("Merged File"))
+        .description(t!("Review and edit before saving. Merging conflicts rebuilds this from the objects above, replacing manual edits."))
         .build();
     let thinking = ThinkingView::new();
     let result_box = gtk::Box::new(gtk::Orientation::Vertical, 8);
@@ -71,7 +70,7 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
     let dialog = adw::Dialog::builder().content_width(960).content_height(800).child(&toolbar).build();
 
     if request.merged_before {
-        show(&banner, "This file was merged before. Saving replaces that merge with this one.", false);
+        show(&banner, &t!("This file was merged before. Saving replaces that merge with this one."), false);
     }
 
     // One status label per conflicting object, updated as merges finish.
@@ -108,12 +107,12 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
                     p
                 }
                 Ok(Err(message)) => {
-                    summary.set_description(Some("This file can't be merged object by object."));
+                    summary.set_description(Some(&t!("This file can't be merged object by object.")));
                     show(&banner, &message, true);
                     return;
                 }
                 Err(_) => {
-                    show(&banner, "Reading the mods' copies failed unexpectedly", true);
+                    show(&banner, &t!("Reading the mods' copies failed unexpectedly"), true);
                     return;
                 }
             };
@@ -124,9 +123,9 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
             for (index, item) in p.items.iter().enumerate() {
                 let subtitle = match &item.status {
                     Status::Same => continue,
-                    Status::Recovered(from) => format!("Recovered from {}", from.join(", ")),
-                    Status::OneChange(from) => format!("Only {from} changes this; using its version"),
-                    Status::Conflict { sources, .. } => format!("Changed differently by {}", sources.iter().map(|s| s.label.as_str()).collect::<Vec<_>>().join(", ")),
+                    Status::Recovered(from) => tf!("Recovered from {from}", from = from.join(", ")),
+                    Status::OneChange(from) => tf!("Only {from} changes this; using its version", from = from),
+                    Status::Conflict { sources, .. } => tf!("Changed differently by {sources}", sources = sources.iter().map(|s| s.label.as_str()).collect::<Vec<_>>().join(", ")),
                 };
                 let row = adw::ActionRow::builder().title(&item.key).subtitle(subtitle).use_markup(false).build();
                 if let Status::Conflict { sources, .. } = &item.status {
@@ -141,7 +140,7 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
                     choice.set_list_factory(Some(&label_factory(None)));
                     choice.set_selected(labels.len() as u32 - 1);
                     choice.set_valign(gtk::Align::Center);
-                    choice.set_tooltip_text(Some("Whose version to keep"));
+                    choice.set_tooltip_text(Some(&t!("Whose version to keep")));
                     let texts: Vec<(String, String)> = sources.iter().map(|s| (s.label.clone(), s.text.clone())).collect();
                     choice.connect_selected_notify(glib::clone!(
                         #[strong]
@@ -171,10 +170,10 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
             editor.buffer().set_text(&p.render());
             save_button.set_sensitive(true);
             if conflicts > 0 {
-                merge_button.set_label(&format!("Merge {} with AI", plural(conflicts, "Conflict", "Conflicts")));
+                merge_button.set_label(&tnf!("Merge {count} Conflict with AI", "Merge {count} Conflicts with AI", count = conflicts));
                 merge_button.set_sensitive(true);
                 if let Some(provider) = &request.provider {
-                    merge_button.set_tooltip_text(Some(&format!("Ask {} to merge each conflicting object", provider.model_name())));
+                    merge_button.set_tooltip_text(Some(&tf!("Ask {model} to merge each conflicting object", model = provider.model_name())));
                 }
             } else {
                 merge_button.set_visible(false);
@@ -237,7 +236,7 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
                             }
                         });
                         let Some((category, key, sources, vanilla)) = job else { continue };
-                        label.set_label("Merging…");
+                        label.set_label(&t!("Merging…"));
                         label.set_tooltip_text(None);
                         label.set_css_classes(&["dim-label", "caption"]);
                         label.set_visible(true);
@@ -252,9 +251,9 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
                         let merged = match result {
                             Some(Ok(checked)) => checked
                                 .script
-                                .and_then(|_| plan.borrow().as_ref().map_or(Err("the merge was closed".to_owned()), |p| p.validate_item(index, &checked.merged.script))),
+                                .and_then(|_| plan.borrow().as_ref().map_or(Err(t!("the merge was closed")), |p| p.validate_item(index, &checked.merged.script))),
                             Some(Err(e)) => Err(e),
-                            None => Err("failed unexpectedly".to_owned()),
+                            None => Err(t!("failed unexpectedly")),
                         };
                         match merged {
                             Ok(text) => {
@@ -263,12 +262,12 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
                                     p.items[index].resolved = true;
                                     editor.buffer().set_text(&p.render());
                                 }
-                                label.set_label("Merged");
+                                label.set_label(&t!("Merged"));
                                 label.set_css_classes(&["success", "caption"]);
                             }
                             Err(e) => {
                                 failures += 1;
-                                label.set_label("Merge failed");
+                                label.set_label(&t!("Merge failed"));
                                 label.set_tooltip_text(Some(&e));
                                 label.set_css_classes(&["error", "caption"]);
                             }
@@ -278,9 +277,9 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
                     save_button.set_sensitive(true);
                     let unresolved = plan.borrow().as_ref().map_or(0, |p| p.conflicts().filter(|(_, i)| !i.resolved).count());
                     button.set_sensitive(unresolved > 0);
-                    button.set_label(if unresolved > 0 { "Retry Failed" } else { "Merged" });
+                    button.set_label(&if unresolved > 0 { t!("Retry Failed") } else { t!("Merged") });
                     if failures > 0 {
-                        show(&banner, &format!("{} couldn't be merged; hover the row for the reason. They keep the last mod's version.", plural(failures, "object", "objects")), true);
+                        show(&banner, &tnf!("{count} object couldn't be merged; hover the row for the reason. They keep the last mod's version.", "{count} objects couldn't be merged; hover the row for the reason. They keep the last mod's version.", count = failures), true);
                     }
                 }
             ));
@@ -328,7 +327,7 @@ pub fn load(path: &str, origins: &[(String, String, PathBuf)], game_dir: Option<
     let versions: Vec<Version> = origins
         .iter()
         .map(|(_, label, root)| {
-            let bytes = std::fs::read(root.join(path)).map_err(|e| format!("Could not read {label}'s copy: {e}"))?;
+            let bytes = std::fs::read(root.join(path)).map_err(|e| tf!("Could not read {label}'s copy: {error}", label = label, error = e))?;
             Ok(Version { label: label.clone(), text: String::from_utf8_lossy(&bytes).into_owned() })
         })
         .collect::<Result<_, String>>()?;
@@ -348,14 +347,14 @@ pub fn describe(p: &Plan) -> String {
         count(|s| matches!(s, Status::OneChange(_))),
         count(|s| matches!(s, Status::Conflict { .. })),
     );
-    let mut parts = vec![format!("{} kept as is", plural(same, "object", "objects"))];
+    let mut parts = vec![tnf!("{count} object kept as is", "{count} objects kept as is", count = same)];
     if recovered > 0 {
-        parts.push(format!("{recovered} recovered from overridden copies"));
+        parts.push(tf!("{count} recovered from overridden copies", count = recovered));
     }
     if one > 0 {
-        parts.push(format!("{one} taken from the only mod that changed them"));
+        parts.push(tf!("{count} taken from the only mod that changed them", count = one));
     }
-    parts.push(if conflicts == 0 { "no conflicts".to_owned() } else { format!("{} to merge", plural(conflicts, "conflict", "conflicts")) });
+    parts.push(if conflicts == 0 { t!("no conflicts") } else { tnf!("{count} conflict to merge", "{count} conflicts to merge", count = conflicts) });
     parts.join(" · ")
 }
 
@@ -364,11 +363,11 @@ pub fn describe(p: &Plan) -> String {
 /// puts what's saved there in the editor.
 fn merge_tool_menu(request: &Rc<Request>, editor: &gtk::TextView, banner: &adw::Banner) -> gtk::MenuButton {
     let list = gtk::Box::builder().orientation(gtk::Orientation::Vertical).build();
-    list.append(&gtk::Label::builder().label("Merge the file below with").xalign(0.0).margin_start(10).margin_end(10).margin_top(6).margin_bottom(6).css_classes(["dim-label", "caption-heading"]).build());
+    list.append(&gtk::Label::builder().label(t!("Merge the file below with")).xalign(0.0).margin_start(10).margin_end(10).margin_top(6).margin_bottom(6).css_classes(["dim-label", "caption-heading"]).build());
     let popover = gtk::Popover::builder().child(&list).build();
-    let button = gtk::MenuButton::builder().label("Merge Tool…").popover(&popover).tooltip_text("Merge the file below with a mod's copy in your merge tool; what you save there replaces it").build();
+    let button = gtk::MenuButton::builder().label(t!("Merge Tool…")).popover(&popover).tooltip_text(t!("Merge the file below with a mod's copy in your merge tool; what you save there replaces it")).build();
     for (_, name, folder) in &request.origins {
-        let item = gtk::Button::builder().label(format!("{name}'s Copy")).css_classes(["flat"]).build();
+        let item = gtk::Button::builder().label(tf!("{name}'s Copy", name = name)).css_classes(["flat"]).build();
         if let Some(label) = item.child().and_downcast::<gtk::Label>() {
             label.set_xalign(0.0);
         }
@@ -379,24 +378,24 @@ fn merge_tool_menu(request: &Rc<Request>, editor: &gtk::TextView, banner: &adw::
             popover.popdown();
             let command = (request.merge_tool)();
             if command.is_empty() {
-                return show(&banner, "Choose a merge tool in Preferences, on the Merging page, first.", true);
+                return show(&banner, &t!("Choose a merge tool in Preferences, on the Merging page, first."), true);
             }
             let Ok(theirs) = std::fs::read(&copy) else {
-                return show(&banner, &format!("Could not read {name}'s copy."), true);
+                return show(&banner, &tf!("Could not read {name}'s copy.", name = &name), true);
             };
             let base = request.game_dir.as_ref().and_then(|dir| std::fs::read(dir.join(&request.path)).ok()).map(|b| String::from_utf8_lossy(&b).into_owned());
             let buffer = editor.buffer();
             let ours = buffer.text(&buffer.start_iter(), &buffer.end_iter(), false).to_string();
             let tool = crate::conflicts_view::merge_tool_name(&command);
-            let left = crate::conflicts_view::ToolSide { label: "Merged file".into(), text: ours };
+            let left = crate::conflicts_view::ToolSide { label: t!("Merged file"), text: ours };
             let right = crate::conflicts_view::ToolSide { label: name.clone(), text: String::from_utf8_lossy(&theirs).into_owned() };
             let (editor, banner) = (editor.clone(), banner.clone());
             crate::conflicts_view::run_merge_tool(&button, command, left, right, base, move |result| match result {
                 Ok(Some(merged)) => {
                     editor.buffer().set_text(&merged);
-                    show(&banner, "The merge tool's result is below. Review it, then save it to the patch.", false);
+                    show(&banner, &t!("The merge tool's result is below. Review it, then save it to the patch."), false);
                 }
-                Ok(None) => show(&banner, &format!("{tool} was closed without saving, so nothing changed."), false),
+                Ok(None) => show(&banner, &tf!("{tool} was closed without saving, so nothing changed.", tool = tool), false),
                 Err(message) => show(&banner, &message, true),
             });
         });

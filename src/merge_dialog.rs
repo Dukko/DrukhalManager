@@ -55,12 +55,12 @@ pub fn validate(category: &str, key: &str, text: &str) -> Result<String, String>
         let name = key.split_once(':').map_or(key, |(_, k)| k);
         return match lines[..] {
             [line] if line.split_once(':').is_some_and(|(k, _)| k == name) => Ok(line.to_owned()),
-            _ => Err(format!("A localisation merge must be a single line starting with `{name}:`")),
+            _ => Err(tf!("A localisation merge must be a single line starting with `{name}:`", name = name)),
         };
     }
-    script::parse(text).map_err(|e| format!("The merged script has a syntax error at {e}"))?;
+    script::parse(text).map_err(|e| tf!("The merged script has a syntax error at {error}", error = e))?;
     if source::extract(category, key, text).is_none() {
-        return Err(format!("The merged script must define `{key}`"));
+        return Err(tf!("The merged script must define `{key}`", key = key));
     }
     Ok(text.trim().to_owned())
 }

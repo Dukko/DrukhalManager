@@ -354,7 +354,7 @@ impl Card {
         let free = self.bubbles.borrow().iter().find(|(b, _)| !b.is_visible()).cloned();
         let (bubble, on_click) = free.unwrap_or_else(|| {
             let bubble = gtk::Button::builder()
-                .tooltip_text("Show these lines")
+                .tooltip_text(t!("Show these lines"))
                 .css_classes(["fold-bubble"])
                 .cursor(&gtk::gdk::Cursor::from_name("pointer", None).expect("the pointer cursor exists"))
                 .build();

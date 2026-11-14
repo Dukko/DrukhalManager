@@ -1370,10 +1370,6 @@ pub fn run_merge_tool(button: &impl IsA<gtk::Widget>, command: String, left: Too
     });
 }
 
-pub fn plural(n: usize, one: &str, many: &str) -> String {
-    format!("{n} {}", if n == 1 { one } else { many })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

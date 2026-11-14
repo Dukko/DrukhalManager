@@ -9,7 +9,6 @@ use std::rc::Rc;
 use adw::prelude::*;
 use gtk::{gio, glib};
 
-use crate::conflicts_view::plural;
 use crate::merge::ai::{self, Provider};
 use crate::merge::{file_merge, lint};
 use crate::merge::patch::Print;
@@ -39,26 +38,26 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
     let request = Rc::new(request);
     let state: Rc<RefCell<Option<State>>> = Rc::default();
 
-    let ai_button = gtk::Button::builder().label("Fix with AI").css_classes(["suggested-action"]).visible(false).build();
-    let save_button = gtk::Button::builder().label("Save to Patch").sensitive(false).build();
+    let ai_button = gtk::Button::builder().label(t!("Fix with AI")).css_classes(["suggested-action"]).visible(false).build();
+    let save_button = gtk::Button::builder().label(t!("Save to Patch")).sensitive(false).build();
     let file_name = request.path.rsplit_once('/').map_or(request.path.as_str(), |(_, f)| f);
     let header = adw::HeaderBar::new();
-    header.set_title_widget(Some(&adw::WindowTitle::new(&format!("Fix {file_name}"), &request.mod_name)));
+    header.set_title_widget(Some(&adw::WindowTitle::new(&tf!("Fix {file}", file = file_name), &request.mod_name)));
     header.pack_end(&save_button);
     header.pack_end(&ai_button);
     let banner = adw::Banner::builder().use_markup(false).build();
 
     let problem = adw::PreferencesGroup::builder()
-        .title("Problem")
-        .description(format!(
-            "{} · {}. The game keeps reading after a brace mistake, but everything after it ends up nested inside the broken object and stops working.",
-            request.mod_name, request.error
+        .title(t!("Problem"))
+        .description(tf!(
+            "{mod_name} · {error}. The game keeps reading after a brace mistake, but everything after it ends up nested inside the broken object and stops working.",
+            mod_name = &request.mod_name, error = &request.error
         ))
         .build();
-    let repairs = adw::PreferencesGroup::builder().title("Repair").description("Repairing…").build();
+    let repairs = adw::PreferencesGroup::builder().title(t!("Repair")).description(t!("Repairing…")).build();
     let editor = gtk::TextView::builder().monospace(true).wrap_mode(gtk::WrapMode::None).top_margin(8).bottom_margin(8).left_margin(8).right_margin(8).build();
     let editor_scroll = gtk::ScrolledWindow::builder().child(&editor).min_content_height(320).css_classes(["card"]).build();
-    let result = adw::PreferencesGroup::builder().title("Fixed File").description("Review and edit before saving. It replaces the mod's copy through the merged patch.").build();
+    let result = adw::PreferencesGroup::builder().title(t!("Fixed File")).description(t!("Review and edit before saving. It replaces the mod's copy through the merged patch.")).build();
     let thinking = ThinkingView::new();
     let result_box = gtk::Box::new(gtk::Orientation::Vertical, 8);
     result_box.append(&thinking.widget);
@@ -106,36 +105,37 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
             })
             .await;
             let Ok(Ok((category, src, repair))) = loaded else {
-                show(&banner, "Could not read the mod's file");
+                show(&banner, &t!("Could not read the mod's file"));
                 return;
             };
             // If the mod later changes this file, the fix may be out of date.
             print.replace(Some(Print::new(&request.mod_id, &request.mod_name, &request.path, &src)));
             save_button.set_sensitive(true);
             let Some(repair) = repair else {
-                repairs.set_description(Some("This can't be repaired automatically. Fix it by hand below; the file is checked before saving."));
+                repairs.set_description(Some(&t!("This can't be repaired automatically. Fix it by hand below; the file is checked before saving.")));
                 editor.buffer().set_text(&src);
                 state.replace(Some(State { category, fixes: Vec::new() }));
                 return;
             };
 
-            repairs.set_description(Some(&format!(
-                "Braces were fixed so the file parses and every object is separate again. {} may still be nested wrongly inside.",
-                plural(repair.damaged.len(), "object", "objects")
+            repairs.set_description(Some(&tnf!(
+                "Braces were fixed so the file parses and every object is separate again. {count} object may still be nested wrongly inside.",
+                "Braces were fixed so the file parses and every object is separate again. {count} objects may still be nested wrongly inside.",
+                count = repair.damaged.len()
             )));
             for fix in &repair.fixes {
                 repairs.add(&adw::ActionRow::builder().title(fix).use_markup(false).build());
             }
             for key in &repair.damaged {
-                let row = adw::ActionRow::builder().title(key).subtitle("Braces changed; check its nesting").use_markup(false).build();
+                let row = adw::ActionRow::builder().title(key).subtitle(t!("Braces changed; check its nesting")).use_markup(false).build();
                 row.add_prefix(&gtk::Image::builder().icon_name("dialog-warning-symbolic").css_classes(["warning"]).build());
-                let label = gtk::Label::builder().label("Not reviewed").css_classes(["dim-label", "caption"]).build();
+                let label = gtk::Label::builder().label(t!("Not reviewed")).css_classes(["dim-label", "caption"]).build();
                 row.add_suffix(&label);
                 labels.borrow_mut().push((key.clone(), label));
                 repairs.add(&row);
             }
             editor.buffer().set_text(&repair.text);
-            ai_button.set_label(&format!("Fix {} with AI", plural(repair.damaged.len(), "Object", "Objects")));
+            ai_button.set_label(&tnf!("Fix {count} Object with AI", "Fix {count} Objects with AI", count = repair.damaged.len()));
             ai_button.set_visible(!repair.damaged.is_empty());
             state.replace(Some(State { category, fixes: repair.fixes }));
         }
@@ -189,29 +189,29 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
                         let buffer = editor.buffer();
                         let text = buffer.text(&buffer.start_iter(), &buffer.end_iter(), false).to_string();
                         let Some(range) = lint::object_span(&category, &key, &text) else {
-                            label.set_label("Not found in the file");
+                            label.set_label(&t!("Not found in the file"));
                             failures += 1;
                             continue;
                         };
-                        label.set_label("Fixing…");
+                        label.set_label(&t!("Fixing…"));
                         let (provider, c, k, object, fixes, m) = (provider.clone(), category.clone(), key.clone(), text[range].to_owned(), fixes.clone(), mod_name.clone());
                         let heading = key.clone();
                         let result = thinking_view::run(&thinking, Some(&heading), move |on| ai::fix(&provider, &c, &k, &object, &fixes, &m, on)).await;
                         let fixed = match result {
                             Some(Ok(f)) => merge_dialog::validate(&category, &key, &f.script).map(|script| (script, f.notes)),
                             Some(Err(e)) => Err(e),
-                            None => Err("failed unexpectedly".to_owned()),
+                            None => Err(t!("failed unexpectedly")),
                         };
-                        match fixed.and_then(|(script, notes)| lint::replace_object(&category, &key, &text, &script).map(|t| (t, notes)).ok_or_else(|| "could not place the fix".to_owned())) {
+                        match fixed.and_then(|(script, notes)| lint::replace_object(&category, &key, &text, &script).map(|t| (t, notes)).ok_or_else(|| t!("could not place the fix"))) {
                             Ok((new_text, notes)) => {
                                 buffer.set_text(&new_text);
-                                label.set_label("Fixed");
+                                label.set_label(&t!("Fixed"));
                                 label.set_tooltip_text(Some(&notes));
                                 label.set_css_classes(&["success", "caption"]);
                             }
                             Err(e) => {
                                 failures += 1;
-                                label.set_label("Not fixed; check it by hand");
+                                label.set_label(&t!("Not fixed; check it by hand"));
                                 label.set_tooltip_text(Some(&e));
                                 label.set_css_classes(&["error", "caption"]);
                             }
@@ -220,9 +220,9 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
                     editor.set_editable(true);
                     save_button.set_sensitive(true);
                     button.set_sensitive(failures > 0);
-                    button.set_label(if failures > 0 { "Retry" } else { "Fixed" });
+                    button.set_label(&if failures > 0 { t!("Retry") } else { t!("Fixed") });
                     if failures > 0 {
-                        show(&banner, &format!("{} couldn't be fixed by AI; hover the row for the reason", plural(failures, "object", "objects")));
+                        show(&banner, &tnf!("{count} object couldn't be fixed by AI; hover the row for the reason", "{count} objects couldn't be fixed by AI; hover the row for the reason", count = failures));
                     }
                 }
             ));
@@ -244,7 +244,7 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
             let buffer = editor.buffer();
             let text = buffer.text(&buffer.start_iter(), &buffer.end_iter(), false).to_string();
             if let Err(e) = script::parse(&text) {
-                show(&banner, &format!("The file still has a syntax error at {e}"));
+                show(&banner, &tf!("The file still has a syntax error at {error}", error = e));
                 return;
             }
             match (request.save)(&text, print.borrow().iter().cloned().collect()) {

@@ -529,15 +529,15 @@ fn anthropic_stream(reader: impl BufRead, price: Option<Price>, on: &mut dyn FnM
         Ok(())
     })?;
     match stop_reason.as_deref() {
-        Some("refusal") => Err("Claude declined to merge this object.".into()),
-        Some("max_tokens") => Err("The merged result was too long and got cut off.".into()),
+        Some("refusal") => Err(t!("Claude declined to merge this object.")),
+        Some("max_tokens") => Err(t!("The merged result was too long and got cut off.")),
         _ => parse_merged(&text).map(|m| Merged { usage: Some(usage), ..m }),
     }
 }
 
 fn merge_openai(base_url: &str, model: &str, api_key: &str, system: &str, prompt: &str, on: &mut dyn FnMut(Progress)) -> Result<Merged, String> {
     if model.trim().is_empty() {
-        return Err("Choose a model for the OpenAI-compatible provider in Preferences.".into());
+        return Err(t!("Choose a model for the OpenAI-compatible provider in Preferences."));
     }
     let body = json!({
         "model": model,
@@ -631,8 +631,8 @@ fn openai_stream(mut reader: impl BufRead, on: &mut dyn FnMut(Progress)) -> Resu
         Ok(())
     })?;
     match finish.as_deref() {
-        Some("length") => Err("The merged result was too long and got cut off.".into()),
-        Some("content_filter") => Err("The model declined to merge this object.".into()),
+        Some("length") => Err(t!("The merged result was too long and got cut off.")),
+        Some("content_filter") => Err(t!("The model declined to merge this object.")),
         _ => parse_merged(split_think(&raw).1).map(|m| Merged { usage, ..m }),
     }
 }
@@ -675,8 +675,8 @@ fn parse_openai(status: u16, reply: &Value) -> Result<Merged, String> {
     }
     let choice = &reply["choices"][0];
     match choice["finish_reason"].as_str() {
-        Some("length") => return Err("The merged result was too long and got cut off.".into()),
-        Some("content_filter") => return Err("The model declined to merge this object.".into()),
+        Some("length") => return Err(t!("The merged result was too long and got cut off.")),
+        Some("content_filter") => return Err(t!("The model declined to merge this object.")),
         _ => {}
     }
     if let Some(refusal) = choice.pointer("/message/refusal").and_then(Value::as_str) {
@@ -693,7 +693,7 @@ fn parse_merged(text: &str) -> Result<Merged, String> {
         return Ok(merged);
     }
     let (Some(start), Some(end)) = (text.find('{'), text.rfind('}')) else {
-        return Err("The model's reply did not contain the merged result.".into());
+        return Err(t!("The model's reply did not contain the merged result."));
     };
     serde_json::from_str(&text[start..=end]).map_err(|e| format!("The model's reply was not in the expected format: {e}"))
 }

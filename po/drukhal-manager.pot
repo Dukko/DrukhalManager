@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: DrukhalManager 1.0.0\n"
 "Report-Msgid-Bugs-To: https://github.com/Dukko/DrukhalManager/issues\n"
-"POT-Creation-Date: 2026-11-14 16:45+0000\n"
+"POT-Creation-Date: 2026-11-14 18:50+0000\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -26,6 +26,344 @@ msgid "{count} mod"
 msgid_plural "{count} mods"
 msgstr[0] ""
 msgstr[1] ""
+
+#: src/conflicts_view/file.rs:87 src/conflicts_view/file.rs:96
+msgid "Could not read this copy"
+msgstr ""
+
+#: src/conflicts_view/file.rs:89 src/conflicts_view/file.rs:98
+msgid "Too big to show"
+msgstr ""
+
+#: src/conflicts_view/file.rs:94 src/conflicts_view/file.rs:112
+msgid "The mod's files weren't found"
+msgstr ""
+
+#: src/conflicts_view/file.rs:101
+msgid "Not a text file"
+msgstr ""
+
+#: src/conflicts_view/file.rs:109 src/conflicts_view/file.rs:255 src/conflicts_view/object.rs:671 src/conflicts_view/object.rs:762
+msgid "Base Game"
+msgstr ""
+
+#: src/conflicts_view/file.rs:132
+msgid "top level"
+msgstr ""
+
+#: src/conflicts_view/file.rs:133
+msgid "{count} mod ships it"
+msgid_plural "{count} mods ship it"
+msgstr[0] ""
+msgstr[1] ""
+
+#: src/conflicts_view/file.rs:134
+msgid "Overridden file · {where_} · {mods} · {name} wins"
+msgstr ""
+
+#: src/conflicts_view/file.rs:142
+msgid "Combine the copies object by object, using AI only where they disagree"
+msgstr ""
+
+#: src/conflicts_view/file.rs:169
+msgid "The game only uses the copy from {name}, the mod loaded last. The others' changes to this file are lost."
+msgstr ""
+
+#: src/conflicts_view/file.rs:171
+msgid "The merged patch's copy is out of date: {reasons}."
+msgstr ""
+
+#: src/conflicts_view/file.rs:172
+msgid "The merged patch holds its own copy, which is used instead of all of these."
+msgstr ""
+
+#: src/conflicts_view/file.rs:190
+msgid "Compare {name} with the copy before it"
+msgstr ""
+
+#: src/conflicts_view/file.rs:202 src/conflicts_view/object.rs:366 src/conflicts_view/object.rs:484
+msgid "Nothing to Compare"
+msgstr ""
+
+#: src/conflicts_view/file.rs:202
+msgid "The mods' copies of this file weren't found. Rescan, in case the mods changed."
+msgstr ""
+
+#: src/conflicts_view/file.rs:213
+msgid "{name}: {reason}"
+msgstr ""
+
+#: src/conflicts_view/file.rs:213
+msgid "text"
+msgstr ""
+
+#: src/conflicts_view/file.rs:214
+msgid "These copies can't be shown side by side.\n"
+"{lines}"
+msgstr ""
+
+#: src/conflicts_view/file.rs:222 src/conflicts_view/file.rs:288
+msgid "The game's own copy"
+msgstr ""
+
+#: src/conflicts_view/file.rs:227 src/conflicts_view/file.rs:294
+msgid "Used in game"
+msgstr ""
+
+#: src/conflicts_view/file.rs:227 src/conflicts_view/file.rs:294
+msgid "Overridden"
+msgstr ""
+
+#: src/conflicts_view/file.rs:232 src/conflicts_view/file.rs:316 src/conflicts_view/object.rs:512 src/conflicts_view/object.rs:526
+msgid "Use This Version"
+msgstr ""
+
+#: src/conflicts_view/file.rs:232 src/conflicts_view/file.rs:316
+msgid "Save this copy to the merged patch, so it's used instead of {name}'s"
+msgstr ""
+
+#: src/conflicts_view/file.rs:255
+msgid "Mark what each copy changed from the base game, instead of the differences between the two"
+msgstr ""
+
+#: src/conflicts_view/file.rs:257 src/conflicts_view/object.rs:673 src/conflicts_view/object.rs:782
+msgid "Changed Lines Only"
+msgstr ""
+
+#: src/conflicts_view/file.rs:257 src/conflicts_view/object.rs:673 src/conflicts_view/object.rs:782
+msgid "Fold runs of lines that are the same in both, keeping a few around each difference. Click a fold to open it"
+msgstr ""
+
+#: src/conflicts_view/file.rs:258 src/conflicts_view/object.rs:674
+msgid "Ignore Spacing"
+msgstr ""
+
+#: src/conflicts_view/file.rs:258 src/conflicts_view/object.rs:674
+msgid "Don't count lines that only differ in spacing or indentation"
+msgstr ""
+
+#: src/conflicts_view/file.rs:310
+msgid "GTK can't read this image"
+msgstr ""
+
+#: src/conflicts_view/file.rs:336
+msgid "These two copies are identical."
+msgstr ""
+
+#: src/conflicts_view/file.rs:344 src/conflicts_view/object.rs:626 src/file_merge_dialog.rs:368
+msgid "Merge Tool…"
+msgstr ""
+
+#: src/conflicts_view/file.rs:344
+msgid "Merge these two copies in your merge tool; what you save there goes into the merged patch"
+msgstr ""
+
+#: src/conflicts_view/file.rs:351 src/conflicts_view/object.rs:633
+msgid "Choose a merge tool in Preferences first"
+msgstr ""
+
+#: src/conflicts_view/file.rs:363
+msgid "Saved your merge of {name}"
+msgstr ""
+
+#: src/conflicts_view/file.rs:365 src/conflicts_view/object.rs:649
+msgid "{tool} was closed without saving, so nothing changed"
+msgstr ""
+
+#: src/conflicts_view/file.rs:380
+msgid "Using {name}'s copy of {file}"
+msgstr ""
+
+#: src/conflicts_view/object.rs:122
+msgid "Result so far ({names})"
+msgstr ""
+
+#: src/conflicts_view/object.rs:281
+msgid "Object · {category}"
+msgstr ""
+
+#: src/conflicts_view/object.rs:292
+msgid "In game"
+msgstr ""
+
+#: src/conflicts_view/object.rs:327
+msgid "Could not read the mods' files"
+msgstr ""
+
+#: src/conflicts_view/object.rs:387
+msgid "{count} mod defines this"
+msgid_plural "{count} mods define this"
+msgstr[0] ""
+msgstr[1] ""
+
+#: src/conflicts_view/object.rs:389
+msgid "Object · {category} · {mods}, and the base game"
+msgstr ""
+
+#: src/conflicts_view/object.rs:391
+msgid "Object · {category} · {mods}"
+msgstr ""
+
+#: src/conflicts_view/object.rs:411
+msgid "Undo Last Step"
+msgstr ""
+
+#: src/conflicts_view/object.rs:422
+msgid "Start Over"
+msgstr ""
+
+#: src/conflicts_view/object.rs:422
+msgid "Go through the versions again from the first"
+msgstr ""
+
+#: src/conflicts_view/object.rs:434 src/conflicts_view.rs:274
+msgid "Merge with AI"
+msgstr ""
+
+#: src/conflicts_view/object.rs:436
+msgid "Ask {model} to combine these two versions"
+msgstr ""
+
+#: src/conflicts_view/object.rs:437 src/conflicts_view/object.rs:803
+msgid "Set up an AI provider in Preferences first"
+msgstr ""
+
+#: src/conflicts_view/object.rs:459
+msgid "In game now, {name}'s version is used: {reason}."
+msgstr ""
+
+#: src/conflicts_view/object.rs:462
+msgid "Couldn't find the definition in: {mods}"
+msgstr ""
+
+#: src/conflicts_view/object.rs:465
+msgid "The saved merge is out of date: {reasons}. Saving a new one replaces it."
+msgstr ""
+
+#: src/conflicts_view/object.rs:469
+msgid "This is the saved merge of {sources}. Edit and save it again, or start over to go through the versions again."
+msgstr ""
+
+#: src/conflicts_view/object.rs:473
+msgid "the result so far"
+msgstr ""
+
+#: src/conflicts_view/object.rs:474
+msgid "{reason}, so {which} keeps every change. No AI needed."
+msgstr ""
+
+#: src/conflicts_view/object.rs:477
+msgid "Notes from the model: {notes}"
+msgstr ""
+
+#: src/conflicts_view/object.rs:484
+msgid "The definition wasn't found in any mod's file. Rescan, in case the mods changed."
+msgstr ""
+
+#: src/conflicts_view/object.rs:513
+msgid "Keep {name}'s version and leave out {other}'s changes"
+msgstr ""
+
+#: src/conflicts_view/object.rs:516
+msgid "Keep This"
+msgstr ""
+
+#: src/conflicts_view/object.rs:517
+msgid "Keep the result so far and leave out {name}'s changes"
+msgstr ""
+
+#: src/conflicts_view/object.rs:520 src/conflicts_view/object.rs:541
+msgid "Edited"
+msgstr ""
+
+#: src/conflicts_view/object.rs:521 src/window/overview.rs:655
+msgid "Kept"
+msgstr ""
+
+#: src/conflicts_view/object.rs:522 src/file_merge_dialog.rs:265 src/file_merge_dialog.rs:280
+msgid "Merged"
+msgstr ""
+
+#: src/conflicts_view/object.rs:524
+msgid "Result so far"
+msgstr ""
+
+#: src/conflicts_view/object.rs:526
+msgid "Use {name}'s version in place of the one on the left"
+msgstr ""
+
+#: src/conflicts_view/object.rs:544
+msgid "Undo your edits to this version"
+msgstr ""
+
+#: src/conflicts_view/object.rs:586 src/conflicts_view/object.rs:765
+msgid "Take Change"
+msgstr ""
+
+#: src/conflicts_view/object.rs:586
+msgid "Copy the right card's side of the highlighted difference into the left card"
+msgstr ""
+
+#: src/conflicts_view/object.rs:626
+msgid "Merge these two versions in your merge tool; what you save there replaces the right one"
+msgstr ""
+
+#: src/conflicts_view/object.rs:647
+msgid "The merge tool's result is on the right; keep it with Use This Version"
+msgstr ""
+
+#: src/conflicts_view/object.rs:671
+msgid "Mark what each version changed from the base game, instead of the differences between the two"
+msgstr ""
+
+#. What to show: the editor, or the result next to another version.
+#: src/conflicts_view/object.rs:685
+msgid "Edit the Result"
+msgstr ""
+
+#: src/conflicts_view/object.rs:687
+msgid "Compare with the Base Game"
+msgstr ""
+
+#: src/conflicts_view/object.rs:690
+msgid "Compare with {name}"
+msgstr ""
+
+#: src/conflicts_view/object.rs:712
+msgid "Merged Result"
+msgstr ""
+
+#: src/conflicts_view/object.rs:713
+msgid "Saved merge"
+msgstr ""
+
+#: src/conflicts_view/object.rs:715
+msgid "Saved"
+msgstr ""
+
+#: src/conflicts_view/object.rs:715
+msgid "Not saved yet"
+msgstr ""
+
+#: src/conflicts_view/object.rs:723 src/file_merge_dialog.rs:37 src/fix_dialog.rs:42
+msgid "Save to Patch"
+msgstr ""
+
+#: src/conflicts_view/object.rs:723
+msgid "Save to the merged patch"
+msgstr ""
+
+#: src/conflicts_view/object.rs:765
+msgid "Copy the right card's side of the highlighted difference into the result"
+msgstr ""
+
+#: src/conflicts_view/object.rs:825
+msgid "The model's result still has a problem after a correction: {problem}. Fix it by hand, or undo and try again."
+msgstr ""
+
+#: src/conflicts_view/object.rs:834 src/folder_merge_dialog.rs:675
+msgid "The merge failed unexpectedly"
+msgstr ""
 
 #: src/conflicts_view.rs:218
 msgid "#{position} · {file}"
@@ -53,10 +391,6 @@ msgstr ""
 
 #: src/conflicts_view.rs:273
 msgid "Use the Right Version"
-msgstr ""
-
-#: src/conflicts_view.rs:274
-msgid "Merge with AI"
 msgstr ""
 
 #: src/conflicts_view.rs:275
@@ -454,7 +788,7 @@ msgstr ""
 msgid "Mods changed since they were merged"
 msgstr ""
 
-#: src/conflicts_view.rs:1305
+#: src/conflicts_view.rs:1305 src/folder_merge_dialog.rs:688 src/folder_merge_dialog.rs:747
 msgid "Merged into the patch"
 msgstr ""
 
@@ -476,6 +810,697 @@ msgstr ""
 
 #: src/conflicts_view.rs:1366
 msgid "The merge tool failed"
+msgstr ""
+
+#: src/diff_view.rs:357
+msgid "Show these lines"
+msgstr ""
+
+#: src/error_report_dialog.rs:18
+msgid "{count} line in error.log"
+msgid_plural "{count} lines in error.log"
+msgstr[0] ""
+msgstr[1] ""
+
+#: src/error_report_dialog.rs:19
+msgid "{count} error comes from your mods"
+msgid_plural "{count} errors come from your mods"
+msgstr[0] ""
+msgstr[1] ""
+
+#: src/error_report_dialog.rs:21
+msgid "{lines}, written {when}. {errors}."
+msgstr ""
+
+#: src/error_report_dialog.rs:22
+msgid "{lines}. {errors}."
+msgstr ""
+
+#: src/error_report_dialog.rs:25
+msgid "Open error.log"
+msgstr ""
+
+#: src/error_report_dialog.rs:36
+msgid "No Errors"
+msgstr ""
+
+#: src/error_report_dialog.rs:36
+msgid "The game didn't log any errors last time"
+msgstr ""
+
+#: src/error_report_dialog.rs:42
+msgid "Game Errors"
+msgstr ""
+
+#: src/error_report_dialog.rs:42
+msgid "From the last time Stellaris ran"
+msgstr ""
+
+#: src/error_report_dialog.rs:52
+msgid "{errors} · {kinds}"
+msgstr ""
+
+#: src/error_report_dialog.rs:52 src/error_report_dialog.rs:57 src/window/overview.rs:466
+msgid "{count} error"
+msgid_plural "{count} errors"
+msgstr[0] ""
+msgstr[1] ""
+
+#: src/error_report_dialog.rs:52
+msgid "{count} kind"
+msgid_plural "{count} kinds"
+msgstr[0] ""
+msgstr[1] ""
+
+#: src/error_report_dialog.rs:56
+msgid "Errors from your merges and fixes"
+msgstr ""
+
+#: src/error_report_dialog.rs:57
+msgid "{errors} · from your merges and fixes"
+msgstr ""
+
+#: src/error_report_dialog.rs:72
+msgid "Open this file"
+msgstr ""
+
+#: src/error_report_dialog.rs:79
+msgid "…and {count} more kind"
+msgid_plural "…and {count} more kinds"
+msgstr[0] ""
+msgstr[1] ""
+
+#: src/file_merge_dialog.rs:36
+msgid "Merge Conflicts"
+msgstr ""
+
+#: src/file_merge_dialog.rs:51 src/folder_merge_dialog.rs:150
+msgid "Objects"
+msgstr ""
+
+#: src/file_merge_dialog.rs:51
+msgid "Reading each mod's copy…"
+msgstr ""
+
+#: src/file_merge_dialog.rs:54
+msgid "Merged File"
+msgstr ""
+
+#: src/file_merge_dialog.rs:55
+msgid "Review and edit before saving. Merging conflicts rebuilds this from the objects above, replacing manual edits."
+msgstr ""
+
+#: src/file_merge_dialog.rs:73
+msgid "This file was merged before. Saving replaces that merge with this one."
+msgstr ""
+
+#: src/file_merge_dialog.rs:110
+msgid "This file can't be merged object by object."
+msgstr ""
+
+#: src/file_merge_dialog.rs:115
+msgid "Reading the mods' copies failed unexpectedly"
+msgstr ""
+
+#: src/file_merge_dialog.rs:126
+msgid "Recovered from {from}"
+msgstr ""
+
+#: src/file_merge_dialog.rs:127
+msgid "Only {from} changes this; using its version"
+msgstr ""
+
+#: src/file_merge_dialog.rs:128
+msgid "Changed differently by {sources}"
+msgstr ""
+
+#: src/file_merge_dialog.rs:143
+msgid "Whose version to keep"
+msgstr ""
+
+#: src/file_merge_dialog.rs:173
+msgid "Merge {count} Conflict with AI"
+msgid_plural "Merge {count} Conflicts with AI"
+msgstr[0] ""
+msgstr[1] ""
+
+#: src/file_merge_dialog.rs:176
+msgid "Ask {model} to merge each conflicting object"
+msgstr ""
+
+#: src/file_merge_dialog.rs:239
+msgid "Merging…"
+msgstr ""
+
+#: src/file_merge_dialog.rs:254
+msgid "the merge was closed"
+msgstr ""
+
+#: src/file_merge_dialog.rs:256 src/fix_dialog.rs:203 src/folder_merge_dialog.rs:719
+msgid "failed unexpectedly"
+msgstr ""
+
+#: src/file_merge_dialog.rs:270
+msgid "Merge failed"
+msgstr ""
+
+#: src/file_merge_dialog.rs:280
+msgid "Retry Failed"
+msgstr ""
+
+#: src/file_merge_dialog.rs:282
+msgid "{count} object couldn't be merged; hover the row for the reason. They keep the last mod's version."
+msgid_plural "{count} objects couldn't be merged; hover the row for the reason. They keep the last mod's version."
+msgstr[0] ""
+msgstr[1] ""
+
+#: src/file_merge_dialog.rs:330
+msgid "Could not read {label}'s copy: {error}"
+msgstr ""
+
+#: src/file_merge_dialog.rs:350
+msgid "{count} object kept as is"
+msgid_plural "{count} objects kept as is"
+msgstr[0] ""
+msgstr[1] ""
+
+#: src/file_merge_dialog.rs:352
+msgid "{count} recovered from overridden copies"
+msgstr ""
+
+#: src/file_merge_dialog.rs:355
+msgid "{count} taken from the only mod that changed them"
+msgstr ""
+
+#: src/file_merge_dialog.rs:357
+msgid "no conflicts"
+msgstr ""
+
+#: src/file_merge_dialog.rs:357
+msgid "{count} conflict to merge"
+msgid_plural "{count} conflicts to merge"
+msgstr[0] ""
+msgstr[1] ""
+
+#: src/file_merge_dialog.rs:366
+msgid "Merge the file below with"
+msgstr ""
+
+#: src/file_merge_dialog.rs:368
+msgid "Merge the file below with a mod's copy in your merge tool; what you save there replaces it"
+msgstr ""
+
+#: src/file_merge_dialog.rs:370
+msgid "{name}'s Copy"
+msgstr ""
+
+#: src/file_merge_dialog.rs:381
+msgid "Choose a merge tool in Preferences, on the Merging page, first."
+msgstr ""
+
+#: src/file_merge_dialog.rs:384
+msgid "Could not read {name}'s copy."
+msgstr ""
+
+#: src/file_merge_dialog.rs:390
+msgid "Merged file"
+msgstr ""
+
+#: src/file_merge_dialog.rs:396
+msgid "The merge tool's result is below. Review it, then save it to the patch."
+msgstr ""
+
+#: src/file_merge_dialog.rs:398
+msgid "{tool} was closed without saving, so nothing changed."
+msgstr ""
+
+#: src/fix_dialog.rs:41
+msgid "Fix with AI"
+msgstr ""
+
+#: src/fix_dialog.rs:45
+msgid "Fix {file}"
+msgstr ""
+
+#: src/fix_dialog.rs:51
+msgid "Problem"
+msgstr ""
+
+#: src/fix_dialog.rs:53
+msgid "{mod_name} · {error}. The game keeps reading after a brace mistake, but everything after it ends up nested inside the broken object and stops working."
+msgstr ""
+
+#: src/fix_dialog.rs:57
+msgid "Repair"
+msgstr ""
+
+#: src/fix_dialog.rs:57
+msgid "Repairing…"
+msgstr ""
+
+#: src/fix_dialog.rs:60
+msgid "Fixed File"
+msgstr ""
+
+#: src/fix_dialog.rs:60
+msgid "Review and edit before saving. It replaces the mod's copy through the merged patch."
+msgstr ""
+
+#: src/fix_dialog.rs:108
+msgid "Could not read the mod's file"
+msgstr ""
+
+#: src/fix_dialog.rs:115
+msgid "This can't be repaired automatically. Fix it by hand below; the file is checked before saving."
+msgstr ""
+
+#: src/fix_dialog.rs:122
+msgid "Braces were fixed so the file parses and every object is separate again. {count} object may still be nested wrongly inside."
+msgid_plural "Braces were fixed so the file parses and every object is separate again. {count} objects may still be nested wrongly inside."
+msgstr[0] ""
+msgstr[1] ""
+
+#: src/fix_dialog.rs:130
+msgid "Braces changed; check its nesting"
+msgstr ""
+
+#: src/fix_dialog.rs:132
+msgid "Not reviewed"
+msgstr ""
+
+#: src/fix_dialog.rs:138
+msgid "Fix {count} Object with AI"
+msgid_plural "Fix {count} Objects with AI"
+msgstr[0] ""
+msgstr[1] ""
+
+#: src/fix_dialog.rs:192
+msgid "Not found in the file"
+msgstr ""
+
+#: src/fix_dialog.rs:196
+msgid "Fixing…"
+msgstr ""
+
+#: src/fix_dialog.rs:205
+msgid "could not place the fix"
+msgstr ""
+
+#: src/fix_dialog.rs:208 src/fix_dialog.rs:223
+msgid "Fixed"
+msgstr ""
+
+#: src/fix_dialog.rs:214
+msgid "Not fixed; check it by hand"
+msgstr ""
+
+#: src/fix_dialog.rs:223
+msgid "Retry"
+msgstr ""
+
+#: src/fix_dialog.rs:225
+msgid "{count} object couldn't be fixed by AI; hover the row for the reason"
+msgid_plural "{count} objects couldn't be fixed by AI; hover the row for the reason"
+msgstr[0] ""
+msgstr[1] ""
+
+#: src/fix_dialog.rs:247
+msgid "The file still has a syntax error at {error}"
+msgstr ""
+
+#: src/folder_merge_dialog.rs:131 src/folder_merge_dialog.rs:192
+msgid "Merge"
+msgstr ""
+
+#: src/folder_merge_dialog.rs:132
+msgid "Stop"
+msgstr ""
+
+#: src/folder_merge_dialog.rs:132
+msgid "Stop after the object being merged"
+msgstr ""
+
+#: src/folder_merge_dialog.rs:134
+msgid "No AI provider set up"
+msgstr ""
+
+#: src/folder_merge_dialog.rs:134
+msgid "with {model}"
+msgstr ""
+
+#: src/folder_merge_dialog.rs:135
+msgid "Merge {title}"
+msgstr ""
+
+#: src/folder_merge_dialog.rs:139
+msgid "Reading every version…"
+msgstr ""
+
+#: src/folder_merge_dialog.rs:150
+msgid "Files"
+msgstr ""
+
+#: src/folder_merge_dialog.rs:152
+msgid "Each file is saved to the patch as soon as its conflicting objects are merged. Review any of them later from its conflict."
+msgstr ""
+
+#: src/folder_merge_dialog.rs:154
+msgid "Each merge is saved to the patch as soon as it's done. Review any of them later with Edit Merge."
+msgstr ""
+
+#: src/folder_merge_dialog.rs:194
+msgid "Merge {count} File"
+msgid_plural "Merge {count} Files"
+msgstr[0] ""
+msgstr[1] ""
+
+#: src/folder_merge_dialog.rs:196
+msgid "Merge {count} Object"
+msgid_plural "Merge {count} Objects"
+msgstr[0] ""
+msgstr[1] ""
+
+#: src/folder_merge_dialog.rs:201
+msgid "Set Up AI…"
+msgstr ""
+
+#: src/folder_merge_dialog.rs:204
+msgid "Nothing selected to merge"
+msgstr ""
+
+#: src/folder_merge_dialog.rs:208 src/folder_merge_dialog.rs:494
+msgid " · {count} without AI"
+msgstr ""
+
+#: src/folder_merge_dialog.rs:211
+msgid "No AI calls needed · {count} file can be combined as they are"
+msgid_plural "No AI calls needed · {count} files can be combined as they are"
+msgstr[0] ""
+msgstr[1] ""
+
+#: src/folder_merge_dialog.rs:212
+msgid "In each of these, every object is the same in every copy, only in some of them, or changed by only one mod."
+msgstr ""
+
+#: src/folder_merge_dialog.rs:214
+msgid "No AI calls needed · {count} version can be used as it is"
+msgid_plural "No AI calls needed · {count} versions can be used as they are"
+msgstr[0] ""
+msgstr[1] ""
+
+#: src/folder_merge_dialog.rs:215
+msgid "Each of these was changed by only one mod, or is the same in every mod."
+msgstr ""
+
+#: src/folder_merge_dialog.rs:219
+msgid "{count} AI call"
+msgid_plural "{count} AI calls"
+msgstr[0] ""
+msgstr[1] ""
+
+#: src/folder_merge_dialog.rs:221
+msgid "{calls}{without_ai} · about {input} tokens in, {low}–{high} out"
+msgstr ""
+
+#: src/folder_merge_dialog.rs:227
+msgid "Estimated cost: {low} to {high}, depending on how much the model thinks. Prices: ${input:.3} per million tokens in, ${output:.3} out."
+msgstr ""
+
+#: src/folder_merge_dialog.rs:233
+msgid "The provider doesn't publish this model's price, so the cost can't be estimated."
+msgstr ""
+
+#: src/folder_merge_dialog.rs:234
+msgid "Looking up the model's price…"
+msgstr ""
+
+#: src/folder_merge_dialog.rs:269
+msgid "This kind of file can't be merged object by object"
+msgstr ""
+
+#: src/folder_merge_dialog.rs:290
+msgid "Merge this file"
+msgstr ""
+
+#: src/folder_merge_dialog.rs:290
+msgid "Merge this object"
+msgstr ""
+
+#: src/folder_merge_dialog.rs:296 src/folder_merge_dialog.rs:330
+msgid "Show the merged result"
+msgstr ""
+
+#: src/folder_merge_dialog.rs:330
+msgid "Hide the merged result"
+msgstr ""
+
+#: src/folder_merge_dialog.rs:337
+msgid "Already merged · {subtitle}"
+msgstr ""
+
+#: src/folder_merge_dialog.rs:344
+msgid "No AI needed: {reason} · {subtitle}"
+msgstr ""
+
+#: src/folder_merge_dialog.rs:353
+msgid "Nothing to merge"
+msgstr ""
+
+#: src/folder_merge_dialog.rs:353
+msgid "Could not find it in: {mods}"
+msgstr ""
+
+#: src/folder_merge_dialog.rs:409
+msgid "Stopping…"
+msgstr ""
+
+#: src/folder_merge_dialog.rs:490
+msgid "Stopped · {count} not merged"
+msgstr ""
+
+#: src/folder_merge_dialog.rs:490
+msgid "Done"
+msgstr ""
+
+#: src/folder_merge_dialog.rs:492
+msgid "Merged {saved} of {total}"
+msgstr ""
+
+#: src/folder_merge_dialog.rs:497
+msgid " · {count} with objects left unmerged"
+msgstr ""
+
+#: src/folder_merge_dialog.rs:500
+msgid " · {count} failed"
+msgstr ""
+
+#: src/folder_merge_dialog.rs:504
+msgid "No AI calls were needed"
+msgstr ""
+
+#: src/folder_merge_dialog.rs:506
+msgid " · cost {cost}"
+msgstr ""
+
+#: src/folder_merge_dialog.rs:507
+msgid "Used {input} tokens in and {output} out{cost}"
+msgstr ""
+
+#: src/folder_merge_dialog.rs:509
+msgid "The provider didn't report token usage"
+msgstr ""
+
+#: src/folder_merge_dialog.rs:577
+msgid "{done} of {total} done"
+msgstr ""
+
+#: src/folder_merge_dialog.rs:578
+msgid "Merging {done} of {total}: {key}"
+msgstr ""
+
+#: src/folder_merge_dialog.rs:579
+msgid "{done} of {total} done · merging {count} at once"
+msgstr ""
+
+#: src/folder_merge_dialog.rs:663
+msgid "Used as it is: {reason}"
+msgstr ""
+
+#: src/folder_merge_dialog.rs:663
+msgid "Saved to the patch without AI"
+msgstr ""
+
+#: src/folder_merge_dialog.rs:682
+msgid "The model's result was rejected, even after a correction: {error}"
+msgstr ""
+
+#: src/folder_merge_dialog.rs:685
+msgid "Corrected after a rejected first try. {notes}"
+msgstr ""
+
+#: src/folder_merge_dialog.rs:708
+msgid "{key}: not reached before the run was stopped"
+msgstr ""
+
+#: src/folder_merge_dialog.rs:722
+msgid "rejected, even after a correction: {error}"
+msgstr ""
+
+#: src/folder_merge_dialog.rs:731
+msgid "{key}: {error}"
+msgstr ""
+
+#: src/folder_merge_dialog.rs:746
+msgid "Combined without AI"
+msgstr ""
+
+#: src/folder_merge_dialog.rs:746
+msgid "Merged {count} conflicting object"
+msgid_plural "Merged {count} conflicting objects"
+msgstr[0] ""
+msgstr[1] ""
+
+#: src/folder_merge_dialog.rs:750
+msgid "Saved, but {objects} the last mod's version: {problems}"
+msgstr ""
+
+#: src/folder_merge_dialog.rs:751
+msgid "{count} object keeps"
+msgid_plural "{count} objects keep"
+msgstr[0] ""
+msgstr[1] ""
+
+#: src/folder_merge_dialog.rs:775
+msgid "under $0.01"
+msgstr ""
+
+#: src/merge/ai.rs:532
+msgid "Claude declined to merge this object."
+msgstr ""
+
+#: src/merge/ai.rs:533 src/merge/ai.rs:634 src/merge/ai.rs:678
+msgid "The merged result was too long and got cut off."
+msgstr ""
+
+#: src/merge/ai.rs:540
+msgid "Choose a model for the OpenAI-compatible provider in Preferences."
+msgstr ""
+
+#: src/merge/ai.rs:635 src/merge/ai.rs:679
+msgid "The model declined to merge this object."
+msgstr ""
+
+#: src/merge/ai.rs:696
+msgid "The model's reply did not contain the merged result."
+msgstr ""
+
+#: src/merge/conflicts.rs:296 src/mods/mod.rs:105
+msgid "Mod files not found"
+msgstr ""
+
+#. Zips are unpacked before scanning; this one couldn't be.
+#: src/merge/conflicts.rs:301
+msgid "Could not unpack this zipped mod"
+msgstr ""
+
+#: src/merge/conflicts.rs:306
+msgid "Could not read mod files: {error}"
+msgstr ""
+
+#: src/merge/external.rs:93
+msgid "The merge tool command can't be read: a quote isn't closed"
+msgstr ""
+
+#: src/merge/external.rs:104
+msgid "No merge tool is set"
+msgstr ""
+
+#: src/merge/lint.rs:49
+msgid "Closed {count} block left open before line {line}"
+msgid_plural "Closed {count} blocks left open before line {line}"
+msgstr[0] ""
+msgstr[1] ""
+
+#: src/merge/lint.rs:85
+msgid "Removed a '}}' that closed nothing on line {line}"
+msgstr ""
+
+#: src/merge/lint.rs:99
+msgid "Closed {count} block left open at the end of the file"
+msgid_plural "Closed {count} blocks left open at the end of the file"
+msgstr[0] ""
+msgstr[1] ""
+
+#: src/merge/patch.rs:399
+msgid "The base game changed it in {version}"
+msgstr ""
+
+#: src/merge/patch.rs:400
+msgid "The base game changed it in an update"
+msgstr ""
+
+#: src/merge/patch.rs:431
+msgid "no longer defines it"
+msgstr ""
+
+#: src/merge/patch.rs:447
+msgid "The base game no longer defines it"
+msgstr ""
+
+#: src/merge/patch.rs:453
+msgid "The base game added it in {version}"
+msgstr ""
+
+#: src/merge/patch.rs:469
+msgid "no longer ships this file"
+msgstr ""
+
+#: src/merge/patch.rs:474
+msgid "The base game no longer ships this file"
+msgstr ""
+
+#: src/merge/patch.rs:484
+msgid "The base game added this file in {version}"
+msgstr ""
+
+#: src/merge/patch.rs:653
+msgid "{name} isn't enabled any more"
+msgstr ""
+
+#: src/merge/patch.rs:657
+msgid "{name} {missing}"
+msgstr ""
+
+#: src/merge/patch.rs:658
+msgid "{name} changed it"
+msgstr ""
+
+#: src/merge/trivial.rs:29
+msgid "Every mod's version matches the base game"
+msgstr ""
+
+#: src/merge/trivial.rs:29
+msgid "Every mod ships the same version"
+msgstr ""
+
+#: src/merge/trivial.rs:41
+msgid "Only {name} changed it from the base game"
+msgstr ""
+
+#: src/merge/trivial.rs:42
+msgid "Only {names} changed it from the base game, in the same way"
+msgstr ""
+
+#: src/merge_dialog.rs:58
+msgid "A localisation merge must be a single line starting with `{name}:`"
+msgstr ""
+
+#: src/merge_dialog.rs:61
+msgid "The merged script has a syntax error at {error}"
+msgstr ""
+
+#: src/merge_dialog.rs:63
+msgid "The merged script must define `{key}`"
 msgstr ""
 
 #. Mods also list optional compatibility targets here, so a
@@ -502,6 +1527,22 @@ msgstr ""
 
 #: src/mods/checks.rs:144
 msgid "Made for Stellaris {supported}; you have {installed}. It may still work."
+msgstr ""
+
+#: src/mods/extra.rs:66
+msgid "Could not list the mod in {folder}: {error}"
+msgstr ""
+
+#: src/mods/extra.rs:76
+msgid "Could not remove {path}: {error}"
+msgstr ""
+
+#: src/mods/extra.rs:113
+msgid "The extra mod folder {folder} is outside your home folder, so DrukhalManager can't see it from its sandbox. Run this once, then restart: flatpak override --user --filesystem={folder} io.github.dukko.DrukhalManager"
+msgstr ""
+
+#: src/mods/extra.rs:117
+msgid "Could not read the extra mod folder {folder}: {error}"
 msgstr ""
 
 #: src/mods/filter.rs:52 src/window/shortcuts.rs:21 src/window/shortcuts.rs:32 src/window.rs:383 src/window.rs:461
@@ -706,6 +1747,674 @@ msgstr ""
 msgid "Changes game rules ({what}…)"
 msgstr ""
 
+#: src/mods/mod.rs:95
+msgid "Invalid descriptor: {error}"
+msgstr ""
+
+#: src/mods/mod.rs:97
+msgid "Unreadable descriptor: {error}"
+msgstr ""
+
+#: src/mods/mod.rs:103
+msgid "Unsubscribed in Steam, so its files are gone"
+msgstr ""
+
+#: src/mods/mod.rs:104
+msgid "Steam hasn't downloaded it yet"
+msgstr ""
+
+#: src/mods/mod.rs:119
+msgid "Descriptor file not found"
+msgstr ""
+
+#: src/multiplayer.rs:73
+msgid "Native Linux build"
+msgstr ""
+
+#: src/multiplayer.rs:74
+msgid "Windows build"
+msgstr ""
+
+#: src/multiplayer.rs:82
+msgid "Players report that the native Linux build's checksum doesn't match the Windows build's, even with the same mods and files. Whoever runs the native Linux build can switch to the Windows build through Proton: in Steam, open Stellaris's Properties, and under Compatibility force a Proton version."
+msgstr ""
+
+#: src/multiplayer_dialog.rs:63
+msgid "Counting files…"
+msgstr ""
+
+#: src/multiplayer_dialog.rs:75
+msgid "{what}: {done} of {files}"
+msgstr ""
+
+#: src/multiplayer_dialog.rs:75 src/multiplayer_dialog.rs:311 src/window/backups_ui.rs:127 src/window/collections_ui.rs:774
+msgid "{count} file"
+msgid_plural "{count} files"
+msgstr[0] ""
+msgstr[1] ""
+
+#: src/multiplayer_dialog.rs:94
+msgid "Playing together needs the same game version, mods, load order and mod files. Save your report and send it to the other players, or open one of theirs to see what differs."
+msgstr ""
+
+#: src/multiplayer_dialog.rs:96
+msgid "Save My Report…"
+msgstr ""
+
+#: src/multiplayer_dialog.rs:96
+msgid "{count} enabled mod and the game's files"
+msgid_plural "{count} enabled mods and the game's files"
+msgstr[0] ""
+msgstr[1] ""
+
+#: src/multiplayer_dialog.rs:98
+msgid "Compare With a Report…"
+msgstr ""
+
+#: src/multiplayer_dialog.rs:98
+msgid "Open the report another player sent you"
+msgstr ""
+
+#: src/multiplayer_dialog.rs:101
+msgid "Include All Game Files"
+msgstr ""
+
+#: src/multiplayer_dialog.rs:102
+msgid "Also localisation, interface and graphics, to find modified or damaged game files outside the multiplayer checksum. Slow the first time."
+msgstr ""
+
+#: src/multiplayer_dialog.rs:112
+msgid "Playing With Windows Players"
+msgstr ""
+
+#: src/multiplayer_dialog.rs:112
+msgid "You run the native Linux build. {note}"
+msgstr ""
+
+#: src/multiplayer_dialog.rs:120
+msgid "Multiplayer Check"
+msgstr ""
+
+#: src/multiplayer_dialog.rs:128
+msgid "Multiplayer reports"
+msgstr ""
+
+#: src/multiplayer_dialog.rs:148
+msgid "Save Multiplayer Report"
+msgstr ""
+
+#: src/multiplayer_dialog.rs:153
+msgid "Reading"
+msgstr ""
+
+#: src/multiplayer_dialog.rs:158
+msgid "Saved {name}; send it to the other players"
+msgstr ""
+
+#: src/multiplayer_dialog.rs:159
+msgid "Could not save the report: {error}"
+msgstr ""
+
+#: src/multiplayer_dialog.rs:160
+msgid "Could not save the report"
+msgstr ""
+
+#: src/multiplayer_dialog.rs:182
+msgid "Open Multiplayer Report"
+msgstr ""
+
+#: src/multiplayer_dialog.rs:188
+msgid "Comparing"
+msgstr ""
+
+#: src/multiplayer_dialog.rs:191
+msgid "Could not read {file}: {error}"
+msgstr ""
+
+#: src/multiplayer_dialog.rs:198
+msgid "The comparison failed"
+msgstr ""
+
+#: src/multiplayer_dialog.rs:226
+msgid "Different"
+msgstr ""
+
+#: src/multiplayer_dialog.rs:227
+msgid "Only line endings differ (Windows CRLF or Linux LF)"
+msgstr ""
+
+#: src/multiplayer_dialog.rs:228
+msgid "Only in yours"
+msgstr ""
+
+#: src/multiplayer_dialog.rs:229
+msgid "Only in theirs"
+msgstr ""
+
+#: src/multiplayer_dialog.rs:232
+msgid "{what} · in the multiplayer checksum"
+msgstr ""
+
+#: src/multiplayer_dialog.rs:241
+msgid "{count} file differs"
+msgid_plural "{count} files differ"
+msgstr[0] ""
+msgstr[1] ""
+
+#: src/multiplayer_dialog.rs:243
+msgid " · {count} in the multiplayer checksum, so the game won't start together"
+msgstr ""
+
+#: src/multiplayer_dialog.rs:245
+msgid " · none in the multiplayer checksum (graphics, sound…), so it may still work"
+msgstr ""
+
+#: src/multiplayer_dialog.rs:255 src/multiplayer_dialog.rs:314
+msgid "…and {count} more"
+msgstr ""
+
+#: src/multiplayer_dialog.rs:263 src/multiplayer_dialog.rs:267
+msgid "Compared With {name}"
+msgstr ""
+
+#: src/multiplayer_dialog.rs:264
+msgid "Everything Matches"
+msgstr ""
+
+#: src/multiplayer_dialog.rs:264
+msgid "Same game version, mods, load order and mod files"
+msgstr ""
+
+#: src/multiplayer_dialog.rs:267
+msgid "What differs between your setup and theirs. Fix these so you all have the same."
+msgstr ""
+
+#: src/multiplayer_dialog.rs:271 src/preferences.rs:374
+msgid "Game"
+msgstr ""
+
+#: src/multiplayer_dialog.rs:273
+msgid "Different game version"
+msgstr ""
+
+#: src/multiplayer_dialog.rs:273 src/multiplayer_dialog.rs:276 src/multiplayer_dialog.rs:296
+msgid "Yours: {mine} · Theirs: {theirs}"
+msgstr ""
+
+#: src/multiplayer_dialog.rs:276
+msgid "Different game build"
+msgstr ""
+
+#: src/multiplayer_dialog.rs:279
+msgid "Game files"
+msgstr ""
+
+#: src/multiplayer_dialog.rs:284
+msgid "Only You Have"
+msgstr ""
+
+#: src/multiplayer_dialog.rs:284
+msgid "Enabled for you but not for them"
+msgstr ""
+
+#: src/multiplayer_dialog.rs:289
+msgid "Only They Have"
+msgstr ""
+
+#: src/multiplayer_dialog.rs:289
+msgid "Enabled for them but not for you"
+msgstr ""
+
+#: src/multiplayer_dialog.rs:294
+msgid "Different Load Order"
+msgstr ""
+
+#: src/multiplayer_dialog.rs:294
+msgid "The mods you both have load in a different order, which changes which files win"
+msgstr ""
+
+#: src/multiplayer_dialog.rs:301
+msgid "Different Mod Files"
+msgstr ""
+
+#: src/multiplayer_dialog.rs:301
+msgid "Usually a different version of the mod: resubscribe or update so you have the same"
+msgstr ""
+
+#: src/multiplayer_dialog.rs:307
+msgid "Files the Linux Build May Skip"
+msgstr ""
+
+#: src/multiplayer_dialog.rs:308
+msgid "The native Linux build reads file and folder names exactly, unlike Windows, so it may skip these files: they're in a game folder whose name isn't lowercase, such as Common or common/Traits, or named like another file but for case. Its checksum then doesn't match. The mod's author can rename them, or whoever runs the native Linux build can switch to the Windows build through Proton."
+msgstr ""
+
+#: src/secrets.rs:55
+msgid "No system keyring is available ({error})"
+msgstr ""
+
+#: src/secrets.rs:65
+msgid "Could not read the API key from the keyring: {error}"
+msgstr ""
+
+#: src/secrets.rs:77
+msgid "Could not save the API key in the keyring: {error}"
+msgstr ""
+
+#: src/secrets.rs:86
+msgid "Credential Manager isn't available ({error})"
+msgstr ""
+
+#: src/secrets.rs:93
+msgid "Could not read the API key from Credential Manager: {error}"
+msgstr ""
+
+#: src/secrets.rs:107
+msgid "Could not save the API key in Credential Manager: {error}"
+msgstr ""
+
+#: src/preferences.rs:88
+msgid "The key is kept in your system keyring."
+msgstr ""
+
+#: src/preferences.rs:90
+msgid "No keyring is available, so the key is kept in DrukhalManager's settings file, readable only by you."
+msgstr ""
+
+#: src/preferences.rs:96
+msgid "With your own Steam Web API key, the mod list also checks the Workshop's “Required items” of enabled mods, which many mods list only there, and Find Compatibility Patches can search the Workshop for patches between your mods. Get a key at <a href=\"https://steamcommunity.com/dev/apikey\">steamcommunity.com/dev/apikey</a>. {storage}"
+msgstr ""
+
+#: src/preferences.rs:107
+msgid "Steam Workshop"
+msgstr ""
+
+#: src/preferences.rs:108
+msgid "Steam Web API Key"
+msgstr ""
+
+#: src/preferences.rs:119 src/window/requirements_ui.rs:112 src/window.rs:966
+msgid "The keyring call failed"
+msgstr ""
+
+#: src/preferences.rs:142
+msgid "Merge Tool…, on the Conflicts page and when merging a file, opens two versions in this program, and uses what you save. {left}, {right}, {base} and {output} stand for the files."
+msgstr ""
+
+#: src/preferences.rs:144
+msgid " The Flatpak needs permission to start it, given once in a terminal with: {command}"
+msgstr ""
+
+#: src/preferences.rs:146
+msgid "External Merge Tool"
+msgstr ""
+
+#: src/preferences.rs:148
+msgid "Command"
+msgstr ""
+
+#: src/preferences.rs:155
+msgid "Use a common tool"
+msgstr ""
+
+#: src/preferences.rs:187
+msgid "Use the detected location"
+msgstr ""
+
+#: src/preferences.rs:187
+msgid "Don't use a folder"
+msgstr ""
+
+#: src/preferences.rs:188
+msgid "Choose a folder"
+msgstr ""
+
+#: src/preferences.rs:188
+msgid "Choose a file"
+msgstr ""
+
+#: src/preferences.rs:198
+msgid "{path} (detected)"
+msgstr ""
+
+#: src/preferences.rs:243
+msgid "Locations"
+msgstr ""
+
+#: src/preferences.rs:244
+msgid "A new game executable or data directory takes effect the next time DrukhalManager starts."
+msgstr ""
+
+#: src/preferences.rs:246
+msgid "Game Executable"
+msgstr ""
+
+#: src/preferences.rs:246 src/preferences.rs:247
+msgid "Not found"
+msgstr ""
+
+#: src/preferences.rs:247
+msgid "Data Directory"
+msgstr ""
+
+#: src/preferences.rs:248
+msgid "Where Stellaris keeps mod descriptors, saves and the load order"
+msgstr ""
+
+#: src/preferences.rs:249
+msgid "Extra Mod Folder"
+msgstr ""
+
+#: src/preferences.rs:249 src/window/overview.rs:649 src/window.rs:1007
+msgid "None"
+msgstr ""
+
+#: src/preferences.rs:250
+msgid "Mods in this folder's subfolders are listed and loaded like the rest, e.g. local mods on another drive or in a git checkout"
+msgstr ""
+
+#: src/preferences.rs:252
+msgid "Write Merged Mods There"
+msgstr ""
+
+#: src/preferences.rs:253
+msgid "Merge into One Mod writes into the extra mod folder instead of the game's"
+msgstr ""
+
+#: src/preferences.rs:268
+msgid "Launching"
+msgstr ""
+
+#: src/preferences.rs:269
+msgid "Game Launch Options"
+msgstr ""
+
+#: src/preferences.rs:271
+msgid "Refresh Descriptors Before Playing"
+msgstr ""
+
+#: src/preferences.rs:272
+msgid "Point mod descriptors at their mods' folders again if they moved"
+msgstr ""
+
+#: src/preferences.rs:275
+msgid "Close After Launching Game"
+msgstr ""
+
+#: src/preferences.rs:282
+msgid "Steam starts the game in the Flatpak"
+msgstr ""
+
+#: src/preferences.rs:284
+msgid "In the Flatpak, Steam starts the game, so set launch options in Steam: right-click Stellaris, choose Properties, then Launch Options."
+msgstr ""
+
+#: src/preferences.rs:286
+msgid "Added after the launcher's own arguments, e.g. -debug_mode"
+msgstr ""
+
+#: src/preferences.rs:299
+msgid "Conflict Scan"
+msgstr ""
+
+#: src/preferences.rs:300
+msgid "Localisation in languages you don't play in adds conflicts you don't need to solve. Changes apply on the next scan."
+msgstr ""
+
+#: src/preferences.rs:303
+msgid "Localisation"
+msgstr ""
+
+#: src/preferences.rs:313
+msgid "The game's language"
+msgstr ""
+
+#: src/preferences.rs:326 src/window/overview.rs:651
+msgid "Not scanned"
+msgstr ""
+
+#: src/preferences.rs:327
+msgid "Every language"
+msgstr ""
+
+#: src/preferences.rs:329
+msgid "{count} languages"
+msgstr ""
+
+#: src/preferences.rs:342
+msgid "Merge into One Mod"
+msgstr ""
+
+#: src/preferences.rs:343
+msgid "{Name} stands for the collection's name. Applies to the next merge."
+msgstr ""
+
+#: src/preferences.rs:346
+msgid "Merged Mod Name"
+msgstr ""
+
+#: src/preferences.rs:347
+msgid "Use the default name"
+msgstr ""
+
+#: src/preferences.rs:357
+msgid "Needs {Name}, or every collection's merge gets the same name"
+msgstr ""
+
+#: src/preferences.rs:377
+msgid "Merging"
+msgstr ""
+
+#: src/preferences.rs:406
+msgid "Leave the key empty to use the ANTHROPIC_API_KEY environment variable."
+msgstr ""
+
+#: src/preferences.rs:410
+msgid "OpenRouter, or a local server such as Ollama (http://localhost:11434/v1) or LM Studio (http://localhost:1234/v1). Use a model that's good at code; small local models often produce broken merges."
+msgstr ""
+
+#: src/preferences.rs:422
+msgid "{input} per million input tokens, {output} per million output tokens"
+msgstr ""
+
+#: src/preferences.rs:423
+msgid "Its price isn't known here, so merges show no cost estimate"
+msgstr ""
+
+#: src/preferences.rs:440
+msgid "Model"
+msgstr ""
+
+#: src/preferences.rs:488
+msgid "Provider"
+msgstr ""
+
+#: src/preferences.rs:489
+msgid "Claude (Anthropic API)"
+msgstr ""
+
+#: src/preferences.rs:489
+msgid "OpenAI-compatible"
+msgstr ""
+
+#: src/preferences.rs:494
+msgid "Claude"
+msgstr ""
+
+#: src/preferences.rs:495 src/preferences.rs:555
+msgid "{storage} {note}"
+msgstr ""
+
+#: src/preferences.rs:497
+msgid "API Key"
+msgstr ""
+
+#: src/preferences.rs:503
+msgid "OpenAI-Compatible Endpoint"
+msgstr ""
+
+#: src/preferences.rs:504 src/preferences.rs:556
+msgid "{note} {storage}"
+msgstr ""
+
+#: src/preferences.rs:506
+msgid "Base URL"
+msgstr ""
+
+#: src/preferences.rs:507
+msgid "Model ID, as the provider names it"
+msgstr ""
+
+#: src/preferences.rs:508
+msgid "API Key (optional for local servers)"
+msgstr ""
+
+#: src/preferences.rs:513 src/preferences.rs:533
+msgid "AI Merging"
+msgstr ""
+
+#: src/preferences.rs:513
+msgid "Merging sends the conflicting definitions to the provider you choose."
+msgstr ""
+
+#: src/preferences.rs:526
+msgid "Merge All"
+msgstr ""
+
+#: src/preferences.rs:528
+msgid "Merges at Once"
+msgstr ""
+
+#: src/preferences.rs:529
+msgid "How many objects Merge All sends to the provider at the same time. Lower it if the provider rate-limits you."
+msgstr ""
+
+#: src/preferences.rs:566
+msgid "DrukhalManager"
+msgstr ""
+
+#: src/preferences.rs:567
+msgid "Version {version}{flatpak}"
+msgstr ""
+
+#: src/preferences.rs:567
+msgid " (Flatpak)"
+msgstr ""
+
+#: src/preferences.rs:573 src/preferences.rs:680
+msgid "Updates"
+msgstr ""
+
+#: src/preferences.rs:575
+msgid "Check for Updates at Startup"
+msgstr ""
+
+#: src/preferences.rs:577
+msgid "Flatpak checks DrukhalManager's repository and offers to install new versions"
+msgstr ""
+
+#: src/preferences.rs:579
+msgid "Asks GitHub for the latest release. Your package manager installs it."
+msgstr ""
+
+#: src/preferences.rs:584
+msgid "Include Test Versions"
+msgstr ""
+
+#: src/preferences.rs:585
+msgid "Also offers betas and release candidates, which may have bugs"
+msgstr ""
+
+#: src/preferences.rs:588
+msgid "Check for Updates"
+msgstr ""
+
+#: src/preferences.rs:590
+msgid "Check"
+msgstr ""
+
+#: src/preferences.rs:613
+msgid "Ignore This Version"
+msgstr ""
+
+#: src/preferences.rs:614
+msgid "Open Release Page"
+msgstr ""
+
+#: src/preferences.rs:615
+msgid "Install Update"
+msgstr ""
+
+#: src/preferences.rs:651
+msgid "The check failed"
+msgstr ""
+
+#: src/preferences.rs:656
+msgid "Test version {version} is available"
+msgstr ""
+
+#: src/preferences.rs:656
+msgid "Version {version} is available"
+msgstr ""
+
+#: src/preferences.rs:657
+msgid "What's New in {version}"
+msgstr ""
+
+#: src/preferences.rs:658
+msgid "No release notes."
+msgstr ""
+
+#: src/preferences.rs:662
+msgid "\n"
+"\n"
+"Test versions aren't in DrukhalManager's Flatpak repository. To try this one, download DrukhalManager.flatpak from its release page and run “flatpak install --reinstall DrukhalManager.flatpak”. The next stable release replaces it as usual."
+msgstr ""
+
+#: src/preferences.rs:671
+msgid "DrukhalManager is up to date"
+msgstr ""
+
+#: src/resize_grip.rs:19
+msgid "Drag to resize"
+msgstr ""
+
+#: src/thinking_view.rs:50
+msgid "What the model is thinking. Click to expand."
+msgstr ""
+
+#: src/thinking_view.rs:57
+msgid "Waiting for the model…"
+msgstr ""
+
+#: src/thinking_view.rs:81
+msgid "Thinking: {thought}"
+msgstr ""
+
+#: src/thinking_view.rs:85
+msgid "Writing the result… {count} characters"
+msgstr ""
+
+#: src/thinking_view.rs:94
+msgid "This model didn't share its reasoning"
+msgstr ""
+
+#: src/thinking_view.rs:95
+msgid "Reasoning ({count} words)"
+msgstr ""
+
+#: src/update.rs:65
+msgid "Could not reach GitHub: {error}"
+msgstr ""
+
+#: src/update.rs:66
+msgid "Unexpected reply from GitHub: {error}"
+msgstr ""
+
+#: src/update.rs:71
+msgid "No releases are published yet"
+msgstr ""
+
 #: src/window/backups_ui.rs:26 src/window/backups_ui.rs:29
 msgid "Merged Patch Backups"
 msgstr ""
@@ -777,12 +2486,6 @@ msgstr[1] ""
 #: src/window/backups_ui.rs:125
 msgid "{objects} and {files}"
 msgstr ""
-
-#: src/window/backups_ui.rs:127 src/window/collections_ui.rs:774
-msgid "{count} file"
-msgid_plural "{count} files"
-msgstr[0] ""
-msgstr[1] ""
 
 #: src/window/backups_ui.rs:133
 msgid "{when} · {contents}"
@@ -1822,12 +3525,6 @@ msgstr ""
 msgid "Last game logged {errors}"
 msgstr ""
 
-#: src/window/overview.rs:466
-msgid "{count} error"
-msgid_plural "{count} errors"
-msgstr[0] ""
-msgstr[1] ""
-
 #: src/window/overview.rs:477
 msgid "No Mod Selected"
 msgstr ""
@@ -1872,20 +3569,8 @@ msgstr ""
 msgid "No problems found"
 msgstr ""
 
-#: src/window/overview.rs:649 src/window.rs:1007
-msgid "None"
-msgstr ""
-
-#: src/window/overview.rs:651
-msgid "Not scanned"
-msgstr ""
-
 #: src/window/overview.rs:655
 msgid "Turns them off"
-msgstr ""
-
-#: src/window/overview.rs:655
-msgid "Kept"
 msgstr ""
 
 #: src/window/overview.rs:656 src/window.rs:1006
@@ -2454,10 +4139,6 @@ msgstr ""
 
 #: src/window/requirements_ui.rs:43
 msgid "_Undo"
-msgstr ""
-
-#: src/window/requirements_ui.rs:112 src/window.rs:966
-msgid "The keyring call failed"
 msgstr ""
 
 #: src/window/requirements_ui.rs:153

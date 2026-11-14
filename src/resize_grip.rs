@@ -16,7 +16,7 @@ pub fn resizable(scroll: &gtk::ScrolledWindow) -> gtk::Box {
         .height_request(12)
         .halign(gtk::Align::Fill)
         .cursor(&gtk::gdk::Cursor::from_name("row-resize", None).expect("a standard cursor"))
-        .tooltip_text("Drag to resize")
+        .tooltip_text(t!("Drag to resize"))
         .css_classes(["resize-grip"])
         .build();
     let pill = gtk::Box::builder().halign(gtk::Align::Center).valign(gtk::Align::Center).css_classes(["resize-grip-pill"]).build();

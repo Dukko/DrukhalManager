@@ -293,17 +293,17 @@ pub fn analyze_cached(mods: &[ModInput], languages: Option<&BTreeSet<String>>, c
     let mut files: BTreeMap<String, Vec<(usize, String)>> = BTreeMap::new();
     for (position, m) in mods.iter().enumerate() {
         let Some(root) = &m.root else {
-            report.skipped.push((position, "Mod files not found".into()));
+            report.skipped.push((position, t!("Mod files not found")));
             continue;
         };
         if root.is_file() {
             // Zips are unpacked before scanning; this one couldn't be.
-            report.skipped.push((position, "Could not unpack this zipped mod".into()));
+            report.skipped.push((position, t!("Could not unpack this zipped mod")));
             continue;
         }
         let mut found = Vec::new();
         if let Err(e) = walk(root, root, &mut found) {
-            report.skipped.push((position, format!("Could not read mod files: {e}")));
+            report.skipped.push((position, tf!("Could not read mod files: {error}", error = e)));
             continue;
         }
         // A later `replace_path` makes the game ignore earlier mods' files in

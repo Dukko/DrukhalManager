@@ -46,7 +46,7 @@ pub fn repair(category: &str, src: &str) -> Option<Repair> {
     for (n, line) in src.split_inclusive('\n').enumerate() {
         let number = n + 1;
         if !in_string && depth > 0 && starts_top_level_object(line) {
-            fixes.push(format!("Closed {} left open before line {number}", plural(depth)));
+            fixes.push(tnf!("Closed {count} block left open before line {line}", "Closed {count} blocks left open before line {line}", count = depth, line = number));
             mark(&mut damaged, &current);
             out.push_str(&"}".repeat(depth));
             out.push('\n');
@@ -82,7 +82,7 @@ pub fn repair(category: &str, src: &str) -> Option<Repair> {
                 '"' => in_string = true,
                 '{' => depth += 1,
                 '}' if depth == 0 => {
-                    fixes.push(format!("Removed a '}}' that closed nothing on line {number}"));
+                    fixes.push(tf!("Removed a '}}' that closed nothing on line {line}", line = number));
                     mark(&mut damaged, &current);
                     continue;
                 }
@@ -96,7 +96,7 @@ pub fn repair(category: &str, src: &str) -> Option<Repair> {
         return None;
     }
     if depth > 0 {
-        fixes.push(format!("Closed {} left open at the end of the file", plural(depth)));
+        fixes.push(tnf!("Closed {count} block left open at the end of the file", "Closed {count} blocks left open at the end of the file", count = depth));
         mark(&mut damaged, &current);
         if !out.ends_with('\n') {
             out.push('\n');
@@ -149,10 +149,6 @@ fn starts_top_level_object(line: &str) -> bool {
     }
     let Some((key, rest)) = line.split_once('=') else { return false };
     !key.trim().contains(char::is_whitespace) && rest.trim_start().starts_with('{')
-}
-
-fn plural(n: usize) -> String {
-    if n == 1 { "1 block".into() } else { format!("{n} blocks") }
 }
 
 #[cfg(test)]

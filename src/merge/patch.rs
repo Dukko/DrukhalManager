@@ -396,8 +396,8 @@ impl Patch {
         let game_dir = roots.get(VANILLA).map(PathBuf::as_path);
         let updated = |checked: Option<&str>| matches!((checked, game_version), (Some(was), Some(now)) if was != now);
         let changed_in = |checked: Option<&str>| match (updated(checked), game_version) {
-            (true, Some(now)) => format!("The base game changed it in {now}"),
-            _ => "The base game changed it in an update".to_owned(),
+            (true, Some(now)) => tf!("The base game changed it in {version}", version = now),
+            _ => t!("The base game changed it in an update"),
         };
         let has_vanilla = |prints: &[Print]| prints.iter().any(|p| p.mod_id == VANILLA);
 
@@ -428,7 +428,7 @@ impl Patch {
             let mut check = Check::default();
             for p in &mut m.prints {
                 if p.mod_id != VANILLA {
-                    check.mod_print(p, roots, &text_of, "no longer defines it");
+                    check.mod_print(p, roots, &text_of, &t!("no longer defines it"));
                     continue;
                 }
                 let Some(dir) = game_dir else { continue };
@@ -444,13 +444,13 @@ impl Patch {
                     }
                 }
                 match now {
-                    None => check.base_game("The base game no longer defines it".to_owned()),
+                    None => check.base_game(t!("The base game no longer defines it")),
                     Some(text) if fingerprint(&text) != p.hash => check.base_game(changed_in(m.game_version.as_deref())),
                     Some(_) => {}
                 }
             }
             if added.contains(&(category.clone(), key.clone())) {
-                check.base_game(format!("The base game added it in {}", game_version.unwrap_or_default()));
+                check.base_game(tf!("The base game added it in {version}", version = game_version.unwrap_or_default()));
             }
             dirty |= check.confirm(&mut m.game_version, game_dir, game_version);
             if !check.reasons.is_empty() {
@@ -466,12 +466,12 @@ impl Patch {
             let mut check = Check::default();
             for p in &f.prints {
                 if p.mod_id != VANILLA {
-                    check.mod_print(p, roots, &text_of, "no longer ships this file");
+                    check.mod_print(p, roots, &text_of, &t!("no longer ships this file"));
                     continue;
                 }
                 let Some(dir) = game_dir else { continue };
                 match read_text(dir, &p.file) {
-                    None => check.base_game("The base game no longer ships this file".to_owned()),
+                    None => check.base_game(t!("The base game no longer ships this file")),
                     Some(text) if fingerprint(&text) != p.hash => check.base_game(changed_in(f.game_version.as_deref())),
                     Some(_) => {}
                 }
@@ -481,7 +481,7 @@ impl Patch {
                 && updated(f.game_version.as_deref())
                 && dir.join(&f.path).is_file()
             {
-                check.base_game(format!("The base game added this file in {}", game_version.unwrap_or_default()));
+                check.base_game(tf!("The base game added this file in {version}", version = game_version.unwrap_or_default()));
             }
             dirty |= check.confirm(&mut f.game_version, game_dir, game_version);
             if !check.reasons.is_empty() {
@@ -650,12 +650,12 @@ impl Check {
     /// the mod no longer has it.
     fn mod_print(&mut self, p: &Print, roots: &HashMap<String, PathBuf>, text_of: &dyn Fn(&str) -> Option<String>, missing: &str) {
         let Some(root) = roots.get(&p.mod_id) else {
-            self.reasons.push(format!("{} isn't enabled any more", p.name));
+            self.reasons.push(tf!("{name} isn't enabled any more", name = &p.name));
             return;
         };
         match read_text(root, &p.file).and_then(|s| text_of(&s)) {
-            None => self.reasons.push(format!("{} {missing}", p.name)),
-            Some(text) if fingerprint(&text) != p.hash => self.reasons.push(format!("{} changed it", p.name)),
+            None => self.reasons.push(tf!("{name} {missing}", name = &p.name, missing = missing)),
+            Some(text) if fingerprint(&text) != p.hash => self.reasons.push(tf!("{name} changed it", name = &p.name)),
             Some(_) => {}
         }
     }

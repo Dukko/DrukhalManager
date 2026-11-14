@@ -26,8 +26,8 @@ pub fn resolve(vanilla: Option<&Source>, sources: &[Source]) -> Option<Resolved>
     let last = prints.len().checked_sub(1)?;
     let base = vanilla.map(|v| print(&v.text));
     if prints.iter().all(|p| *p == prints[0]) {
-        let reason = if base.as_ref() == Some(&prints[0]) { "Every mod's version matches the base game" } else { "Every mod ships the same version" };
-        return Some(Resolved { index: last, reason: reason.to_owned() });
+        let reason = if base.as_ref() == Some(&prints[0]) { t!("Every mod's version matches the base game") } else { t!("Every mod ships the same version") };
+        return Some(Resolved { index: last, reason });
     }
     let base = base?;
     let changed: Vec<usize> = (0..prints.len()).filter(|&i| prints[i] != base).collect();
@@ -38,8 +38,8 @@ pub fn resolve(vanilla: Option<&Source>, sources: &[Source]) -> Option<Resolved>
     let mut names: Vec<&str> = changed.iter().map(|&i| sources[i].label.as_str()).collect();
     names.dedup();
     let reason = match names[..] {
-        [one] => format!("Only {one} changed it from the base game"),
-        _ => format!("Only {} changed it from the base game, in the same way", join(&names)),
+        [one] => tf!("Only {name} changed it from the base game", name = one),
+        _ => tf!("Only {names} changed it from the base game, in the same way", names = join(&names)),
     };
     Some(Resolved { index: newest, reason })
 }

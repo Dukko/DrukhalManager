@@ -52,7 +52,7 @@ mod store {
             keyring.unlock().await?;
             Ok(keyring)
         })
-        .map_err(|e: oo7::Error| format!("No system keyring is available ({e})"))
+        .map_err(|e: oo7::Error| tf!("No system keyring is available ({error})", error = e))
     }
 
     pub fn get(kind: &str) -> Result<Option<String>, String> {
@@ -62,7 +62,7 @@ mod store {
             let secret = item.secret().await?;
             Ok(Some(String::from_utf8_lossy(secret.as_bytes()).into_owned()))
         })
-        .map_err(|e: oo7::Error| format!("Could not read the API key from the keyring: {e}"))
+        .map_err(|e: oo7::Error| tf!("Could not read the API key from the keyring: {error}", error = e))
     }
 
     pub fn set(kind: &str, key: &str) -> Result<(), String> {
@@ -74,7 +74,7 @@ mod store {
                 keyring.create_item(&label(kind), &attributes(kind), key, true).await
             }
         })
-        .map_err(|e| format!("Could not save the API key in the keyring: {e}"))
+        .map_err(|e| tf!("Could not save the API key in the keyring: {error}", error = e))
     }
 }
 
@@ -83,14 +83,14 @@ mod store {
 #[cfg(windows)]
 mod store {
     fn entry(kind: &str) -> Result<keyring::Entry, String> {
-        keyring::Entry::new_with_target(&format!("{}/{kind}", crate::APP_ID), crate::APP_ID, kind).map_err(|e| format!("Credential Manager isn't available ({e})"))
+        keyring::Entry::new_with_target(&format!("{}/{kind}", crate::APP_ID), crate::APP_ID, kind).map_err(|e| tf!("Credential Manager isn't available ({error})", error = e))
     }
 
     pub fn get(kind: &str) -> Result<Option<String>, String> {
         match entry(kind)?.get_password() {
             Ok(key) => Ok(Some(key)),
             Err(keyring::Error::NoEntry) => Ok(None),
-            Err(e) => Err(format!("Could not read the API key from Credential Manager: {e}")),
+            Err(e) => Err(tf!("Could not read the API key from Credential Manager: {error}", error = e)),
         }
     }
 
@@ -104,7 +104,7 @@ mod store {
         } else {
             entry.set_password(key)
         };
-        result.map_err(|e| format!("Could not save the API key in Credential Manager: {e}"))
+        result.map_err(|e| tf!("Could not save the API key in Credential Manager: {error}", error = e))
     }
 }
 
