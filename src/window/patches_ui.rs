@@ -329,10 +329,11 @@ impl Window {
 
     fn patch_row(self: &Rc<Self>, d: &Rc<Dialog>, group: &adw::PreferencesGroup, s: &Suggestion, names: &[String]) -> adw::ActionRow {
         let item = &s.item;
-        let title = if item.title.is_empty() { format!("Workshop item {}", item.id) } else { item.title.clone() };
-        let mut facts = vec![format!("{} {}", thousands(item.subscriptions), if item.subscriptions == 1 { "subscriber" } else { "subscribers" })];
+        let title = if item.title.is_empty() { tf!("Workshop item {id}", id = item.id) } else { item.title.clone() };
+        let subscribers = tn!("subscriber", "subscribers", item.subscriptions);
+        let mut facts = vec![tf!("{count} {kind}", count = thousands(item.subscriptions), kind = subscribers)];
         if item.updated > 0 {
-            facts.push(format!("updated {}", ago(UNIX_EPOCH + Duration::from_secs(item.updated))));
+            facts.push(tf!("updated {when}", when = ago(UNIX_EPOCH + Duration::from_secs(item.updated))));
         }
         let row = adw::ActionRow::builder().title(&title).use_markup(false).subtitle(format!("{}\n{}", needs(names), facts.join(" · "))).subtitle_lines(0).build();
         row.add_prefix(&self.workshop_thumbnail(item.id, 48));
@@ -369,7 +370,7 @@ impl Window {
             if let Some(filter) = filter {
                 filter();
             }
-            let toast = adw::Toast::builder().title(format!("Dismissed “{title}”")).button_label("_Undo").build();
+            let toast = adw::Toast::builder().title(tf!("Dismissed “{title}”", title = &title)).button_label(t!("_Undo")).build();
             let (weak, dw) = (Rc::downgrade(&ui), Rc::downgrade(&d));
             toast.connect_button_clicked(move |_| {
                 if let (Some(ui), Some(d)) = (weak.upgrade(), dw.upgrade()) {

@@ -149,7 +149,7 @@ impl Window {
         let monitor = match update::Monitor::new().await {
             Ok(m) => Rc::new(m),
             Err(e) => {
-                self.add_toast(adw::Toast::builder().title(format!("Could not reach Flatpak to update: {}", e.message())).timeout(0).build());
+                self.add_toast(adw::Toast::builder().title(tf!("Could not reach Flatpak to update: {error}", error = e.message())).timeout(0).build());
                 return None;
             }
         };

@@ -24,7 +24,7 @@ impl Window {
                     if let Err(e) = collections.save(&mods::collections::path()) {
                         self.add_toast(
                             adw::Toast::builder()
-                                .title(format!("Could not save collections: {e}"))
+                                .title(tf!("Could not save collections: {error}", error = e))
                                 .timeout(0)
                                 .build(),
                         );
@@ -38,7 +38,7 @@ impl Window {
             Err(e) => {
                 self.add_toast(
                     adw::Toast::builder()
-                        .title(format!("Could not save load order: {e}"))
+                        .title(tf!("Could not save load order: {error}", error = e))
                         .timeout(0)
                         .build(),
                 );

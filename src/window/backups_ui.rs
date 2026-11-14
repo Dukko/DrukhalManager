@@ -15,7 +15,7 @@ impl Window {
     pub(super) fn snapshot_patch(&self, reason: &str) -> Result<(), String> {
         snapshot::take(&self.paths.user_dir, &self.patch_target(), &self.paths.backup_dir, reason)
             .map(|_| ())
-            .map_err(|e| format!("Could not back up the merged patch first, so nothing was changed: {e}"))
+            .map_err(|e| tf!("Could not back up the merged patch first, so nothing was changed: {error}", error = e))
     }
 
     pub(super) fn show_patch_backups(self: &Rc<Self>) {

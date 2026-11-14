@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: DrukhalManager 1.0.0\n"
 "Report-Msgid-Bugs-To: https://github.com/Dukko/DrukhalManager/issues\n"
-"POT-Creation-Date: 2026-11-14 20:15+0000\n"
+"POT-Creation-Date: 2026-11-14 20:26+0000\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -2427,6 +2427,10 @@ msgstr ""
 msgid "No releases are published yet"
 msgstr ""
 
+#: src/window/backups_ui.rs:18
+msgid "Could not back up the merged patch first, so nothing was changed: {error}"
+msgstr ""
+
 #: src/window/backups_ui.rs:26 src/window/backups_ui.rs:29
 msgid "Merged Patch Backups"
 msgstr ""
@@ -2463,7 +2467,7 @@ msgstr ""
 msgid "_Restore"
 msgstr ""
 
-#: src/window/backups_ui.rs:100
+#: src/window/backups_ui.rs:100 src/window/conflicts_ui.rs:768
 msgid "Could not read the merged patch: {error}"
 msgstr ""
 
@@ -2503,7 +2507,7 @@ msgstr ""
 msgid "{when} · {contents}"
 msgstr ""
 
-#: src/window/collections_ui.rs:28 src/window/collections_ui.rs:205
+#: src/window/collections_ui.rs:28 src/window/collections_ui.rs:205 src/window/conflicts_ui.rs:750 src/window/persist.rs:27
 msgid "Could not save collections: {error}"
 msgstr ""
 
@@ -2999,6 +3003,34 @@ msgstr ""
 msgid "Backups…"
 msgstr ""
 
+#: src/window/conflicts_ui.rs:220
+msgid "Could not update {what}: {error}"
+msgstr ""
+
+#: src/window/conflicts_ui.rs:240
+msgid "Removed {what} from the patch"
+msgstr ""
+
+#: src/window/conflicts_ui.rs:281
+msgid "The mods {what} was merged from no longer conflict over it. Remove it from the patch, or enable them and rescan."
+msgstr ""
+
+#: src/window/conflicts_ui.rs:300
+msgid "Kept {what}; changes to its mods will be noticed from now on"
+msgstr ""
+
+#: src/window/conflicts_ui.rs:346
+msgid "Could not save ignored conflicts: {error}"
+msgstr ""
+
+#: src/window/conflicts_ui.rs:765
+msgid "Could not rename the merged patch: {error}"
+msgstr ""
+
+#: src/window/conflicts_ui.rs:782
+msgid "Could not save the merged patch: {error}"
+msgstr ""
+
 #: src/window/conflicts_ui.rs:832
 msgid "added to the end of the load order"
 msgstr ""
@@ -3260,7 +3292,7 @@ msgstr ""
 msgid " · Updated since the game was"
 msgstr ""
 
-#: src/window/game_update_ui.rs:98 src/window/overview.rs:721 src/window/patches_ui.rs:340
+#: src/window/game_update_ui.rs:98 src/window/overview.rs:721 src/window/patches_ui.rs:341
 msgid "Open Workshop Page"
 msgstr ""
 
@@ -3557,7 +3589,7 @@ msgstr ""
 msgid "Always loads last"
 msgstr ""
 
-#: src/window/overview.rs:527
+#: src/window/overview.rs:527 src/window/patches_ui.rs:336
 msgid "updated {when}"
 msgstr ""
 
@@ -3597,7 +3629,7 @@ msgstr ""
 msgid "not installed"
 msgstr ""
 
-#: src/window/overview.rs:693 src/window/patches_ui.rs:413
+#: src/window/overview.rs:693 src/window/patches_ui.rs:414
 msgid "enabled"
 msgstr ""
 
@@ -3701,7 +3733,7 @@ msgstr ""
 msgid "Patches for recent versions of the mods you run are usually updated with them, so older ones are hidden. Some mods that haven't been updated in years still work fine, but this list is meant for recent compatibility patches."
 msgstr ""
 
-#: src/window/patches_ui.rs:229 src/window/patches_ui.rs:399
+#: src/window/patches_ui.rs:229 src/window/patches_ui.rs:400
 msgid "1 year"
 msgstr ""
 
@@ -3759,35 +3791,57 @@ msgid_plural "Show {count} Dismissed Items Again"
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/window/patches_ui.rs:357 src/window/notifications.rs:187
+#: src/window/patches_ui.rs:332 src/window/requirements_ui.rs:39
+msgid "Workshop item {id}"
+msgstr ""
+
+#: src/window/patches_ui.rs:333
+msgid "subscriber"
+msgid_plural "subscribers"
+msgstr[0] ""
+msgstr[1] ""
+
+#: src/window/patches_ui.rs:334
+msgid "{count} {kind}"
+msgstr ""
+
+#: src/window/patches_ui.rs:358 src/window/notifications.rs:187
 msgid "Dismiss"
 msgstr ""
 
-#: src/window/patches_ui.rs:400
+#: src/window/patches_ui.rs:373
+msgid "Dismissed “{title}”"
+msgstr ""
+
+#: src/window/patches_ui.rs:373 src/window/requirements_ui.rs:43
+msgid "_Undo"
+msgstr ""
+
+#: src/window/patches_ui.rs:401
 msgid "{count} year"
 msgid_plural "{count} years"
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/window/patches_ui.rs:401
+#: src/window/patches_ui.rs:402
 msgid "{count} week"
 msgid_plural "{count} weeks"
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/window/patches_ui.rs:410
+#: src/window/patches_ui.rs:411
 msgid "{list} and {last}"
 msgstr ""
 
-#: src/window/patches_ui.rs:414
+#: src/window/patches_ui.rs:415
 msgid "both enabled"
 msgstr ""
 
-#: src/window/patches_ui.rs:415
+#: src/window/patches_ui.rs:416
 msgid "all enabled"
 msgstr ""
 
-#: src/window/patches_ui.rs:417
+#: src/window/patches_ui.rs:418
 msgid "Needs {list}, {status}"
 msgstr ""
 
@@ -3987,6 +4041,10 @@ msgstr[1] ""
 msgid "Yesterday {time}"
 msgstr ""
 
+#: src/window/persist.rs:41
+msgid "Could not save load order: {error}"
+msgstr ""
+
 #: src/window/persist.rs:73
 msgid "Load order saved"
 msgstr ""
@@ -4051,6 +4109,10 @@ msgstr ""
 
 #: src/window/reload.rs:103
 msgid "Mods reloaded, none added or removed"
+msgstr ""
+
+#: src/window/reload.rs:113
+msgid "{first}, {second}, {third} and {count} more"
 msgstr ""
 
 #: src/window/repair_ui.rs:17
@@ -4141,16 +4203,8 @@ msgstr ""
 msgid "Could not repair descriptors: {error}"
 msgstr ""
 
-#: src/window/requirements_ui.rs:39
-msgid "Workshop item {id}"
-msgstr ""
-
 #: src/window/requirements_ui.rs:42
 msgid "“{name}” is no longer treated as required"
-msgstr ""
-
-#: src/window/requirements_ui.rs:43
-msgid "_Undo"
 msgstr ""
 
 #: src/window/requirements_ui.rs:153
@@ -4653,6 +4707,10 @@ msgstr ""
 
 #: src/window/updates.rs:140
 msgid "Details"
+msgstr ""
+
+#: src/window/updates.rs:152
+msgid "Could not reach Flatpak to update: {error}"
 msgstr ""
 
 #: src/window/updates.rs:186

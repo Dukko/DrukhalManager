@@ -110,7 +110,7 @@ fn summary(added: &[String], updated: &[String], removed: &[String]) -> String {
 fn names(names: &[String]) -> String {
     match names {
         [first, second, third, rest @ ..] if !rest.is_empty() => {
-            format!("{first}, {second}, {third} and {} more", rest.len())
+            tf!("{first}, {second}, {third} and {count} more", first = first, second = second, third = third, count = rest.len())
         }
         _ => names.join(", "),
     }
