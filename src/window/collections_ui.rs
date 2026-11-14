@@ -156,32 +156,32 @@ impl Window {
         }
         menu.append_section(Some("Collections"), &list);
         let manage = gio::Menu::new();
-        manage.append(Some("_New Collection…"), Some("win.collection-new"));
-        manage.append(Some("_Duplicate…"), Some("win.collection-duplicate"));
-        manage.append(Some("_Rename…"), Some("win.collection-rename"));
+        manage.append(Some(&t!("_New Collection…")), Some("win.collection-new"));
+        manage.append(Some(&t!("_Duplicate…")), Some("win.collection-duplicate"));
+        manage.append(Some(&t!("_Rename…")), Some("win.collection-rename"));
         if collections.list.len() > 1 {
-            manage.append(Some("De_lete"), Some("win.collection-delete"));
+            manage.append(Some(&t!("De_lete")), Some("win.collection-delete"));
         }
         menu.append_section(None, &manage);
         let share = gio::Menu::new();
         let import = gio::Menu::new();
-        import.append(Some("From the _Game's Load Order"), Some("win.collection-import-game"));
-        import.append(Some("From a Launcher _Playset…"), Some("win.collection-import-playset"));
-        import.append(Some("From a _File…"), Some("win.collection-import-file"));
-        import.append(Some("From a _Workshop Collection…"), Some("win.collection-import-workshop"));
+        import.append(Some(&t!("From the _Game's Load Order")), Some("win.collection-import-game"));
+        import.append(Some(&t!("From a Launcher _Playset…")), Some("win.collection-import-playset"));
+        import.append(Some(&t!("From a _File…")), Some("win.collection-import-file"));
+        import.append(Some(&t!("From a _Workshop Collection…")), Some("win.collection-import-workshop"));
         share.append_submenu(Some("_Import"), &import);
         let export = gio::Menu::new();
-        export.append(Some("To a DrukhalManager _File…"), Some("win.collection-export"));
-        export.append(Some("With the Merged _Patch…"), Some("win.collection-export-bundle"));
-        export.append(Some("To a Paradox _Launcher File…"), Some("win.collection-export-launcher"));
+        export.append(Some(&t!("To a DrukhalManager _File…")), Some("win.collection-export"));
+        export.append(Some(&t!("With the Merged _Patch…")), Some("win.collection-export-bundle"));
+        export.append(Some(&t!("To a Paradox _Launcher File…")), Some("win.collection-export-launcher"));
         share.append_submenu(Some("_Export"), &export);
-        share.append(Some("_Copy Load Order"), Some("win.collection-copy"));
-        share.append(Some("_Paste Load Order"), Some("win.collection-paste"));
-        share.append(Some("_Merge into One Mod…"), Some("win.collection-merge"));
+        share.append(Some(&t!("_Copy Load Order")), Some("win.collection-copy"));
+        share.append(Some(&t!("_Paste Load Order")), Some("win.collection-paste"));
+        share.append(Some(&t!("_Merge into One Mod…")), Some("win.collection-merge"));
         if collections.active().frozen.is_empty() {
-            share.append(Some("_Freeze This Collection…"), Some("win.collection-freeze"));
+            share.append(Some(&t!("_Freeze This Collection…")), Some("win.collection-freeze"));
         } else {
-            share.append(Some("Un_freeze This Collection…"), Some("win.collection-unfreeze"));
+            share.append(Some(&t!("Un_freeze This Collection…")), Some("win.collection-unfreeze"));
         }
         menu.append_section(None, &share);
         // Only once there's an Extra Mod Folder, or to bring it back.
@@ -448,7 +448,7 @@ impl Window {
             let Some(id) = workshop::parse_id(&text) else {
                 return ui.toast_error("That isn't a Workshop collection link or ID");
             };
-            let toast = adw::Toast::builder().title("Reading the collection from Steam…").timeout(0).build();
+            let toast = adw::Toast::builder().title(t!("Reading the collection from Steam…")).timeout(0).build();
             ui.show_progress(&toast);
             let weak = Rc::downgrade(ui);
             glib::spawn_future_local(async move {
@@ -483,7 +483,7 @@ impl Window {
         for m in &missing {
             let row = adw::ActionRow::builder().title(&m.name).use_markup(false).build();
             if let Some(id) = m.steam_id {
-                let open = gtk::Button::builder().icon_name("adw-external-link-symbolic").tooltip_text("Open on the Steam Workshop").valign(gtk::Align::Center).css_classes(["flat"]).build();
+                let open = gtk::Button::builder().icon_name("adw-external-link-symbolic").tooltip_text(t!("Open on the Steam Workshop")).valign(gtk::Align::Center).css_classes(["flat"]).build();
                 let window = self.window.downgrade();
                 open.connect_clicked(move |_| open_page(&window, id));
                 row.add_suffix(&open);
@@ -491,7 +491,7 @@ impl Window {
             }
             list.append(&row);
         }
-        let all = gtk::Button::builder().label("Open the Collection on the Workshop").halign(gtk::Align::Center).css_classes(["pill"]).build();
+        let all = gtk::Button::builder().label(t!("Open the Collection on the Workshop")).halign(gtk::Align::Center).css_classes(["pill"]).build();
         let window = self.window.downgrade();
         all.connect_clicked(move |_| open_page(&window, collection_id));
         let scroll = gtk::ScrolledWindow::builder().child(&list).propagate_natural_height(true).max_content_height(320).hscrollbar_policy(gtk::PolicyType::Never).build();
@@ -552,7 +552,7 @@ impl Window {
         filter.add_pattern("*.zip");
         let filters = gio::ListStore::new::<gtk::FileFilter>();
         filters.append(&filter);
-        let dialog = gtk::FileDialog::builder().title("Import Collection").filters(&filters).modal(true).build();
+        let dialog = gtk::FileDialog::builder().title(t!("Import Collection")).filters(&filters).modal(true).build();
         let weak = Rc::downgrade(self);
         dialog.open(Some(&self.window), None::<&gio::Cancellable>, move |file| {
             let (Some(ui), Ok(file)) = (weak.upgrade(), file) else { return };
@@ -614,8 +614,8 @@ impl Window {
         }
         let dialog = adw::AlertDialog::new(Some("Merge into One Mod?"), Some(&body));
         let as_zip = gtk::CheckButton::builder()
-            .label("Write One Zip File")
-            .tooltip_text("Easier to move, back up and share than thousands of files. The game reads it like a folder.")
+            .label(t!("Write One Zip File"))
+            .tooltip_text(t!("Easier to move, back up and share than thousands of files. The game reads it like a folder."))
             .active(self.settings.borrow().game.merge_to_zip)
             .halign(gtk::Align::Center)
             .build();
@@ -717,7 +717,7 @@ impl Window {
 
     fn export_collection_file(self: &Rc<Self>, notes: bool) {
         let name = self.collections.borrow().active.clone();
-        let dialog = gtk::FileDialog::builder().title("Export Collection").initial_name(format!("{name}.json")).modal(true).build();
+        let dialog = gtk::FileDialog::builder().title(t!("Export Collection")).initial_name(format!("{name}.json")).modal(true).build();
         let weak = Rc::downgrade(self);
         dialog.save(Some(&self.window), None::<&gio::Cancellable>, move |file| {
             let (Some(ui), Ok(file)) = (weak.upgrade(), file) else { return };
@@ -740,7 +740,7 @@ impl Window {
 
     fn export_bundle_file(self: &Rc<Self>, notes: bool) {
         let name = self.collections.borrow().active.clone();
-        let dialog = gtk::FileDialog::builder().title("Export with the Merged Patch").initial_name(format!("{name}.zip")).modal(true).build();
+        let dialog = gtk::FileDialog::builder().title(t!("Export with the Merged Patch")).initial_name(format!("{name}.zip")).modal(true).build();
         let weak = Rc::downgrade(self);
         dialog.save(Some(&self.window), None::<&gio::Cancellable>, move |file| {
             let (Some(ui), Ok(file)) = (weak.upgrade(), file) else { return };
@@ -825,7 +825,7 @@ impl Window {
     /// players who don't use DrukhalManager.
     fn export_launcher(self: &Rc<Self>) {
         let name = self.collections.borrow().active.clone();
-        let dialog = gtk::FileDialog::builder().title("Export for the Paradox Launcher").initial_name(format!("{name} (launcher).json")).modal(true).build();
+        let dialog = gtk::FileDialog::builder().title(t!("Export for the Paradox Launcher")).initial_name(format!("{name} (launcher).json")).modal(true).build();
         let weak = Rc::downgrade(self);
         dialog.save(Some(&self.window), None::<&gio::Cancellable>, move |file| {
             let (Some(ui), Ok(file)) = (weak.upgrade(), file) else { return };

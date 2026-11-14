@@ -87,7 +87,7 @@ impl Window {
             }
             let row = adw::ActionRow::builder().title(glib::markup_escape_text(display_name(m))).subtitle(subtitle).build();
             if m.descriptor.remote_file_id.is_some() {
-                let button = gtk::Button::builder().icon_name("web-browser-symbolic").tooltip_text("Open Workshop Page").valign(gtk::Align::Center).css_classes(["flat"]).build();
+                let button = gtk::Button::builder().icon_name("web-browser-symbolic").tooltip_text(t!("Open Workshop Page")).valign(gtk::Align::Center).css_classes(["flat"]).build();
                 let weak = Rc::downgrade(self);
                 let index = o.index;
                 button.connect_clicked(move |_| {

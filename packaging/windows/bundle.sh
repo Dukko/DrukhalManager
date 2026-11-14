@@ -2,7 +2,7 @@
 # Builds DrukhalManager for Windows and gathers it with the GTK it runs on
 # into one folder that runs on a PC without MSYS2. Run from the repository
 # root in an MSYS2 UCRT64 shell with the packages the Windows CI job
-# installs (plus librsvg and adwaita-icon-theme):
+# installs (plus librsvg, adwaita-icon-theme and gettext):
 #
 #     packaging/windows/bundle.sh [OUT_DIR]
 #
@@ -20,6 +20,12 @@ rm -rf "$out"
 mkdir -p "$out/bin" "$out/lib" "$out/share/glib-2.0/schemas" "$out/share/icons"
 
 cp target/release/drukhal-manager.exe "$out/bin/DrukhalManager.exe"
+
+# The UI translations, for the languages po/ has so far.
+if [ -d target/i18n/locale ]; then
+    mkdir -p "$out/share/locale"
+    cp -r target/i18n/locale/. "$out/share/locale/"
+fi
 
 # The image loaders: the app icon is an SVG, and mod thumbnails can be
 # anything gdk-pixbuf reads.

@@ -46,8 +46,8 @@ impl BulkBar {
         let more_menu = gio::Menu::new();
         more_menu.append_submenu(Some("_Category"), &categories);
         more_menu.append_submenu(Some("_Add to Collection"), &collections);
-        let more = gtk::MenuButton::builder().icon_name("view-more-symbolic").menu_model(&more_menu).tooltip_text("Category and Collections").build();
-        let clear = gtk::Button::builder().icon_name("window-close-symbolic").tooltip_text("Clear the Selection").action_name("win.bulk-clear").css_classes(["flat"]).build();
+        let more = gtk::MenuButton::builder().icon_name("view-more-symbolic").menu_model(&more_menu).tooltip_text(t!("Category and Collections")).build();
+        let clear = gtk::Button::builder().icon_name("window-close-symbolic").tooltip_text(t!("Clear the Selection")).action_name("win.bulk-clear").css_classes(["flat"]).build();
 
         let bar = gtk::ActionBar::new();
         bar.pack_start(&count);

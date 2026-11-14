@@ -848,10 +848,10 @@ impl Window {
             .child(
                 &adw::ButtonContent::builder()
                     .icon_name("view-refresh-symbolic")
-                    .label("Rescan")
+                    .label(t!("Rescan"))
                     .build(),
             )
-            .tooltip_text("Scan again, e.g. after mods were updated")
+            .tooltip_text(t!("Scan again, e.g. after mods were updated"))
             .build();
         let weak = Rc::downgrade(self);
         button.connect_clicked(move |_| {

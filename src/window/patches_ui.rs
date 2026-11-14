@@ -51,13 +51,13 @@ const MAX_WEEKS: u32 = 260;
 impl Window {
     pub(super) fn find_patches(self: &Rc<Self>) {
         let title = adw::WindowTitle::new("Compatibility Patches", "");
-        let refresh = gtk::Button::builder().icon_name("view-refresh-symbolic").tooltip_text("Search Again").build();
+        let refresh = gtk::Button::builder().icon_name("view-refresh-symbolic").tooltip_text(t!("Search Again")).build();
         let header = adw::HeaderBar::new();
         header.set_title_widget(Some(&title));
         header.pack_start(&refresh);
 
         let progress = gtk::ProgressBar::builder().show_text(false).width_request(240).halign(gtk::Align::Center).build();
-        let searching = adw::StatusPage::builder().icon_name("system-search-symbolic").title("Searching the Workshop").child(&progress).build();
+        let searching = adw::StatusPage::builder().icon_name("system-search-symbolic").title(t!("Searching the Workshop")).child(&progress).build();
         let problem = adw::StatusPage::new();
         let results = adw::Bin::new();
         let stack = gtk::Stack::new();
@@ -172,7 +172,7 @@ impl Window {
             d.refresh.set_sensitive(true);
             match failed {
                 Some(None) => {
-                    let open = gtk::Button::builder().label("_Open Preferences").use_underline(true).halign(gtk::Align::Center).css_classes(["pill", "suggested-action"]).build();
+                    let open = gtk::Button::builder().label(t!("_Open Preferences")).use_underline(true).halign(gtk::Align::Center).css_classes(["pill", "suggested-action"]).build();
                     let (dialog, window) = (d.dialog.downgrade(), ui.window.downgrade());
                     open.connect_clicked(move |_| {
                         if let Some(dialog) = dialog.upgrade() {
@@ -186,7 +186,7 @@ impl Window {
                 }
                 Some(Some(e)) => {
                     crate::diagnostics::log!("patches", "Could not search the Workshop: {e}");
-                    let again = gtk::Button::builder().label("_Try Again").use_underline(true).halign(gtk::Align::Center).css_classes(["pill"]).build();
+                    let again = gtk::Button::builder().label(t!("_Try Again")).use_underline(true).halign(gtk::Align::Center).css_classes(["pill"]).build();
                     let (weak, dw) = (Rc::downgrade(&ui), Rc::downgrade(&d));
                     again.connect_clicked(move |_| {
                         if let (Some(ui), Some(d)) = (weak.upgrade(), dw.upgrade()) {
@@ -214,7 +214,7 @@ impl Window {
 
         let page = adw::PreferencesPage::new();
         let options = adw::PreferencesGroup::builder()
-            .description("Patches for recent versions of the mods you run are usually updated with them, so older ones are hidden. Some mods that haven't been updated in years still work fine, but this list is meant for recent compatibility patches.")
+            .description(t!("Patches for recent versions of the mods you run are usually updated with them, so older ones are hidden. Some mods that haven't been updated in years still work fine, but this list is meant for recent compatibility patches."))
             .build();
         let weeks = self.settings.borrow().patch_weeks.clamp(MIN_WEEKS, MAX_WEEKS);
         let scale = gtk::Scale::with_range(gtk::Orientation::Horizontal, f64::from(MIN_WEEKS), f64::from(MAX_WEEKS), 1.0);
@@ -228,15 +228,15 @@ impl Window {
             scale.add_mark(f64::from(at), gtk::PositionType::Bottom, mark);
         }
         scale.update_property(&[gtk::accessible::Property::Label("Updated within, in weeks")]);
-        let age = adw::ActionRow::builder().title("Updated Within").subtitle(weeks_text(weeks)).build();
+        let age = adw::ActionRow::builder().title(t!("Updated Within")).subtitle(weeks_text(weeks)).build();
         age.add_suffix(&scale);
         options.add(&age);
-        let all = adw::SwitchRow::builder().title("Show Everything That Needs Only Enabled Mods").subtitle("Also items whose names don't say they're patches").active(d.show_all.get()).build();
+        let all = adw::SwitchRow::builder().title(t!("Show Everything That Needs Only Enabled Mods")).subtitle(t!("Also items whose names don't say they're patches")).active(d.show_all.get()).build();
         options.add(&all);
         page.add(&options);
 
         let group = adw::PreferencesGroup::builder()
-            .description("Workshop items made for mods you run, all of whose required items are enabled. After subscribing, reload the mods (F5): Smart Sort places patches after the mods they patch.")
+            .description(t!("Workshop items made for mods you run, all of whose required items are enabled. After subscribing, reload the mods (F5): Smart Sort places patches after the mods they patch."))
             .build();
         let none = adw::ActionRow::builder().css_classes(["dim-label"]).build();
         group.add(&none);
@@ -324,7 +324,7 @@ impl Window {
         let row = adw::ActionRow::builder().title(&title).use_markup(false).subtitle(format!("{}\n{}", needs(names), facts.join(" · "))).subtitle_lines(0).build();
         row.add_prefix(&self.workshop_thumbnail(item.id, 48));
 
-        let open = gtk::Button::builder().icon_name("web-browser-symbolic").tooltip_text("Open Workshop Page").valign(gtk::Align::Center).css_classes(["flat"]).build();
+        let open = gtk::Button::builder().icon_name("web-browser-symbolic").tooltip_text(t!("Open Workshop Page")).valign(gtk::Align::Center).css_classes(["flat"]).build();
         let id = item.id;
         let window = self.window.downgrade();
         open.connect_clicked(move |_| {
@@ -341,7 +341,7 @@ impl Window {
         });
         row.add_suffix(&open);
 
-        let dismiss = gtk::Button::builder().icon_name("window-close-symbolic").tooltip_text("Dismiss").valign(gtk::Align::Center).css_classes(["flat"]).build();
+        let dismiss = gtk::Button::builder().icon_name("window-close-symbolic").tooltip_text(t!("Dismiss")).valign(gtk::Align::Center).css_classes(["flat"]).build();
         let (weak, dw) = (Rc::downgrade(self), Rc::downgrade(d));
         let (group, row_ref) = (group.downgrade(), row.downgrade());
         dismiss.connect_clicked(move |_| {

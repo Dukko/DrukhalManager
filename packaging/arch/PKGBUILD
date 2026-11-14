@@ -8,7 +8,7 @@ arch=('x86_64' 'aarch64')
 url="https://github.com/Dukko/DrukhalManager"
 license=('MIT')
 depends=('gtk4' 'libadwaita' 'glib2' 'hicolor-icon-theme')
-makedepends=('cargo' 'git')
+makedepends=('cargo' 'git' 'gettext')
 provides=('drukhal-manager')
 conflicts=('drukhal-manager')
 options=('!lto')
@@ -47,4 +47,8 @@ package() {
   install -Dm644 "data/icons/$_app.svg" "$pkgdir/usr/share/icons/hicolor/scalable/apps/$_app.svg"
   install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
   install -Dm644 NOTICE "$pkgdir/usr/share/licenses/$pkgname/NOTICE"
+  if [ -d target/i18n/locale ]; then
+    install -d "$pkgdir/usr/share/locale"
+    cp -r target/i18n/locale/. "$pkgdir/usr/share/locale/"
+  fi
 }

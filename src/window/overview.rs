@@ -117,7 +117,7 @@ pub(super) fn sidebar_page(views: &gtk::ListBox, categories: &gtk::ListBox, find
     lists.append(&heading("Views"));
     lists.append(views);
     let categories_heading = heading("Categories");
-    categories_heading.set_tooltip_text(Some("The sections Smart Sort puts enabled mods in"));
+    categories_heading.set_tooltip_text(Some(&t!("The sections Smart Sort puts enabled mods in")));
     lists.append(&categories_heading);
     lists.append(categories);
     // Hidden with the list while no category has a mod.
@@ -145,7 +145,7 @@ fn category_header(run: &Run) -> gtk::Widget {
         run.category.description().to_owned()
     }));
     if run.category == Category::Patches {
-        let find = gtk::Button::builder().label("Find More…").action_name("win.find-patches").tooltip_text("Search the Workshop for patches between your enabled mods").hexpand(true).halign(gtk::Align::End).css_classes(["flat", "sidebar-link", "caption-heading", "accent"]).build();
+        let find = gtk::Button::builder().label(t!("Find More…")).action_name("win.find-patches").tooltip_text(t!("Search the Workshop for patches between your enabled mods")).hexpand(true).halign(gtk::Align::End).css_classes(["flat", "sidebar-link", "caption-heading", "accent"]).build();
         line.append(&find);
     }
     line.upcast()
@@ -180,12 +180,12 @@ pub(super) struct Health {
 pub(super) fn ago(t: SystemTime) -> String {
     let days = SystemTime::now().duration_since(t).map_or(0, |d| d.as_secs() / 86_400);
     match days {
-        0 => "today".to_owned(),
-        1 => "yesterday".to_owned(),
-        2..=13 => format!("{days} days ago"),
-        14..=59 => format!("{} weeks ago", days / 7),
-        60..=729 => format!("{} months ago", days / 30),
-        _ => format!("{} years ago", days / 365),
+        0 => t!("today"),
+        1 => t!("yesterday"),
+        2..=13 => tnf!("{count} day ago", "{count} days ago", count = days),
+        14..=59 => tnf!("{count} week ago", "{count} weeks ago", count = days / 7),
+        60..=729 => tnf!("{count} month ago", "{count} months ago", count = days / 30),
+        _ => tnf!("{count} year ago", "{count} years ago", count = days / 365),
     }
 }
 
@@ -309,79 +309,87 @@ impl Window {
             self.health.remove(&child);
         }
         let short = h.version.as_deref().map(|v| format!("v{}", crate::mods::game_update::major_minor(v)));
-        let mut first = format!("of {} enabled", h.total);
-        if h.dirty {
-            first.push_str(" · unsaved");
-        }
+        let first = if h.dirty {
+            tf!("of {total} enabled · unsaved", total = h.total)
+        } else {
+            tf!("of {total} enabled", total = h.total)
+        };
         self.health.append(&self.health_card(&h.enabled.to_string(), &first, None, false));
         if h.outdated > 0 {
-            let text = format!("not updated for {}", short.as_deref().unwrap_or("this game"));
+            let this_game = t!("this game");
+            let text = tf!("not updated for {version}", version = short.as_deref().unwrap_or(&this_game));
             let show: Card = Box::new(|ui: &Rc<Window>| ui.set_view(View::Outdated));
             let disable: Card = Box::new(|ui: &Rc<Window>| ui.show_outdated_mods(false));
-            self.health.append(&self.health_card_with_actions(&h.outdated.to_string(), &text, vec![("Show", show), ("Disable for Now…", disable)], true));
+            self.health.append(&self.health_card_with_actions(&h.outdated.to_string(), &text, vec![(&t!("Show"), show), (&t!("Disable for Now…"), disable)], true));
         }
         if h.missing_required > 0 {
-            let text = if h.missing_required == 1 { "required mod missing" } else { "required mods missing" };
-            self.health.append(&self.health_card(&h.missing_required.to_string(), text, Some(("Show", Box::new(|ui: &Rc<Window>| ui.set_view(View::Attention)))), true));
+            let text = tn!("required mod missing", "required mods missing", h.missing_required);
+            self.health.append(&self.health_card(&h.missing_required.to_string(), &text, Some((&t!("Show"), Box::new(|ui: &Rc<Window>| ui.set_view(View::Attention)))), true));
         }
         if h.misordered > 0 {
-            let text = if h.misordered == 1 { "loads before a mod it needs" } else { "load before mods they need" };
-            self.health.append(&self.health_card(&h.misordered.to_string(), text, Some(("Sort", Box::new(|ui: &Rc<Window>| ui.sort_by_dependencies()))), true));
+            let text = tn!("loads before a mod it needs", "load before mods they need", h.misordered);
+            self.health.append(&self.health_card(&h.misordered.to_string(), &text, Some((&t!("Sort"), Box::new(|ui: &Rc<Window>| ui.sort_by_dependencies()))), true));
         }
         if h.stale_merges > 0 {
-            let text = if h.stale_merges == 1 { "merge out of date" } else { "merges out of date" };
-            self.health.append(&self.health_card(&h.stale_merges.to_string(), text, Some(("Review", Box::new(|ui: &Rc<Window>| ui.stack.set_visible_child_name("conflicts")))), true));
+            let text = tn!("merge out of date", "merges out of date", h.stale_merges);
+            self.health.append(&self.health_card(&h.stale_merges.to_string(), &text, Some((&t!("Review"), Box::new(|ui: &Rc<Window>| ui.stack.set_visible_child_name("conflicts")))), true));
         }
         if !h.updated_since.is_empty() {
             let n = h.updated_since.len();
-            let text = if n == 1 { "mod updated since you last played" } else { "mods updated since you last played" };
-            let card = self.health_card(&n.to_string(), text, Some(("Show", Box::new(|ui: &Rc<Window>| ui.show_session_updates()))), false);
+            let text = tn!("mod updated since you last played", "mods updated since you last played", n);
+            let card = self.health_card(&n.to_string(), &text, Some((&t!("Show"), Box::new(|ui: &Rc<Window>| ui.show_session_updates()))), false);
             card.set_tooltip_text(Some(&h.updated_since.join("\n")));
             self.health.append(&card);
         }
         if !h.waiting.is_empty() {
             let n = h.waiting.len();
-            let text = if n == 1 { "mod update Steam hasn't downloaded yet" } else { "mod updates Steam hasn't downloaded yet" };
-            let card = self.health_card(&n.to_string(), text, Some(("Show", Box::new(|ui: &Rc<Window>| ui.show_session_updates()))), false);
+            let text = tn!("mod update Steam hasn't downloaded yet", "mod updates Steam hasn't downloaded yet", n);
+            let card = self.health_card(&n.to_string(), &text, Some((&t!("Show"), Box::new(|ui: &Rc<Window>| ui.show_session_updates()))), false);
             card.set_tooltip_text(Some(&h.waiting.join("\n")));
             self.health.append(&card);
         }
         if !h.frozen_updates.is_empty() {
             let n = h.frozen_updates.len();
-            let text = if n == 1 { "frozen mod updated on the Workshop" } else { "frozen mods updated on the Workshop" };
-            let card = self.health_card(&n.to_string(), text, Some(("Show", Box::new(|ui: &Rc<Window>| ui.show_frozen_updates()))), false);
+            let text = tn!("frozen mod updated on the Workshop", "frozen mods updated on the Workshop", n);
+            let card = self.health_card(&n.to_string(), &text, Some((&t!("Show"), Box::new(|ui: &Rc<Window>| ui.show_frozen_updates()))), false);
             card.set_tooltip_text(Some(&h.frozen_updates.join("\n")));
             self.health.append(&card);
         }
         if h.enabled > 0 {
             let card = if h.no_achievements.is_empty() {
-                self.health_card("On", "achievements stay on", None, false)
+                self.health_card(&t!("On"), &t!("achievements stay on"), None, false)
             } else {
                 let n = h.no_achievements.len();
-                self.health_card(&n.to_string(), if n == 1 { "mod turns off achievements" } else { "mods turn off achievements" }, Some(("Show", Box::new(|ui: &Rc<Window>| ui.set_view(View::NoAchievements)))), false)
+                let text = tn!("mod turns off achievements", "mods turn off achievements", n);
+                self.health_card(&n.to_string(), &text, Some((&t!("Show"), Box::new(|ui: &Rc<Window>| ui.set_view(View::NoAchievements)))), false)
             };
             card.set_tooltip_text(Some(&if h.no_achievements.is_empty() {
-                "No enabled mod changes the files the game checksums, so achievements stay on".to_owned()
+                t!("No enabled mod changes the files the game checksums, so achievements stay on")
             } else {
-                format!("Achievements are off because these mods change the files the game checksums:\n{}", h.no_achievements.join("\n"))
+                tf!("Achievements are off because these mods change the files the game checksums:\n{mods}", mods = h.no_achievements.join("\n"))
             }));
             self.health.append(&card);
         }
 
         let mut info = Vec::new();
         if let Some(version) = &h.version {
-            info.push(format!("Stellaris {version}"));
+            info.push(tf!("Stellaris {version}", version = version));
         }
-        info.push(if h.no_achievements.is_empty() { "Achievements on".to_owned() } else { format!("Achievements off, because of {}", plural(h.no_achievements.len(), "mod", "mods")) });
+        info.push(if h.no_achievements.is_empty() {
+            t!("Achievements on")
+        } else {
+            tf!("Achievements off, because of {mods}", mods = tnf!("{count} mod", "{count} mods", count = h.no_achievements.len()))
+        });
         if let Some(last) = crate::paradox::session::last_save(&self.paths.user_dir) {
-            let mut line = format!("Last save: {}", last.empire);
-            if !last.date.is_empty() {
-                line.push_str(&format!(", {}", last.date));
-            }
+            let mut line = if last.date.is_empty() {
+                tf!("Last save: {empire}", empire = last.empire)
+            } else {
+                tf!("Last save: {empire}, {date}", empire = last.empire, date = last.date)
+            };
             let played = crate::mods::saves::Saves::load(&crate::mods::saves::path()).campaigns.remove(&last.folder);
             if let Some(played) = played {
                 let same = crate::mods::saves::compare(&played.mods, &self.state.borrow().enabled_ids()).is_empty();
-                line.push_str(if same { " · same mods" } else { " · played with other mods" });
+                line.push_str(&if same { t!(" · same mods") } else { t!(" · played with other mods") });
             }
             info.push(line);
         }
@@ -447,7 +455,7 @@ impl Window {
         glib::spawn_future_local(async move {
             let count = gio::spawn_blocking(move || std::fs::read(&log).map(|b| String::from_utf8_lossy(&b).lines().filter(|l| !l.trim().is_empty()).count()).unwrap_or(0)).await.unwrap_or(0);
             let Some(ui) = weak.upgrade() else { return };
-            ui.errors_link.set_label(&format!("Last game logged {}", plural(count, "error", "errors")));
+            ui.errors_link.set_label(&tf!("Last game logged {errors}", errors = tnf!("{count} error", "{count} errors", count = count)));
             ui.errors_link.set_visible(count > 0);
         });
     }
@@ -458,8 +466,8 @@ impl Window {
         let child = built.unwrap_or_else(|| {
             adw::StatusPage::builder()
                 .icon_name("view-list-symbolic")
-                .title("No Mod Selected")
-                .description("Click a mod to see what's wrong with it, what it needs and what it overrides.")
+                .title(t!("No Mod Selected"))
+                .description(t!("Click a mod to see what's wrong with it, what it needs and what it overrides."))
                 .css_classes(["compact"])
                 .build()
                 .upcast()
@@ -581,11 +589,11 @@ impl Window {
             let fix = if issue.fixed_by_sorting {
                 Some(self.fix_button("Sort", |ui| ui.sort_by_dependencies()))
             } else if issue.message.starts_with("Requires “") {
-                let get = gtk::Button::builder().label("Get").valign(gtk::Align::Center).action_name("win.get-requirements").action_target(&target).css_classes(["pill", "small"]).build();
+                let get = gtk::Button::builder().label(t!("Get")).valign(gtk::Align::Center).action_name("win.get-requirements").action_target(&target).css_classes(["pill", "small"]).build();
                 let actions = gtk::Box::new(gtk::Orientation::Vertical, 4);
                 actions.append(&get);
                 if let Some(r) = m.requires.iter().find(|r| issue.message.contains(&format!("“{}”", r.name))) {
-                    let ignore = gtk::Button::builder().label("Not Needed").action_name("win.ignore-requirement").action_target(&r.steam_id.to_variant()).tooltip_text(format!("Stop treating “{}” as required", r.name)).css_classes(["flat", "small"]).build();
+                    let ignore = gtk::Button::builder().label(t!("Not Needed")).action_name("win.ignore-requirement").action_target(&r.steam_id.to_variant()).tooltip_text(format!("Stop treating “{}” as required", r.name)).css_classes(["flat", "small"]).build();
                     actions.append(&ignore);
                 }
                 Some(actions.upcast())
@@ -678,7 +686,7 @@ impl Window {
         // What can be done with it.
         let actions = gtk::ListBox::builder().selection_mode(gtk::SelectionMode::None).css_classes(["boxed-list"]).build();
         if !is_patch {
-            let switch = adw::SwitchRow::builder().title("Enabled").active(position.is_some()).build();
+            let switch = adw::SwitchRow::builder().title(t!("Enabled")).active(position.is_some()).build();
             let weak = Rc::downgrade(self);
             switch.connect_active_notify(move |s| {
                 let on = s.is_active();

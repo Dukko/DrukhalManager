@@ -23,6 +23,7 @@ jobs:
           dnf install -y --setopt=install_weak_deps=False \
             gcc pkg-config \
             gtk4-devel libadwaita-devel \
+            gettext \
             git ca-certificates
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -35,6 +36,10 @@ jobs:
         run: cargo test --locked
       - name: cargo clippy
         run: cargo clippy --all-targets --locked
+      - name: Translation template is current
+        run: |
+          cargo install xtr --version 0.1.11 --locked
+          po/check-pot.sh
       - name: Keep non-UI code free of GTK
         # So a native Windows UI could reuse it later (#153).
         run: |
@@ -61,6 +66,7 @@ jobs:
             mingw-w64-ucrt-x86_64-pkgconf
             mingw-w64-ucrt-x86_64-gtk4
             mingw-w64-ucrt-x86_64-libadwaita
+            mingw-w64-ucrt-x86_64-gettext
             mingw-w64-ucrt-x86_64-rust
       - name: cargo build
         run: cargo build --locked
@@ -68,3 +74,7 @@ jobs:
         run: cargo test --locked
       - name: cargo clippy
         run: cargo clippy --all-targets --locked
+      - name: Translation template is current
+        run: |
+          cargo install xtr --version 0.1.11 --locked
+          po/check-pot.sh

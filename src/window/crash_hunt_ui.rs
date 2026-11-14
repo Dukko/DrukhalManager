@@ -54,7 +54,7 @@ impl Window {
         }
         let launches = Hunt::new((0..count).collect(), HashMap::new(), &[]).estimate();
         let dialog = adw::AlertDialog::builder()
-            .heading("Find the Crashing Mod")
+            .heading(t!("Find the Crashing Mod"))
             .body(format!(
                 "DrukhalManager turns off part of your {count} mods at a time. Each time, launch the game, do what made it crash, and say whether it crashed. That takes about {launches} launches.\n\nStart a new game for each test, or load a save you don't mind losing, and don't save: a save loaded with mods turned off can break. Mods that others need stay on with them. Your collection and load order come back at the end."
             ))

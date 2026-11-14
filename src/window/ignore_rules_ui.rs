@@ -74,7 +74,7 @@ impl Window {
         let dependency_count = analysis.report.files.iter().filter(|c| c.builds_on_dependencies(&analysis.depends_on)).count()
             + analysis.report.objects.iter().filter(|c| c.builds_on_dependencies(&analysis.depends_on)).count();
         let hide_dependencies = adw::SwitchRow::builder()
-            .title("Hide Conflicts With Dependencies")
+            .title(t!("Hide Conflicts With Dependencies"))
             .subtitle(format!(
                 "Patches and submods are meant to override the mods they depend on. This hides {}.",
                 plural(dependency_count, "conflict", "conflicts")
@@ -90,14 +90,14 @@ impl Window {
         body.append(&preview_scroll);
 
         let cancel = gtk::Button::with_mnemonic("_Cancel");
-        let save = gtk::Button::builder().use_underline(true).label("_Save").css_classes(["suggested-action"]).build();
+        let save = gtk::Button::builder().use_underline(true).label(t!("_Save")).css_classes(["suggested-action"]).build();
         let header = adw::HeaderBar::builder().show_start_title_buttons(false).show_end_title_buttons(false).build();
         header.pack_start(&cancel);
         header.pack_end(&save);
         let toolbar = adw::ToolbarView::new();
         toolbar.add_top_bar(&header);
         toolbar.set_content(Some(&body));
-        let dialog = adw::Dialog::builder().title("Ignore Rules").content_width(680).content_height(620).child(&toolbar).build();
+        let dialog = adw::Dialog::builder().title(t!("Ignore Rules")).content_width(680).content_height(620).child(&toolbar).build();
 
         let update = {
             let (analysis, buffer, placeholder) = (analysis.clone(), buffer.clone(), placeholder.clone());

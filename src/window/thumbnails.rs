@@ -90,7 +90,7 @@ impl Window {
         if patch::is_patch(&m.id) {
             picture.set_icon_name(Some(crate::APP_ID));
             picture.set_css_classes(&["mod-thumbnail", "patch"]);
-            picture.set_tooltip_text(Some("Made by Drukhal Manager from your merges"));
+            picture.set_tooltip_text(Some(&t!("Made by Drukhal Manager from your merges")));
             return picture;
         }
         let path = match picture_path(m) {

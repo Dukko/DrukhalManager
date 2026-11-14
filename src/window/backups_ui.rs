@@ -27,13 +27,13 @@ impl Window {
         header.set_title_widget(Some(&adw::WindowTitle::new("Merged Patch Backups", &target.name)));
         let toolbar = adw::ToolbarView::new();
         toolbar.add_top_bar(&header);
-        let dialog = adw::Dialog::builder().title("Merged Patch Backups").content_width(620).content_height(560).child(&toolbar).build();
+        let dialog = adw::Dialog::builder().title(t!("Merged Patch Backups")).content_width(620).content_height(560).child(&toolbar).build();
 
         if snapshots.is_empty() {
             let empty = adw::StatusPage::builder()
                 .icon_name("document-open-recent-symbolic")
-                .title("No Backups Yet")
-                .description("The merged patch is backed up before each Merge All, and before merges are removed from it.")
+                .title(t!("No Backups Yet"))
+                .description(t!("The merged patch is backed up before each Merge All, and before merges are removed from it."))
                 .build();
             toolbar.set_content(Some(&empty));
             return dialog.present(Some(&self.window));
@@ -47,7 +47,7 @@ impl Window {
             .build();
         for s in snapshots {
             let row = adw::ActionRow::builder().title(glib::markup_escape_text(&s.reason).as_str()).subtitle(subtitle(&s)).build();
-            let restore = gtk::Button::builder().label("Restore…").valign(gtk::Align::Center).css_classes(["flat"]).build();
+            let restore = gtk::Button::builder().label(t!("Restore…")).valign(gtk::Align::Center).css_classes(["flat"]).build();
             let (weak, dialog_ref) = (Rc::downgrade(self), dialog.downgrade());
             restore.connect_clicked(move |_| {
                 if let (Some(ui), Some(dialog)) = (weak.upgrade(), dialog_ref.upgrade()) {

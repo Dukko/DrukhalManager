@@ -39,21 +39,21 @@ impl Window {
         ));
 
         let cancel = gtk::Button::with_label("Cancel");
-        let apply = gtk::Button::builder().label("Apply").css_classes(["suggested-action"]).sensitive(false).build();
+        let apply = gtk::Button::builder().label(t!("Apply")).css_classes(["suggested-action"]).sensitive(false).build();
         let header = adw::HeaderBar::builder().show_start_title_buttons(false).show_end_title_buttons(false).build();
         header.pack_start(&cancel);
         header.pack_end(&apply);
         let groups = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(24).margin_top(12).margin_bottom(24).margin_start(12).margin_end(12).build();
         let clamp = adw::Clamp::builder().maximum_size(720).child(&groups).build();
         let scroll = gtk::ScrolledWindow::builder().hscrollbar_policy(gtk::PolicyType::Never).vexpand(true).child(&clamp).build();
-        let loading = adw::StatusPage::builder().title("Reading Mods…").child(&adw::Spinner::new()).build();
+        let loading = adw::StatusPage::builder().title(t!("Reading Mods…")).child(&adw::Spinner::new()).build();
         let stack = gtk::Stack::new();
         stack.add_named(&loading, Some("loading"));
         stack.add_named(&scroll, Some("plan"));
         let toolbar = adw::ToolbarView::new();
         toolbar.add_top_bar(&header);
         toolbar.set_content(Some(&stack));
-        let dialog = adw::Dialog::builder().title("Smart Sort").content_width(720).content_height(760).child(&toolbar).build();
+        let dialog = adw::Dialog::builder().title(t!("Smart Sort")).content_width(720).content_height(760).child(&toolbar).build();
         cancel.connect_clicked(glib::clone!(
             #[weak]
             dialog,
@@ -174,7 +174,7 @@ fn section_picker(p: &Placement, id: &str, overrides: &Rc<RefCell<HashMap<String
     labels.extend(Category::ALL.iter().map(|c| c.title()));
     let picker = gtk::DropDown::from_strings(&labels);
     picker.set_valign(gtk::Align::Center);
-    picker.set_tooltip_text(Some("Which section this mod goes in"));
+    picker.set_tooltip_text(Some(&t!("Which section this mod goes in")));
     let chosen = overrides.borrow().get(id).copied();
     picker.set_selected(chosen.and_then(|c| Category::ALL.iter().position(|&x| x == c)).map_or(0, |at| at as u32 + 1));
     if chosen.is_none() {

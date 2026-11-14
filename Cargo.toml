@@ -10,8 +10,10 @@ repository = "https://github.com/Dukko/DrukhalManager"
 adw = { version = "0.9.2", package = "libadwaita", features = ["v1_8"] }
 async-channel = "2.5.0"
 dirs = "7.0.0"
+formatx = "0.4.2"
 fs4 = "1.1.0"
 futures-lite = "2.6.1"
+gettext-rs = { version = "0.8.0", features = ["gettext-system"] }
 gtk = { version = "0.11.5", package = "gtk4", features = ["v4_14"] }
 rusqlite = { version = "0.41.1", features = ["bundled"] }
 serde = { version = "1.0.229", features = ["derive"] }

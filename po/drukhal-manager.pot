@@ -1,0 +1,600 @@
+# SOME DESCRIPTIVE TITLE.
+# Copyright (C) YEAR Dukko
+# This file is distributed under the same license as the DrukhalManager package.
+# FIRST AUTHOR <EMAIL@ADDRESS>, YEAR.
+#
+#, fuzzy
+msgid ""
+msgstr ""
+"Project-Id-Version: DrukhalManager 1.0.0\n"
+"Report-Msgid-Bugs-To: https://github.com/Dukko/DrukhalManager/issues\n"
+"POT-Creation-Date: 2026-11-14 14:53+0000\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language-Team: LANGUAGE <LL@li.org>\n"
+"Language: \n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+
+#: src/window/backups_ui.rs:30
+msgid "Merged Patch Backups"
+msgstr ""
+
+#: src/window/backups_ui.rs:35
+msgid "No Backups Yet"
+msgstr ""
+
+#: src/window/backups_ui.rs:36
+msgid "The merged patch is backed up before each Merge All, and before merges are removed from it."
+msgstr ""
+
+#: src/window/backups_ui.rs:50
+msgid "Restore…"
+msgstr ""
+
+#: src/window/collections_ui.rs:159
+msgid "_New Collection…"
+msgstr ""
+
+#: src/window/collections_ui.rs:160
+msgid "_Duplicate…"
+msgstr ""
+
+#: src/window/collections_ui.rs:161
+msgid "_Rename…"
+msgstr ""
+
+#: src/window/collections_ui.rs:163
+msgid "De_lete"
+msgstr ""
+
+#: src/window/collections_ui.rs:168
+msgid "From the _Game's Load Order"
+msgstr ""
+
+#: src/window/collections_ui.rs:169
+msgid "From a Launcher _Playset…"
+msgstr ""
+
+#: src/window/collections_ui.rs:170
+msgid "From a _File…"
+msgstr ""
+
+#: src/window/collections_ui.rs:171
+msgid "From a _Workshop Collection…"
+msgstr ""
+
+#: src/window/collections_ui.rs:174
+msgid "To a DrukhalManager _File…"
+msgstr ""
+
+#: src/window/collections_ui.rs:175
+msgid "With the Merged _Patch…"
+msgstr ""
+
+#: src/window/collections_ui.rs:176
+msgid "To a Paradox _Launcher File…"
+msgstr ""
+
+#: src/window/collections_ui.rs:178
+msgid "_Copy Load Order"
+msgstr ""
+
+#: src/window/collections_ui.rs:179
+msgid "_Paste Load Order"
+msgstr ""
+
+#: src/window/collections_ui.rs:180
+msgid "_Merge into One Mod…"
+msgstr ""
+
+#: src/window/collections_ui.rs:182
+msgid "_Freeze This Collection…"
+msgstr ""
+
+#: src/window/collections_ui.rs:184
+msgid "Un_freeze This Collection…"
+msgstr ""
+
+#: src/window/collections_ui.rs:451
+msgid "Reading the collection from Steam…"
+msgstr ""
+
+#: src/window/collections_ui.rs:486
+msgid "Open on the Steam Workshop"
+msgstr ""
+
+#: src/window/collections_ui.rs:494
+msgid "Open the Collection on the Workshop"
+msgstr ""
+
+#: src/window/collections_ui.rs:555
+msgid "Import Collection"
+msgstr ""
+
+#: src/window/collections_ui.rs:617
+msgid "Write One Zip File"
+msgstr ""
+
+#: src/window/collections_ui.rs:618
+msgid "Easier to move, back up and share than thousands of files. The game reads it like a folder."
+msgstr ""
+
+#: src/window/collections_ui.rs:720
+msgid "Export Collection"
+msgstr ""
+
+#: src/window/collections_ui.rs:743
+msgid "Export with the Merged Patch"
+msgstr ""
+
+#: src/window/collections_ui.rs:828
+msgid "Export for the Paradox Launcher"
+msgstr ""
+
+#: src/window/conflicts_ui.rs:851
+msgid "Rescan"
+msgstr ""
+
+#: src/window/conflicts_ui.rs:854
+msgid "Scan again, e.g. after mods were updated"
+msgstr ""
+
+#: src/window/crash_hunt_ui.rs:57
+msgid "Find the Crashing Mod"
+msgstr ""
+
+#: src/window/ignore_rules_ui.rs:77
+msgid "Hide Conflicts With Dependencies"
+msgstr ""
+
+#: src/window/ignore_rules_ui.rs:93
+msgid "_Save"
+msgstr ""
+
+#: src/window/ignore_rules_ui.rs:100
+msgid "Ignore Rules"
+msgstr ""
+
+#: src/window/game_update_ui.rs:90 src/window/patches_ui.rs:327
+msgid "Open Workshop Page"
+msgstr ""
+
+#: src/window/overview.rs:120
+msgid "The sections Smart Sort puts enabled mods in"
+msgstr ""
+
+#: src/window/overview.rs:148
+msgid "Find More…"
+msgstr ""
+
+#: src/window/overview.rs:148
+msgid "Search the Workshop for patches between your enabled mods"
+msgstr ""
+
+#: src/window/overview.rs:461
+msgid "No Mod Selected"
+msgstr ""
+
+#: src/window/overview.rs:462
+msgid "Click a mod to see what's wrong with it, what it needs and what it overrides."
+msgstr ""
+
+#: src/window/overview.rs:584
+msgid "Get"
+msgstr ""
+
+#: src/window/overview.rs:588
+msgid "Not Needed"
+msgstr ""
+
+#: src/window/overview.rs:681 src/window.rs:1004
+msgid "Enabled"
+msgstr ""
+
+#: src/window/patches_ui.rs:54
+msgid "Search Again"
+msgstr ""
+
+#: src/window/patches_ui.rs:60
+msgid "Searching the Workshop"
+msgstr ""
+
+#: src/window/patches_ui.rs:175
+msgid "_Open Preferences"
+msgstr ""
+
+#: src/window/patches_ui.rs:189
+msgid "_Try Again"
+msgstr ""
+
+#: src/window/patches_ui.rs:217
+msgid "Patches for recent versions of the mods you run are usually updated with them, so older ones are hidden. Some mods that haven't been updated in years still work fine, but this list is meant for recent compatibility patches."
+msgstr ""
+
+#: src/window/patches_ui.rs:231
+msgid "Updated Within"
+msgstr ""
+
+#: src/window/patches_ui.rs:234
+msgid "Show Everything That Needs Only Enabled Mods"
+msgstr ""
+
+#: src/window/patches_ui.rs:234
+msgid "Also items whose names don't say they're patches"
+msgstr ""
+
+#: src/window/patches_ui.rs:239
+msgid "Workshop items made for mods you run, all of whose required items are enabled. After subscribing, reload the mods (F5): Smart Sort places patches after the mods they patch."
+msgstr ""
+
+#: src/window/patches_ui.rs:344 src/window/notifications.rs:187
+msgid "Dismiss"
+msgstr ""
+
+#: src/window/list.rs:327
+msgid "Not installed, so it's left out of the game's load order"
+msgstr ""
+
+#: src/window/list.rs:329
+msgid "Open on the Steam Workshop to subscribe"
+msgstr ""
+
+#: src/window/list.rs:336
+msgid "Remove from Collection"
+msgstr ""
+
+#: src/window/list.rs:539
+msgid "Turns off achievements: it changes files the game checksums"
+msgstr ""
+
+#: src/window/list.rs:598
+msgid "Always loads last, so its merges and fixes win"
+msgstr ""
+
+#: src/window/list.rs:743
+msgid "Load position: type a number to move this mod there"
+msgstr ""
+
+#: src/window/notifications.rs:54 src/window/notifications.rs:68
+msgid "Notifications"
+msgstr ""
+
+#: src/window/notifications.rs:55
+msgid "Clear All"
+msgstr ""
+
+#: src/window/notifications.rs:60
+msgid "No notifications"
+msgstr ""
+
+#: src/window/saves_ui.rs:78
+msgid "Different Mods Than Last Time"
+msgstr ""
+
+#: src/window/saves_ui.rs:133
+msgid "Saves"
+msgstr ""
+
+#: src/window/saves_ui.rs:133
+msgid "The mods each campaign was last played with from DrukhalManager."
+msgstr ""
+
+#: src/window/session_updates_ui.rs:92
+msgid "Change Notes"
+msgstr ""
+
+#: src/window/session_updates_ui.rs:92
+msgid "Open its Workshop change notes in the browser"
+msgstr ""
+
+#: src/window/session_updates_ui.rs:110
+msgid "Not Downloaded Yet"
+msgstr ""
+
+#: src/window/session_updates_ui.rs:113
+msgid "Steam Downloads"
+msgstr ""
+
+#: src/window/session_updates_ui.rs:113
+msgid "Open Steam's Downloads page"
+msgstr ""
+
+#: src/window/session_updates_ui.rs:132
+msgid "Updated Since You Last Played"
+msgstr ""
+
+#: src/window/session_updates_ui.rs:153
+msgid "Freeze This Collection…"
+msgstr ""
+
+#: src/window/session_updates_ui.rs:154
+msgid "Keep the versions you have now, so later updates can't change a campaign in progress"
+msgstr ""
+
+#: src/window/session_updates_ui.rs:169
+msgid "Mark as Seen"
+msgstr ""
+
+#: src/window/session_updates_ui.rs:198
+msgid "Mod Updates"
+msgstr ""
+
+#: src/window/selection_ui.rs:49
+msgid "Category and Collections"
+msgstr ""
+
+#: src/window/selection_ui.rs:50
+msgid "Clear the Selection"
+msgstr ""
+
+#: src/window/smart_sort_ui.rs:42
+msgid "Apply"
+msgstr ""
+
+#: src/window/smart_sort_ui.rs:49
+msgid "Reading Mods…"
+msgstr ""
+
+#: src/window/smart_sort_ui.rs:56
+msgid "Smart Sort"
+msgstr ""
+
+#: src/window/smart_sort_ui.rs:177
+msgid "Which section this mod goes in"
+msgstr ""
+
+#: src/window/dlc_ui.rs:32
+msgid "DLCs that are off aren't loaded by the game. In multiplayer, every player needs the same DLCs on, except content packs such as portraits and music. Changes are saved when this closes."
+msgstr ""
+
+#: src/window/dlc_ui.rs:66
+msgid "Turn All On"
+msgstr ""
+
+#: src/window/dlc_ui.rs:77
+msgid "DLC"
+msgstr ""
+
+#: src/window/thumbnails.rs:93
+msgid "Made by Drukhal Manager from your merges"
+msgstr ""
+
+#: src/window.rs:214
+msgid "Could Not Read Mods"
+msgstr ""
+
+#: src/window.rs:215
+msgid "{path}: {e}"
+msgstr ""
+
+#: src/window.rs:228
+msgid "_Saves…"
+msgstr ""
+
+#: src/window.rs:229
+msgid "_Multiplayer Check…"
+msgstr ""
+
+#: src/window.rs:230
+msgid "_DLC…"
+msgstr ""
+
+#: src/window.rs:233
+msgid "_Find the Crashing Mod…"
+msgstr ""
+
+#: src/window.rs:237
+msgid "More Ways to Launch"
+msgstr ""
+
+#: src/window.rs:241 src/window.rs:342
+msgid "Launch"
+msgstr ""
+
+#: src/window.rs:248
+msgid "Save"
+msgstr ""
+
+#: src/window.rs:250
+msgid "Save the load order for the game and the Paradox Launcher (Ctrl+S)"
+msgstr ""
+
+#: src/window.rs:257
+msgid "_Preferences"
+msgstr ""
+
+#: src/window.rs:258
+msgid "_Keyboard Shortcuts"
+msgstr ""
+
+#: src/window.rs:262
+msgid "_Copy Diagnostics"
+msgstr ""
+
+#: src/window.rs:263
+msgid "Open _Log Folder"
+msgstr ""
+
+#: src/window.rs:264
+msgid "_Troubleshooting"
+msgstr ""
+
+#: src/window.rs:265
+msgid "_About DrukhalManager"
+msgstr ""
+
+#: src/window.rs:270
+msgid "Main Menu"
+msgstr ""
+
+#: src/window.rs:279
+msgid "Collections: switch between saved load orders"
+msgstr ""
+
+#: src/window.rs:290
+msgid "Stellaris was not found in any Steam library"
+msgstr ""
+
+#: src/window.rs:293 src/window.rs:294
+msgid "No mods match"
+msgstr ""
+
+#: src/window.rs:302
+msgid "Not Installed"
+msgstr ""
+
+#: src/window.rs:305
+msgid "Enable All"
+msgstr ""
+
+#: src/window.rs:306
+msgid "Enable or disable every mod"
+msgstr ""
+
+#: src/window.rs:310
+msgid "Sort A–Z, Dependencies First"
+msgstr ""
+
+#: src/window.rs:311
+msgid "Show _Category Headers"
+msgstr ""
+
+#: src/window.rs:313
+msgid "Smart Sort…"
+msgstr ""
+
+#: src/window.rs:314
+msgid "Sort into sections by what each mod changes, keeping sub-mods below their mods and every mod after its dependencies"
+msgstr ""
+
+#: src/window.rs:315
+msgid "More ways to sort"
+msgstr ""
+
+#: src/window.rs:322
+msgid "Search mods (Ctrl+F), or try source:local or enabled:no"
+msgstr ""
+
+#: src/window.rs:332
+msgid "Repair…"
+msgstr ""
+
+#: src/window.rs:337
+msgid "Restore"
+msgstr ""
+
+#: src/window.rs:383 src/window.rs:461
+msgid "Load Order"
+msgstr ""
+
+#. While a view, category or search narrows the list.
+#: src/window.rs:387
+msgid "Select All Shown"
+msgstr ""
+
+#. While a view, category or search narrows the list.
+#: src/window.rs:387
+msgid "Select every mod listed, to change them all at once"
+msgstr ""
+
+#: src/window.rs:395
+msgid "Name"
+msgstr ""
+
+#: src/window.rs:395
+msgid "Recently Updated"
+msgstr ""
+
+#: src/window.rs:396
+msgid "Order of the disabled mods"
+msgstr ""
+
+#: src/window.rs:401
+msgid "Disabled"
+msgstr ""
+
+#: src/window.rs:404
+msgid "Sort by"
+msgstr ""
+
+#: src/window.rs:448
+msgid "Show Views"
+msgstr ""
+
+#: src/window.rs:469 src/window.rs:1007
+msgid "Conflicts"
+msgstr ""
+
+#: src/window.rs:648
+msgid "the Disabled list's order"
+msgstr ""
+
+#: src/window.rs:930
+msgid "Could not save {what}: {e}"
+msgstr ""
+
+#: src/window.rs:966
+msgid "The keyring call failed"
+msgstr ""
+
+#: src/window.rs:973
+msgid "{error}. The API key is saved in settings.json, readable only by you."
+msgstr ""
+
+#: src/window.rs:1004
+msgid "Yes"
+msgstr ""
+
+#: src/window.rs:1004
+msgid "No"
+msgstr ""
+
+#: src/window.rs:1005
+msgid "Source"
+msgstr ""
+
+#: src/window.rs:1005
+msgid "Workshop"
+msgstr ""
+
+#: src/window.rs:1005
+msgid "Local"
+msgstr ""
+
+#: src/window.rs:1006
+msgid "Achievements"
+msgstr ""
+
+#: src/window.rs:1006
+msgid "Keeps Them On"
+msgstr ""
+
+#: src/window.rs:1006
+msgid "Turns Them Off"
+msgstr ""
+
+#: src/window.rs:1007
+msgid "Has Conflicts"
+msgstr ""
+
+#: src/window.rs:1007
+msgid "None"
+msgstr ""
+
+#: src/window.rs:1016
+msgid "Any"
+msgstr ""
+
+#: src/window.rs:1037
+msgid "Or type them: version:3.12, -- to leave out (source:--local), || for either"
+msgstr ""
+
+#: src/window.rs:1060
+msgid "Filters"
+msgstr ""
+
+#: src/window.rs:1061
+msgid "Filter the mods by state"
+msgstr ""

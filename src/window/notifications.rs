@@ -51,13 +51,13 @@ impl Bell {
         let icon = gtk::Overlay::builder().child(&gtk::Image::from_icon_name("preferences-system-notifications-symbolic")).build();
         icon.add_overlay(&badge);
 
-        let heading = gtk::Label::builder().label("Notifications").xalign(0.0).hexpand(true).css_classes(["heading"]).build();
-        let clear = gtk::Button::builder().label("Clear All").css_classes(["flat", "small"]).sensitive(false).build();
+        let heading = gtk::Label::builder().label(t!("Notifications")).xalign(0.0).hexpand(true).css_classes(["heading"]).build();
+        let clear = gtk::Button::builder().label(t!("Clear All")).css_classes(["flat", "small"]).sensitive(false).build();
         let top = gtk::Box::builder().spacing(6).margin_start(6).margin_end(2).build();
         top.append(&heading);
         top.append(&clear);
         let list = gtk::ListBox::builder().selection_mode(gtk::SelectionMode::None).css_classes(["boxed-list", "notification-list"]).build();
-        let empty = gtk::Label::builder().label("No notifications").margin_top(18).margin_bottom(18).css_classes(["dim-label"]).build();
+        let empty = gtk::Label::builder().label(t!("No notifications")).margin_top(18).margin_bottom(18).css_classes(["dim-label"]).build();
         let scrolled = gtk::ScrolledWindow::builder().child(&list).hscrollbar_policy(gtk::PolicyType::Never).propagate_natural_height(true).max_content_height(460).visible(false).build();
         let body = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(8).width_request(380).build();
         body.append(&top);
@@ -65,7 +65,7 @@ impl Bell {
         body.append(&scrolled);
         let popover = gtk::Popover::builder().child(&body).build();
 
-        let button = gtk::MenuButton::builder().child(&icon).popover(&popover).tooltip_text("Notifications").build();
+        let button = gtk::MenuButton::builder().child(&icon).popover(&popover).tooltip_text(t!("Notifications")).build();
         let bell = Rc::new(Bell { button, badge, list, empty, clear, entries: RefCell::new(Vec::new()), unseen: Cell::new(0) });
 
         let weak = Rc::downgrade(&bell);
@@ -128,9 +128,9 @@ impl Bell {
         self.badge.set_label(&if unseen > 99 { "99+".to_owned() } else { unseen.to_string() });
         let total = self.entries.borrow().len();
         self.button.set_tooltip_text(Some(&match (total, unseen) {
-            (0, _) => "Notifications".to_owned(),
-            (_, 0) => format!("Notifications ({total})"),
-            _ => format!("Notifications ({unseen} new)"),
+            (0, _) => t!("Notifications"),
+            (_, 0) => tf!("Notifications ({total})", total = total),
+            _ => tf!("Notifications ({unseen} new)", unseen = unseen),
         }));
     }
 
@@ -156,7 +156,7 @@ impl Bell {
     fn row(self: &Rc<Self>, entry: &Entry, now: Option<&glib::DateTime>) -> adw::ActionRow {
         let mut when = when(&entry.at, now);
         if entry.count > 1 {
-            when.push_str(&format!(" · {} times", entry.count));
+            when.push_str(&tnf!(" · {count} time", " · {count} times", count = entry.count));
         }
         let row = adw::ActionRow::builder().title(&entry.title).subtitle(when).use_markup(false).build();
         // The toast's button, such as Show or Restart, offered again.
@@ -184,7 +184,7 @@ impl Bell {
             });
             row.add_suffix(&act);
         }
-        let dismiss = gtk::Button::builder().icon_name("window-close-symbolic").tooltip_text("Dismiss").valign(gtk::Align::Center).css_classes(["flat", "circular"]).build();
+        let dismiss = gtk::Button::builder().icon_name("window-close-symbolic").tooltip_text(t!("Dismiss")).valign(gtk::Align::Center).css_classes(["flat", "circular"]).build();
         let weak = Rc::downgrade(self);
         let toast = entry.toast.clone();
         dismiss.connect_clicked(move |_| {
@@ -206,7 +206,7 @@ fn when(at: &glib::DateTime, now: Option<&glib::DateTime>) -> String {
     let days = now.difference_in_days(at);
     match days {
         0 => time,
-        1 => format!("Yesterday {time}"),
+        1 => tf!("Yesterday {time}", time = time),
         _ => at.format("%b %-d, %H:%M").map(|s| s.to_string()).unwrap_or(time),
     }
 }

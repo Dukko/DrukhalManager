@@ -265,11 +265,12 @@ impl Window {
         }
         self.state.borrow_mut().set_all(enable);
         self.refresh();
-        let verb = if enable { "Enabled" } else { "Disabled" };
-        self.offer_undo(&format!(
-            "{verb} {}",
-            conflicts_view::plural(changed, "mod", "mods")
-        ));
+        let undo = if enable {
+            tnf!("Enabled {count} mod", "Enabled {count} mods", count = changed)
+        } else {
+            tnf!("Disabled {count} mod", "Disabled {count} mods", count = changed)
+        };
+        self.offer_undo(&undo);
     }
 
     pub(super) fn sort_by_dependencies(self: &Rc<Self>) {
@@ -324,16 +325,16 @@ impl Window {
             None => "Loads first once it's installed".to_owned(),
         };
         let row = adw::ActionRow::builder().title(&p.name).subtitle(subtitle).use_markup(false).css_classes(["dim-label"]).build();
-        row.add_prefix(&gtk::Image::builder().icon_name("action-unavailable-symbolic").tooltip_text("Not installed, so it's left out of the game's load order").build());
+        row.add_prefix(&gtk::Image::builder().icon_name("action-unavailable-symbolic").tooltip_text(t!("Not installed, so it's left out of the game's load order")).build());
         if let Some(steam_id) = p.steam_id {
-            let open = gtk::Button::builder().icon_name("adw-external-link-symbolic").tooltip_text("Open on the Steam Workshop to subscribe").valign(gtk::Align::Center).css_classes(["flat"]).build();
+            let open = gtk::Button::builder().icon_name("adw-external-link-symbolic").tooltip_text(t!("Open on the Steam Workshop to subscribe")).valign(gtk::Align::Center).css_classes(["flat"]).build();
             let window = self.window.downgrade();
             open.connect_clicked(move |_| {
                 gtk::UriLauncher::new(&crate::paradox::workshop::page_url(steam_id)).launch(window.upgrade().as_ref(), None::<&gio::Cancellable>, |_| {});
             });
             row.add_suffix(&open);
         }
-        let remove = gtk::Button::builder().icon_name("user-trash-symbolic").tooltip_text("Remove from Collection").valign(gtk::Align::Center).css_classes(["flat"]).build();
+        let remove = gtk::Button::builder().icon_name("user-trash-symbolic").tooltip_text(t!("Remove from Collection")).valign(gtk::Align::Center).css_classes(["flat"]).build();
         let weak = Rc::downgrade(self);
         let id = p.id.clone();
         remove.connect_clicked(move |_| {
@@ -497,7 +498,7 @@ impl Window {
                 .width_chars(7)
                 .xalign(0.0)
                 .valign(gtk::Align::Center)
-                .tooltip_text(if outdated { "Doesn't say it supports this game version" } else { "The game version it supports" })
+                .tooltip_text(if outdated { t!("Doesn't say it supports this game version") } else { t!("The game version it supports") })
                 .css_classes(["caption", "numeric", if outdated { "warning" } else { "dim-label" }])
                 .build();
             row.add_suffix(&version);
@@ -505,7 +506,7 @@ impl Window {
         if conflicts > 0 {
             let badge = gtk::Label::builder()
                 .label(conflicts.to_string())
-                .tooltip_text(format!("{}; see the Conflicts page (Alt+2)", conflicts_view::plural(conflicts, "conflict", "conflicts")))
+                .tooltip_text(tnf!("{count} conflict; see the Conflicts page (Alt+2)", "{count} conflicts; see the Conflicts page (Alt+2)", count = conflicts))
                 .valign(gtk::Align::Center)
                 .css_classes(["caption", "numeric", "conflict-count"])
                 .build();
@@ -536,7 +537,7 @@ impl Window {
             row.add_suffix(
                 &gtk::Image::builder()
                     .icon_name("action-unavailable-symbolic")
-                    .tooltip_text("Turns off achievements: it changes files the game checksums")
+                    .tooltip_text(t!("Turns off achievements: it changes files the game checksums"))
                     .css_classes(["dim-label"])
                     .build(),
             );
@@ -595,7 +596,7 @@ impl Window {
             // Pinned: no handle, no editable position.
             let lock = gtk::Image::builder()
                 .icon_name("changes-prevent-symbolic")
-                .tooltip_text("Always loads last, so its merges and fixes win")
+                .tooltip_text(t!("Always loads last, so its merges and fixes win"))
                 .css_classes(["dim-label"])
                 .build();
             let number = gtk::Label::builder()
@@ -636,19 +637,20 @@ impl Window {
         if untracked > 0 {
             problems.push((
                 checks::Severity::Warning,
-                format!(
-                    "{} saved by an older version {} checking; see the Conflicts page",
-                    conflicts_view::plural(untracked, "merge", "merges"),
-                    if untracked == 1 { "needs" } else { "need" }
+                tnf!(
+                    "{count} merge saved by an older version needs checking; see the Conflicts page",
+                    "{count} merges saved by an older version need checking; see the Conflicts page",
+                    count = untracked
                 ),
             ));
         }
         if outdated > 0 {
             problems.push((
                 checks::Severity::Warning,
-                format!(
-                    "{} out of date because mods changed; see the Conflicts page",
-                    conflicts_view::plural(outdated, "merge or fix is", "merges or fixes are")
+                tnf!(
+                    "{count} merge or fix is out of date because mods changed; see the Conflicts page",
+                    "{count} merges or fixes are out of date because mods changed; see the Conflicts page",
+                    count = outdated
                 ),
             ));
         }
@@ -740,7 +742,7 @@ impl Window {
             .xalign(1.0)
             .input_purpose(gtk::InputPurpose::Digits)
             .valign(gtk::Align::Center)
-            .tooltip_text("Load position: type a number to move this mod there")
+            .tooltip_text(t!("Load position: type a number to move this mod there"))
             .css_classes(["numeric", "flat"])
             .build();
         let apply = {

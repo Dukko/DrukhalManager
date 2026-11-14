@@ -157,15 +157,27 @@ There's a longer how-to for each of these in the [wiki](https://github.com/Dukko
 
 ## Building
 
-Requires Rust, GTK 4.14+ and libadwaita 1.8+ development files.
+Requires Rust, GTK 4.14+ and libadwaita 1.8+ development files, plus gettext to compile the translations (Fedora `gettext`, Arch `gettext`, MSYS2 `mingw-w64-ucrt-x86_64-gettext`).
 
 ```sh
 cargo run --release
 ```
 
-To install by hand elsewhere, copy `target/release/drukhal-manager` to your `PATH`, `data/io.github.dukko.DrukhalManager.desktop` to `share/applications`, and the icon from `data/icons` to `share/icons/hicolor/scalable/apps`.
+To install by hand elsewhere, copy `target/release/drukhal-manager` to your `PATH`, `data/io.github.dukko.DrukhalManager.desktop` to `share/applications`, `target/i18n/locale` to `share/locale`, and the icon from `data/icons` to `share/icons/hicolor/scalable/apps`.
 
 On Windows, build in an [MSYS2](https://www.msys2.org/) UCRT64 shell with the packages listed in `.github/workflows/windows-bundle.yml`. `packaging/windows/bundle.sh` builds a release and gathers it with GTK into a folder that runs without MSYS2.
+
+## Translating
+
+The app's own strings are translated with gettext; the sources stay in English and the translations live in `po/`. To add a language:
+
+```sh
+msginit --input po/drukhal-manager.pot --locale=de_DE.UTF-8 --output-file=po/de.po
+# translate po/de.po with Poedit, Lokalize, or Weblate
+LANG=de_DE.UTF-8 cargo run
+```
+
+`po/README.md` explains the placeholders and how to try a translation without installing it. Translations are also collected on Weblate once the project there is set up; each `.po` file is compiled into the Flatpak, the Windows bundle and the Arch package.
 
 <details>
 <summary>Releasing</summary>
@@ -175,7 +187,8 @@ On Windows, build in an [MSYS2](https://www.msys2.org/) UCRT64 shell with the pa
 1. Bump the version in `Cargo.toml` and add a `<release>` to `data/io.github.dukko.DrukhalManager.metainfo.xml`.
 2. If the release adds a permission to `flatpak/io.github.dukko.DrukhalManager.yml`, say so in the release notes: Flatpak won't let the app update itself into it, so users update with `flatpak update` or their software centre instead.
 3. If dependencies changed, regenerate `flatpak/cargo-sources.json` (see `flatpak/generate-cargo-sources.py`); the build fails if it is stale.
-4. Merge it into `master` through a pull request. The *Tag release* workflow tags `vX.Y.Z`, builds the Flatpak, publishes the signed repository to GitHub Pages and attaches `DrukhalManager.flatpak` to the release. The *Windows bundle* workflow attaches the installer `DrukhalManager-setup-x64.exe` and `DrukhalManager-windows-x64.zip` once the release exists.
+4. If UI strings changed, run `po/update-pot.sh` and commit the template; CI fails when it is out of date.
+5. Merge it into `master` through a pull request. The *Tag release* workflow tags `vX.Y.Z`, builds the Flatpak, publishes the signed repository to GitHub Pages and attaches `DrukhalManager.flatpak` to the release. The *Windows bundle* workflow attaches the installer `DrukhalManager-setup-x64.exe` and `DrukhalManager-windows-x64.zip` once the release exists.
 
 </details>
 

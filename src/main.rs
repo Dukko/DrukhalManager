@@ -12,6 +12,8 @@ mod fix_dialog;
 mod folder_merge_dialog;
 #[cfg(unix)]
 mod host_stylesheet;
+#[macro_use]
+mod i18n;
 mod merge;
 mod merge_dialog;
 mod mods;
@@ -34,6 +36,8 @@ use paradox::{game, steam};
 pub const APP_ID: &str = "io.github.dukko.DrukhalManager";
 
 fn main() -> gtk::glib::ExitCode {
+    // Before any UI, so the first string the app shows is translated too.
+    i18n::init();
     let app = adw::Application::builder().application_id(APP_ID).build();
     app.connect_activate(build_ui);
     app.run()

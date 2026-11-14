@@ -75,7 +75,7 @@ impl Window {
             body.push_str("\n• The load order is different");
         }
         body.push_str("\n\nLoading a save with other mods can break it.");
-        let dialog = adw::AlertDialog::builder().heading("Different Mods Than Last Time").body(body).body_use_markup(true).build();
+        let dialog = adw::AlertDialog::builder().heading(t!("Different Mods Than Last Time")).body(body).body_use_markup(true).build();
         dialog.add_response("cancel", "_Cancel");
         let can_switch = played.collection != now.collection && self.collections.borrow().get(&played.collection).is_some();
         if can_switch {
@@ -130,7 +130,7 @@ impl Window {
             list.append(&row);
         }
         let scrolled = gtk::ScrolledWindow::builder().child(&list).hscrollbar_policy(gtk::PolicyType::Never).propagate_natural_height(true).max_content_height(420).build();
-        let dialog = adw::AlertDialog::builder().heading("Saves").body("The mods each campaign was last played with from DrukhalManager.").build();
+        let dialog = adw::AlertDialog::builder().heading(t!("Saves")).body(t!("The mods each campaign was last played with from DrukhalManager.")).build();
         dialog.set_extra_child(Some(&scrolled));
         dialog.add_response("close", "_Close");
         dialog.present(Some(&self.window));

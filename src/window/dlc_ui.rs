@@ -29,7 +29,7 @@ impl Window {
 
         let page = adw::PreferencesPage::new();
         let all = adw::PreferencesGroup::builder()
-            .description("DLCs that are off aren't loaded by the game. In multiplayer, every player needs the same DLCs on, except content packs such as portraits and music. Changes are saved when this closes.")
+            .description(t!("DLCs that are off aren't loaded by the game. In multiplayer, every player needs the same DLCs on, except content packs such as portraits and music. Changes are saved when this closes."))
             .build();
         page.add(&all);
         let groups = [("Expansions", &["expansion"][..]), ("Story Packs", &["story_pack"]), ("Species Packs", &["species_pack"]), ("Content Packs", &["content_pack"])];
@@ -63,7 +63,7 @@ impl Window {
             }
             page.add(&group);
         }
-        let on = gtk::Button::builder().label("Turn All On").build();
+        let on = gtk::Button::builder().label(t!("Turn All On")).build();
         let switches = Rc::new(switches);
         on.connect_clicked({
             let switches = switches.clone();
@@ -74,7 +74,7 @@ impl Window {
         let toolbar = adw::ToolbarView::new();
         toolbar.add_top_bar(&header);
         toolbar.set_content(Some(&page));
-        let dialog = adw::Dialog::builder().title("DLC").content_width(560).content_height(680).child(&toolbar).build();
+        let dialog = adw::Dialog::builder().title(t!("DLC")).content_width(560).content_height(680).child(&toolbar).build();
 
         let weak = Rc::downgrade(self);
         dialog.connect_closed(move |_| {
