@@ -473,6 +473,72 @@ mod tests {
     }
 
     #[test]
+    #[ignore]
+    fn scan_timing() {
+        let root = std::env::temp_dir().join(format!("drukhal-scan-timing-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let mut file_count = 0;
+        let mut object_count = 0;
+        let mut inputs = Vec::new();
+        for m in 0..150 {
+            let name = format!("mod{m}");
+            let mut files = Vec::new();
+            for f in 0..40 {
+                let (folder, ext) = match f % 4 {
+                    0 => ("common/buildings", "txt"),
+                    1 => ("common/technology", "txt"),
+                    2 => ("events", "txt"),
+                    _ => ("localisation/english", "yml"),
+                };
+                let mut body = String::new();
+                if ext == "yml" {
+                    body.push_str("l_english:\n");
+                    for l in 0..100 {
+                        // Some keys are shared between mods.
+                        let k = if l % 10 == 0 { format!("shared_{}", l / 10) } else { format!("m{m}_f{f}_l{l}") };
+                        body.push_str(&format!(" {k}:0 \"Text {l}\"\n"));
+                        object_count += 1;
+                    }
+                } else {
+                    for o in 0..30 {
+                        let k = if o % 10 == 0 { format!("shared_{f}_{o}") } else { format!("m{m}_f{f}_o{o}") };
+                        let head = if folder == "events" { format!("country_event = {{ id = {k}") } else { format!("{k} = {{") };
+                        body.push_str(&format!("{head}\n\tcost = {{ energy = {o} }}\n\tmodifier = {{ a = 1 b = 2 }}\n}}\n"));
+                        object_count += 1;
+                    }
+                }
+                let path = if ext == "yml" { format!("{folder}/m{m}_f{f}_l_english.yml") } else { format!("{folder}/m{m}_f{f}.txt") };
+                files.push((path, body));
+                file_count += 1;
+            }
+            let refs: Vec<(&str, &str)> = files.iter().map(|(a, b)| (a.as_str(), b.as_str())).collect();
+            write(&root.join(&name), &refs);
+            inputs.push(input(&root, &name, &[]));
+        }
+        let best = |cold: bool| {
+            let mut warm_cache = ScanCache::default();
+            if !cold {
+                analyze_cached(&inputs, None, &mut warm_cache);
+            }
+            (0..3)
+                .map(|_| {
+                    let mut fresh = ScanCache::default();
+                    let cache = if cold { &mut fresh } else { &mut warm_cache };
+                    let start = std::time::Instant::now();
+                    let report = analyze_cached(&inputs, None, cache);
+                    assert!(!report.objects.is_empty());
+                    start.elapsed().as_millis()
+                })
+                .min()
+                .unwrap()
+        };
+        println!("TIMING cold scan={}", best(true));
+        println!("TIMING warm scan={}", best(false));
+        println!("TIMING files={file_count} objects={object_count}");
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn finds_file_and_object_conflicts() {
         let root = std::env::temp_dir().join(format!("drukhal-conflicts-{}", std::process::id()));
         write(&root.join("a"), &[
