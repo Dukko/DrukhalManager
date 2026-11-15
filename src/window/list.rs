@@ -968,3 +968,48 @@ fn place(list: &gtk::ListBox, rows: &[adw::ActionRow]) {
     }
     debug_assert!(rows.iter().enumerate().all(|(i, r)| list.row_at_index(i as i32).as_ref() == Some(r.upcast_ref::<gtk::ListBoxRow>())));
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn data() -> RowData {
+        RowData {
+            id: "ugc_1.mod".into(),
+            enabled: true,
+            is_patch: false,
+            name: "My Alias".into(),
+            real_name: "Real Name".into(),
+            aliased: true,
+            source: mods::Source::Local,
+            tags: vec!["Fixes".into()],
+            content: None,
+            note: Some("Remember This".into()),
+            game_version: "4.0.*".into(),
+            outdated: true,
+            conflicts: 2,
+            no_achievements: true,
+            steam: None,
+            remote_file_id: Some(1234567),
+            problems: vec![(checks::Severity::Warning, "Broken".into(), false)],
+            has_requirement: false,
+        }
+    }
+
+    #[test]
+    fn row_facts_match_what_search_reads() {
+        let mut data = data();
+        let facts = data.facts();
+        for part in ["my alias", "real name", "fixes", "remember this", "1234567"] {
+            assert!(facts.text.contains(part), "{part} missing from {}", facts.text);
+        }
+        assert!(facts.enabled);
+        assert!(!facts.achievements);
+        assert!(facts.conflicts);
+        assert!(facts.outdated);
+        assert!(facts.attention);
+        assert!(facts.category.is_none());
+        data.problems[0].0 = checks::Severity::Info;
+        assert!(!data.facts().attention);
+    }
+}
