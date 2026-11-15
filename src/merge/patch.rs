@@ -9,13 +9,17 @@
 //! the patches Irony Mod Manager writes
 //! (MIT, © 2020 Mario, https://github.com/bcssov/IronyModManager).
 
+use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::io::{self, Write};
+use std::ops::Range;
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 
 use serde::{Deserialize, Serialize};
 
 use super::conflicts;
+use crate::paradox::script::{self, Entry};
 
 /// The folder of the one patch older versions shared between every
 /// collection; it becomes the active collection's.
@@ -712,6 +716,51 @@ fn read_text(root: &Path, file: &str) -> Option<String> {
     std::fs::read(root.join(file)).ok().map(|b| String::from_utf8_lossy(&b).into_owned())
 }
 
+/// Source files read during one freshness check, each read and parsed at
+/// most once, since many merges cite the same game and mod files.
+#[derive(Default)]
+struct Sources {
+    texts: RefCell<HashMap<PathBuf, Option<Rc<String>>>>,
+    parsed: RefCell<HashMap<PathBuf, Option<Rc<Vec<(Entry, Range<usize>)>>>>>,
+}
+
+impl Sources {
+    /// The file's text, as [`read_text`] gives it.
+    fn text(&self, root: &Path, file: &str) -> Option<Rc<String>> {
+        let path = root.join(file);
+        if let Some(text) = self.texts.borrow().get(&path) {
+            return text.clone();
+        }
+        let text = read_text(root, file).map(Rc::new);
+        self.texts.borrow_mut().insert(path, text.clone());
+        text
+    }
+
+    /// The object's definition in the file, as [`super::source::extract`]
+    /// finds it, but parsing each file only once.
+    fn object(&self, root: &Path, file: &str, category: &str, key: &str) -> Option<String> {
+        let text = self.text(root, file)?;
+        if category == "localisation" {
+            return super::source::extract_parsed(category, key, &text, &[]);
+        }
+        // As `extract` does: files that can't define it aren't parsed.
+        if !text.contains(key.rsplit(':').next().unwrap_or(key)) {
+            return None;
+        }
+        let path = root.join(file);
+        let cached = self.parsed.borrow().get(&path).cloned();
+        let entries = match cached {
+            Some(entries) => entries,
+            None => {
+                let entries = script::parse_with_spans(&text).ok().map(Rc::new);
+                self.parsed.borrow_mut().insert(path, entries.clone());
+                entries
+            }
+        }?;
+        super::source::extract_parsed(category, key, &text, &entries)
+    }
+}
+
 /// A descriptor's `supported_version` for the installed game: `v4.5.3`
 /// gives `v4.5.*`, unknown gives `*`.
 pub fn supported_version(game_version: Option<&str>) -> String {
@@ -1194,5 +1243,39 @@ mod tests {
             }
             println!("TIMING {case} recheck={recheck:.1} picks={picks:.1} (stale={stale})");
         }
+    }
+
+    #[test]
+    fn sources_match_extract() {
+        let dir = std::env::temp_dir().join(format!("drukhal-sources-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let text = "@cost = 10\n@unused = 1\nbuilding_lab = {\n\tcost = @cost\n}\nbuilding_other = { cost = 2 }\n";
+        std::fs::write(dir.join("a.txt"), text).unwrap();
+        let loc = "l_english:\n lab:0 \"Lab\"\n";
+        std::fs::write(dir.join("a.yml"), loc).unwrap();
+        let sources = Sources::default();
+        for key in ["building_lab", "building_other", "building_missing"] {
+            assert_eq!(sources.object(&dir, "a.txt", "common/buildings", key), super::super::source::extract("common/buildings", key, text), "{key}");
+        }
+        assert!(sources.object(&dir, "a.txt", "common/buildings", "building_lab").unwrap().contains("@cost = 10"));
+        assert_eq!(sources.object(&dir, "a.yml", "localisation", "l_english:lab"), super::super::source::extract("localisation", "l_english:lab", loc));
+        assert!(sources.object(&dir, "a.yml", "localisation", "l_english:lab").is_some());
+        assert_eq!(sources.object(&dir, "nope.txt", "common/buildings", "building_lab"), None);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn sources_read_each_file_once() {
+        let dir = std::env::temp_dir().join(format!("drukhal-sources-once-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("a.txt"), "x = {}").unwrap();
+        let sources = Sources::default();
+        assert_eq!(sources.text(&dir, "a.txt").as_deref().map(String::as_str), Some("x = {}"));
+        assert!(sources.text(&dir, "a.txt").is_some());
+        std::fs::remove_file(dir.join("a.txt")).unwrap();
+        assert_eq!(sources.text(&dir, "a.txt").as_deref().map(String::as_str), Some("x = {}"), "served from the cache");
+        std::fs::remove_dir_all(dir).unwrap();
     }
 }

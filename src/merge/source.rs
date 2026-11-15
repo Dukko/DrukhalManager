@@ -26,6 +26,15 @@ pub fn extract(category: &str, key: &str, src: &str) -> Option<String> {
         return None;
     }
     let entries = script::parse_with_spans(src).ok()?;
+    extract_parsed(category, key, src, &entries)
+}
+
+/// As [`extract`], from `src` already parsed into `entries`, so one parse
+/// can serve many lookups.
+pub fn extract_parsed(category: &str, key: &str, src: &str, entries: &[(Entry, std::ops::Range<usize>)]) -> Option<String> {
+    if category == "localisation" {
+        return localisation_line(key, src);
+    }
     let found = entries.iter().find(|(entry, _)| match entry {
         Entry::Assign { key: k, value, .. } if category == "events" => k != "namespace" && value.as_block().and_then(|b| b.scalar("id")) == Some(key),
         Entry::Assign { key: k, .. } => k == key,
@@ -155,8 +164,8 @@ fn localisation_line(key: &str, src: &str) -> Option<String> {
     None
 }
 
-/// The base game's definition of the object, if it has one.
-pub fn vanilla(game_dir: &Path, category: &str, key: &str) -> Option<Source> {
+/// The base game's files for `category`, in the order they're searched.
+pub fn vanilla_files(game_dir: &Path, category: &str) -> Vec<std::path::PathBuf> {
     let (dir, recursive, extension) = match category {
         "localisation" => (game_dir.join("localisation"), true, "yml"),
         _ => (game_dir.join(category), false, "txt"),
@@ -164,7 +173,12 @@ pub fn vanilla(game_dir: &Path, category: &str, key: &str) -> Option<Source> {
     let mut files = Vec::new();
     collect(&dir, recursive, extension, &mut files);
     files.sort();
-    files.into_iter().find_map(|path| {
+    files
+}
+
+/// The base game's definition of the object, if it has one.
+pub fn vanilla(game_dir: &Path, category: &str, key: &str) -> Option<Source> {
+    vanilla_files(game_dir, category).into_iter().find_map(|path| {
         let src = String::from_utf8_lossy(&std::fs::read(&path).ok()?).into_owned();
         let text = extract(category, key, &src)?;
         let file = crate::platform::game_path(path.strip_prefix(game_dir).ok()?);
