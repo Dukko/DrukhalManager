@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: DrukhalManager 1.0.1\n"
 "Report-Msgid-Bugs-To: https://github.com/Dukko/DrukhalManager/issues\n"
-"POT-Creation-Date: 2026-11-15 22:47+0000\n"
+"POT-Creation-Date: 2026-11-15 23:08+0000\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -2475,7 +2475,7 @@ msgstr ""
 msgid "_Restore"
 msgstr ""
 
-#: src/window/backups_ui.rs:100 src/window/conflicts_ui.rs:766
+#: src/window/backups_ui.rs:100 src/window/conflicts_ui.rs:774
 msgid "Could not read the merged patch: {error}"
 msgstr ""
 
@@ -2515,7 +2515,7 @@ msgstr ""
 msgid "{when} · {contents}"
 msgstr ""
 
-#: src/window/collections_ui.rs:28 src/window/collections_ui.rs:205 src/window/conflicts_ui.rs:748 src/window/persist.rs:27
+#: src/window/collections_ui.rs:28 src/window/collections_ui.rs:205 src/window/conflicts_ui.rs:756 src/window/persist.rs:27
 msgid "Could not save collections: {error}"
 msgstr ""
 
@@ -2985,81 +2985,81 @@ msgstr[1] ""
 msgid "The clipboard doesn't hold a load order"
 msgstr ""
 
-#: src/window/conflicts_ui.rs:152
+#: src/window/conflicts_ui.rs:160
 msgid "Scan Failed"
 msgstr ""
 
-#: src/window/conflicts_ui.rs:153
+#: src/window/conflicts_ui.rs:161
 msgid "Something went wrong while reading the mods' files. Please report this: {error}"
 msgstr ""
 
-#: src/window/conflicts_ui.rs:201
+#: src/window/conflicts_ui.rs:209
 msgid "Nothing to update: the mods changed again since the last check"
 msgstr ""
 
-#: src/window/conflicts_ui.rs:209
+#: src/window/conflicts_ui.rs:217
 msgid "{count} picked version"
 msgid_plural "{count} picked versions"
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/window/conflicts_ui.rs:216
+#: src/window/conflicts_ui.rs:224
 msgid "Updated {what} to the new version"
 msgstr ""
 
-#: src/window/conflicts_ui.rs:216
+#: src/window/conflicts_ui.rs:224
 msgid "Backups…"
 msgstr ""
 
-#: src/window/conflicts_ui.rs:218
+#: src/window/conflicts_ui.rs:226
 msgid "Could not update {what}: {error}"
 msgstr ""
 
-#: src/window/conflicts_ui.rs:238
+#: src/window/conflicts_ui.rs:246
 msgid "Removed {what} from the patch"
 msgstr ""
 
-#: src/window/conflicts_ui.rs:279
+#: src/window/conflicts_ui.rs:287
 msgid "The mods {what} was merged from no longer conflict over it. Remove it from the patch, or enable them and rescan."
 msgstr ""
 
-#: src/window/conflicts_ui.rs:298
+#: src/window/conflicts_ui.rs:306
 msgid "Kept {what}; changes to its mods will be noticed from now on"
 msgstr ""
 
-#: src/window/conflicts_ui.rs:344
+#: src/window/conflicts_ui.rs:352
 msgid "Could not save ignored conflicts: {error}"
 msgstr ""
 
-#: src/window/conflicts_ui.rs:763
+#: src/window/conflicts_ui.rs:771
 msgid "Could not rename the merged patch: {error}"
 msgstr ""
 
-#: src/window/conflicts_ui.rs:780
+#: src/window/conflicts_ui.rs:788
 msgid "Could not save the merged patch: {error}"
 msgstr ""
 
-#: src/window/conflicts_ui.rs:830
+#: src/window/conflicts_ui.rs:838
 msgid "added to the end of the load order"
 msgstr ""
 
-#: src/window/conflicts_ui.rs:833
+#: src/window/conflicts_ui.rs:841
 msgid "Saved to {name}"
 msgstr ""
 
-#: src/window/conflicts_ui.rs:836
+#: src/window/conflicts_ui.rs:844
 msgid "Saved to {name}, which was {change}"
 msgstr ""
 
-#: src/window/conflicts_ui.rs:837 src/window/shortcuts.rs:23
+#: src/window/conflicts_ui.rs:845 src/window/shortcuts.rs:23
 msgid "Save Load Order"
 msgstr ""
 
-#: src/window/conflicts_ui.rs:849
+#: src/window/conflicts_ui.rs:857
 msgid "Rescan"
 msgstr ""
 
-#: src/window/conflicts_ui.rs:852
+#: src/window/conflicts_ui.rs:860
 msgid "Scan again, e.g. after mods were updated"
 msgstr ""
 
