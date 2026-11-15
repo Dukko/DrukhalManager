@@ -35,7 +35,7 @@ jobs:
       run:
         shell: msys2 {0}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.tag || github.ref }}
       - uses: msys2/setup-msys2@v2
@@ -88,12 +88,12 @@ jobs:
           Start-Process -Wait "$dir\unins000.exe" -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES'
           for ($i = 0; $i -lt 30 -and (Test-Path "$dir\bin"); $i++) { Start-Sleep -Seconds 1 }
           if (Test-Path "$dir\bin") { throw "Still installed after uninstalling" }
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: DrukhalManager-windows
           path: target/windows-bundle
           if-no-files-found: error
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: DrukhalManager-windows-installer
           path: target/installer/DrukhalManager-setup-x64.exe
@@ -110,11 +110,11 @@ jobs:
       GH_REPO: ${{ github.repository }}
       TAG: ${{ inputs.tag || github.ref_name }}
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: DrukhalManager-windows
           path: bundle
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: DrukhalManager-windows-installer
       - name: Zip
