@@ -14,9 +14,12 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-/// Caches of another version, or written by another version of the app
-/// (whose parsing may differ), are started again.
+/// Caches of another version are started again. Bump it whenever how files
+/// are parsed into keys changes (`object_keys`, `localisation_keys`,
+/// `object_category`, the script parser in `src/paradox/script.rs`).
 const VERSION: u32 = 2;
+/// Caches written by another version of the app keep their files' keys but
+/// lose their verdicts, which depend on the merge logic.
 const APP: &str = env!("CARGO_PKG_VERSION");
 /// Verdicts not used for this many days are dropped.
 const KEEP_DAYS: u32 = 30;
@@ -88,8 +91,16 @@ impl ScanCache {
 
     /// The cache at `path`; empty if there is none or it can't be read.
     pub fn load(path: &Path) -> Self {
-        let cache: Self = std::fs::read(path).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
-        if cache.version == VERSION && cache.app == APP { cache } else { Self { version: VERSION, app: APP.to_owned(), changed: true, ..Self::default() } }
+        let mut cache: Self = std::fs::read(path).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
+        if cache.version != VERSION {
+            return Self { version: VERSION, app: APP.to_owned(), changed: true, ..Self::default() };
+        }
+        if cache.app != APP {
+            cache.simple.clear();
+            cache.app = APP.to_owned();
+            cache.changed = true;
+        }
+        cache
     }
 
     /// Writes the cache, if it changed, dropping files that are gone and
@@ -208,6 +219,47 @@ mod tests {
         assert_eq!(reads.get(), 3);
         assert_ne!(print(&cache, "A").unwrap(), before);
         assert_eq!(cache.conflict_print("c", "x", "4.0.1", &[("A", "f", &root.join("never-read.txt"))]), None);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn keeps_file_keys_after_an_app_update() {
+        let root = std::env::temp_dir().join(format!("drukhal-scan-app-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let file = root.join("a.txt");
+        std::fs::write(&file, "x = {}").unwrap();
+        let mut cache = ScanCache::default();
+        cache.keys(&file, "common/a", |_| Ok(vec!["x".to_owned()])).unwrap();
+        cache.set_verdict("print".into(), None);
+        cache.version = VERSION;
+        cache.app = "0.0.0".into();
+        let path = root.join("cache.json");
+        std::fs::write(&path, serde_json::to_vec(&cache).unwrap()).unwrap();
+
+        let mut cache = ScanCache::load(&path);
+        assert_eq!(cache.keys(&file, "common/a", |_| panic!("parsed again")), Ok(vec!["x".to_owned()]));
+        assert_eq!(cache.verdict("print"), None);
+        assert!(cache.changed);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn starts_again_after_a_parser_change() {
+        let root = std::env::temp_dir().join(format!("drukhal-scan-version-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let file = root.join("a.txt");
+        std::fs::write(&file, "x = {}").unwrap();
+        let mut cache = ScanCache::default();
+        cache.keys(&file, "common/a", |_| Ok(vec!["x".to_owned()])).unwrap();
+        cache.version = VERSION - 1;
+        cache.app = APP.to_owned();
+        let path = root.join("cache.json");
+        std::fs::write(&path, serde_json::to_vec(&cache).unwrap()).unwrap();
+
+        let cache = ScanCache::load(&path);
+        assert!(cache.files.is_empty() && cache.simple.is_empty());
         std::fs::remove_dir_all(root).unwrap();
     }
 }
