@@ -12,7 +12,6 @@ async-channel = "2.5.0"
 dirs = "7.0.0"
 formatx = "0.4.2"
 fs4 = "1.1.0"
-futures-lite = "2.6.1"
 gettext-rs = { version = "0.8.0", features = ["gettext-system"] }
 gtk = { version = "0.11.5", package = "gtk4", features = ["v4_14"] }
 rusqlite = { version = "0.41.1", features = ["bundled"] }
@@ -27,6 +26,7 @@ zip = { version = "9.5.0", default-features = false, features = ["deflate-flate2
 # The system keyring: the Secret Service (or the Secret portal in the
 # Flatpak) on Linux, Credential Manager on Windows.
 [target.'cfg(unix)'.dependencies]
+futures-lite = "2.6.1"
 oo7 = { version = "0.7.0", default-features = false, features = ["async-std", "native_crypto"] }
 
 [target.'cfg(windows)'.dependencies]
