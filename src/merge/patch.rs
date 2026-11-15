@@ -1271,6 +1271,20 @@ mod tests {
                 std::fs::remove_dir_all(&f.root).unwrap();
             }
             println!("TIMING {case} recheck={recheck:.1} picks={picks:.1} (stale={stale})");
+            // The combined check, on a fresh fixture each run as above.
+            let mut check = f64::MAX;
+            let mut marked = 0;
+            for _ in 0..3 {
+                let mut f = timing_fixture("timing");
+                if case == "updated" {
+                    timing_update(&f);
+                }
+                let t = Instant::now();
+                marked = f.patch.check(&f.roots, Some(version)).len();
+                check = check.min(ms(t));
+                std::fs::remove_dir_all(&f.root).unwrap();
+            }
+            println!("TIMING {case} check={check:.1} (stale={marked})");
         }
     }
 
