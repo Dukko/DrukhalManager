@@ -70,6 +70,23 @@ jobs:
             mingw-w64-ucrt-x86_64-gettext
             mingw-w64-ucrt-x86_64-rust
             diffutils
+      # Swatinem/rust-cache assumes rustup, so cache by hand: MSYS2's cargo
+      # keeps its registry in the MSYS2 home, which actions/cache needs as a
+      # Windows path.
+      - name: Locate the cargo home and the Rust version
+        id: rust
+        run: |
+          echo "home=$(cygpath -w "$HOME/.cargo")" >> "$GITHUB_OUTPUT"
+          echo "version=$(rustc -V | tr ' ()' '---')" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ${{ steps.rust.outputs.home }}\registry
+            ${{ steps.rust.outputs.home }}\git
+            target
+          key: windows-cargo-${{ steps.rust.outputs.version }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            windows-cargo-${{ steps.rust.outputs.version }}-
       - name: cargo build
         run: cargo build --locked
       - name: cargo test
