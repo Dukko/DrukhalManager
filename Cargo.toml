@@ -30,7 +30,8 @@ futures-lite = "2.6.1"
 oo7 = { version = "0.7.0", default-features = false, features = ["async-std", "native_crypto"] }
 
 [target.'cfg(windows)'.dependencies]
-keyring = { version = "3.6.3", default-features = false, features = ["windows-native"] }
+keyring-core = "1.0.1"
+windows-native-keyring-store = "1.1.0"
 windows-registry = "0.100.0"
 
 # The icon and version details of the Windows .exe.
