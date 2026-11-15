@@ -87,6 +87,7 @@ impl Window {
                 // Zipped mods are read from an unpacked copy; one that can't
                 // be unpacked stays a zip, which the scan reports.
                 let mut inputs = inputs;
+                let unpacking = std::time::Instant::now();
                 for input in &mut inputs {
                     if let Some(root) = &input.root
                         && let Ok(files) = archive::files(root)
@@ -95,12 +96,16 @@ impl Window {
                     }
                 }
                 let roots: Vec<_> = inputs.iter().map(|i| i.root.clone().filter(|r| r.is_dir())).collect();
+                let unpacking = unpacking.elapsed();
                 // A poisoned lock only means an earlier scan panicked.
                 let mut cache = cache.lock().unwrap_or_else(|e| e.into_inner());
                 let cache = cache.get_or_insert_with(|| ScanCache::load(&ScanCache::path()));
+                let reading = std::time::Instant::now();
                 let report = conflicts::analyze_cached(&inputs, Some(&languages), cache);
+                let reading = reading.elapsed();
+                let checking = std::time::Instant::now();
                 let simple = crate::merge::trivial::simple_conflicts_cached(&report, &roots, &labels, game_dir.as_deref(), game_version.as_deref(), cache);
-                (report, roots, simple)
+                (report, roots, simple, [unpacking, reading, checking.elapsed()])
             })
             .await;
             // Written after the results show; the next scan waits for it.
@@ -114,11 +119,14 @@ impl Window {
             let Some(ui) = weak.upgrade() else { return };
             ui.scanning.set(false);
             match result {
-                Ok((report, roots, simple)) => {
+                Ok((report, roots, simple, [unpacking, reading, checking])) => {
                     crate::diagnostics::log!(
                         "scan",
-                        "Scan done in {:.1}s: {} file and {} object conflicts, {} files with errors, {} mods skipped",
+                        "Scan done in {:.1}s (unpacking {:.1}s, reading files {:.1}s, merge checks {:.1}s): {} file and {} object conflicts, {} files with errors, {} mods skipped",
                         started.elapsed().as_secs_f32(),
+                        unpacking.as_secs_f32(),
+                        reading.as_secs_f32(),
+                        checking.as_secs_f32(),
                         report.files.len(),
                         report.objects.len(),
                         report.errors.len(),
