@@ -166,7 +166,7 @@ impl Window {
         let mut roots: std::collections::HashMap<String, std::path::PathBuf> = state
             .enabled
             .iter()
-            .filter_map(|&i| Some((state.mods[i].id.clone(), archive::files(state.mods[i].content.as_deref()?).ok()?)))
+            .filter_map(|&i| Some((state.mods[i].id.clone(), archive::cached(state.mods[i].content.as_deref()?)?)))
             .collect();
         if let Some(game) = &self.game {
             roots.insert(patch::VANILLA.to_owned(), game.dir.clone());

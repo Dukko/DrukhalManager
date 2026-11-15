@@ -334,7 +334,7 @@ impl Window {
                 error_log::LogMod {
                     id: m.id.clone(),
                     name: display_name(m).to_owned(),
-                    root: m.content.as_deref().and_then(|c| archive::files(c).ok()),
+                    root: m.content.as_deref().and_then(archive::cached),
                     steam_id: m.descriptor.remote_file_id,
                     is_patch: patch::is_patch(&m.id),
                 }
@@ -388,7 +388,7 @@ impl Window {
             state
                 .mods
                 .iter()
-                .filter_map(|m| Some((m.id.clone(), archive::files(m.content.as_deref()?).ok()?)))
+                .filter_map(|m| Some((m.id.clone(), archive::cached(m.content.as_deref()?)?)))
                 .collect()
         };
         error_report_dialog::present(&self.window, &self.error_report(), log, modified, roots);

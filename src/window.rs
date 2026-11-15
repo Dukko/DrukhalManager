@@ -839,6 +839,7 @@ pub fn build(
         }
     });
     ui.refresh();
+    ui.unpack_zips();
     // Once the window is up, so the dialog has a parent to show over.
     let weak = Rc::downgrade(&ui);
     glib::idle_add_local_once(move || {

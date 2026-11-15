@@ -210,7 +210,7 @@ impl Window {
         for &i in &state.enabled {
             let Some(content) = &state.mods[i].content else { continue };
             if !cache.contains_key(content) {
-                let Ok(files) = mods::archive::files(content) else { continue };
+                let Some(files) = mods::archive::cached(content) else { continue };
                 cache.insert(content.clone(), mods::smart_sort::Profile::read(&files));
             }
             profiles.insert(i, cache[content].clone());
@@ -815,12 +815,12 @@ impl Window {
     }
 }
 
-/// Whether the mod changes checksummed files (zipped mods are unpacked once,
-/// and cached).
+/// Whether the mod changes checksummed files (zipped mods are read from their
+/// unpacked copy, once there is one).
 fn changes_checksum(m: &Mod) -> bool {
     m.content
         .as_deref()
-        .and_then(|c| if c.is_file() { mods::archive::files(c).ok() } else { Some(c.to_path_buf()) })
+        .and_then(mods::archive::cached)
         .is_some_and(|root| crate::multiplayer::changes_checksum(&root))
 }
 
