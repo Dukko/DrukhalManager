@@ -16,6 +16,7 @@ use crate::merge_dialog;
 use crate::thinking_view::{self, ThinkingView};
 use crate::paradox::script;
 
+#[allow(clippy::type_complexity)]
 pub struct Request {
     pub path: String,
     pub mod_id: String,
@@ -185,7 +186,8 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
                 banner,
                 async move {
                     let mut failures = 0;
-                    for (key, label) in labels.borrow().clone() {
+                    let pending = labels.borrow().clone();
+                    for (key, label) in pending {
                         let buffer = editor.buffer();
                         let text = buffer.text(&buffer.start_iter(), &buffer.end_iter(), false).to_string();
                         let Some(range) = lint::object_span(&category, &key, &text) else {

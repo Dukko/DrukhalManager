@@ -14,6 +14,7 @@ use crate::merge::file_merge::{self, Plan, Status, Version};
 use crate::merge::patch::{Print, VANILLA};
 use crate::thinking_view::{self, ThinkingView};
 
+#[allow(clippy::type_complexity)]
 pub struct Request {
     pub path: String,
     /// `(descriptor id, mod name, mod folder)` for each copy, in load order.

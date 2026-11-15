@@ -53,6 +53,7 @@ pub enum Items {
     Files { folder: String, files: Vec<FileItem> },
 }
 
+#[allow(clippy::type_complexity)]
 pub struct Request {
     pub items: Items,
     pub game_dir: Option<PathBuf>,
