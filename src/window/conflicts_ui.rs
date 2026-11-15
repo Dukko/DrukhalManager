@@ -182,9 +182,7 @@ impl Window {
             .borrow_mut()
             .as_mut()
             .map(|p| {
-                let mut stale = p.recheck(&roots, version);
-                Patch::mark_picks(&mut stale, &p.picks_to_update(&roots));
-                stale
+                p.check(&roots, version)
             })
             .unwrap_or_default();
         self.stale.replace(stale);
