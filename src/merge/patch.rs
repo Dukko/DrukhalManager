@@ -1056,4 +1056,143 @@ mod tests {
 
         std::fs::remove_dir_all(user).unwrap();
     }
+
+    /// A heavily modded game on disk, with a patch merging much of it.
+    struct TimingFixture {
+        root: PathBuf,
+        user: PathBuf,
+        game: PathBuf,
+        mods_dir: PathBuf,
+        patch: Patch,
+        roots: HashMap<String, PathBuf>,
+    }
+
+    /// The building a merge `idx` is about: 150 from `00_a.txt`, 150 from `01_b.txt`.
+    fn timing_building(idx: usize) -> String {
+        if idx < 150 { format!("bld_a_{idx}") } else { format!("bld_b_{}", idx - 150) }
+    }
+
+    fn timing_object(name: &str, buildtime: u32) -> String {
+        format!("{name} = {{\n\tbase_buildtime = {buildtime}\n\tcost = {{ minerals = 50 }}\n\tallow = {{ always = yes }}\n\tai_weight = {{ factor = 1 }}\n}}\n")
+    }
+
+    fn timing_write(root: &Path, file: &str, text: &str) {
+        let path = root.join(file);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, text).unwrap();
+    }
+
+    /// Mod `n`'s buildings: 20 of the 300 merged ones, so each is defined by 2 mods.
+    fn timing_mod_buildings(n: usize) -> Vec<String> {
+        (0..20).map(|j| timing_building((n * 20 + j) % 300)).collect()
+    }
+
+    /// Mod `n`'s localisation keys: 10 of the first 100.
+    fn timing_mod_keys(n: usize) -> Vec<usize> {
+        (0..10).map(|j| (n * 10 + j) % 100).collect()
+    }
+
+    fn timing_fixture(name: &str) -> TimingFixture {
+        let root = std::env::temp_dir().join(format!("drukhal-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let (user, game, mods_dir) = (root.join("user"), root.join("game"), root.join("mods"));
+        std::fs::create_dir_all(user.join("mod")).unwrap();
+        for f in ["a", "b", "c", "d"] {
+            let text: String = (0..500).map(|i| timing_object(&format!("bld_{f}_{i}"), 100)).collect();
+            let file = format!("common/buildings/{}_{f}.txt", match f { "a" => "00", "b" => "01", "c" => "02", _ => "03" });
+            timing_write(&game, &file, &text);
+        }
+        let mut loc = String::from("l_english:\n");
+        for i in 0..20_000 {
+            loc.push_str(&format!(" key_{i}:0 \"Text {i}\"\n"));
+        }
+        timing_write(&game, "localisation/english/big_l_english.yml", &loc);
+
+        let mut defining: HashMap<String, Vec<(SourceMod, String)>> = HashMap::new();
+        let mut loc_defining: HashMap<usize, Vec<(SourceMod, String)>> = HashMap::new();
+        let mut roots: HashMap<String, PathBuf> = HashMap::new();
+        for n in 0..30 {
+            let dir = mods_dir.join(format!("m{n}"));
+            let source: SourceMod = (format!("mod/m{n}.mod"), format!("Mod {n}"), dir.clone());
+            let buildings = timing_mod_buildings(n);
+            let text: String = buildings.iter().map(|b| timing_object(b, 200)).collect();
+            let file = format!("common/buildings/zz_m{n}.txt");
+            timing_write(&dir, &file, &text);
+            for b in buildings {
+                defining.entry(b).or_default().push((source.clone(), file.clone()));
+            }
+            let keys = timing_mod_keys(n);
+            let mut loc = String::from("l_english:\n");
+            for k in &keys {
+                loc.push_str(&format!(" key_{k}:0 \"Mod {n} {k}\"\n"));
+            }
+            let file = format!("localisation/english/m{n}_l_english.yml");
+            timing_write(&dir, &file, &loc);
+            for k in keys {
+                loc_defining.entry(k).or_default().push((source.clone(), file.clone()));
+            }
+            roots.insert(source.0, dir);
+        }
+        roots.insert(VANILLA.to_owned(), game.clone());
+
+        let mut patch = Patch::open(&user, &test_target()).unwrap();
+        for idx in 0..300 {
+            let key = timing_building(idx);
+            let mods = &defining[&key];
+            assert!(mods.len() >= 2, "{key} is defined by {} mod(s)", mods.len());
+            let prints = object_prints("common/buildings", &key, Some(&game), mods);
+            // As if the first mod's version was picked.
+            let kept = super::super::source::extract("common/buildings", &key, &std::fs::read_to_string(mods[0].0.2.join(&mods[0].1)).unwrap()).unwrap();
+            patch.save(&user, Some("v4.0.0"), "common/buildings", &key, &kept, prints).unwrap();
+        }
+        for k in 0..50 {
+            let mods = &loc_defining[&k];
+            assert!(mods.len() >= 2);
+            let key = format!("l_english:key_{k}");
+            let prints = object_prints("localisation", &key, Some(&game), mods);
+            let kept = super::super::source::extract("localisation", &key, &std::fs::read_to_string(mods[0].0.2.join(&mods[0].1)).unwrap()).unwrap();
+            patch.save(&user, Some("v4.0.0"), "localisation", &key, &kept, prints).unwrap();
+        }
+        TimingFixture { root, user, game, mods_dir, patch, roots }
+    }
+
+    /// A game update and two mods' edits: 20 merges go out of date and 50
+    /// definitions move to a new file, unchanged.
+    fn timing_update(f: &TimingFixture) {
+        for n in 0..2 {
+            let text: String = timing_mod_buildings(n).iter().enumerate().map(|(j, b)| timing_object(b, if j < 10 { 999 } else { 200 })).collect();
+            timing_write(&f.mods_dir.join(format!("m{n}")), &format!("common/buildings/zz_m{n}.txt"), &text);
+        }
+        let (kept, moved): (String, String) = ((50..500).map(|i| timing_object(&format!("bld_a_{i}"), 100)).collect(), (0..50).map(|i| timing_object(&format!("bld_a_{i}"), 100)).collect());
+        timing_write(&f.game, "common/buildings/00_a.txt", &kept);
+        timing_write(&f.game, "common/buildings/04_e.txt", &moved);
+    }
+
+    /// How long the merged patch's freshness check takes on a big setup:
+    /// `cargo test --release --locked recheck_timing -- --ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn recheck_timing() {
+        use std::time::Instant;
+        let ms = |t: Instant| t.elapsed().as_secs_f64() * 1000.0;
+        for (case, version) in [("steady", "v4.0.0"), ("updated", "v4.1.0")] {
+            let (mut recheck, mut picks) = (f64::MAX, f64::MAX);
+            let mut stale = 0;
+            for _ in 0..3 {
+                let mut f = timing_fixture("timing");
+                if case == "updated" {
+                    timing_update(&f);
+                }
+                let t = Instant::now();
+                stale = f.patch.recheck(&f.roots, Some(version)).len();
+                recheck = recheck.min(ms(t));
+                let t = Instant::now();
+                let n = f.patch.picks_to_update(&f.roots).len();
+                picks = picks.min(ms(t));
+                let _ = n;
+                std::fs::remove_dir_all(&f.root).unwrap();
+            }
+            println!("TIMING {case} recheck={recheck:.1} picks={picks:.1} (stale={stale})");
+        }
+    }
 }
