@@ -77,7 +77,7 @@ jobs:
         id: rust
         run: |
           echo "home=$(cygpath -w "$HOME/.cargo")" >> "$GITHUB_OUTPUT"
-          echo "version=$(rustc -V | tr ' ()' '---')" >> "$GITHUB_OUTPUT"
+          echo "version=$(rustc -V | sha256sum | cut -c1-16)" >> "$GITHUB_OUTPUT"
       - uses: actions/cache@v6
         with:
           path: |
