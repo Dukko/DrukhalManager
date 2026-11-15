@@ -36,6 +36,14 @@
     <control>keyboard</control>
   </supports>
   <releases>
+    <release version="1.0.1" date="2026-11-15">
+      <description>
+        <p><em>A faster load order.</em> Dragging, toggling, sorting, undoing and redoing no longer rebuild every row of the list, only the ones that changed. With a few hundred mods, moving one mod is about five times faster, and sorting about twice as fast.</p>
+        <p><em>Opens sooner with zipped mods.</em> Mods that come as zip files are unpacked in the background after the window opens, instead of before it.</p>
+        <p><em>Quicker merged patch checks.</em> Checking whether merges are out of date reads each mod and game file once, instead of once per merge. With a large merged patch this takes milliseconds instead of a noticeable pause at startup and after every scan.</p>
+        <p><em>Smaller download.</em> The app itself is about a fifth smaller.</p>
+      </description>
+    </release>
     <release version="1.0.0" date="2026-11-13">
       <description>
         <p><em>DrukhalManager 1.0, now on Windows.</em> The same app, with the same interface, runs on 64-bit Windows. Download DrukhalManager-setup-x64.exe from the release to install it, or the zip to run it without installing. The downloads aren't code-signed yet, so the first time Windows SmartScreen asks: click More info, then Run anyway.</p>

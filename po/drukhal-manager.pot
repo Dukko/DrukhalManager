@@ -6,9 +6,9 @@
 #, fuzzy
 msgid ""
 msgstr ""
-"Project-Id-Version: DrukhalManager 1.0.0\n"
+"Project-Id-Version: DrukhalManager 1.0.1\n"
 "Report-Msgid-Bugs-To: https://github.com/Dukko/DrukhalManager/issues\n"
-"POT-Creation-Date: 2026-11-14 20:47+0000\n"
+"POT-Creation-Date: 2026-11-15 22:15+0000\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -150,7 +150,7 @@ msgstr ""
 msgid "These two copies are identical."
 msgstr ""
 
-#: src/conflicts_view/file.rs:344 src/conflicts_view/object.rs:626 src/file_merge_dialog.rs:368
+#: src/conflicts_view/file.rs:344 src/conflicts_view/object.rs:626 src/file_merge_dialog.rs:369
 msgid "Merge Tool…"
 msgstr ""
 
@@ -280,7 +280,7 @@ msgstr ""
 msgid "Kept"
 msgstr ""
 
-#: src/conflicts_view/object.rs:522 src/file_merge_dialog.rs:265 src/file_merge_dialog.rs:280
+#: src/conflicts_view/object.rs:522 src/file_merge_dialog.rs:266 src/file_merge_dialog.rs:281
 msgid "Merged"
 msgstr ""
 
@@ -345,7 +345,7 @@ msgstr ""
 msgid "Not saved yet"
 msgstr ""
 
-#: src/conflicts_view/object.rs:723 src/file_merge_dialog.rs:37 src/fix_dialog.rs:42
+#: src/conflicts_view/object.rs:723 src/file_merge_dialog.rs:38 src/fix_dialog.rs:43
 msgid "Save to Patch"
 msgstr ""
 
@@ -361,7 +361,7 @@ msgstr ""
 msgid "The model's result still has a problem after a correction: {problem}. Fix it by hand, or undo and try again."
 msgstr ""
 
-#: src/conflicts_view/object.rs:834 src/folder_merge_dialog.rs:675
+#: src/conflicts_view/object.rs:834 src/folder_merge_dialog.rs:676
 msgid "The merge failed unexpectedly"
 msgstr ""
 
@@ -430,7 +430,7 @@ msgstr ""
 msgid "Merged Patch Backups…"
 msgstr ""
 
-#: src/conflicts_view.rs:415 src/window/overview.rs:653 src/window/shortcuts.rs:32 src/window/shortcuts.rs:82 src/window.rs:469 src/window.rs:1007
+#: src/conflicts_view.rs:415 src/window/overview.rs:653 src/window/shortcuts.rs:32 src/window/shortcuts.rs:82 src/window.rs:474 src/window.rs:1015
 msgid "Conflicts"
 msgstr ""
 
@@ -788,7 +788,7 @@ msgstr ""
 msgid "Mods changed since they were merged"
 msgstr ""
 
-#: src/conflicts_view.rs:1305 src/folder_merge_dialog.rs:688 src/folder_merge_dialog.rs:747
+#: src/conflicts_view.rs:1305 src/folder_merge_dialog.rs:689 src/folder_merge_dialog.rs:748
 msgid "Merged into the patch"
 msgstr ""
 
@@ -894,487 +894,487 @@ msgid_plural "…and {count} more kinds"
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/file_merge_dialog.rs:36
+#: src/file_merge_dialog.rs:37
 msgid "Merge Conflicts"
 msgstr ""
 
-#: src/file_merge_dialog.rs:51 src/folder_merge_dialog.rs:150
+#: src/file_merge_dialog.rs:52 src/folder_merge_dialog.rs:151
 msgid "Objects"
 msgstr ""
 
-#: src/file_merge_dialog.rs:51
+#: src/file_merge_dialog.rs:52
 msgid "Reading each mod's copy…"
 msgstr ""
 
-#: src/file_merge_dialog.rs:54
+#: src/file_merge_dialog.rs:55
 msgid "Merged File"
 msgstr ""
 
-#: src/file_merge_dialog.rs:55
+#: src/file_merge_dialog.rs:56
 msgid "Review and edit before saving. Merging conflicts rebuilds this from the objects above, replacing manual edits."
 msgstr ""
 
-#: src/file_merge_dialog.rs:73
+#: src/file_merge_dialog.rs:74
 msgid "This file was merged before. Saving replaces that merge with this one."
 msgstr ""
 
-#: src/file_merge_dialog.rs:110
+#: src/file_merge_dialog.rs:111
 msgid "This file can't be merged object by object."
 msgstr ""
 
-#: src/file_merge_dialog.rs:115
+#: src/file_merge_dialog.rs:116
 msgid "Reading the mods' copies failed unexpectedly"
 msgstr ""
 
-#: src/file_merge_dialog.rs:126
+#: src/file_merge_dialog.rs:127
 msgid "Recovered from {from}"
 msgstr ""
 
-#: src/file_merge_dialog.rs:127
+#: src/file_merge_dialog.rs:128
 msgid "Only {from} changes this; using its version"
 msgstr ""
 
-#: src/file_merge_dialog.rs:128
+#: src/file_merge_dialog.rs:129
 msgid "Changed differently by {sources}"
 msgstr ""
 
-#: src/file_merge_dialog.rs:143
+#: src/file_merge_dialog.rs:144
 msgid "Whose version to keep"
 msgstr ""
 
-#: src/file_merge_dialog.rs:173
+#: src/file_merge_dialog.rs:174
 msgid "Merge {count} Conflict with AI"
 msgid_plural "Merge {count} Conflicts with AI"
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/file_merge_dialog.rs:176
+#: src/file_merge_dialog.rs:177
 msgid "Ask {model} to merge each conflicting object"
 msgstr ""
 
-#: src/file_merge_dialog.rs:239
+#: src/file_merge_dialog.rs:240
 msgid "Merging…"
 msgstr ""
 
-#: src/file_merge_dialog.rs:254
+#: src/file_merge_dialog.rs:255
 msgid "the merge was closed"
 msgstr ""
 
-#: src/file_merge_dialog.rs:256 src/fix_dialog.rs:203 src/folder_merge_dialog.rs:719
+#: src/file_merge_dialog.rs:257 src/fix_dialog.rs:205 src/folder_merge_dialog.rs:720
 msgid "failed unexpectedly"
 msgstr ""
 
-#: src/file_merge_dialog.rs:270
+#: src/file_merge_dialog.rs:271
 msgid "Merge failed"
 msgstr ""
 
-#: src/file_merge_dialog.rs:280
+#: src/file_merge_dialog.rs:281
 msgid "Retry Failed"
 msgstr ""
 
-#: src/file_merge_dialog.rs:282
+#: src/file_merge_dialog.rs:283
 msgid "{count} object couldn't be merged; hover the row for the reason. They keep the last mod's version."
 msgid_plural "{count} objects couldn't be merged; hover the row for the reason. They keep the last mod's version."
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/file_merge_dialog.rs:330
+#: src/file_merge_dialog.rs:331
 msgid "Could not read {label}'s copy: {error}"
 msgstr ""
 
-#: src/file_merge_dialog.rs:350
+#: src/file_merge_dialog.rs:351
 msgid "{count} object kept as is"
 msgid_plural "{count} objects kept as is"
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/file_merge_dialog.rs:352
+#: src/file_merge_dialog.rs:353
 msgid "{count} recovered from overridden copies"
 msgstr ""
 
-#: src/file_merge_dialog.rs:355
+#: src/file_merge_dialog.rs:356
 msgid "{count} taken from the only mod that changed them"
 msgstr ""
 
-#: src/file_merge_dialog.rs:357
+#: src/file_merge_dialog.rs:358
 msgid "no conflicts"
 msgstr ""
 
-#: src/file_merge_dialog.rs:357
+#: src/file_merge_dialog.rs:358
 msgid "{count} conflict to merge"
 msgid_plural "{count} conflicts to merge"
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/file_merge_dialog.rs:366
+#: src/file_merge_dialog.rs:367
 msgid "Merge the file below with"
 msgstr ""
 
-#: src/file_merge_dialog.rs:368
+#: src/file_merge_dialog.rs:369
 msgid "Merge the file below with a mod's copy in your merge tool; what you save there replaces it"
 msgstr ""
 
-#: src/file_merge_dialog.rs:370
+#: src/file_merge_dialog.rs:371
 msgid "{name}'s Copy"
 msgstr ""
 
-#: src/file_merge_dialog.rs:381
+#: src/file_merge_dialog.rs:382
 msgid "Choose a merge tool in Preferences, on the Merging page, first."
 msgstr ""
 
-#: src/file_merge_dialog.rs:384
+#: src/file_merge_dialog.rs:385
 msgid "Could not read {name}'s copy."
 msgstr ""
 
-#: src/file_merge_dialog.rs:390
+#: src/file_merge_dialog.rs:391
 msgid "Merged file"
 msgstr ""
 
-#: src/file_merge_dialog.rs:396
+#: src/file_merge_dialog.rs:397
 msgid "The merge tool's result is below. Review it, then save it to the patch."
 msgstr ""
 
-#: src/file_merge_dialog.rs:398
+#: src/file_merge_dialog.rs:399
 msgid "{tool} was closed without saving, so nothing changed."
 msgstr ""
 
-#: src/fix_dialog.rs:41
+#: src/fix_dialog.rs:42
 msgid "Fix with AI"
 msgstr ""
 
-#: src/fix_dialog.rs:45
+#: src/fix_dialog.rs:46
 msgid "Fix {file}"
 msgstr ""
 
-#: src/fix_dialog.rs:51
+#: src/fix_dialog.rs:52
 msgid "Problem"
 msgstr ""
 
-#: src/fix_dialog.rs:53
+#: src/fix_dialog.rs:54
 msgid "{mod_name} · {error}. The game keeps reading after a brace mistake, but everything after it ends up nested inside the broken object and stops working."
 msgstr ""
 
-#: src/fix_dialog.rs:57
+#: src/fix_dialog.rs:58
 msgid "Repair"
 msgstr ""
 
-#: src/fix_dialog.rs:57
+#: src/fix_dialog.rs:58
 msgid "Repairing…"
 msgstr ""
 
-#: src/fix_dialog.rs:60
+#: src/fix_dialog.rs:61
 msgid "Fixed File"
 msgstr ""
 
-#: src/fix_dialog.rs:60
+#: src/fix_dialog.rs:61
 msgid "Review and edit before saving. It replaces the mod's copy through the merged patch."
 msgstr ""
 
-#: src/fix_dialog.rs:108
+#: src/fix_dialog.rs:109
 msgid "Could not read the mod's file"
 msgstr ""
 
-#: src/fix_dialog.rs:115
+#: src/fix_dialog.rs:116
 msgid "This can't be repaired automatically. Fix it by hand below; the file is checked before saving."
 msgstr ""
 
-#: src/fix_dialog.rs:122
+#: src/fix_dialog.rs:123
 msgid "Braces were fixed so the file parses and every object is separate again. {count} object may still be nested wrongly inside."
 msgid_plural "Braces were fixed so the file parses and every object is separate again. {count} objects may still be nested wrongly inside."
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/fix_dialog.rs:130
+#: src/fix_dialog.rs:131
 msgid "Braces changed; check its nesting"
 msgstr ""
 
-#: src/fix_dialog.rs:132
+#: src/fix_dialog.rs:133
 msgid "Not reviewed"
 msgstr ""
 
-#: src/fix_dialog.rs:138
+#: src/fix_dialog.rs:139
 msgid "Fix {count} Object with AI"
 msgid_plural "Fix {count} Objects with AI"
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/fix_dialog.rs:192
+#: src/fix_dialog.rs:194
 msgid "Not found in the file"
 msgstr ""
 
-#: src/fix_dialog.rs:196
+#: src/fix_dialog.rs:198
 msgid "Fixing…"
 msgstr ""
 
-#: src/fix_dialog.rs:205
+#: src/fix_dialog.rs:207
 msgid "could not place the fix"
 msgstr ""
 
-#: src/fix_dialog.rs:208 src/fix_dialog.rs:223
+#: src/fix_dialog.rs:210 src/fix_dialog.rs:225
 msgid "Fixed"
 msgstr ""
 
-#: src/fix_dialog.rs:214
+#: src/fix_dialog.rs:216
 msgid "Not fixed; check it by hand"
 msgstr ""
 
-#: src/fix_dialog.rs:223
+#: src/fix_dialog.rs:225
 msgid "Retry"
 msgstr ""
 
-#: src/fix_dialog.rs:225
+#: src/fix_dialog.rs:227
 msgid "{count} object couldn't be fixed by AI; hover the row for the reason"
 msgid_plural "{count} objects couldn't be fixed by AI; hover the row for the reason"
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/fix_dialog.rs:247
+#: src/fix_dialog.rs:249
 msgid "The file still has a syntax error at {error}"
 msgstr ""
 
-#: src/folder_merge_dialog.rs:131 src/folder_merge_dialog.rs:192
+#: src/folder_merge_dialog.rs:132 src/folder_merge_dialog.rs:193
 msgid "Merge"
 msgstr ""
 
-#: src/folder_merge_dialog.rs:132
+#: src/folder_merge_dialog.rs:133
 msgid "Stop"
 msgstr ""
 
-#: src/folder_merge_dialog.rs:132
+#: src/folder_merge_dialog.rs:133
 msgid "Stop after the object being merged"
 msgstr ""
 
-#: src/folder_merge_dialog.rs:134
+#: src/folder_merge_dialog.rs:135
 msgid "No AI provider set up"
 msgstr ""
 
-#: src/folder_merge_dialog.rs:134
+#: src/folder_merge_dialog.rs:135
 msgid "with {model}"
 msgstr ""
 
-#: src/folder_merge_dialog.rs:135
+#: src/folder_merge_dialog.rs:136
 msgid "Merge {title}"
 msgstr ""
 
-#: src/folder_merge_dialog.rs:139
+#: src/folder_merge_dialog.rs:140
 msgid "Reading every version…"
 msgstr ""
 
-#: src/folder_merge_dialog.rs:150
+#: src/folder_merge_dialog.rs:151
 msgid "Files"
 msgstr ""
 
-#: src/folder_merge_dialog.rs:152
+#: src/folder_merge_dialog.rs:153
 msgid "Each file is saved to the patch as soon as its conflicting objects are merged. Review any of them later from its conflict."
 msgstr ""
 
-#: src/folder_merge_dialog.rs:154
+#: src/folder_merge_dialog.rs:155
 msgid "Each merge is saved to the patch as soon as it's done. Review any of them later with Edit Merge."
 msgstr ""
 
-#: src/folder_merge_dialog.rs:194
+#: src/folder_merge_dialog.rs:195
 msgid "Merge {count} File"
 msgid_plural "Merge {count} Files"
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/folder_merge_dialog.rs:196
+#: src/folder_merge_dialog.rs:197
 msgid "Merge {count} Object"
 msgid_plural "Merge {count} Objects"
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/folder_merge_dialog.rs:201
+#: src/folder_merge_dialog.rs:202
 msgid "Set Up AI…"
 msgstr ""
 
-#: src/folder_merge_dialog.rs:204
+#: src/folder_merge_dialog.rs:205
 msgid "Nothing selected to merge"
 msgstr ""
 
-#: src/folder_merge_dialog.rs:208 src/folder_merge_dialog.rs:494
+#: src/folder_merge_dialog.rs:209 src/folder_merge_dialog.rs:495
 msgid " · {count} without AI"
 msgstr ""
 
-#: src/folder_merge_dialog.rs:211
+#: src/folder_merge_dialog.rs:212
 msgid "No AI calls needed · {count} file can be combined as they are"
 msgid_plural "No AI calls needed · {count} files can be combined as they are"
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/folder_merge_dialog.rs:212
+#: src/folder_merge_dialog.rs:213
 msgid "In each of these, every object is the same in every copy, only in some of them, or changed by only one mod."
 msgstr ""
 
-#: src/folder_merge_dialog.rs:214
+#: src/folder_merge_dialog.rs:215
 msgid "No AI calls needed · {count} version can be used as it is"
 msgid_plural "No AI calls needed · {count} versions can be used as they are"
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/folder_merge_dialog.rs:215
+#: src/folder_merge_dialog.rs:216
 msgid "Each of these was changed by only one mod, or is the same in every mod."
 msgstr ""
 
-#: src/folder_merge_dialog.rs:219
+#: src/folder_merge_dialog.rs:220
 msgid "{count} AI call"
 msgid_plural "{count} AI calls"
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/folder_merge_dialog.rs:221
+#: src/folder_merge_dialog.rs:222
 msgid "{calls}{without_ai} · about {input} tokens in, {low}–{high} out"
 msgstr ""
 
-#: src/folder_merge_dialog.rs:227
+#: src/folder_merge_dialog.rs:228
 msgid "Estimated cost: {low} to {high}, depending on how much the model thinks. Prices: ${input:.3} per million tokens in, ${output:.3} out."
 msgstr ""
 
-#: src/folder_merge_dialog.rs:233
+#: src/folder_merge_dialog.rs:234
 msgid "The provider doesn't publish this model's price, so the cost can't be estimated."
 msgstr ""
 
-#: src/folder_merge_dialog.rs:234
+#: src/folder_merge_dialog.rs:235
 msgid "Looking up the model's price…"
 msgstr ""
 
-#: src/folder_merge_dialog.rs:269
+#: src/folder_merge_dialog.rs:270
 msgid "This kind of file can't be merged object by object"
 msgstr ""
 
-#: src/folder_merge_dialog.rs:290
+#: src/folder_merge_dialog.rs:291
 msgid "Merge this file"
 msgstr ""
 
-#: src/folder_merge_dialog.rs:290
+#: src/folder_merge_dialog.rs:291
 msgid "Merge this object"
 msgstr ""
 
-#: src/folder_merge_dialog.rs:296 src/folder_merge_dialog.rs:330
+#: src/folder_merge_dialog.rs:297 src/folder_merge_dialog.rs:331
 msgid "Show the merged result"
 msgstr ""
 
-#: src/folder_merge_dialog.rs:330
+#: src/folder_merge_dialog.rs:331
 msgid "Hide the merged result"
 msgstr ""
 
-#: src/folder_merge_dialog.rs:337
+#: src/folder_merge_dialog.rs:338
 msgid "Already merged · {subtitle}"
 msgstr ""
 
-#: src/folder_merge_dialog.rs:344
+#: src/folder_merge_dialog.rs:345
 msgid "No AI needed: {reason} · {subtitle}"
 msgstr ""
 
-#: src/folder_merge_dialog.rs:353
+#: src/folder_merge_dialog.rs:354
 msgid "Nothing to merge"
 msgstr ""
 
-#: src/folder_merge_dialog.rs:353
+#: src/folder_merge_dialog.rs:354
 msgid "Could not find it in: {mods}"
 msgstr ""
 
-#: src/folder_merge_dialog.rs:409
+#: src/folder_merge_dialog.rs:410
 msgid "Stopping…"
 msgstr ""
 
-#: src/folder_merge_dialog.rs:490
+#: src/folder_merge_dialog.rs:491
 msgid "Stopped · {count} not merged"
 msgstr ""
 
-#: src/folder_merge_dialog.rs:490
+#: src/folder_merge_dialog.rs:491
 msgid "Done"
 msgstr ""
 
-#: src/folder_merge_dialog.rs:492
+#: src/folder_merge_dialog.rs:493
 msgid "Merged {saved} of {total}"
 msgstr ""
 
-#: src/folder_merge_dialog.rs:497
+#: src/folder_merge_dialog.rs:498
 msgid " · {count} with objects left unmerged"
 msgstr ""
 
-#: src/folder_merge_dialog.rs:500
+#: src/folder_merge_dialog.rs:501
 msgid " · {count} failed"
 msgstr ""
 
-#: src/folder_merge_dialog.rs:504
+#: src/folder_merge_dialog.rs:505
 msgid "No AI calls were needed"
 msgstr ""
 
-#: src/folder_merge_dialog.rs:506
+#: src/folder_merge_dialog.rs:507
 msgid " · cost {cost}"
 msgstr ""
 
-#: src/folder_merge_dialog.rs:507
+#: src/folder_merge_dialog.rs:508
 msgid "Used {input} tokens in and {output} out{cost}"
 msgstr ""
 
-#: src/folder_merge_dialog.rs:509
+#: src/folder_merge_dialog.rs:510
 msgid "The provider didn't report token usage"
 msgstr ""
 
-#: src/folder_merge_dialog.rs:577
+#: src/folder_merge_dialog.rs:578
 msgid "{done} of {total} done"
 msgstr ""
 
-#: src/folder_merge_dialog.rs:578
+#: src/folder_merge_dialog.rs:579
 msgid "Merging {done} of {total}: {key}"
 msgstr ""
 
-#: src/folder_merge_dialog.rs:579
+#: src/folder_merge_dialog.rs:580
 msgid "{done} of {total} done · merging {count} at once"
 msgstr ""
 
-#: src/folder_merge_dialog.rs:663
+#: src/folder_merge_dialog.rs:664
 msgid "Used as it is: {reason}"
 msgstr ""
 
-#: src/folder_merge_dialog.rs:663
+#: src/folder_merge_dialog.rs:664
 msgid "Saved to the patch without AI"
 msgstr ""
 
-#: src/folder_merge_dialog.rs:682
+#: src/folder_merge_dialog.rs:683
 msgid "The model's result was rejected, even after a correction: {error}"
 msgstr ""
 
-#: src/folder_merge_dialog.rs:685
+#: src/folder_merge_dialog.rs:686
 msgid "Corrected after a rejected first try. {notes}"
 msgstr ""
 
-#: src/folder_merge_dialog.rs:708
+#: src/folder_merge_dialog.rs:709
 msgid "{key}: not reached before the run was stopped"
 msgstr ""
 
-#: src/folder_merge_dialog.rs:722
+#: src/folder_merge_dialog.rs:723
 msgid "rejected, even after a correction: {error}"
 msgstr ""
 
-#: src/folder_merge_dialog.rs:731
+#: src/folder_merge_dialog.rs:732
 msgid "{key}: {error}"
 msgstr ""
 
-#: src/folder_merge_dialog.rs:746
+#: src/folder_merge_dialog.rs:747
 msgid "Combined without AI"
 msgstr ""
 
-#: src/folder_merge_dialog.rs:746
+#: src/folder_merge_dialog.rs:747
 msgid "Merged {count} conflicting object"
 msgid_plural "Merged {count} conflicting objects"
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/folder_merge_dialog.rs:750
+#: src/folder_merge_dialog.rs:751
 msgid "Saved, but {objects} the last mod's version: {problems}"
 msgstr ""
 
-#: src/folder_merge_dialog.rs:751
+#: src/folder_merge_dialog.rs:752
 msgid "{count} object keeps"
 msgid_plural "{count} objects keep"
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/folder_merge_dialog.rs:775
+#: src/folder_merge_dialog.rs:776
 msgid "under $0.01"
 msgstr ""
 
@@ -1435,51 +1435,51 @@ msgid_plural "Closed {count} blocks left open at the end of the file"
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/merge/patch.rs:399
+#: src/merge/patch.rs:425
 msgid "The base game changed it in {version}"
 msgstr ""
 
-#: src/merge/patch.rs:400
+#: src/merge/patch.rs:426
 msgid "The base game changed it in an update"
 msgstr ""
 
-#: src/merge/patch.rs:431
+#: src/merge/patch.rs:457
 msgid "no longer defines it"
 msgstr ""
 
-#: src/merge/patch.rs:447
+#: src/merge/patch.rs:478
 msgid "The base game no longer defines it"
 msgstr ""
 
-#: src/merge/patch.rs:453
+#: src/merge/patch.rs:484
 msgid "The base game added it in {version}"
 msgstr ""
 
-#: src/merge/patch.rs:469
+#: src/merge/patch.rs:500
 msgid "no longer ships this file"
 msgstr ""
 
-#: src/merge/patch.rs:474
+#: src/merge/patch.rs:505
 msgid "The base game no longer ships this file"
 msgstr ""
 
-#: src/merge/patch.rs:484
+#: src/merge/patch.rs:515
 msgid "The base game added this file in {version}"
 msgstr ""
 
-#: src/merge/patch.rs:515
+#: src/merge/patch.rs:546
 msgid "It is no longer in the patch"
 msgstr ""
 
-#: src/merge/patch.rs:653
+#: src/merge/patch.rs:684
 msgid "{name} isn't enabled any more"
 msgstr ""
 
-#: src/merge/patch.rs:657
+#: src/merge/patch.rs:688
 msgid "{name} {missing}"
 msgstr ""
 
-#: src/merge/patch.rs:658
+#: src/merge/patch.rs:689
 msgid "{name} changed it"
 msgstr ""
 
@@ -1557,7 +1557,7 @@ msgstr ""
 msgid "Could not read the extra mod folder {folder}: {error}"
 msgstr ""
 
-#: src/mods/filter.rs:52 src/window/shortcuts.rs:21 src/window/shortcuts.rs:32 src/window.rs:383 src/window.rs:461
+#: src/mods/filter.rs:52 src/window/shortcuts.rs:21 src/window/shortcuts.rs:32 src/window.rs:388 src/window.rs:466
 msgid "Load Order"
 msgstr ""
 
@@ -1569,7 +1569,7 @@ msgstr ""
 msgid "Not Updated for This Game"
 msgstr ""
 
-#: src/mods/filter.rs:55 src/window.rs:1007
+#: src/mods/filter.rs:55 src/window.rs:1015
 msgid "Has Conflicts"
 msgstr ""
 
@@ -1577,7 +1577,7 @@ msgstr ""
 msgid "Turns Off Achievements"
 msgstr ""
 
-#: src/mods/filter.rs:57 src/window/overview.rs:512 src/window.rs:401
+#: src/mods/filter.rs:57 src/window/overview.rs:512 src/window.rs:406
 msgid "Disabled"
 msgstr ""
 
@@ -2001,11 +2001,11 @@ msgstr ""
 msgid "The native Linux build reads file and folder names exactly, unlike Windows, so it may skip these files: they're in a game folder whose name isn't lowercase, such as Common or common/Traits, or named like another file but for case. Its checksum then doesn't match. The mod's author can rename them, or whoever runs the native Linux build can switch to the Windows build through Proton."
 msgstr ""
 
-#: src/paradox/error_log.rs:142
+#: src/paradox/error_log.rs:152
 msgid "Base game or missing files"
 msgstr ""
 
-#: src/paradox/error_log.rs:143
+#: src/paradox/error_log.rs:153
 msgid "Not tied to a file"
 msgstr ""
 
@@ -2053,7 +2053,7 @@ msgstr ""
 msgid "Steam Web API Key"
 msgstr ""
 
-#: src/preferences.rs:119 src/window/requirements_ui.rs:112 src/window.rs:966
+#: src/preferences.rs:119 src/window/requirements_ui.rs:112 src/window.rs:974
 msgid "The keyring call failed"
 msgstr ""
 
@@ -2125,7 +2125,7 @@ msgstr ""
 msgid "Extra Mod Folder"
 msgstr ""
 
-#: src/preferences.rs:249 src/window/overview.rs:649 src/window.rs:1007
+#: src/preferences.rs:249 src/window/overview.rs:649 src/window.rs:1015
 msgid "None"
 msgstr ""
 
@@ -2467,7 +2467,7 @@ msgstr ""
 msgid "The merged patch goes back to {contents} from {when}. Its current merges are backed up first, so you can undo this from this list."
 msgstr ""
 
-#: src/window/backups_ui.rs:74 src/window/collections_ui.rs:263 src/window/collections_ui.rs:292 src/window/collections_ui.rs:360 src/window/collections_ui.rs:411 src/window/collections_ui.rs:638 src/window/collections_ui.rs:722 src/window/collections_ui.rs:794 src/window/crash_hunt_ui.rs:59 src/window/ignore_rules_ui.rs:88 src/window/launch.rs:403 src/window/list.rs:392 src/window/repair_ui.rs:89 src/window/saves_ui.rs:86 src/window/freeze_ui.rs:40 src/window/freeze_ui.rs:103
+#: src/window/backups_ui.rs:74 src/window/collections_ui.rs:263 src/window/collections_ui.rs:292 src/window/collections_ui.rs:360 src/window/collections_ui.rs:411 src/window/collections_ui.rs:638 src/window/collections_ui.rs:722 src/window/collections_ui.rs:794 src/window/crash_hunt_ui.rs:59 src/window/ignore_rules_ui.rs:88 src/window/launch.rs:403 src/window/list.rs:415 src/window/repair_ui.rs:89 src/window/saves_ui.rs:86 src/window/freeze_ui.rs:40 src/window/freeze_ui.rs:103
 msgid "_Cancel"
 msgstr ""
 
@@ -2475,7 +2475,7 @@ msgstr ""
 msgid "_Restore"
 msgstr ""
 
-#: src/window/backups_ui.rs:100 src/window/conflicts_ui.rs:768
+#: src/window/backups_ui.rs:100 src/window/conflicts_ui.rs:766
 msgid "Could not read the merged patch: {error}"
 msgstr ""
 
@@ -2515,7 +2515,7 @@ msgstr ""
 msgid "{when} · {contents}"
 msgstr ""
 
-#: src/window/collections_ui.rs:28 src/window/collections_ui.rs:205 src/window/conflicts_ui.rs:750 src/window/persist.rs:27
+#: src/window/collections_ui.rs:28 src/window/collections_ui.rs:205 src/window/conflicts_ui.rs:748 src/window/persist.rs:27
 msgid "Could not save collections: {error}"
 msgstr ""
 
@@ -2564,7 +2564,7 @@ msgstr ""
 msgid "_Duplicate…"
 msgstr ""
 
-#: src/window/collections_ui.rs:160 src/window/list.rs:685
+#: src/window/collections_ui.rs:160 src/window/list.rs:729
 msgid "_Rename…"
 msgstr ""
 
@@ -2654,11 +2654,11 @@ msgstr ""
 msgid "_Discard"
 msgstr ""
 
-#: src/window/collections_ui.rs:263 src/window/ignore_rules_ui.rs:89 src/window/launch.rs:405 src/window/list.rs:397
+#: src/window/collections_ui.rs:263 src/window/ignore_rules_ui.rs:89 src/window/launch.rs:405 src/window/list.rs:420
 msgid "_Save"
 msgstr ""
 
-#: src/window/collections_ui.rs:282 src/window/list.rs:355 src/window.rs:395
+#: src/window/collections_ui.rs:282 src/window/list.rs:378 src/window.rs:400
 msgid "Name"
 msgstr ""
 
@@ -2686,7 +2686,7 @@ msgstr ""
 msgid "Rename Collection"
 msgstr ""
 
-#: src/window/collections_ui.rs:334 src/window/list.rs:355
+#: src/window/collections_ui.rs:334 src/window/list.rs:378
 msgid "_Rename"
 msgstr ""
 
@@ -2993,73 +2993,73 @@ msgstr ""
 msgid "Something went wrong while reading the mods' files. Please report this: {error}"
 msgstr ""
 
-#: src/window/conflicts_ui.rs:203
+#: src/window/conflicts_ui.rs:201
 msgid "Nothing to update: the mods changed again since the last check"
 msgstr ""
 
-#: src/window/conflicts_ui.rs:211
+#: src/window/conflicts_ui.rs:209
 msgid "{count} picked version"
 msgid_plural "{count} picked versions"
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/window/conflicts_ui.rs:218
+#: src/window/conflicts_ui.rs:216
 msgid "Updated {what} to the new version"
 msgstr ""
 
-#: src/window/conflicts_ui.rs:218
+#: src/window/conflicts_ui.rs:216
 msgid "Backups…"
 msgstr ""
 
-#: src/window/conflicts_ui.rs:220
+#: src/window/conflicts_ui.rs:218
 msgid "Could not update {what}: {error}"
 msgstr ""
 
-#: src/window/conflicts_ui.rs:240
+#: src/window/conflicts_ui.rs:238
 msgid "Removed {what} from the patch"
 msgstr ""
 
-#: src/window/conflicts_ui.rs:281
+#: src/window/conflicts_ui.rs:279
 msgid "The mods {what} was merged from no longer conflict over it. Remove it from the patch, or enable them and rescan."
 msgstr ""
 
-#: src/window/conflicts_ui.rs:300
+#: src/window/conflicts_ui.rs:298
 msgid "Kept {what}; changes to its mods will be noticed from now on"
 msgstr ""
 
-#: src/window/conflicts_ui.rs:346
+#: src/window/conflicts_ui.rs:344
 msgid "Could not save ignored conflicts: {error}"
 msgstr ""
 
-#: src/window/conflicts_ui.rs:765
+#: src/window/conflicts_ui.rs:763
 msgid "Could not rename the merged patch: {error}"
 msgstr ""
 
-#: src/window/conflicts_ui.rs:782
+#: src/window/conflicts_ui.rs:780
 msgid "Could not save the merged patch: {error}"
 msgstr ""
 
-#: src/window/conflicts_ui.rs:832
+#: src/window/conflicts_ui.rs:830
 msgid "added to the end of the load order"
 msgstr ""
 
-#: src/window/conflicts_ui.rs:835
+#: src/window/conflicts_ui.rs:833
 msgid "Saved to {name}"
 msgstr ""
 
-#: src/window/conflicts_ui.rs:838
+#: src/window/conflicts_ui.rs:836
 msgid "Saved to {name}, which was {change}"
 msgstr ""
 
-#: src/window/conflicts_ui.rs:839 src/window/shortcuts.rs:23
+#: src/window/conflicts_ui.rs:837 src/window/shortcuts.rs:23
 msgid "Save Load Order"
 msgstr ""
 
-#: src/window/conflicts_ui.rs:851
+#: src/window/conflicts_ui.rs:849
 msgid "Rescan"
 msgstr ""
 
-#: src/window/conflicts_ui.rs:854
+#: src/window/conflicts_ui.rs:852
 msgid "Scan again, e.g. after mods were updated"
 msgstr ""
 
@@ -3585,11 +3585,11 @@ msgstr ""
 msgid "Click a mod to see what's wrong with it, what it needs and what it overrides."
 msgstr ""
 
-#: src/window/overview.rs:515 src/window/list.rs:457 src/window.rs:1005
+#: src/window/overview.rs:515 src/window/list.rs:920 src/window.rs:1013
 msgid "Workshop"
 msgstr ""
 
-#: src/window/overview.rs:516 src/window/list.rs:458 src/window.rs:1005
+#: src/window/overview.rs:516 src/window/list.rs:921 src/window.rs:1013
 msgid "Local"
 msgstr ""
 
@@ -3601,7 +3601,7 @@ msgstr ""
 msgid "updated {when}"
 msgstr ""
 
-#: src/window/overview.rs:545 src/window/list.rs:388
+#: src/window/overview.rs:545 src/window/list.rs:411
 msgid "Note"
 msgstr ""
 
@@ -3625,7 +3625,7 @@ msgstr ""
 msgid "Turns them off"
 msgstr ""
 
-#: src/window/overview.rs:656 src/window.rs:1006
+#: src/window/overview.rs:656 src/window.rs:1014
 msgid "Achievements"
 msgstr ""
 
@@ -3645,7 +3645,7 @@ msgstr ""
 msgid "disabled"
 msgstr ""
 
-#: src/window/overview.rs:709 src/window.rs:1004
+#: src/window/overview.rs:709 src/window.rs:1012
 msgid "Enabled"
 msgstr ""
 
@@ -3653,7 +3653,7 @@ msgstr ""
 msgid "Open in Steam"
 msgstr ""
 
-#: src/window/overview.rs:725 src/window/list.rs:693
+#: src/window/overview.rs:725 src/window/list.rs:737
 msgid "Open Folder"
 msgstr ""
 
@@ -3853,169 +3853,169 @@ msgstr ""
 msgid "Needs {list}, {status}"
 msgstr ""
 
-#: src/window/list.rs:269
+#: src/window/list.rs:292
 msgid "Enabled {count} mod"
 msgid_plural "Enabled {count} mods"
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/window/list.rs:271
+#: src/window/list.rs:294
 msgid "Disabled {count} mod"
 msgid_plural "Disabled {count} mods"
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/window/list.rs:281
+#: src/window/list.rs:304
 msgid "Sorted mods after their dependencies"
 msgstr ""
 
-#: src/window/list.rs:286
+#: src/window/list.rs:309
 msgid "Already in alphabetical order"
 msgstr ""
 
-#: src/window/list.rs:289
+#: src/window/list.rs:312
 msgid "Sorted mods alphabetically, after their dependencies"
 msgstr ""
 
-#: src/window/list.rs:299 src/window/shortcuts.rs:26
+#: src/window/list.rs:322 src/window/shortcuts.rs:26
 msgid "Undo"
 msgstr ""
 
-#: src/window/list.rs:321
+#: src/window/list.rs:344
 msgid "Loads after {name} once it's installed"
 msgstr ""
 
-#: src/window/list.rs:322
+#: src/window/list.rs:345
 msgid "Loads first once it's installed"
 msgstr ""
 
-#: src/window/list.rs:325
+#: src/window/list.rs:348
 msgid "Not installed, so it's left out of the game's load order"
 msgstr ""
 
-#: src/window/list.rs:327
+#: src/window/list.rs:350
 msgid "Open on the Steam Workshop to subscribe"
 msgstr ""
 
-#: src/window/list.rs:334
+#: src/window/list.rs:357
 msgid "Remove from Collection"
 msgstr ""
 
-#: src/window/list.rs:355
+#: src/window/list.rs:378
 msgid "Rename Mod"
 msgstr ""
 
-#: src/window/list.rs:390
+#: src/window/list.rs:413
 msgid "Edit Note"
 msgstr ""
 
-#: src/window/list.rs:390
+#: src/window/list.rs:413
 msgid "Add Note"
 msgstr ""
 
-#: src/window/list.rs:394 src/window/repair_ui.rs:103
+#: src/window/list.rs:417 src/window/repair_ui.rs:103
 msgid "_Remove"
 msgstr ""
 
-#: src/window/list.rs:498
+#: src/window/list.rs:565
 msgid "Doesn't say it supports this game version"
 msgstr ""
 
-#: src/window/list.rs:498
+#: src/window/list.rs:565
 msgid "The game version it supports"
 msgstr ""
 
-#: src/window/list.rs:506
+#: src/window/list.rs:574
 msgid "{count} conflict; see the Conflicts page (Alt+2)"
 msgid_plural "{count} conflicts; see the Conflicts page (Alt+2)"
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/window/list.rs:537
+#: src/window/list.rs:585
 msgid "Turns off achievements: it changes files the game checksums"
 msgstr ""
 
-#: src/window/list.rs:596
+#: src/window/list.rs:638
 msgid "Always loads last, so its merges and fixes win"
 msgstr ""
 
-#: src/window/list.rs:641
+#: src/window/list.rs:686
 msgid "{count} merge saved by an older version needs checking; see the Conflicts page"
 msgid_plural "{count} merges saved by an older version need checking; see the Conflicts page"
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/window/list.rs:652
+#: src/window/list.rs:697
 msgid "{count} merge or fix is out of date because mods changed; see the Conflicts page"
 msgid_plural "{count} merges or fixes are out of date because mods changed; see the Conflicts page"
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/window/list.rs:671
+#: src/window/list.rs:715
 msgid "Move to _Top"
 msgstr ""
 
-#: src/window/list.rs:672
+#: src/window/list.rs:716
 msgid "Move to _Bottom"
 msgstr ""
 
-#: src/window/list.rs:681
+#: src/window/list.rs:725
 msgid "_Get Required Mods"
 msgstr ""
 
-#: src/window/list.rs:689
+#: src/window/list.rs:733
 msgid "Edit _Note…"
 msgstr ""
 
-#: src/window/list.rs:689
+#: src/window/list.rs:733
 msgid "Add _Note…"
 msgstr ""
 
-#: src/window/list.rs:698
+#: src/window/list.rs:742
 msgid "Show _Conflicts"
 msgstr ""
 
-#: src/window/list.rs:705
+#: src/window/list.rs:749
 msgid "Open in _Steam"
 msgstr ""
 
-#: src/window/list.rs:706
+#: src/window/list.rs:750
 msgid "Open Workshop Page in _Browser"
 msgstr ""
 
-#: src/window/list.rs:707
+#: src/window/list.rs:751
 msgid "Copy _Workshop Link"
 msgstr ""
 
-#: src/window/list.rs:708
+#: src/window/list.rs:752
 msgid "_Unsubscribe in Steam…"
 msgstr ""
 
-#: src/window/list.rs:747
+#: src/window/list.rs:791
 msgid "Load position: type a number to move this mod there"
 msgstr ""
 
-#: src/window/list.rs:833
+#: src/window/list.rs:868
 msgid "Update pending"
 msgstr ""
 
-#: src/window/list.rs:834
+#: src/window/list.rs:869
 msgid "Steam has a newer version it hasn't finished downloading. Let it finish before playing, or the game may load a half-updated mod."
 msgstr ""
 
-#: src/window/list.rs:837
+#: src/window/list.rs:872
 msgid "Downloading"
 msgstr ""
 
-#: src/window/list.rs:837
+#: src/window/list.rs:872
 msgid "Steam hasn't finished downloading this mod"
 msgstr ""
 
-#: src/window/list.rs:839
+#: src/window/list.rs:874
 msgid "Unsubscribed"
 msgstr ""
 
-#: src/window/list.rs:840
+#: src/window/list.rs:875
 msgid "You're no longer subscribed to this mod in Steam. Once Steam removes its files, Repair in the banner above the list can remove it from the list."
 msgstr ""
 
@@ -4085,41 +4085,41 @@ msgstr ""
 msgid "Load order saved, but the Paradox Launcher's playset wasn't updated: {error}"
 msgstr ""
 
-#: src/window/reload.rs:52
+#: src/window/reload.rs:95
 msgid "the reload failed"
 msgstr ""
 
-#: src/window/reload.rs:57
+#: src/window/reload.rs:100
 msgid "Could not reload mods: {e}"
 msgstr ""
 
-#: src/window/reload.rs:80
+#: src/window/reload.rs:123
 msgid " · back in the load order: {names}"
 msgstr ""
 
-#: src/window/reload.rs:92
+#: src/window/reload.rs:135
 msgid "{count} new mod: {names}"
 msgid_plural "{count} new mods: {names}"
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/window/reload.rs:95
+#: src/window/reload.rs:138
 msgid "{count} updated: {names}"
 msgstr ""
 
-#: src/window/reload.rs:99
+#: src/window/reload.rs:142
 msgid "{name} was removed"
 msgstr ""
 
-#: src/window/reload.rs:100
+#: src/window/reload.rs:143
 msgid "{count} mods were removed: {names}"
 msgstr ""
 
-#: src/window/reload.rs:103
+#: src/window/reload.rs:146
 msgid "Mods reloaded, none added or removed"
 msgstr ""
 
-#: src/window/reload.rs:113
+#: src/window/reload.rs:156
 msgid "{first}, {second}, {third} and {count} more"
 msgstr ""
 
@@ -4677,7 +4677,7 @@ msgstr ""
 msgid "_Unfreeze…"
 msgstr ""
 
-#: src/window/thumbnails.rs:93
+#: src/window/thumbnails.rs:96
 msgid "Made by Drukhal Manager from your merges"
 msgstr ""
 
@@ -4753,200 +4753,200 @@ msgstr ""
 msgid "Could not update: {error}"
 msgstr ""
 
-#: src/window.rs:214
+#: src/window.rs:219
 msgid "Could Not Read Mods"
 msgstr ""
 
-#: src/window.rs:215
+#: src/window.rs:220
 msgid "{path}: {error}"
 msgstr ""
 
-#: src/window.rs:228
+#: src/window.rs:233
 msgid "_Saves…"
 msgstr ""
 
-#: src/window.rs:229
+#: src/window.rs:234
 msgid "_Multiplayer Check…"
 msgstr ""
 
-#: src/window.rs:230
+#: src/window.rs:235
 msgid "_DLC…"
 msgstr ""
 
-#: src/window.rs:233
+#: src/window.rs:238
 msgid "_Find the Crashing Mod…"
 msgstr ""
 
-#: src/window.rs:237
+#: src/window.rs:242
 msgid "More Ways to Launch"
 msgstr ""
 
-#: src/window.rs:241 src/window.rs:342
+#: src/window.rs:246 src/window.rs:347
 msgid "Launch"
 msgstr ""
 
-#: src/window.rs:248
+#: src/window.rs:253
 msgid "Save"
 msgstr ""
 
-#: src/window.rs:250
+#: src/window.rs:255
 msgid "Save the load order for the game and the Paradox Launcher (Ctrl+S)"
 msgstr ""
 
-#: src/window.rs:257
+#: src/window.rs:262
 msgid "_Preferences"
 msgstr ""
 
-#: src/window.rs:258
+#: src/window.rs:263
 msgid "_Keyboard Shortcuts"
 msgstr ""
 
-#: src/window.rs:262
+#: src/window.rs:267
 msgid "_Copy Diagnostics"
 msgstr ""
 
-#: src/window.rs:263
+#: src/window.rs:268
 msgid "Open _Log Folder"
 msgstr ""
 
-#: src/window.rs:264
+#: src/window.rs:269
 msgid "_Troubleshooting"
 msgstr ""
 
-#: src/window.rs:265
+#: src/window.rs:270
 msgid "_About DrukhalManager"
 msgstr ""
 
-#: src/window.rs:270
+#: src/window.rs:275
 msgid "Main Menu"
 msgstr ""
 
-#: src/window.rs:279
+#: src/window.rs:284
 msgid "Collections: switch between saved load orders"
 msgstr ""
 
-#: src/window.rs:290
+#: src/window.rs:295
 msgid "Stellaris was not found in any Steam library"
 msgstr ""
 
-#: src/window.rs:293 src/window.rs:294
+#: src/window.rs:298 src/window.rs:299
 msgid "No mods match"
 msgstr ""
 
-#: src/window.rs:302
+#: src/window.rs:307
 msgid "Not Installed"
 msgstr ""
 
-#: src/window.rs:305
+#: src/window.rs:310
 msgid "Enable All"
 msgstr ""
 
-#: src/window.rs:306
+#: src/window.rs:311
 msgid "Enable or disable every mod"
 msgstr ""
 
-#: src/window.rs:310
+#: src/window.rs:315
 msgid "Sort A–Z, Dependencies First"
 msgstr ""
 
-#: src/window.rs:311
+#: src/window.rs:316
 msgid "Show _Category Headers"
 msgstr ""
 
-#: src/window.rs:313
+#: src/window.rs:318
 msgid "Smart Sort…"
 msgstr ""
 
-#: src/window.rs:314
+#: src/window.rs:319
 msgid "Sort into sections by what each mod changes, keeping sub-mods below their mods and every mod after its dependencies"
 msgstr ""
 
-#: src/window.rs:315
+#: src/window.rs:320
 msgid "More ways to sort"
 msgstr ""
 
-#: src/window.rs:322
+#: src/window.rs:327
 msgid "Search mods (Ctrl+F), or try source:local or enabled:no"
 msgstr ""
 
-#: src/window.rs:332
+#: src/window.rs:337
 msgid "Repair…"
 msgstr ""
 
-#: src/window.rs:337
+#: src/window.rs:342
 msgid "Restore"
 msgstr ""
 
 #. While a view, category or search narrows the list.
-#: src/window.rs:387
+#: src/window.rs:392
 msgid "Select All Shown"
 msgstr ""
 
 #. While a view, category or search narrows the list.
-#: src/window.rs:387
+#: src/window.rs:392
 msgid "Select every mod listed, to change them all at once"
 msgstr ""
 
-#: src/window.rs:395
+#: src/window.rs:400
 msgid "Recently Updated"
 msgstr ""
 
-#: src/window.rs:396
+#: src/window.rs:401
 msgid "Order of the disabled mods"
 msgstr ""
 
-#: src/window.rs:404
+#: src/window.rs:409
 msgid "Sort by"
 msgstr ""
 
-#: src/window.rs:448
+#: src/window.rs:453
 msgid "Show Views"
 msgstr ""
 
-#: src/window.rs:648
+#: src/window.rs:655
 msgid "the Disabled list's order"
 msgstr ""
 
-#: src/window.rs:930
+#: src/window.rs:938
 msgid "Could not save {what}: {e}"
 msgstr ""
 
-#: src/window.rs:973
+#: src/window.rs:981
 msgid "{error}. The API key is saved in settings.json, readable only by you."
 msgstr ""
 
-#: src/window.rs:1004
+#: src/window.rs:1012
 msgid "Yes"
 msgstr ""
 
-#: src/window.rs:1004
+#: src/window.rs:1012
 msgid "No"
 msgstr ""
 
-#: src/window.rs:1005
+#: src/window.rs:1013
 msgid "Source"
 msgstr ""
 
-#: src/window.rs:1006
+#: src/window.rs:1014
 msgid "Keeps Them On"
 msgstr ""
 
-#: src/window.rs:1006
+#: src/window.rs:1014
 msgid "Turns Them Off"
 msgstr ""
 
-#: src/window.rs:1016
+#: src/window.rs:1024
 msgid "Any"
 msgstr ""
 
-#: src/window.rs:1037
+#: src/window.rs:1045
 msgid "Or type them: version:3.12, -- to leave out (source:--local), || for either"
 msgstr ""
 
-#: src/window.rs:1060
+#: src/window.rs:1068
 msgid "Filters"
 msgstr ""
 
-#: src/window.rs:1061
+#: src/window.rs:1069
 msgid "Filter the mods by state"
 msgstr ""
