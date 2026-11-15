@@ -103,7 +103,7 @@ jobs:
           PKG_CONFIG_PATH: /ucrt64/lib/pkgconfig:/ucrt64/share/pkgconfig
         run: |
           export PATH="/ucrt64/bin:$PATH"
-          /ucrt64/bin/cargo clippy --all-targets --locked --target x86_64-pc-windows-gnu
+          /ucrt64/bin/cargo clippy --all-targets --locked --target x86_64-pc-windows-gnu -- -D warnings
       - name: Translation template is current
         run: |
           # Install xtr under the workspace: MSYS2's PATH does not include
