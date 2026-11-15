@@ -36,3 +36,10 @@ windows-registry = "0.100.0"
 # The icon and version details of the Windows .exe.
 [target.'cfg(windows)'.build-dependencies]
 winresource = "0.1.34"
+
+# Smaller, faster release builds (Flatpak, Windows zip, AUR) for a longer
+# build. Symbol names stay so backtraces in bug reports are readable.
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = "debuginfo"
