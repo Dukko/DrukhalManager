@@ -349,18 +349,23 @@ impl Patch {
     /// take the mod's new version without asking again. `roots` is as for
     /// [`Patch::recheck`].
     pub fn picks_to_update(&self, roots: &HashMap<String, PathBuf>) -> Vec<Pick> {
+        self.picks_with(roots, &Sources::default())
+    }
+
+    /// [`Patch::picks_to_update`], reading source files through `sources`.
+    fn picks_with(&self, roots: &HashMap<String, PathBuf>, sources: &Sources) -> Vec<Pick> {
         let game_dir = roots.get(VANILLA).map(PathBuf::as_path);
         let mut picks = Vec::new();
         for m in &self.manifest.merges {
-            let text_of = |src: &str| super::source::extract(&m.category, &m.key, src);
-            if let Some((i, now, prints)) = picked_update(&m.script, &m.prints, roots, game_dir, &text_of) {
+            let read = |root: &Path, file: &str| sources.object(root, file, &m.category, &m.key);
+            if let Some((i, now, prints)) = picked_update(&m.script, &m.prints, roots, game_dir, &read) {
                 picks.push(Pick { object: Some((m.category.clone(), m.key.clone())), path: m.file.clone(), name: m.prints[i].name.clone(), contents: now.into_bytes(), prints });
             }
         }
         for f in &self.manifest.files {
             let Some(kept) = read_text(&self.root, &f.path) else { continue };
-            let text_of = |src: &str| Some(src.to_owned());
-            let Some((i, _, prints)) = picked_update(&kept, &f.prints, roots, game_dir, &text_of) else { continue };
+            let read = |root: &Path, file: &str| sources.text(root, file).map(|t| t.as_str().to_owned());
+            let Some((i, _, prints)) = picked_update(&kept, &f.prints, roots, game_dir, &read) else { continue };
             // The file as the mod ships it, byte for byte.
             let Some(contents) = roots.get(&f.prints[i].mod_id).and_then(|root| std::fs::read(root.join(&f.prints[i].file)).ok()) else { continue };
             picks.push(Pick { object: None, path: f.path.clone(), name: f.prints[i].name.clone(), contents, prints });
@@ -396,7 +401,24 @@ impl Patch {
     /// against, so that after an update it also notices definitions the base
     /// game added, and follows base-game definitions that moved to another
     /// file. That bookkeeping is saved if it changed.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn recheck(&mut self, roots: &HashMap<String, PathBuf>, game_version: Option<&str>) -> Vec<Stale> {
+        self.recheck_with(roots, game_version, &Sources::default())
+    }
+
+    /// [`Patch::recheck`], with each entry's pick marked as
+    /// [`Patch::mark_picks`] does, reading each source file once for both.
+    pub fn check(&mut self, roots: &HashMap<String, PathBuf>, game_version: Option<&str>) -> Vec<Stale> {
+        // Sharing one reader is safe: `recheck_with` writes only the patch's
+        // manifest, never a source file the reader has cached.
+        let sources = Sources::default();
+        let mut stale = self.recheck_with(roots, game_version, &sources);
+        Self::mark_picks(&mut stale, &self.picks_with(roots, &sources));
+        stale
+    }
+
+    /// [`Patch::recheck`], reading source files through `sources`.
+    fn recheck_with(&mut self, roots: &HashMap<String, PathBuf>, game_version: Option<&str>, sources: &Sources) -> Vec<Stale> {
         let game_dir = roots.get(VANILLA).map(PathBuf::as_path);
         let updated = |checked: Option<&str>| matches!((checked, game_version), (Some(was), Some(now)) if was != now);
         let changed_in = |checked: Option<&str>| match (updated(checked), game_version) {
@@ -428,23 +450,28 @@ impl Patch {
                 stale.push(Stale { object: Some((category, key)), path: m.file.clone(), reasons: vec![UNTRACKED.to_owned()], untracked: true, base_game: false, pick: None });
                 continue;
             }
-            let text_of = |src: &str| super::source::extract(&category, &key, src);
+            let read = |root: &Path, file: &str| sources.object(root, file, &category, &key);
             let mut check = Check::default();
             for p in &mut m.prints {
                 if p.mod_id != VANILLA {
-                    check.mod_print(p, roots, &text_of, &t!("no longer defines it"));
+                    check.mod_print(p, roots, &read, &t!("no longer defines it"));
                     continue;
                 }
                 let Some(dir) = game_dir else { continue };
-                let mut now = read_text(dir, &p.file).and_then(|s| text_of(&s));
+                let mut now = read(dir, &p.file);
                 if now.is_none() {
                     // Updates often move definitions between files.
-                    if let Some(v) = super::source::vanilla(dir, &category, &key) {
-                        if fingerprint(&v.text) == p.hash {
-                            p.file = v.file;
+                    let moved = super::source::vanilla_files(dir, &category).into_iter().find_map(|path| {
+                        let file = crate::platform::game_path(path.strip_prefix(dir).ok()?);
+                        let text = read(dir, &file)?;
+                        Some((file, text))
+                    });
+                    if let Some((file, text)) = moved {
+                        if fingerprint(&text) == p.hash {
+                            p.file = file;
                             dirty = true;
                         }
-                        now = Some(v.text);
+                        now = Some(text);
                     }
                 }
                 match now {
@@ -466,15 +493,15 @@ impl Patch {
                 stale.push(Stale { object: None, path: f.path.clone(), reasons: vec![UNTRACKED.to_owned()], untracked: true, base_game: false, pick: None });
                 continue;
             }
-            let text_of = |src: &str| Some(src.to_owned());
+            let read = |root: &Path, file: &str| sources.text(root, file).map(|t| t.as_str().to_owned());
             let mut check = Check::default();
             for p in &f.prints {
                 if p.mod_id != VANILLA {
-                    check.mod_print(p, roots, &text_of, &t!("no longer ships this file"));
+                    check.mod_print(p, roots, &read, &t!("no longer ships this file"));
                     continue;
                 }
                 let Some(dir) = game_dir else { continue };
-                match read_text(dir, &p.file) {
+                match read(dir, &p.file) {
                     None => check.base_game(t!("The base game no longer ships this file")),
                     Some(text) if fingerprint(&text) != p.hash => check.base_game(changed_in(f.game_version.as_deref())),
                     Some(_) => {}
@@ -652,12 +679,12 @@ impl Check {
 
     /// Compares a mod's source with `p`, `missing` saying what it means when
     /// the mod no longer has it.
-    fn mod_print(&mut self, p: &Print, roots: &HashMap<String, PathBuf>, text_of: &dyn Fn(&str) -> Option<String>, missing: &str) {
+    fn mod_print(&mut self, p: &Print, roots: &HashMap<String, PathBuf>, read: &dyn Fn(&Path, &str) -> Option<String>, missing: &str) {
         let Some(root) = roots.get(&p.mod_id) else {
             self.reasons.push(tf!("{name} isn't enabled any more", name = &p.name));
             return;
         };
-        match read_text(root, &p.file).and_then(|s| text_of(&s)) {
+        match read(root, &p.file) {
             None => self.reasons.push(tf!("{name} {missing}", name = &p.name, missing = missing)),
             Some(text) if fingerprint(&text) != p.hash => self.reasons.push(tf!("{name} changed it", name = &p.name)),
             Some(_) => {}
@@ -681,10 +708,10 @@ impl Check {
 
 /// Of `prints`, the mod one `kept` (the text the patch holds) is a copy
 /// of, if that mod changed it since while every other source is as it was:
-/// its new version and the updated prints. `text_of` reads a source's
-/// version from a file's text; the base game is only checked when
+/// its new version and the updated prints. `read` gives a source's
+/// version from its folder and file; the base game is only checked when
 /// `game_dir` is known, as [`Patch::recheck`] does.
-fn picked_update(kept: &str, prints: &[Print], roots: &HashMap<String, PathBuf>, game_dir: Option<&Path>, text_of: &dyn Fn(&str) -> Option<String>) -> Option<(usize, String, Vec<Print>)> {
+fn picked_update(kept: &str, prints: &[Print], roots: &HashMap<String, PathBuf>, game_dir: Option<&Path>, read: &dyn Fn(&Path, &str) -> Option<String>) -> Option<(usize, String, Vec<Print>)> {
     let kept = fingerprint(kept);
     let picked = prints.iter().position(|p| p.mod_id != VANILLA && p.hash == kept)?;
     let mut now = None;
@@ -697,7 +724,7 @@ fn picked_update(kept: &str, prints: &[Print], roots: &HashMap<String, PathBuf>,
         } else {
             roots.get(&p.mod_id)?
         };
-        let text = read_text(root, &p.file).and_then(|s| text_of(&s))?;
+        let text = read(root, &p.file)?;
         let same = fingerprint(&text) == p.hash;
         match (i == picked, same) {
             (true, false) => now = Some(text),
@@ -716,12 +743,15 @@ fn read_text(root: &Path, file: &str) -> Option<String> {
     std::fs::read(root.join(file)).ok().map(|b| String::from_utf8_lossy(&b).into_owned())
 }
 
+/// A file's top-level entries with their byte ranges.
+type Parsed = Vec<(Entry, Range<usize>)>;
+
 /// Source files read during one freshness check, each read and parsed at
 /// most once, since many merges cite the same game and mod files.
 #[derive(Default)]
 struct Sources {
     texts: RefCell<HashMap<PathBuf, Option<Rc<String>>>>,
-    parsed: RefCell<HashMap<PathBuf, Option<Rc<Vec<(Entry, Range<usize>)>>>>>,
+    parsed: RefCell<HashMap<PathBuf, Option<Rc<Parsed>>>>,
 }
 
 impl Sources {
@@ -1109,7 +1139,6 @@ mod tests {
     /// A heavily modded game on disk, with a patch merging much of it.
     struct TimingFixture {
         root: PathBuf,
-        user: PathBuf,
         game: PathBuf,
         mods_dir: PathBuf,
         patch: Patch,
@@ -1202,7 +1231,7 @@ mod tests {
             let kept = super::super::source::extract("localisation", &key, &std::fs::read_to_string(mods[0].0.2.join(&mods[0].1)).unwrap()).unwrap();
             patch.save(&user, Some("v4.0.0"), "localisation", &key, &kept, prints).unwrap();
         }
-        TimingFixture { root, user, game, mods_dir, patch, roots }
+        TimingFixture { root, game, mods_dir, patch, roots }
     }
 
     /// A game update and two mods' edits: 20 merges go out of date and 50
