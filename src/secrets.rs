@@ -82,14 +82,33 @@ mod store {
 /// (`io.github.dukko.DrukhalManager/anthropic`).
 #[cfg(windows)]
 mod store {
-    fn entry(kind: &str) -> Result<keyring::Entry, String> {
-        keyring::Entry::new_with_target(&format!("{}/{kind}", crate::APP_ID), crate::APP_ID, kind).map_err(|e| tf!("Credential Manager isn't available ({error})", error = e))
+    use std::collections::HashMap;
+    use std::sync::OnceLock;
+
+    /// Installs the Credential Manager store the first time it's needed.
+    fn init() -> Result<(), String> {
+        static INIT: OnceLock<Result<(), String>> = OnceLock::new();
+        INIT.get_or_init(|| {
+            let store = windows_native_keyring_store::Store::new().map_err(|e| tf!("Credential Manager isn't available ({error})", error = e))?;
+            keyring_core::set_default_store(store);
+            Ok(())
+        })
+        .clone()
+    }
+
+    /// The credential is addressed by its target name, as in keyring 3, so
+    /// keys saved by earlier versions are still found.
+    fn entry(kind: &str) -> Result<keyring_core::Entry, String> {
+        init()?;
+        let target = format!("{}/{kind}", crate::APP_ID);
+        let modifiers = HashMap::from([("target", target.as_str())]);
+        keyring_core::Entry::new_with_modifiers(crate::APP_ID, kind, &modifiers).map_err(|e| tf!("Credential Manager isn't available ({error})", error = e))
     }
 
     pub fn get(kind: &str) -> Result<Option<String>, String> {
         match entry(kind)?.get_password() {
             Ok(key) => Ok(Some(key)),
-            Err(keyring::Error::NoEntry) => Ok(None),
+            Err(keyring_core::Error::NoEntry) => Ok(None),
             Err(e) => Err(tf!("Could not read the API key from Credential Manager: {error}", error = e)),
         }
     }
@@ -98,7 +117,7 @@ mod store {
         let entry = entry(kind)?;
         let result = if key.is_empty() {
             match entry.delete_credential() {
-                Err(keyring::Error::NoEntry) => Ok(()),
+                Err(keyring_core::Error::NoEntry) => Ok(()),
                 other => other,
             }
         } else {
