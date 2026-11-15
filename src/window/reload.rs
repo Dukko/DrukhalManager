@@ -23,6 +23,40 @@ impl Window {
         app.set_accels_for_action("win.reload", &["F5", "<Control>r"]);
     }
 
+    /// Unpacks zipped mods with no current unpacked copy, in the background,
+    /// then shows what they hold (thumbnails, categories, the patch check).
+    /// The UI thread only ever looks copies up (`archive::cached`).
+    pub(super) fn unpack_zips(self: &Rc<Self>) {
+        let contents: Vec<std::path::PathBuf> = self.state.borrow().mods.iter().filter_map(|m| m.content.clone()).collect();
+        let weak = Rc::downgrade(self);
+        glib::spawn_future_local(async move {
+            let unpacked = gio::spawn_blocking(move || {
+                let mut unpacked = 0;
+                for content in contents {
+                    if mods::archive::cached(&content).is_some() {
+                        continue; // a folder, or already unpacked
+                    }
+                    match mods::archive::files(&content) {
+                        Ok(_) => unpacked += 1,
+                        Err(e) => crate::diagnostics::log!("mods", "Could not unpack {}: {e}", content.display()),
+                    }
+                }
+                unpacked
+            })
+            .await
+            .unwrap_or(0);
+            if unpacked == 0 {
+                return;
+            }
+            let Some(ui) = weak.upgrade() else { return };
+            crate::diagnostics::log!("mods", "Unpacked {unpacked} zipped mods");
+            *ui.thumbnails.borrow_mut() = Default::default();
+            ui.profiles.borrow_mut().clear();
+            ui.check_stale();
+            ui.refresh();
+        });
+    }
+
     /// Reads the descriptors and Workshop folders again in the background,
     /// keeping the load order, collection and unsaved changes, then calls
     /// `then` if it worked.
@@ -72,6 +106,7 @@ impl Window {
             ui.update_repair_banner();
             let rescan = ui.analysis.borrow().is_some();
             ui.refresh();
+            ui.unpack_zips();
             if rescan {
                 ui.scan();
             }

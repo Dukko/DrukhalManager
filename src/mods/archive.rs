@@ -23,10 +23,9 @@ fn cache_dir() -> PathBuf {
     crate::platform::cache_dir().join("archives")
 }
 
-pub(crate) fn files_in(content: &Path, cache: &Path) -> io::Result<PathBuf> {
-    if !content.is_file() {
-        return Ok(content.to_path_buf());
-    }
+/// The folder a zip's copy is unpacked to, and the stamp that shows the
+/// copy matches the zip as it is now.
+fn location(content: &Path, cache: &Path) -> io::Result<(PathBuf, String)> {
     let meta = std::fs::metadata(content)?;
     let modified = meta.modified()?.duration_since(UNIX_EPOCH).map_or(0, |d| d.as_nanos());
     let stamp = format!("{}\n{}\n{}\n", content.display(), meta.len(), modified);
@@ -38,6 +37,28 @@ pub(crate) fn files_in(content: &Path, cache: &Path) -> io::Result<PathBuf> {
         .map(|s| s.to_string_lossy().chars().map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '_' }).take(40).collect())
         .unwrap_or_default();
     let dir = cache.join(format!("{stem}-{:016x}", hasher.finish()));
+    Ok((dir, stamp))
+}
+
+/// Like [`files`], but never unpacks: `None` for a zip with no current
+/// unpacked copy yet. Cheap enough for the UI thread.
+pub fn cached(content: &Path) -> Option<PathBuf> {
+    cached_in(content, &cache_dir())
+}
+
+pub(crate) fn cached_in(content: &Path, cache: &Path) -> Option<PathBuf> {
+    if !content.is_file() {
+        return Some(content.to_path_buf());
+    }
+    let (dir, stamp) = location(content, cache).ok()?;
+    std::fs::read_to_string(dir.join(STAMP)).is_ok_and(|s| s == stamp).then_some(dir)
+}
+
+pub(crate) fn files_in(content: &Path, cache: &Path) -> io::Result<PathBuf> {
+    if !content.is_file() {
+        return Ok(content.to_path_buf());
+    }
+    let (dir, stamp) = location(content, cache)?;
     if std::fs::read_to_string(dir.join(STAMP)).is_ok_and(|s| s == stamp) {
         return Ok(dir);
     }
@@ -128,6 +149,32 @@ mod tests {
         std::fs::write(root.join("broken.zip"), "not a zip").unwrap();
         assert!(files_in(&root.join("broken.zip"), &cache).is_err());
         assert_eq!(std::fs::read_dir(&cache).unwrap().filter_map(|e| e.ok()).filter(|e| e.file_name().to_string_lossy().contains(".tmp-")).count(), 0);
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn cached_never_unpacks() {
+        let root = std::env::temp_dir().join(format!("drukhal-archive-cached-{}", std::process::id()));
+        let cache = root.join("cache");
+        std::fs::create_dir_all(&root).unwrap();
+        let zip = root.join("old mod.zip");
+        write_zip(&zip, &[("common/buildings/a.txt", "a = {}")]);
+
+        // Never unpacked: no copy, and the lookup unpacks nothing.
+        assert_eq!(cached_in(&zip, &cache), None);
+        assert!(!cache.exists() || std::fs::read_dir(&cache).unwrap().next().is_none());
+
+        // Unpacked: the current copy is found.
+        let dir = files_in(&zip, &cache).unwrap();
+        assert_eq!(cached_in(&zip, &cache), Some(dir));
+
+        // Changed (different size): the copy is stale.
+        write_zip(&zip, &[("common/buildings/a.txt", "a = { cost = 1 }")]);
+        assert_eq!(cached_in(&zip, &cache), None);
+
+        // Folders are read in place.
+        assert_eq!(cached_in(&root, &cache), Some(root.clone()));
 
         std::fs::remove_dir_all(root).unwrap();
     }

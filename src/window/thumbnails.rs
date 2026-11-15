@@ -56,7 +56,7 @@ pub(super) fn add_css() {
 /// Zipped mods use their unpacked copy.
 fn picture_path(m: &Mod) -> Option<PathBuf> {
     let content = m.content.as_deref()?;
-    let dir = if content.is_file() { archive::files(content).ok()? } else { content.to_path_buf() };
+    let dir = archive::cached(content)?;
     let named = m.descriptor.picture.as_deref().map(str::trim).filter(|p| !p.is_empty());
     named.into_iter().chain(["thumbnail.png", "thumbnail.jpg", "thumbnail.jpeg"]).find_map(|name| find(&dir, name))
 }
