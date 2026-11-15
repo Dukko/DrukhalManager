@@ -50,11 +50,18 @@ impl Window {
             }
             let Some(ui) = weak.upgrade() else { return };
             crate::diagnostics::log!("mods", "Unpacked {unpacked} zipped mods");
-            *ui.thumbnails.borrow_mut() = Default::default();
-            ui.profiles.borrow_mut().clear();
+            ui.forget_mod_files();
             ui.check_stale();
             ui.refresh();
         });
+    }
+
+    /// Forgets what was read from the mods' files (thumbnails, Smart Sort
+    /// folders, checksummed files), after they may have changed.
+    pub(super) fn forget_mod_files(&self) {
+        *self.thumbnails.borrow_mut() = Default::default();
+        self.profiles.borrow_mut().clear();
+        self.checksummed.borrow_mut().clear();
     }
 
     /// Reads the descriptors and Workshop folders again in the background,
@@ -100,8 +107,7 @@ impl Window {
             let collection = ui.collections.borrow().active().mods.clone();
             let restored = ui.state.borrow_mut().restore_returned(&collection, &returned);
             // Updated mods may have new thumbnails and files.
-            *ui.thumbnails.borrow_mut() = Default::default();
-            ui.profiles.borrow_mut().clear();
+            ui.forget_mod_files();
             ui.check_stale();
             ui.update_repair_banner();
             let rescan = ui.analysis.borrow().is_some();
