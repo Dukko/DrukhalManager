@@ -199,7 +199,7 @@ mod tests {
         std::fs::write(user.join("mod/broken.mod"), "name=\"Alpha Broken\" path=\"/nowhere\"").unwrap();
         std::fs::write(user.join("dlc_load.json"), r#"{"enabled_mods":["mod/ugc_42.mod","mod/deleted.mod"],"disabled_dlcs":[]}"#).unwrap();
 
-        let mods = discover(&user, &[workshop.clone()]).unwrap();
+        let mods = discover(&user, std::slice::from_ref(&workshop)).unwrap();
         let names: Vec<_> = mods.iter().map(|m| m.descriptor.name.as_str()).collect();
         assert_eq!(names, ["Moved", "mod/deleted.mod", "Alpha Broken", "Zed Local"]);
         assert_eq!(mods[0].content.as_deref(), Some(workshop.join("42").as_path()));

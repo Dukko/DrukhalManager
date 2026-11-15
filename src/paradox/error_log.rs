@@ -54,7 +54,7 @@ pub struct Report {
 
 impl Report {
     /// Errors credited to mods (not the base game or unknown sources).
-    pub fn from_mods(&self) -> usize {
+    pub fn mod_errors(&self) -> usize {
         self.groups.iter().filter(|g| g.mod_id.is_some()).map(Group::total).sum()
     }
 }
@@ -127,6 +127,16 @@ fn message(line: &str) -> &str {
     }
 }
 
+/// A group being built: the mod (or none) it is credited to, with its entries.
+struct Building {
+    target: Option<usize>,
+    label: String,
+    no_file: bool,
+    entries: Vec<Entry>,
+    /// Message pattern to its index in `entries`.
+    seen: HashMap<String, usize>,
+}
+
 pub fn analyze(log: &str, mods: &[LogMod]) -> Report {
     // Which mod's copy of a file loads: the last one in load order.
     let mut owner_cache: HashMap<String, Option<usize>> = HashMap::new();
@@ -141,7 +151,7 @@ pub fn analyze(log: &str, mods: &[LogMod]) -> Report {
 
     let base_game = t!("Base game or missing files");
     let no_file = t!("Not tied to a file");
-    let mut groups: Vec<(Option<usize>, String, bool, Vec<Entry>, HashMap<String, usize>)> = Vec::new();
+    let mut groups: Vec<Building> = Vec::new();
     let mut lines = 0;
     for line in log.lines().map(str::trim_end).filter(|l| !l.is_empty()) {
         lines += 1;
@@ -157,14 +167,14 @@ pub fn analyze(log: &str, mods: &[LogMod]) -> Report {
             },
             (None, None) => (None, no_file.clone(), true),
         };
-        let g = match groups.iter().position(|(t, l, ..)| *t == target && *l == label) {
+        let g = match groups.iter().position(|b| b.target == target && b.label == label) {
             Some(g) => g,
             None => {
-                groups.push((target, label, no_file_errors, Vec::new(), HashMap::new()));
+                groups.push(Building { target, label, no_file: no_file_errors, entries: Vec::new(), seen: HashMap::new() });
                 groups.len() - 1
             }
         };
-        let (_, _, _, entries, seen) = &mut groups[g];
+        let Building { entries, seen, .. } = &mut groups[g];
         match seen.get(&pattern(msg)) {
             Some(&e) => entries[e].count += 1,
             None => {
@@ -176,7 +186,7 @@ pub fn analyze(log: &str, mods: &[LogMod]) -> Report {
 
     let mut out: Vec<Group> = groups
         .into_iter()
-        .map(|(target, label, no_file, entries, _)| match target {
+        .map(|Building { target, label, no_file, entries, .. }| match target {
             Some(i) => Group { label: mods[i].name.clone(), mod_id: Some(mods[i].id.clone()), is_patch: mods[i].is_patch, no_file, entries },
             None => Group { label, mod_id: None, is_patch: false, no_file, entries },
         })
@@ -232,7 +242,7 @@ mod tests {
         assert_eq!(r.groups[1].entries[0].count, 2, "repeats are counted, not listed");
         let numbered = "[05:00:00][g.cpp:1]: Failed to read key in file: common/x/shared.txt line: 1\n[05:00:01][g.cpp:1]: Failed to read key in file: common/x/shared.txt line: 72\n";
         assert_eq!(analyze(numbered, &mods).groups[0].entries.len(), 1, "errors differing only in numbers are one entry");
-        assert_eq!(r.from_mods(), 5);
+        assert_eq!(r.mod_errors(), 5);
         std::fs::remove_dir_all(root).unwrap();
     }
 }

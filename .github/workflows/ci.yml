@@ -35,7 +35,7 @@ jobs:
       - name: cargo test
         run: cargo test --locked
       - name: cargo clippy
-        run: cargo clippy --all-targets --locked
+        run: cargo clippy --all-targets --locked -- -D warnings
       - name: Translation template is current
         run: |
           cargo install xtr --version 0.1.11 --locked

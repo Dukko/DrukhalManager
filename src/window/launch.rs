@@ -281,7 +281,7 @@ impl Window {
             .and_then(|m| m.modified())
             .is_ok_and(|t| t >= started);
         let report = if fresh { Some(self.error_report()) } else { None };
-        let from_mods = report.as_ref().map_or(0, |r| r.from_mods());
+        let from_mods = report.as_ref().map_or(0, |r| r.mod_errors());
         if from_mods > 0 {
             crate::diagnostics::log!("game", "error.log has {from_mods} errors from the mods");
         }

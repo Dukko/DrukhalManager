@@ -16,7 +16,7 @@ const ROWS_PER_GROUP: usize = 200;
 pub fn present(parent: &impl IsA<gtk::Widget>, report: &Report, log: PathBuf, modified: Option<String>, roots: std::collections::HashMap<String, PathBuf>) {
     let page = adw::PreferencesPage::new();
     let lines = tnf!("{count} line in error.log", "{count} lines in error.log", count = report.lines);
-    let errors = tnf!("{count} error comes from your mods", "{count} errors come from your mods", count = report.from_mods());
+    let errors = tnf!("{count} error comes from your mods", "{count} errors come from your mods", count = report.mod_errors());
     let description = match modified {
         Some(when) => tf!("{lines}, written {when}. {errors}.", lines = &lines, when = when, errors = &errors),
         None => tf!("{lines}. {errors}.", lines = &lines, errors = &errors),
