@@ -57,11 +57,13 @@ impl Window {
     }
 
     /// Forgets what was read from the mods' files (thumbnails, Smart Sort
-    /// folders, checksummed files), after they may have changed.
+    /// folders, checksummed files, and the rows built from them), after
+    /// they may have changed.
     pub(super) fn forget_mod_files(&self) {
         *self.thumbnails.borrow_mut() = Default::default();
         self.profiles.borrow_mut().clear();
         self.checksummed.borrow_mut().clear();
+        self.rows.borrow_mut().clear();
     }
 
     /// Reads the descriptors and Workshop folders again in the background,

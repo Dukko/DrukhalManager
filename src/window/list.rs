@@ -1,6 +1,7 @@
 //! The load order list: rows, reordering, toggling and undo.
 
 use std::cell::Cell;
+use std::collections::HashMap;
 use std::rc::Rc;
 
 use adw::prelude::*;
@@ -28,10 +29,8 @@ impl Window {
         };
         let state = self.state.borrow();
         self.search_facts.borrow_mut().clear();
-        // Rebuilding drops the selection; it's put back at the end.
+        // Moving rows can drop the selection; it's put back at the end.
         self.restoring_marks.set(true);
-        self.enabled_list.remove_all();
-        self.disabled_list.remove_all();
         // Conflict counts are only shown while they match the load order.
         let counts = self
             .analysis
@@ -83,6 +82,9 @@ impl Window {
             .filter(|m| self.changes_checksum(m))
             .map(|m| display_name(m).to_owned())
             .collect();
+        let mut rows = self.rows.borrow_mut();
+        let mut shown = std::collections::HashSet::new();
+        let mut enabled_rows = Vec::with_capacity(state.enabled.len());
         for (position, &index) in state.enabled.iter().enumerate() {
             let conflicts = counts
                 .as_ref()
@@ -92,8 +94,8 @@ impl Window {
             let m = &state.mods[index];
             let data = self.row_data(m, true, conflicts, issues.get(&index).unwrap_or(&none));
             self.search_facts.borrow_mut().insert(index, data.facts());
-            let (row, _) = self.row(m, index, &data, &Rc::new(Cell::new(position)));
-            self.enabled_list.append(&row);
+            shown.insert(index);
+            enabled_rows.push(self.keep_or_build(&mut rows, m, index, Some(position), data));
         }
         {
             let mut facts = self.search_facts.borrow_mut();
@@ -115,13 +117,20 @@ impl Window {
             let settings = self.settings.borrow();
             state.disabled_in(settings.disabled_order, &settings.aliases)
         };
+        let mut disabled_rows = Vec::new();
         for index in disabled {
             let m = &state.mods[index];
             let data = self.row_data(m, false, 0, issues.get(&index).unwrap_or(&none));
             self.search_facts.borrow_mut().insert(index, data.facts());
-            let (row, _) = self.row(m, index, &data, &Rc::new(Cell::new(0)));
-            self.disabled_list.append(&row);
+            shown.insert(index);
+            disabled_rows.push(self.keep_or_build(&mut rows, m, index, None, data));
         }
+        rows.retain(|i, _| shown.contains(i));
+        // The enabled list first: a mod that moved between lists has a new
+        // row, and the old one is dropped by whichever list still holds it.
+        place(&self.enabled_list, &enabled_rows);
+        place(&self.disabled_list, &disabled_rows);
+        drop(rows);
         let misordered = issues
             .values()
             .flatten()
@@ -167,10 +176,12 @@ impl Window {
         self.refresh_health(health);
         self.refresh_view_counts(enabled);
         self.refresh_category_counts();
-        // The facts the filter reads came after the rows.
-        if self.category.get().is_some() {
-            self.enabled_list.invalidate_filter();
-        }
+        // Reused rows aren't added again, so GTK doesn't run the filter and
+        // header functions for them by itself; facts and Smart Sort runs may
+        // have changed.
+        self.enabled_list.invalidate_filter();
+        self.disabled_list.invalidate_filter();
+        self.enabled_list.invalidate_headers();
         // Keep showing the selected mod, in its new place.
         if let Some(index) = self.selected.get() {
             let name = format!("mod-{index}");
@@ -452,6 +463,30 @@ impl Window {
         });
         dialog.present(Some(&self.window));
         text.grab_focus();
+    }
+
+    /// The row for the mod at `index`, kept from the last rebuild when it
+    /// would be built the same, with its position updated.
+    fn keep_or_build(self: &Rc<Self>, rows: &mut HashMap<usize, CachedRow>, m: &Mod, index: usize, position: Option<usize>, data: RowData) -> adw::ActionRow {
+        if let Some(cached) = rows.get(&index)
+            && cached.data == data
+        {
+            if let Some(p) = position
+                && p != cached.position.get()
+            {
+                cached.position.set(p);
+                match &cached.number {
+                    Some(PositionWidget::Entry(entry)) => entry.set_text(&(p + 1).to_string()),
+                    Some(PositionWidget::Label(label)) => label.set_label(&(p + 1).to_string()),
+                    None => {}
+                }
+            }
+            return cached.row.clone();
+        }
+        let position = Rc::new(Cell::new(position.unwrap_or(0)));
+        let (row, number) = self.row(m, index, &data, &position);
+        rows.insert(index, CachedRow { data, row: row.clone(), position, number });
+        row
     }
 
     /// Everything `row` shows, read from the mod and the settings.
@@ -844,7 +879,7 @@ fn steam_badge(state: Option<ItemState>) -> Option<(String, String, &'static str
 }
 
 /// The widget showing an enabled row's load position.
-enum PositionWidget {
+pub(super) enum PositionWidget {
     Entry(gtk::Entry),
     /// The merged patch's position can't be edited.
     Label(gtk::Label),
@@ -854,7 +889,7 @@ enum PositionWidget {
 /// thumbnail. Two equal values build identical rows, so a row is kept
 /// while its `RowData` stays the same.
 #[derive(Clone, PartialEq)]
-struct RowData {
+pub(super) struct RowData {
     id: String,
     enabled: bool,
     is_patch: bool,
@@ -905,4 +940,31 @@ impl RowData {
             category: None,
         }
     }
+}
+
+/// A row kept between rebuilds, with what it was built from.
+pub(super) struct CachedRow {
+    data: RowData,
+    row: adw::ActionRow,
+    position: Rc<Cell<usize>>,
+    number: Option<PositionWidget>,
+}
+
+/// Makes `list` hold exactly `rows`, in order, moving only rows that are
+/// out of place instead of emptying it.
+fn place(list: &gtk::ListBox, rows: &[adw::ActionRow]) {
+    for (i, row) in rows.iter().enumerate() {
+        if list.row_at_index(i as i32).as_ref() == Some(row.upcast_ref::<gtk::ListBoxRow>()) {
+            continue;
+        }
+        // It may be further down this list, or in the other one.
+        if let Some(parent) = row.parent().and_then(|p| p.downcast::<gtk::ListBox>().ok()) {
+            parent.remove(row);
+        }
+        list.insert(row, i as i32);
+    }
+    while let Some(extra) = list.row_at_index(rows.len() as i32) {
+        list.remove(&extra);
+    }
+    debug_assert!(rows.iter().enumerate().all(|(i, r)| list.row_at_index(i as i32).as_ref() == Some(r.upcast_ref::<gtk::ListBoxRow>())));
 }

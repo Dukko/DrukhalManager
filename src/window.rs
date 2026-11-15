@@ -102,6 +102,9 @@ struct Window {
     profiles: RefCell<std::collections::HashMap<PathBuf, smart_sort::Profile>>,
     /// Whether each mod changes checksummed files, by its files' path.
     checksummed: RefCell<std::collections::HashMap<PathBuf, bool>>,
+    /// Each mod's row from the last rebuild, by mod index, kept while it
+    /// would be built the same; see `list::CachedRow`.
+    rows: RefCell<std::collections::HashMap<usize, list::CachedRow>>,
     enabled_section: gtk::Box,
     disabled_section: gtk::Box,
     /// The selected mod's details, and the panel it's in.
@@ -538,6 +541,7 @@ pub fn build(
         category_runs: RefCell::default(),
         profiles: RefCell::default(),
         checksummed: RefCell::default(),
+        rows: RefCell::default(),
         enabled_section,
         disabled_section,
         inspector,
