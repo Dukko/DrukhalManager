@@ -1,5 +1,6 @@
 //! The load order list: rows, reordering, toggling and undo.
 
+use std::cell::Cell;
 use std::rc::Rc;
 
 use adw::prelude::*;
@@ -88,13 +89,11 @@ impl Window {
                 .and_then(|c| c.get(position))
                 .copied()
                 .unwrap_or(0);
-            self.enabled_list.append(&self.row(
-                &state.mods[index],
-                index,
-                Some(position),
-                conflicts,
-                issues.get(&index).unwrap_or(&none),
-            ));
+            let m = &state.mods[index];
+            let data = self.row_data(m, true, conflicts, issues.get(&index).unwrap_or(&none));
+            self.search_facts.borrow_mut().insert(index, data.facts());
+            let (row, _) = self.row(m, index, &data, &Rc::new(Cell::new(position)));
+            self.enabled_list.append(&row);
         }
         {
             let mut facts = self.search_facts.borrow_mut();
@@ -117,13 +116,11 @@ impl Window {
             state.disabled_in(settings.disabled_order, &settings.aliases)
         };
         for index in disabled {
-            self.disabled_list.append(&self.row(
-                &state.mods[index],
-                index,
-                None,
-                0,
-                issues.get(&index).unwrap_or(&none),
-            ));
+            let m = &state.mods[index];
+            let data = self.row_data(m, false, 0, issues.get(&index).unwrap_or(&none));
+            self.search_facts.borrow_mut().insert(index, data.facts());
+            let (row, _) = self.row(m, index, &data, &Rc::new(Cell::new(0)));
+            self.disabled_list.append(&row);
         }
         let misordered = issues
             .values()
@@ -457,38 +454,60 @@ impl Window {
         text.grab_focus();
     }
 
-    pub(super) fn row(
-        self: &Rc<Self>,
-        m: &Mod,
-        index: usize,
-        position: Option<usize>,
-        conflicts: usize,
-        issues: &[checks::Issue],
-    ) -> adw::ActionRow {
+    /// Everything `row` shows, read from the mod and the settings.
+    fn row_data(&self, m: &Mod, enabled: bool, conflicts: usize, issues: &[checks::Issue]) -> RowData {
         let d = &m.descriptor;
         let alias = self.settings.borrow().aliases.get(&m.id).cloned();
-        let name = alias.as_deref().unwrap_or(display_name(m));
-        let source = match m.source {
-            mods::Source::Workshop => t!("Workshop"),
-            mods::Source::Local => t!("Local"),
-        };
-        let mut tooltip = Vec::new();
-        if alias.is_some() {
-            // The real name, which search also matches.
-            tooltip.push(display_name(m).trim().to_owned());
+        let game = self.game.as_ref().and_then(|g| g.version.as_deref());
+        let outdated = game.is_some_and(|game| !d.game_version().is_empty() && !checks::version_matches(d.game_version(), game));
+        // One icon for everything wrong with this mod, worst first.
+        let mut problems = self.extra_problems(m);
+        problems.extend(issues.iter().map(|i| (i.severity, i.message.clone(), false)));
+        problems.sort_by_key(|a| std::cmp::Reverse(a.0));
+        RowData {
+            id: m.id.clone(),
+            enabled,
+            is_patch: patch::is_patch(&m.id),
+            aliased: alias.is_some(),
+            name: alias.unwrap_or_else(|| display_name(m).to_owned()),
+            real_name: display_name(m).to_owned(),
+            source: m.source,
+            tags: d.tags.clone(),
+            content: m.content.clone(),
+            note: self.settings.borrow().notes.get(&m.id).cloned(),
+            game_version: d.game_version().to_owned(),
+            outdated,
+            conflicts,
+            no_achievements: self.changes_checksum(m),
+            steam: m.steam,
+            remote_file_id: d.remote_file_id,
+            problems,
+            has_requirement: issues.iter().any(|i| i.requirement.is_some()),
         }
-        tooltip.push(source.clone());
-        if !d.tags.is_empty() {
-            tooltip.push(d.tags.join(", "));
+    }
+
+    /// Builds a mod's row from `data`. Only the thumbnail comes from `m`.
+    /// `position` is read when the row is used, so it can be updated
+    /// without building the row again. Also returns the widget showing the
+    /// number, if the row has one.
+    fn row(self: &Rc<Self>, m: &Mod, index: usize, data: &RowData, position: &Rc<Cell<usize>>) -> (adw::ActionRow, Option<PositionWidget>) {
+        let mut tooltip = Vec::new();
+        if data.aliased {
+            // The real name, which search also matches.
+            tooltip.push(data.real_name.trim().to_owned());
+        }
+        tooltip.push(data.source_label());
+        if !data.tags.is_empty() {
+            tooltip.push(data.tags.join(", "));
         }
         let mut tooltip = tooltip.join(" · ");
-        if let Some(content) = &m.content {
+        if let Some(content) = &data.content {
             tooltip.push('\n');
             tooltip.push_str(&content.display().to_string());
         }
 
         let row = adw::ActionRow::builder()
-            .title(name)
+            .title(&data.name)
             .title_lines(1)
             .tooltip_text(tooltip)
             .use_markup(false)
@@ -497,16 +516,14 @@ impl Window {
         // First, so it ends up nearest the name: later prefixes go before it.
         row.add_prefix(&self.thumbnail_sized(m, 28));
 
-        let note = self.settings.borrow().notes.get(&m.id).cloned();
-        if let Some(note) = &note {
+        if let Some(note) = &data.note {
             row.add_suffix(&gtk::Image::builder().icon_name("document-edit-symbolic").tooltip_text(note).valign(gtk::Align::Center).css_classes(["dim-label"]).build());
         }
 
-        let game = self.game.as_ref().and_then(|g| g.version.as_deref());
-        let outdated = game.is_some_and(|game| !d.game_version().is_empty() && !checks::version_matches(d.game_version(), game));
-        if !d.game_version().is_empty() {
+        let outdated = data.outdated;
+        if !data.game_version.is_empty() {
             let version = gtk::Label::builder()
-                .label(d.game_version())
+                .label(&data.game_version)
                 .width_chars(7)
                 .xalign(0.0)
                 .valign(gtk::Align::Center)
@@ -515,6 +532,7 @@ impl Window {
                 .build();
             row.add_suffix(&version);
         }
+        let conflicts = data.conflicts;
         if conflicts > 0 {
             let badge = gtk::Label::builder()
                 .label(conflicts.to_string())
@@ -524,28 +542,8 @@ impl Window {
                 .build();
             row.add_suffix(&badge);
         }
-        let no_achievements = self.changes_checksum(m);
-        let mut text = vec![name.to_owned(), display_name(m).to_owned(), source, d.tags.join(" ")];
-        text.extend(d.remote_file_id.map(|id| id.to_string()));
-        text.extend(note);
-        self.search_facts.borrow_mut().insert(
-            index,
-            mods::filter::Facts {
-                text: text.join(" ").to_lowercase(),
-                enabled: position.is_some(),
-                achievements: !no_achievements,
-                source: m.source,
-                version: d.game_version().to_owned(),
-                conflicts: conflicts > 0,
-                outdated,
-                // Set below, once the problems are known.
-                attention: false,
-                // Set by `refresh`, from the Smart Sort plan.
-                category: None,
-            },
-        );
         row.set_widget_name(&format!("mod-{index}"));
-        if no_achievements {
+        if data.no_achievements {
             row.add_suffix(
                 &gtk::Image::builder()
                     .icon_name("action-unavailable-symbolic")
@@ -554,7 +552,7 @@ impl Window {
                     .build(),
             );
         }
-        if let Some((label, tooltip, class)) = steam_badge(m.steam) {
+        if let Some((label, tooltip, class)) = steam_badge(data.steam) {
             let badge = gtk::Label::builder()
                 .label(&label)
                 .tooltip_text(&tooltip)
@@ -563,20 +561,13 @@ impl Window {
                 .build();
             row.add_suffix(&badge);
         }
-        let is_patch = patch::is_patch(&m.id);
-        // One icon for everything wrong with this mod, worst first.
-        let mut problems = self.extra_problems(m);
-        problems.extend(issues.iter().map(|i| (i.severity, i.message.clone(), false)));
-        problems.sort_by_key(|a| std::cmp::Reverse(a.0));
-        if let Some(f) = self.search_facts.borrow_mut().get_mut(&index) {
-            f.attention = problems.iter().any(|(s, _, _)| *s == checks::Severity::Warning);
-        }
-        if let Some((worst, _, _)) = problems.first() {
+        if let Some((worst, _, _)) = data.problems.first() {
             let (icon, class) = match worst {
                 checks::Severity::Warning => ("dialog-warning-symbolic", "warning"),
                 checks::Severity::Info => ("dialog-information-symbolic", "dim-label"),
             };
-            let tooltip = problems
+            let tooltip = data
+                .problems
                 .iter()
                 .map(|(_, m, _)| m.as_str())
                 .collect::<Vec<_>>()
@@ -589,10 +580,10 @@ impl Window {
                     .build(),
             );
         }
-        self.row_menu(&row, m, index, position, conflicts, issues);
+        self.row_menu(&row, data, index);
 
         let toggle = gtk::Switch::builder()
-            .active(position.is_some())
+            .active(data.enabled)
             .valign(gtk::Align::Center)
             .build();
         let weak = Rc::downgrade(self);
@@ -604,31 +595,35 @@ impl Window {
         });
         row.add_suffix(&toggle);
 
-        if let (Some(position), true) = (position, is_patch) {
+        let mut number = None;
+        if data.enabled && data.is_patch {
             // Pinned: no handle, no editable position.
             let lock = gtk::Image::builder()
                 .icon_name("changes-prevent-symbolic")
                 .tooltip_text(t!("Always loads last, so its merges and fixes win"))
                 .css_classes(["dim-label"])
                 .build();
-            let number = gtk::Label::builder()
-                .label((position + 1).to_string())
+            let label = gtk::Label::builder()
+                .label((position.get() + 1).to_string())
                 .width_chars(3)
                 .xalign(1.0)
                 .css_classes(["dim-label", "numeric"])
                 .build();
             row.add_prefix(&lock);
-            row.add_prefix(&number);
-        } else if let Some(position) = position {
+            row.add_prefix(&label);
+            number = Some(PositionWidget::Label(label));
+        } else if data.enabled {
             let handle = gtk::Image::builder()
                 .icon_name("list-drag-handle-symbolic")
                 .css_classes(["dim-label"])
                 .build();
             row.add_prefix(&handle);
-            row.add_prefix(&self.position_entry(position));
-            self.make_reorderable(&row, position);
+            let entry = self.position_entry(position.clone());
+            row.add_prefix(&entry);
+            self.make_reorderable(&row, position.clone());
+            number = Some(PositionWidget::Entry(entry));
         }
-        row
+        (row, number)
     }
 
     /// Problems with the mod that aren't load order checks: an unreadable
@@ -676,11 +671,10 @@ impl Window {
 
     /// The row's menu, opened by right-clicking it: the same actions as the
     /// inspector, for when it's out of the way.
-    fn row_menu(self: &Rc<Self>, row: &adw::ActionRow, m: &Mod, index: usize, position: Option<usize>, conflicts: usize, issues: &[checks::Issue]) {
-        let is_patch = patch::is_patch(&m.id);
+    fn row_menu(self: &Rc<Self>, row: &adw::ActionRow, data: &RowData, index: usize) {
         let menu = gio::Menu::new();
         let index_variant = (index as u32).to_variant();
-        if position.is_some() && !is_patch {
+        if data.enabled && !data.is_patch {
             let moves = gio::Menu::new();
             for (label, action) in [
                 (t!("Move to _Top"), "win.move-top"),
@@ -692,7 +686,7 @@ impl Window {
             }
             menu.append_section(None, &moves);
         }
-        if position.is_some() && issues.iter().any(|i| i.requirement.is_some()) {
+        if data.enabled && data.has_requirement {
             let item = gio::MenuItem::new(Some(&t!("_Get Required Mods")), None);
             item.set_action_and_target_value(Some("win.get-requirements"), Some(&index_variant));
             menu.append_item(&item);
@@ -700,21 +694,21 @@ impl Window {
         let item = gio::MenuItem::new(Some(&t!("_Rename…")), None);
         item.set_action_and_target_value(Some("win.rename-mod"), Some(&index_variant));
         menu.append_item(&item);
-        let has_note = self.settings.borrow().notes.contains_key(&m.id);
+        let has_note = data.note.is_some();
         let item = gio::MenuItem::new(Some(&if has_note { t!("Edit _Note…") } else { t!("Add _Note…") }), None);
         item.set_action_and_target_value(Some("win.edit-note"), Some(&index_variant));
         menu.append_item(&item);
-        if m.content.is_some() {
+        if data.content.is_some() {
             let item = gio::MenuItem::new(Some(&t!("Open Folder")), None);
             item.set_action_and_target_value(Some("win.open-folder"), Some(&index_variant));
             menu.append_item(&item);
         }
-        if conflicts > 0 {
+        if data.conflicts > 0 {
             let item = gio::MenuItem::new(Some(&t!("Show _Conflicts")), None);
             item.set_action_and_target_value(Some("win.show-conflicts"), Some(&index_variant));
             menu.append_item(&item);
         }
-        if m.descriptor.remote_file_id.is_some() {
+        if data.remote_file_id.is_some() {
             let workshop = gio::Menu::new();
             for (label, action) in [
                 (t!("Open in _Steam"), "win.open-in-steam"),
@@ -722,7 +716,7 @@ impl Window {
                 (t!("Copy _Workshop Link"), "win.copy-workshop-link"),
                 (t!("_Unsubscribe in Steam…"), "win.unsubscribe"),
             ] {
-                if action == "win.unsubscribe" && m.steam == Some(ItemState::Unsubscribed) {
+                if action == "win.unsubscribe" && data.steam == Some(ItemState::Unsubscribed) {
                     continue;
                 }
                 let item = gio::MenuItem::new(Some(&label), None);
@@ -751,9 +745,9 @@ impl Window {
 
     /// The load position as an editable number: type a position and press
     /// Enter, or leave the field, to move the mod there.
-    pub(super) fn position_entry(self: &Rc<Self>, position: usize) -> gtk::Entry {
+    fn position_entry(self: &Rc<Self>, position: Rc<Cell<usize>>) -> gtk::Entry {
         let entry = gtk::Entry::builder()
-            .text((position + 1).to_string())
+            .text((position.get() + 1).to_string())
             .width_chars(3)
             .max_width_chars(4)
             .xalign(1.0)
@@ -766,6 +760,7 @@ impl Window {
             let weak = Rc::downgrade(self);
             move |entry: &gtk::Entry| {
                 let Some(ui) = weak.upgrade() else { return };
+                let position = position.get();
                 match entry.text().trim().parse::<usize>() {
                     // Positions are shown from 1.
                     Ok(n) if n.saturating_sub(1) != position => {
@@ -791,14 +786,13 @@ impl Window {
         entry
     }
 
-    pub(super) fn make_reorderable(self: &Rc<Self>, row: &adw::ActionRow, position: usize) {
+    fn make_reorderable(self: &Rc<Self>, row: &adw::ActionRow, position: Rc<Cell<usize>>) {
         let source = gtk::DragSource::builder()
             .actions(gdk::DragAction::MOVE)
             .build();
-        source.connect_prepare(move |_, _, _| {
-            Some(gdk::ContentProvider::for_value(
-                &(position as u32).to_value(),
-            ))
+        source.connect_prepare({
+            let position = position.clone();
+            move |_, _, _| Some(gdk::ContentProvider::for_value(&(position.get() as u32).to_value()))
         });
         source.connect_drag_begin(glib::clone!(
             #[weak]
@@ -821,7 +815,7 @@ impl Window {
                     return false;
                 };
                 // Dropping on the lower half of a row places the mod after it.
-                let before = position + usize::from(y > f64::from(row.height()) / 2.0);
+                let before = position.get() + usize::from(y > f64::from(row.height()) / 2.0);
                 ui.update(move |state| state.move_enabled(from as usize, before));
                 true
             }
@@ -846,5 +840,69 @@ fn steam_badge(state: Option<ItemState>) -> Option<(String, String, &'static str
             t!("You're no longer subscribed to this mod in Steam. Once Steam removes its files, Repair in the banner above the list can remove it from the list."),
             "dim-label",
         )),
+    }
+}
+
+/// The widget showing an enabled row's load position.
+enum PositionWidget {
+    Entry(gtk::Entry),
+    /// The merged patch's position can't be edited.
+    Label(gtk::Label),
+}
+
+/// Everything a mod's row shows or offers, apart from its position and
+/// thumbnail. Two equal values build identical rows, so a row is kept
+/// while its `RowData` stays the same.
+#[derive(Clone, PartialEq)]
+struct RowData {
+    id: String,
+    enabled: bool,
+    is_patch: bool,
+    /// The alias, or the mod's own name.
+    name: String,
+    /// The mod's own name.
+    real_name: String,
+    aliased: bool,
+    source: mods::Source,
+    tags: Vec<String>,
+    content: Option<std::path::PathBuf>,
+    note: Option<String>,
+    game_version: String,
+    outdated: bool,
+    conflicts: usize,
+    no_achievements: bool,
+    steam: Option<ItemState>,
+    remote_file_id: Option<u64>,
+    /// Severity, message, whether the Conflicts page has details; worst first.
+    problems: Vec<(checks::Severity, String, bool)>,
+    has_requirement: bool,
+}
+
+impl RowData {
+    /// The translated name of where the mod comes from.
+    fn source_label(&self) -> String {
+        match self.source {
+            mods::Source::Workshop => t!("Workshop"),
+            mods::Source::Local => t!("Local"),
+        }
+    }
+
+    /// What search and the filters know about this mod.
+    fn facts(&self) -> mods::filter::Facts {
+        let mut text = vec![self.name.clone(), self.real_name.clone(), self.source_label(), self.tags.join(" ")];
+        text.extend(self.remote_file_id.map(|id| id.to_string()));
+        text.extend(self.note.clone());
+        mods::filter::Facts {
+            text: text.join(" ").to_lowercase(),
+            enabled: self.enabled,
+            achievements: !self.no_achievements,
+            source: self.source,
+            version: self.game_version.clone(),
+            conflicts: self.conflicts > 0,
+            outdated: self.outdated,
+            attention: self.problems.iter().any(|(s, _, _)| *s == checks::Severity::Warning),
+            // Set by `refresh`, from the Smart Sort plan.
+            category: None,
+        }
     }
 }
