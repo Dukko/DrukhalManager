@@ -36,6 +36,12 @@
     <control>keyboard</control>
   </supports>
   <releases>
+    <release version="1.0.2" date="2026-11-15">
+      <description>
+        <p><em>Faster conflict scans after updates.</em> What a scan learns from reading your mods' files is now kept when DrukhalManager updates, so the first scan after an update no longer reads every file again. This takes effect from the update after this one.</p>
+        <p><em>Under the hood.</em> Updated libraries, including the bundled SQLite and, on Windows, the code that keeps API keys in Credential Manager. Keys you saved before are still found.</p>
+      </description>
+    </release>
     <release version="1.0.1" date="2026-11-15">
       <description>
         <p><em>A faster load order.</em> Dragging, toggling, sorting, undoing and redoing no longer rebuild every row of the list, only the ones that changed. With a few hundred mods, moving one mod is about five times faster, and sorting about twice as fast.</p>
