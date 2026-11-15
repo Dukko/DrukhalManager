@@ -79,7 +79,7 @@ impl Window {
             .enabled
             .iter()
             .map(|&i| &state.mods[i])
-            .filter(|m| changes_checksum(m))
+            .filter(|m| self.changes_checksum(m))
             .map(|m| display_name(m).to_owned())
             .collect();
         for (position, &index) in state.enabled.iter().enumerate() {
@@ -217,6 +217,21 @@ impl Window {
         }
         let overrides = self.settings.borrow().sort_categories.iter().filter_map(|(id, key)| Some((id.clone(), mods::smart_sort::Category::from_key(key)?))).collect();
         mods::smart_sort::plan(&state.mods, &state.enabled, &profiles, &overrides, &patch::is_patch)
+    }
+
+    /// Whether the mod changes checksummed files, remembered until the
+    /// mods' files may have changed (see `forget_mod_files`). Zipped mods
+    /// count once their unpacked copy exists.
+    fn changes_checksum(&self, m: &Mod) -> bool {
+        let Some(content) = &m.content else { return false };
+        if let Some(&known) = self.checksummed.borrow().get(content) {
+            return known;
+        }
+        // Not unpacked yet: answer no, and ask again next time.
+        let Some(root) = mods::archive::cached(content) else { return false };
+        let changes = crate::multiplayer::changes_checksum(&root);
+        self.checksummed.borrow_mut().insert(content.clone(), changes);
+        changes
     }
 
     /// Undoes the last load order change, unless the user is typing in a
@@ -509,7 +524,7 @@ impl Window {
                 .build();
             row.add_suffix(&badge);
         }
-        let no_achievements = changes_checksum(m);
+        let no_achievements = self.changes_checksum(m);
         let mut text = vec![name.to_owned(), display_name(m).to_owned(), source, d.tags.join(" ")];
         text.extend(d.remote_file_id.map(|id| id.to_string()));
         text.extend(note);
@@ -813,15 +828,6 @@ impl Window {
         ));
         row.add_controller(target);
     }
-}
-
-/// Whether the mod changes checksummed files (zipped mods are read from their
-/// unpacked copy, once there is one).
-fn changes_checksum(m: &Mod) -> bool {
-    m.content
-        .as_deref()
-        .and_then(mods::archive::cached)
-        .is_some_and(|root| crate::multiplayer::changes_checksum(&root))
 }
 
 /// A label for what Steam is doing with a Workshop mod, if it's worth

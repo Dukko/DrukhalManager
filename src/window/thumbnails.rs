@@ -36,6 +36,9 @@ pub(super) struct Cache {
     asked: HashSet<u64>,
     /// Waiting to be asked for, in one request.
     queued: Vec<u64>,
+    /// Each mod's thumbnail file, by mod id, so rebuilding the list
+    /// doesn't look for it again. `None`: it has none of its own.
+    paths: HashMap<String, Option<PathBuf>>,
 }
 
 /// Where a Workshop item's downloaded preview is kept.
@@ -93,7 +96,16 @@ impl Window {
             picture.set_tooltip_text(Some(&t!("Made by Drukhal Manager from your merges")));
             return picture;
         }
-        let path = match picture_path(m) {
+        let own = self.thumbnails.borrow().paths.get(&m.id).cloned();
+        let own = own.unwrap_or_else(|| {
+            let found = picture_path(m);
+            // A zip not unpacked yet may still have one: only remember once it is.
+            if m.content.as_deref().is_none_or(|c| archive::cached(c).is_some()) {
+                self.thumbnails.borrow_mut().paths.insert(m.id.clone(), found.clone());
+            }
+            found
+        });
+        let path = match own {
             Some(path) => path,
             None => {
                 let Some(id) = m.descriptor.remote_file_id else { return picture };

@@ -100,6 +100,8 @@ struct Window {
     /// The folders each mod ships, by its files' path, for Smart Sort's
     /// categories.
     profiles: RefCell<std::collections::HashMap<PathBuf, smart_sort::Profile>>,
+    /// Whether each mod changes checksummed files, by its files' path.
+    checksummed: RefCell<std::collections::HashMap<PathBuf, bool>>,
     enabled_section: gtk::Box,
     disabled_section: gtk::Box,
     /// The selected mod's details, and the panel it's in.
@@ -535,6 +537,7 @@ pub fn build(
         category_counts,
         category_runs: RefCell::default(),
         profiles: RefCell::default(),
+        checksummed: RefCell::default(),
         enabled_section,
         disabled_section,
         inspector,
