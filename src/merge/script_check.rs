@@ -51,14 +51,16 @@ pub struct Context {
     anchors: HashMap<String, Ctx>,
     /// Keys seen in vanilla, by "anchor\tE" or "anchor\tT".
     allowed: HashMap<String, HashSet<String>>,
-    /// Every key in `allowed`, whatever the anchor. Rebuilt on load.
-    #[serde(skip)]
+    /// Every key vanilla uses anywhere in `common/` and `events/`, in any
+    /// block, except the names of top-level objects, plus all of `allowed`.
+    #[serde(default)]
     seen: HashSet<String>,
 }
 
 impl Context {
     fn indexed(mut self) -> Self {
-        self.seen = self.allowed.values().flatten().cloned().collect();
+        let allowed: Vec<String> = self.allowed.values().flatten().cloned().collect();
+        self.seen.extend(allowed);
         self
     }
 }
@@ -318,6 +320,42 @@ fn learn_anchors(tallies: &HashMap<String, Tally>) -> HashMap<String, Ctx> {
     anchors
 }
 
+fn collect_keys(nodes: &[Node], out: &mut HashSet<String>) {
+    for node in nodes {
+        if let Some(key) = &node.key
+            && plain(key)
+        {
+            out.insert(key.clone());
+        }
+        if let Some(kids) = &node.kids {
+            collect_keys(kids, out);
+        }
+    }
+}
+
+/// Every key the game's script files use, in any block, except the names of
+/// top-level objects.
+fn vanilla_keys(game_dir: &Path) -> HashSet<String> {
+    let mut files = Vec::new();
+    for folder in ["common", "events"] {
+        let dir = game_dir.join(folder);
+        if dir.is_dir() {
+            let _ = conflicts::walk(game_dir, &dir, &mut files);
+        }
+    }
+    let mut keys = HashSet::new();
+    for file in files.iter().filter(|f| f.to_lowercase().ends_with(".txt")) {
+        let Some(text) = read_text(&game_dir.join(file)) else { continue };
+        let Ok(nodes) = script::parse_lines(&text) else { continue };
+        for node in &nodes {
+            if let Some(kids) = &node.kids {
+                collect_keys(kids, &mut keys);
+            }
+        }
+    }
+    keys
+}
+
 /// Reads the base game's files and learns where its effects and triggers
 /// are. Only game files are used, never mods.
 pub fn learn(game_dir: &Path, docs: &Docs, version: &str) -> Context {
@@ -352,6 +390,7 @@ pub fn learn(game_dir: &Path, docs: &Docs, version: &str) -> Context {
         }
         (tallies, allowed)
     };
+    let seen = vanilla_keys(game_dir);
     // The traversal depends on the anchors, so they're learned in two passes.
     let (first, _) = pass(&HashMap::new(), false);
     let first = learn_anchors(&first);
@@ -363,10 +402,10 @@ pub fn learn(game_dir: &Path, docs: &Docs, version: &str) -> Context {
         anchors.entry(anchor).or_insert(ctx);
     }
     if anchors == first {
-        return Context { version: version.to_owned(), anchors, allowed, seen: HashSet::new() }.indexed();
+        return Context { version: version.to_owned(), anchors, allowed, seen }.indexed();
     }
     let (_, allowed) = pass(&anchors, true);
-    Context { version: version.to_owned(), anchors, allowed, seen: HashSet::new() }.indexed()
+    Context { version: version.to_owned(), anchors, allowed, seen }.indexed()
 }
 
 fn context_path(cache_dir: &Path, version: &str) -> PathBuf {
@@ -665,12 +704,13 @@ mod tests {
     #[test]
     fn names_vanilla_uses_elsewhere_are_unsure() {
         let game = game("unsure");
-        // `species_class` is a plain setting somewhere in vanilla.
-        write(&game, &[("common/scripted_effects/c.txt", "y = { species_class = x }")]);
+        // `species_class` is only ever a parameter of an effect in vanilla.
+        write(&game, &[("common/scripted_effects/c.txt", "y = { create_message = { species_class = x } }"), ("common/buildings/top.txt", "top_object_name = { cost = 1 }")]);
         let docs = docs();
         let context = learn(&game, &docs, "4.0");
         let known = known(&docs, &[&game]);
-        assert!(context.seen.contains("species_class"));
+        assert!(context.seen.contains("species_class") && context.seen.contains("cost"));
+        assert!(!context.seen.contains("top_object_name") && !context.allowed.values().any(|keys| keys.contains("species_class")));
         let text = "country_event = { id = m.1 immediate = { species_class = x every_system_colony = { } } }";
         let found = check_text(&context, &known, "events/m.txt", text);
         assert_eq!(names(&found), [("species_class", Ctx::Effect, Problem::Unsure), ("every_system_colony", Ctx::Effect, Problem::Unknown)]);
