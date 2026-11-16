@@ -36,6 +36,11 @@
     <control>keyboard</control>
   </supports>
   <releases>
+    <release version="1.4.2" date="2026-11-16">
+      <description>
+        <p>Game Errors recognises many more harmless lines and sorts them into their own collapsed groups (looks and sounds, missing text, references to other mods, mod descriptors, and more "defined twice"), so the problems list shows what can actually break the game. On a 158-mod log it went from about 18,000 problem lines to about 10,000.</p>
+      </description>
+    </release>
     <release version="1.4.1" date="2026-11-16">
       <description>
         <p>Mods that only add an advanced authority swap to an existing authority (holding nothing but advanced_authority_swap blocks) are no longer shown as conflicting with each other, or as replacing the base game's authority, since the game adds their swaps instead.</p>
