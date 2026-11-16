@@ -39,6 +39,9 @@ pub struct Report {
     /// Every object the scan found, conflicting or not, by (category, key),
     /// with its definitions in load order, for looking objects up.
     pub defined: BTreeMap<(String, String), Vec<Definition>>,
+    /// How many files the scan read from each mod, by scanned position;
+    /// 0 for skipped mods.
+    pub shipped: Vec<usize>,
 }
 
 impl Report {
@@ -317,7 +320,7 @@ pub fn analyze(mods: &[ModInput], languages: Option<&BTreeSet<String>>) -> Repor
 
 /// Like `analyze`, parsing only the files `cache` doesn't know as they are.
 pub fn analyze_cached(mods: &[ModInput], languages: Option<&BTreeSet<String>>, cache: &mut ScanCache) -> Report {
-    let mut report = Report::default();
+    let mut report = Report { shipped: vec![0; mods.len()], ..Report::default() };
 
     // Lowercased relative path -> (load position, path as spelled in that
     // mod) for every mod shipping it.
@@ -341,6 +344,7 @@ pub fn analyze_cached(mods: &[ModInput], languages: Option<&BTreeSet<String>>, c
         // that folder, so they cannot conflict.
         files.retain(|path, _| !m.replace_path.iter().any(|r| is_under(path, r)));
         for path in found.into_iter().filter(|p| reads(p, languages)) {
+            report.shipped[position] += 1;
             files.entry(path.to_lowercase()).or_default().push((position, path));
         }
     }
@@ -891,6 +895,17 @@ mod tests {
         assert_eq!(report.errors[0].file, "events/broken.txt");
         assert_eq!(report.skipped, [(2, "Mod files not found".to_owned())]);
 
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn counts_the_files_each_mod_ships() {
+        let root = std::env::temp_dir().join(format!("dm-shipped-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        write(&root.join("a"), &[("gfx/1.dds", "1"), ("gfx/2.dds", "2")]);
+        write(&root.join("b"), &[("gfx/1.dds", "x"), ("gfx/3.dds", "3"), ("gfx/4.dds", "4")]);
+        let report = analyze(&[input(&root, "a", &[]), input(&root, "b", &[])], None);
+        assert_eq!(report.shipped, vec![2, 3]);
         std::fs::remove_dir_all(root).unwrap();
     }
 
