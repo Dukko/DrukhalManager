@@ -392,6 +392,9 @@ pub fn build(analysis: &Rc<Analysis>, rescan: gtk::Button, hooks: Rc<MergeHooks>
     // The window's action: the merged patch's backups.
     let backups = gtk::Button::builder().icon_name("document-open-recent-symbolic").tooltip_text(t!("Merged Patch Backups…")).action_name("win.patch-backups").css_classes(["flat"]).build();
     footer.append(&show_ignored);
+    // The window's action: look up any object from the last scan.
+    let lookup = gtk::Button::builder().icon_name("system-search-symbolic").tooltip_text(t!("Look Up Objects…")).action_name("win.object-lookup").css_classes(["flat"]).build();
+    footer.append(&lookup);
     footer.append(&rules);
     footer.append(&backups);
     footer.append(&rescan);
