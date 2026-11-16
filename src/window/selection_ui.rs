@@ -333,6 +333,7 @@ impl Window {
         {
             let mut settings = self.settings.borrow_mut();
             for id in &ids {
+                settings.placed_below.remove(id);
                 if key.is_empty() {
                     settings.sort_categories.remove(id);
                 } else {

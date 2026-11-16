@@ -3,7 +3,7 @@
 //! applies the order.
 
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::rc::Rc;
 
 use adw::prelude::*;
@@ -38,6 +38,7 @@ impl Window {
         let overrides: Rc<RefCell<HashMap<String, Category>>> = Rc::new(RefCell::new(
             self.settings.borrow().sort_categories.iter().filter_map(|(id, key)| Some((id.clone(), Category::from_key(key)?))).collect(),
         ));
+        let placed_by_hand: Rc<RefCell<BTreeMap<String, String>>> = Rc::new(RefCell::new(self.settings.borrow().placed_below.clone()));
 
         let cancel = gtk::Button::with_label(&t!("Cancel"));
         let apply = gtk::Button::builder().label(t!("Apply")).css_classes(["suggested-action"]).sensitive(false).build();
@@ -68,11 +69,12 @@ impl Window {
         // Rebuilds the preview from the overrides.
         let render: Rc<Render> = Rc::default();
         *render.borrow_mut() = Some(Box::new({
-            let (input, current, overrides, groups, apply, render) = (input.clone(), current.clone(), overrides.clone(), groups.clone(), apply.clone(), Rc::downgrade(&render));
+            let (input, current, overrides, placed_by_hand, groups, apply, render) = (input.clone(), current.clone(), overrides.clone(), placed_by_hand.clone(), groups.clone(), apply.clone(), Rc::downgrade(&render));
             move || {
                 let input = input.borrow();
                 let Some(input) = input.as_ref() else { return };
-                let placed = smart_sort::plan(&input.mods, &input.enabled, &input.profiles, &overrides.borrow(), &patch::is_patch, &input.below);
+                let by_hand = super::list::by_hand_indexes(&input.mods, &placed_by_hand.borrow());
+                let placed = smart_sort::plan(&input.mods, &input.enabled, &input.profiles, &overrides.borrow(), &patch::is_patch, &input.below, &by_hand);
                 while let Some(child) = groups.first_child() {
                     groups.remove(&child);
                 }
@@ -113,7 +115,10 @@ impl Window {
                         let row = adw::ActionRow::builder().title(m.descriptor.name.trim()).subtitle(&subtitle).use_markup(false).build();
                         row.add_prefix(&gtk::Label::builder().label(position.to_string()).width_chars(3).xalign(1.0).css_classes(["dim-label", "numeric"]).build());
                         if !patch::is_patch(&m.id) {
-                            row.add_suffix(&section_picker(p, &m.id, &overrides, render.clone()));
+                            if by_hand.contains_key(&p.index) {
+                                row.add_suffix(&forget_button(&m.id, &placed_by_hand, render.clone()));
+                            }
+                            row.add_suffix(&section_picker(p, &m.id, &overrides, &placed_by_hand, render.clone()));
                         }
                         group.add(&row);
                     }
@@ -130,12 +135,15 @@ impl Window {
             current,
             #[strong]
             overrides,
+            #[strong]
+            placed_by_hand,
             #[weak]
             dialog,
             move |_| {
                 {
                     let mut settings = ui.settings.borrow_mut();
                     settings.sort_categories = overrides.borrow().iter().map(|(id, c)| (id.clone(), c.key().to_owned())).collect();
+                    settings.placed_below = placed_by_hand.borrow().clone();
                 }
                 ui.save_settings("the Smart Sort sections");
                 let order: Vec<usize> = current.borrow().iter().map(|p| p.index).collect();
@@ -171,7 +179,7 @@ impl Window {
 
 /// A drop-down to put the mod with `id` in another section, or back in the
 /// one Smart Sort finds for it.
-fn section_picker(p: &Placement, id: &str, overrides: &Rc<RefCell<HashMap<String, Category>>>, render: std::rc::Weak<Render>) -> gtk::DropDown {
+fn section_picker(p: &Placement, id: &str, overrides: &Rc<RefCell<HashMap<String, Category>>>, placed_by_hand: &Rc<RefCell<BTreeMap<String, String>>>, render: std::rc::Weak<Render>) -> gtk::DropDown {
     let mut labels = vec![t!("Automatic")];
     labels.extend(Category::ALL.iter().map(|c| c.title().to_owned()));
     let labels: Vec<&str> = labels.iter().map(String::as_str).collect();
@@ -184,8 +192,9 @@ fn section_picker(p: &Placement, id: &str, overrides: &Rc<RefCell<HashMap<String
         // Shows the section it's in, while still following the rules.
         picker.set_tooltip_text(Some(&tf!("Automatic: {category}", category = p.category.title())));
     }
-    let (overrides, id) = (overrides.clone(), id.to_owned());
+    let (overrides, placed_by_hand, id) = (overrides.clone(), placed_by_hand.clone(), id.to_owned());
     picker.connect_selected_notify(move |picker| {
+        placed_by_hand.borrow_mut().remove(&id);
         match picker.selected() {
             0 => overrides.borrow_mut().remove(&id),
             n => overrides.borrow_mut().insert(id.clone(), Category::ALL[n as usize - 1]),
@@ -201,4 +210,24 @@ fn section_picker(p: &Placement, id: &str, overrides: &Rc<RefCell<HashMap<String
         });
     });
     picker
+}
+
+/// A button to make Smart Sort forget where the user placed the mod with
+/// `id`.
+fn forget_button(id: &str, placed_by_hand: &Rc<RefCell<BTreeMap<String, String>>>, render: std::rc::Weak<Render>) -> gtk::Button {
+    let button = gtk::Button::builder().icon_name("edit-clear-symbolic").valign(gtk::Align::Center).css_classes(["flat"]).tooltip_text(t!("Forget where you placed it, so Smart Sort decides")).build();
+    let (placed_by_hand, id) = (placed_by_hand.clone(), id.to_owned());
+    button.connect_clicked(move |_| {
+        placed_by_hand.borrow_mut().remove(&id);
+        // Rebuilt once this signal is done with the button.
+        let render = render.clone();
+        glib::idle_add_local_once(move || {
+            if let Some(render) = render.upgrade()
+                && let Some(render) = render.borrow().as_ref()
+            {
+                render();
+            }
+        });
+    });
+    button
 }
