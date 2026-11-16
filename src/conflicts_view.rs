@@ -428,6 +428,26 @@ pub fn build(analysis: &Rc<Analysis>, rescan: gtk::Button, hooks: Rc<MergeHooks>
         button.connect_clicked(move |b| crate::behind_dialog::present(b, analysis.clone(), hooks.clone()));
         top.append(&button);
     }
+    // Names mods use that the game doesn't have, unless the patch already holds a fix.
+    if let Some(script) = &analysis.script {
+        let pending: Vec<&script_check::Finding> = script.findings.iter().filter(|f| !f.object.as_ref().is_some_and(|(category, key)| (hooks.is_merged)(category, key))).collect();
+        if !pending.is_empty() {
+            let mods = pending.iter().map(|f| f.mod_position).collect::<BTreeSet<_>>().len();
+            let label = gtk::Label::builder()
+                .label(tf!(
+                    "{problems} in {mods}…",
+                    problems = tnf!("{count} script problem", "{count} script problems", count = pending.len()),
+                    mods = tnf!("{count} mod", "{count} mods", count = mods)
+                ))
+                .wrap(true)
+                .xalign(0.0)
+                .build();
+            let button = gtk::Button::builder().child(&label).css_classes(["flat"]).halign(gtk::Align::Start).build();
+            let (analysis, hooks) = (analysis.clone(), hooks.clone());
+            button.connect_clicked(move |b| crate::script_check_dialog::present(b, analysis.clone(), hooks.clone()));
+            top.append(&button);
+        }
+    }
     top.append(&progress);
     if let Some(dropdown) = mod_filter(analysis, &hooks, &involved) {
         dropdown.set_margin_top(6);
