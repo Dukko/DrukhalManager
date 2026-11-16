@@ -414,4 +414,84 @@ mod tests {
         println!("SNAPSHOT objects={} files_read={files} seconds={seconds:.1} gz_bytes={gz}", snap.len());
         let _ = std::fs::remove_dir_all(&cache);
     }
+
+    /// Pretends the real game was updated: an older copy of it differs from
+    /// the current one in 5 objects that Workshop mods also define, and only
+    /// by comments in every other one. Reads the game and the mods only.
+    /// `DRUKHAL_GAME=<game folder> DRUKHAL_WORKSHOP=<workshop folder> cargo test --release simulated_update_on_the_real_game -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn simulated_update_on_the_real_game() {
+        let (Some(game), Some(workshop)) = (std::env::var_os("DRUKHAL_GAME"), std::env::var_os("DRUKHAL_WORKSHOP")) else {
+            println!("DRUKHAL_GAME or DRUKHAL_WORKSHOP is not set");
+            return;
+        };
+        let now = take(Path::new(&game), "vnow");
+        let mut folders: Vec<PathBuf> = std::fs::read_dir(&workshop).unwrap().flatten().map(|e| e.path()).filter(|p| p.is_dir()).collect();
+        folders.sort();
+        let inputs: Vec<conflicts::ModInput> = folders.iter().map(|f| conflicts::ModInput { root: Some(f.clone()), replace_path: Vec::new() }).collect();
+        let roots: Vec<Option<PathBuf>> = folders.iter().cloned().map(Some).collect();
+        let report = conflicts::analyze(&inputs, None);
+
+        // The text a mod's copy has, if the object can be read from it.
+        let mod_text = |category: &str, key: &str, d: &Definition| {
+            let bytes = std::fs::read(roots[d.mod_position].as_ref()?.join(&d.file)).ok()?;
+            source::extract(category, key, String::from_utf8_lossy(&bytes).trim_start_matches('\u{feff}'))
+        };
+        // Five objects whose first mod definition differs from the new game's,
+        // so there is something to find.
+        let mut changed = Vec::new();
+        for ((category, key), definitions) in &report.defined {
+            if changed.len() == 5 {
+                break;
+            }
+            let Some(game_copy) = now.get(category, key) else { continue };
+            if definitions.iter().any(|d| mod_text(category, key, d).is_some_and(|t| !same(&t, &game_copy.text))) {
+                changed.push((category.clone(), key.clone()));
+            }
+        }
+
+        let mut old = Snapshot { version: "vold".into(), objects: BTreeMap::new() };
+        for (category, key) in report.defined.keys() {
+            let Some(game_copy) = now.get(category, key) else { continue };
+            let mut text = match game_copy.text.rfind('}') {
+                Some(end) => format!("{} # old\n{}", &game_copy.text[..end], &game_copy.text[end..]),
+                None => format!("{}\n# old", game_copy.text),
+            };
+            if changed.contains(&(category.clone(), key.clone())) {
+                // A changed value: an extra assignment right after the first brace.
+                text = match text.find('{') {
+                    Some(open) => format!("{}\n\told_game_only = yes\n{}", &text[..=open], &text[open + 1..]),
+                    None => format!("{text}\nold_game_only = yes"),
+                };
+            }
+            old.objects.insert(id(category, key), Saved { file: game_copy.file.clone(), text });
+        }
+
+        let found = behind(&old, &now, &report.defined, &roots);
+        println!("SIMULATED behind={}", found.len());
+        for b in found.iter().take(5) {
+            println!("  example: {} {} (mod #{} {})", b.category, b.key, b.mod_position, b.file);
+        }
+        for (category, key) in &changed {
+            let listed = found.iter().any(|b| &b.category == category && &b.key == key);
+            let definitions = &report.defined[&(category.clone(), key.clone())];
+            let game_file = now.get(category, key).unwrap().file.clone();
+            let why = if listed {
+                "listed: a mod's copy is the one used and differs from the new game".to_owned()
+            } else {
+                let mut all = Vec::new();
+                if !definitions.iter().any(|d| d.file.eq_ignore_ascii_case(&game_file)) {
+                    all.push(Definition { mod_position: 0, file: game_file.clone() });
+                }
+                all.extend(definitions.iter().map(|d| Definition { mod_position: d.mod_position + 1, file: d.file.clone() }));
+                let winner = ObjectConflict { category: category.clone(), key: key.clone(), definitions: all }.winner().map(|(i, _)| i);
+                match winner {
+                    Some(0) if !definitions.iter().any(|d| d.file.eq_ignore_ascii_case(&game_file)) => format!("not listed: the game's own file {game_file} wins over the mods' copies"),
+                    _ => "not listed: the mod copy that is used already matches the new game (or couldn't be read)".to_owned(),
+                }
+            };
+            println!("  changed {category} {key}: {why}");
+        }
+    }
 }
