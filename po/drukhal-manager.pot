@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: DrukhalManager 1.1.0\n"
 "Report-Msgid-Bugs-To: https://github.com/Dukko/DrukhalManager/issues\n"
-"POT-Creation-Date: 2026-11-16 12:25+0000\n"
+"POT-Creation-Date: 2026-11-16 12:26+0000\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -77,15 +77,15 @@ msgstr ""
 msgid "Updated Copy"
 msgstr ""
 
-#: src/behind_dialog.rs:221 src/conflicts_view/object.rs:825 src/error_report_dialog.rs:468
+#: src/behind_dialog.rs:221 src/conflicts_view/object.rs:825 src/error_report_dialog.rs:469
 msgid "The model's result still has a problem after a correction: {problem}. Fix it by hand, or undo and try again."
 msgstr ""
 
-#: src/behind_dialog.rs:224 src/error_report_dialog.rs:472
+#: src/behind_dialog.rs:224 src/error_report_dialog.rs:473
 msgid "Discard"
 msgstr ""
 
-#: src/behind_dialog.rs:225 src/error_report_dialog.rs:473
+#: src/behind_dialog.rs:225 src/error_report_dialog.rs:474
 msgid "Save to Merged Patch"
 msgstr ""
 
@@ -1007,55 +1007,55 @@ msgstr ""
 msgid "Suggest an improvement"
 msgstr ""
 
-#: src/error_report_dialog.rs:272
+#: src/error_report_dialog.rs:273
 msgid "Send a Suggestion"
 msgstr ""
 
-#: src/error_report_dialog.rs:273
+#: src/error_report_dialog.rs:274
 msgid "This opens GitHub in your browser with the text below filled in. Nothing is sent until you submit it there, which needs a GitHub account. Check it doesn't contain anything you'd rather keep private."
 msgstr ""
 
-#: src/error_report_dialog.rs:279 src/window/smart_sort_ui.rs:43
+#: src/error_report_dialog.rs:280 src/window/smart_sort_ui.rs:43
 msgid "Cancel"
 msgstr ""
 
-#: src/error_report_dialog.rs:279
+#: src/error_report_dialog.rs:280
 msgid "Open GitHub"
 msgstr ""
 
-#: src/error_report_dialog.rs:314
+#: src/error_report_dialog.rs:315
 msgid "What This Error Means"
 msgstr ""
 
-#: src/error_report_dialog.rs:350
+#: src/error_report_dialog.rs:351
 msgid "Couldn't get an explanation: {error}"
 msgstr ""
 
-#: src/error_report_dialog.rs:353
+#: src/error_report_dialog.rs:354
 msgid "Couldn't get an explanation."
 msgstr ""
 
-#: src/error_report_dialog.rs:374
+#: src/error_report_dialog.rs:375
 msgid "{name} replaces {key}, which the game has changed. The fix starts from the game's current version and keeps the mod's changes."
 msgstr ""
 
-#: src/error_report_dialog.rs:394
+#: src/error_report_dialog.rs:395
 msgid "Fix This Error"
 msgstr ""
 
-#: src/error_report_dialog.rs:426 src/error_report_dialog.rs:430
+#: src/error_report_dialog.rs:427 src/error_report_dialog.rs:431
 msgid "Couldn't get a fix: {error}"
 msgstr ""
 
-#: src/error_report_dialog.rs:430
+#: src/error_report_dialog.rs:431
 msgid "The request failed unexpectedly"
 msgstr ""
 
-#: src/error_report_dialog.rs:447
+#: src/error_report_dialog.rs:448
 msgid "Fixed Copy"
 msgstr ""
 
-#: src/error_report_dialog.rs:463
+#: src/error_report_dialog.rs:464
 msgid "Not found in Stellaris {version} or the mod's copy: {keys}. Check these before saving."
 msgstr ""
 

@@ -268,6 +268,7 @@ fn game_version(ctx: &Context) -> String {
 /// Shows exactly what will be put in the issue, and opens it on GitHub when
 /// the player agrees.
 fn send_suggestion(parent: &impl IsA<gtk::Widget>, title: String, body: String) {
+    let body = suggest::fitted_body(&title, &body);
     let dialog = adw::AlertDialog::new(
         Some(&t!("Send a Suggestion")),
         Some(&t!("This opens GitHub in your browser with the text below filled in. Nothing is sent until you submit it there, which needs a GitHub account. Check it doesn't contain anything you'd rather keep private.")),

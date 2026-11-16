@@ -60,26 +60,38 @@ pub const NEW_ISSUE_URL: &str = "https://github.com/Dukko/DrukhalManager/issues/
 /// The longest link GitHub reliably accepts, in bytes.
 const MAX_URL: usize = 7000;
 
-/// The link that opens a new issue with `title` and `body` filled in. The
-/// body is cut at a line end so the whole link stays under 7,000 bytes.
-pub fn issue_url(title: &str, body: &str) -> String {
-    let head = format!("{NEW_ISSUE_URL}?title={}&body=", encode(title));
-    let budget = MAX_URL.saturating_sub(head.len());
-    let mut kept = String::new();
+const CUT_LINE: &str = "…(cut to fit the link)";
+
+fn issue_head(title: &str) -> String {
+    format!("{NEW_ISSUE_URL}?title={}&body=", encode(title))
+}
+
+/// The body as `issue_url` keeps it: whole when it fits, otherwise cut at a
+/// line end with a final line saying so.
+pub fn fitted_body(title: &str, body: &str) -> String {
+    let budget = MAX_URL.saturating_sub(issue_head(title).len());
+    if encode(body).len() <= budget {
+        return body.to_owned();
+    }
+    let budget = budget.saturating_sub(encode(&format!("\n{CUT_LINE}")).len());
+    let mut kept: Vec<&str> = Vec::new();
     let mut used = 0;
     for (i, line) in body.split('\n').enumerate() {
-        let encoded = encode(line);
-        let cost = encoded.len() + if i > 0 { 3 } else { 0 };
+        let cost = encode(line).len() + if i > 0 { 3 } else { 0 };
         if used + cost > budget {
             break;
         }
-        if i > 0 {
-            kept.push_str("%0A");
-        }
-        kept.push_str(&encoded);
+        kept.push(line);
         used += cost;
     }
-    head + &kept
+    kept.push(CUT_LINE);
+    kept.join("\n")
+}
+
+/// The link that opens a new issue with `title` and `body` filled in. The
+/// body is cut at a line end so the whole link stays under 7,000 bytes.
+pub fn issue_url(title: &str, body: &str) -> String {
+    issue_head(title) + &encode(&fitted_body(title, body))
 }
 
 pub struct NoteSuggestion<'a> {
@@ -175,6 +187,11 @@ mod tests {
         assert!(long.len() < 7000);
         let short = issue_url("a b", "one\ntwo");
         assert!(short.ends_with("&body=one%0Atwo"));
+        assert_eq!(fitted_body("a b", "one\ntwo"), "one\ntwo");
+        let many = body.repeat(200);
+        let fitted = fitted_body("Title here", &many);
+        assert!(fitted.ends_with(&format!("\n{CUT_LINE}")));
+        assert_eq!(issue_url("Title here", &many), issue_url("Title here", &fitted));
     }
 
     #[test]
