@@ -13,7 +13,8 @@ use crate::diff_view::{Compare, Header, Pair};
 use crate::merge::ai;
 use crate::merge::patch::{Print, VANILLA};
 use crate::merge::source::Source;
-use crate::merge::{base_game, vocabulary};
+use crate::merge::{base_game, script_check, vocabulary};
+use crate::paradox::script_docs::{self, Docs};
 use crate::merge_dialog;
 use crate::paradox::error_log::{self, Entry, Group, Kind, Report};
 use crate::paradox::suggest::{self, HarmlessSuggestion, NoteSuggestion};
@@ -31,7 +32,7 @@ pub struct Explainer {
     pub fixer: Option<Fixer>,
 }
 
-/// A problem on a line inside a mod's copy of a base-game object.
+/// A problem on a line inside one of a mod's objects.
 #[derive(Clone)]
 pub struct Target {
     pub category: String,
@@ -40,8 +41,8 @@ pub struct Target {
     pub mod_name: String,
     /// The mod's file, game-relative, and the object's text in it.
     pub mod_copy: Source,
-    /// The game's current version.
-    pub game: Source,
+    /// The game's current version; none when the mod defines the object itself.
+    pub game: Option<Source>,
 }
 
 pub type IsMerged = Box<dyn Fn(&str, &str) -> bool>;
@@ -54,6 +55,10 @@ pub type SaveObject = Box<dyn Fn(&str, &str, &str, Vec<Print>) -> Result<(), Str
 pub struct Fixer {
     pub game_dir: PathBuf,
     pub game_version: String,
+    /// The user folder, where the game writes its script documentation.
+    pub user_dir: PathBuf,
+    /// The mods' folders, for the scripted effects and triggers they define.
+    pub mod_roots: Vec<PathBuf>,
     /// Fixable problems, by error message.
     pub targets: HashMap<String, Target>,
     /// Errors naming a keyword the game doesn't have, by message.
@@ -371,10 +376,15 @@ fn fix(button: &gtk::Button, ctx: &Rc<Context>, message: String, target: Target,
         return;
     };
     let (game_dir, game_version) = (fixer.game_dir.clone(), fixer.game_version.clone());
+    let (user_dir, mod_roots) = (fixer.user_dir.clone(), fixer.mod_roots.clone());
 
     let error = gtk::Label::builder().label(message.trim()).wrap(true).selectable(true).xalign(0.0).css_classes(["monospace", "dim-label"]).build();
     let intro = gtk::Label::builder()
-        .label(tf!("{name} replaces {key}, which the game has changed. The fix starts from the game's current version and keeps the mod's changes.", name = &target.mod_name, key = &target.key))
+        .label(if target.game.is_some() {
+            tf!("{name} replaces {key}, which the game has changed. The fix starts from the game's current version and keeps the mod's changes.", name = &target.mod_name, key = &target.key)
+        } else {
+            tf!("{name} defines {key} itself, so the game has no version to compare it with. The fix changes only what the error is about.", name = &target.mod_name, key = &target.key)
+        })
         .wrap(true)
         .xalign(0.0)
         .build();
@@ -403,15 +413,33 @@ fn fix(button: &gtk::Button, ctx: &Rc<Context>, message: String, target: Target,
         let job_message = message.clone();
         let result = thinking_view::run(&thinking, None, move |on| {
             let t = job_target;
-            let check = |text: &str| merge_dialog::validate(&t.category, &t.key, text);
-            let checked = ai::repair_checked(&provider, &t.category, &t.key, &t.game, &t.mod_copy, &job_message, &check, on)?;
+            // With no game version to work from, the model gets the game's own
+            // documentation, and the result may not use names it lacks.
+            let own = if t.game.is_none() { OwnCheck::load(&user_dir, &game_dir, &game_version, &mod_roots) } else { None };
+            let check = |text: &str| {
+                let script = merge_dialog::validate(&t.category, &t.key, text)?;
+                if let Some(own) = &own {
+                    let added = script_check::introduced_names(&own.context, &own.known, &t.mod_copy.file, &t.mod_copy.text, &script);
+                    if !added.is_empty() {
+                        return Err(format!("it uses names the current game doesn't have: {}", added.join(", ")));
+                    }
+                }
+                Ok(script)
+            };
+            let checked = match &t.game {
+                Some(game) => ai::repair_checked(&provider, &t.category, &t.key, game, &t.mod_copy, &job_message, &check, on)?,
+                None => {
+                    let reference = own.as_ref().map(|o| o.reference(&job_message, &t.mod_copy)).unwrap_or_default();
+                    ai::repair_own_checked(&provider, &t.category, &t.key, &t.mod_copy, &job_message, &reference, &check, on)?
+                }
+            };
             let text = match &checked.script {
                 Ok(script) => script.clone(),
                 Err(_) => checked.merged.script.clone(),
             };
             // Keywords found in neither the game nor the mod's copy.
             let warnings = match base_game::ensure(&base_game::dir(), &game_dir, &game_version) {
-                Ok(snapshot) => vocabulary::unknown(&text, snapshot.texts().chain([t.game.text.as_str(), t.mod_copy.text.as_str()])),
+                Ok(snapshot) => vocabulary::unknown(&text, snapshot.texts().chain(t.game.as_ref().map(|g| g.text.as_str())).chain([t.mod_copy.text.as_str()])),
                 Err(_) => Vec::new(),
             };
             Ok::<_, String>((checked, warnings))
@@ -435,6 +463,35 @@ fn fix(button: &gtk::Button, ctx: &Rc<Context>, message: String, target: Target,
             }
         }
     });
+}
+
+/// What checks a fix of a mod's own object: the game's documentation and the
+/// names it and the enabled mods define.
+struct OwnCheck {
+    docs: Docs,
+    context: script_check::Context,
+    known: script_check::Known,
+}
+
+impl OwnCheck {
+    /// `None` when the game hasn't written its script documentation. Reads
+    /// many files, so it runs off the UI thread.
+    fn load(user_dir: &std::path::Path, game_dir: &std::path::Path, version: &str, mod_roots: &[PathBuf]) -> Option<OwnCheck> {
+        let docs = script_docs::load(user_dir)?;
+        let context = script_check::ensure_context(&base_game::dir().join("script-context"), game_dir, &docs, version);
+        let mut folders: Vec<&std::path::Path> = vec![game_dir];
+        folders.extend(mod_roots.iter().map(PathBuf::as_path));
+        let known = script_check::known(&docs, &folders);
+        Some(OwnCheck { docs, context, known })
+    }
+
+    /// The documentation entries for the names in the error and the object.
+    fn reference(&self, error: &str, mod_copy: &Source) -> String {
+        let flagged = script_check::check_text(&self.context, &self.known, &mod_copy.file, &mod_copy.text).into_iter().map(|(_, name, _, _)| name);
+        let names = script_check::reference_names(error, &mod_copy.file, flagged);
+        let names: Vec<&str> = names.iter().map(String::as_str).collect();
+        self.docs.reference(&names, 6000)
+    }
 }
 
 /// The fix next to the mod's copy, to edit and save.
@@ -498,10 +555,11 @@ fn review(ctx: &Rc<Context>, dialog: &adw::Dialog, target: &Target, checked: ai:
         };
         // Fingerprints of both sources, so the patch flags this copy as
         // outdated if the game or the mod changes again.
-        let prints = vec![
-            Print::new(VANILLA, "Vanilla", &target.game.file, &target.game.text),
-            Print::new(&target.mod_id, &target.mod_name, &target.mod_copy.file, &target.mod_copy.text),
-        ];
+        let mut prints = Vec::new();
+        if let Some(game) = &target.game {
+            prints.push(Print::new(VANILLA, "Vanilla", &game.file, &game.text));
+        }
+        prints.push(Print::new(&target.mod_id, &target.mod_name, &target.mod_copy.file, &target.mod_copy.text));
         match (fixer.save)(&target.category, &target.key, &script, prints) {
             Ok(()) => {
                 (fixer.saved)();
