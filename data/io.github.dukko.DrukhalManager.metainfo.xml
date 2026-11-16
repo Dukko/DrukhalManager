@@ -36,6 +36,12 @@
     <control>keyboard</control>
   </supports>
   <releases>
+    <release version="1.1.0" date="2026-11-16">
+      <description>
+        <p><em>Find the real problems in the game's error log.</em> Game Errors now shows real problems first, still grouped by mod, and collapses known-harmless messages into one line each with why they don't matter: unused modifiers, things defined twice, missing icons, and saved empire designs that use mods you've turned off. Errors that span several lines are read as one. The sidebar counts only real problems.</p>
+        <p>Explain asks your AI what a problem means, what it does in game and what to do about it, using the error, the mod's name, the game version and the lines of the mod's file around the error. Nothing is sent until you click it.</p>
+      </description>
+    </release>
     <release version="1.0.7" date="2026-11-16">
       <description>
         <p><em>Smart Sort keeps mods where you put them.</em> When you drag a mod or type a new position for it, Smart Sort now keeps it directly below the mod above it, and its preview says so. Choosing a section for the mod, or the Forget button in the Smart Sort preview, hands the decision back to Smart Sort.</p>
