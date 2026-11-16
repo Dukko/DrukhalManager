@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: DrukhalManager 1.0.7\n"
 "Report-Msgid-Bugs-To: https://github.com/Dukko/DrukhalManager/issues\n"
-"POT-Creation-Date: 2026-11-16 11:41+0000\n"
+"POT-Creation-Date: 2026-11-16 11:42+0000\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -2166,11 +2166,11 @@ msgstr ""
 msgid "Mods define resource modifiers nothing uses. The base game does this too."
 msgstr ""
 
-#: src/paradox/error_log.rs:277
+#: src/paradox/error_log.rs:284
 msgid "Base game or missing files"
 msgstr ""
 
-#: src/paradox/error_log.rs:278
+#: src/paradox/error_log.rs:285
 msgid "Not tied to a file"
 msgstr ""
 

@@ -208,7 +208,14 @@ pub fn count_problems(log: &str) -> usize {
     joined(log).iter().filter(|l| Kind::classify(message(l)) == Kind::Problem).count()
 }
 
-/// The line an error points at in `file`, if it says: `file.txt:18`,
+/// Whether `file` is a plain relative path that stays inside a mod folder:
+/// no `..`, no root and no drive prefix.
+pub fn is_inside(file: &str) -> bool {
+    use std::path::Component;
+    Path::new(file).components().all(|c| matches!(c, Component::Normal(_)))
+}
+
+/// The line an error points at in `file`, if it says:`file.txt:18`,
 /// `line: 47` or `near line: 7`. The `file:N` form wins when present,
 /// because later `line:` numbers in the same message can belong to another
 /// file.
@@ -431,6 +438,14 @@ Supported Scopes: planet ship colony\n";
         let tok = joined(UNEXPECTED).remove(0);
         assert_eq!(find_line(&tok, "common/technology/ui_tech_ascension_theory_repeatable.txt"), Some(7));
         assert_eq!(find_line("Something went wrong", "common/x.txt"), None);
+    }
+
+    #[test]
+    fn only_paths_inside_the_mod_are_read() {
+        assert!(is_inside("common/x.txt"));
+        for bad in ["../x.txt", "common/../../x", "/etc/passwd"] {
+            assert!(!is_inside(bad), "{bad}");
+        }
     }
 
     #[test]
