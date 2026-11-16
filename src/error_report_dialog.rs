@@ -9,7 +9,12 @@ use std::rc::Rc;
 use adw::prelude::*;
 use gtk::{gio, glib};
 
+use crate::diff_view::{Compare, Header, Pair};
 use crate::merge::ai;
+use crate::merge::patch::{Print, VANILLA};
+use crate::merge::source::Source;
+use crate::merge::{base_game, vocabulary};
+use crate::merge_dialog;
 use crate::paradox::error_log::{self, Entry, Group, Kind, Report};
 use crate::thinking_view::{self, ThinkingView};
 
@@ -21,6 +26,39 @@ pub struct Explainer {
     pub provider: Option<crate::merge::ai::Provider>,
     pub game_version: Option<String>,
     pub open_preferences: Box<dyn Fn()>,
+    /// Present when the game and its version are known.
+    pub fixer: Option<Fixer>,
+}
+
+/// A problem on a line inside a mod's copy of a base-game object.
+#[derive(Clone)]
+pub struct Target {
+    pub category: String,
+    pub key: String,
+    pub mod_id: String,
+    pub mod_name: String,
+    /// The mod's file, game-relative, and the object's text in it.
+    pub mod_copy: Source,
+    /// The game's current version.
+    pub game: Source,
+}
+
+pub type IsMerged = Box<dyn Fn(&str, &str) -> bool>;
+
+/// Saves a merged object to the patch: category, key, script and the
+/// fingerprints of its sources.
+pub type SaveObject = Box<dyn Fn(&str, &str, &str, Vec<Print>) -> Result<(), String>>;
+
+/// What Fix with AI needs from the window.
+pub struct Fixer {
+    pub game_dir: PathBuf,
+    pub game_version: String,
+    /// Fixable problems, by error message.
+    pub targets: HashMap<String, Target>,
+    /// Whether the patch already holds a merge of `(category, key)`.
+    pub is_merged: IsMerged,
+    pub save: SaveObject,
+    pub saved: Box<dyn Fn()>,
 }
 
 /// Shared by every Explain button in one dialog.
@@ -128,9 +166,36 @@ fn group_row(g: &Group, shown: &[&Entry], root: Option<PathBuf>, ctx: Option<&Rc
         let entry = adw::ActionRow::builder().title(e.message.trim()).subtitle(subtitle.join(" · ")).use_markup(false).title_lines(3).build();
         if let Some(ctx) = ctx {
             let button = gtk::Button::builder().label(t!("Explain")).tooltip_text(t!("Ask your AI what this error means and what to do")).valign(gtk::Align::Center).css_classes(["flat"]).build();
-            let (ctx, message, file, mod_name, root) = (ctx.clone(), e.message.clone(), e.file.clone(), g.mod_id.as_ref().map(|_| g.label.clone()), root.clone());
-            button.connect_clicked(move |b| explain(b, &ctx, message.clone(), file.clone(), mod_name.clone(), root.clone()));
+            let (explain_ctx, message, file, mod_name, root) = (ctx.clone(), e.message.clone(), e.file.clone(), g.mod_id.as_ref().map(|_| g.label.clone()), root.clone());
+            button.connect_clicked(move |b| explain(b, &explain_ctx, message.clone(), file.clone(), mod_name.clone(), root.clone()));
             entry.add_suffix(&button);
+            if let Some(fixer) = &ctx.explain.fixer
+                && let Some(target) = fixer.targets.get(&e.message)
+            {
+                let done = gtk::Label::builder().label(t!("Fixed in the merged patch")).css_classes(["success"]).valign(gtk::Align::Center).build();
+                let fix_button = gtk::Button::builder()
+                    .label(t!("Fix with AI"))
+                    .tooltip_text(t!("Write a corrected copy of this mod's object into the merged patch"))
+                    .valign(gtk::Align::Center)
+                    .css_classes(["flat"])
+                    .build();
+                if (fixer.is_merged)(&target.category, &target.key) {
+                    fix_button.set_visible(false);
+                } else {
+                    done.set_visible(false);
+                }
+                let on_saved: Rc<dyn Fn()> = {
+                    let (done, fix_button) = (done.clone(), fix_button.clone());
+                    Rc::new(move || {
+                        fix_button.set_visible(false);
+                        done.set_visible(true);
+                    })
+                };
+                let (ctx, message, target) = (ctx.clone(), e.message.clone(), target.clone());
+                fix_button.connect_clicked(move |b| fix(b, &ctx, message.clone(), target.clone(), on_saved.clone()));
+                entry.add_suffix(&fix_button);
+                entry.add_suffix(&done);
+            }
         }
         if let (Some(root), Some(file)) = (&root, &e.file)
             && root.join(file).is_file()
@@ -211,6 +276,164 @@ fn explain(button: &gtk::Button, ctx: &Rc<Context>, message: String, file: Optio
             None => answer.set_label(&t!("Couldn't get an explanation.")),
         }
     });
+}
+
+fn margins(widget: &impl IsA<gtk::Widget>) {
+    widget.set_margin_start(12);
+    widget.set_margin_end(12);
+}
+
+/// Asks the AI for a corrected copy of the mod's object, shows it beside the
+/// mod's copy to edit, and saves it to the merged patch.
+fn fix(button: &gtk::Button, ctx: &Rc<Context>, message: String, target: Target, on_saved: Rc<dyn Fn()>) {
+    let (Some(provider), Some(fixer)) = (ctx.explain.provider.clone(), ctx.explain.fixer.as_ref()) else {
+        (ctx.explain.open_preferences)();
+        return;
+    };
+    let (game_dir, game_version) = (fixer.game_dir.clone(), fixer.game_version.clone());
+
+    let error = gtk::Label::builder().label(message.trim()).wrap(true).selectable(true).xalign(0.0).css_classes(["monospace", "dim-label"]).build();
+    let intro = gtk::Label::builder()
+        .label(tf!("{name} replaces {key}, which the game has changed. The fix starts from the game's current version and keeps the mod's changes.", name = &target.mod_name, key = &target.key))
+        .wrap(true)
+        .xalign(0.0)
+        .build();
+    let failure = gtk::Label::builder().wrap(true).selectable(true).xalign(0.0).css_classes(["error"]).visible(false).build();
+    let thinking = ThinkingView::new();
+    let working = gtk::Box::new(gtk::Orientation::Vertical, 12);
+    working.set_margin_top(12);
+    working.set_margin_bottom(12);
+    margins(&working);
+    working.append(&error);
+    working.append(&intro);
+    working.append(&thinking.widget);
+    working.append(&failure);
+    let scrolled = gtk::ScrolledWindow::builder().child(&working).vexpand(true).hscrollbar_policy(gtk::PolicyType::Never).build();
+    let stack = gtk::Stack::new();
+    stack.add_named(&scrolled, Some("working"));
+    let toolbar = adw::ToolbarView::new();
+    toolbar.add_top_bar(&adw::HeaderBar::new());
+    toolbar.set_content(Some(&stack));
+    let dialog = adw::Dialog::builder().title(t!("Fix This Error")).content_width(900).content_height(720).child(&toolbar).build();
+    dialog.present(Some(button));
+
+    let ctx = ctx.clone();
+    glib::spawn_future_local(async move {
+        let job_target = target.clone();
+        let job_message = message.clone();
+        let result = thinking_view::run(&thinking, None, move |on| {
+            let t = job_target;
+            let check = |text: &str| merge_dialog::validate(&t.category, &t.key, text);
+            let checked = ai::repair_checked(&provider, &t.category, &t.key, &t.game, &t.mod_copy, &job_message, &check, on)?;
+            let text = match &checked.script {
+                Ok(script) => script.clone(),
+                Err(_) => checked.merged.script.clone(),
+            };
+            // Keywords found in neither the game nor the mod's copy.
+            let warnings = match base_game::ensure(&base_game::dir(), &game_dir, &game_version) {
+                Ok(snapshot) => vocabulary::unknown(&text, snapshot.texts().chain([t.game.text.as_str(), t.mod_copy.text.as_str()])),
+                Err(_) => Vec::new(),
+            };
+            Ok::<_, String>((checked, warnings))
+        })
+        .await;
+        match result {
+            Some(Ok((checked, warnings))) => {
+                let version = ctx.explain.fixer.as_ref().map(|f| f.game_version.clone()).unwrap_or_default();
+                let page = review(&ctx, &dialog, &target, checked, &warnings, &version, on_saved);
+                stack.add_named(&page, Some("review"));
+                stack.set_visible_child_name("review");
+            }
+            Some(Err(e)) => {
+                failure.set_label(&tf!("Couldn't get a fix: {error}", error = e));
+                failure.set_visible(true);
+            }
+            None => {
+                failure.set_label(&tf!("Couldn't get a fix: {error}", error = t!("The request failed unexpectedly")));
+                failure.set_visible(true);
+            }
+        }
+    });
+}
+
+/// The fix next to the mod's copy, to edit and save.
+fn review(ctx: &Rc<Context>, dialog: &adw::Dialog, target: &Target, checked: ai::Checked, warnings: &[String], version: &str, on_saved: Rc<dyn Fn()>) -> gtk::Box {
+    let (script, problem) = match checked.script {
+        Ok(script) => (script, None),
+        // Kept even when still rejected, to fix by hand.
+        Err(problem) => (checked.merged.script, Some(problem)),
+    };
+    let pair = Pair::new(true);
+    pair.show(&target.mod_copy.text, &script, &Compare::Each, false);
+    pair.left.set_header(&Header { title: target.mod_name.clone(), subtitle: target.mod_copy.file.clone(), color: None, badge: None });
+    pair.right.set_header(&Header { title: t!("Fixed Copy"), subtitle: String::new(), color: None, badge: None });
+    pair.widget.set_vexpand(true);
+
+    let body = gtk::Box::new(gtk::Orientation::Vertical, 6);
+    body.set_margin_top(6);
+    body.set_margin_bottom(12);
+    body.append(&pair.widget);
+    let label = |text: String, classes: &[&str]| {
+        let l = gtk::Label::builder().label(text).wrap(true).xalign(0.0).selectable(true).css_classes(classes.to_vec()).build();
+        margins(&l);
+        l
+    };
+    if !checked.merged.notes.trim().is_empty() {
+        body.append(&label(checked.merged.notes.clone(), &["dim-label"]));
+    }
+    if !warnings.is_empty() {
+        body.append(&label(tf!("Not found in Stellaris {version} or the mod's copy: {keys}. Check these before saving.", version = version, keys = warnings.join(", ")), &["warning"]));
+    }
+    let error = label(String::new(), &["error"]);
+    error.set_visible(false);
+    if let Some(problem) = problem {
+        error.set_label(&tf!("The model's result still has a problem after a correction: {problem}. Fix it by hand, or undo and try again.", problem = problem));
+        error.set_visible(true);
+    }
+    body.append(&error);
+    let discard = gtk::Button::builder().label(t!("Discard")).build();
+    let save = gtk::Button::builder().label(t!("Save to Merged Patch")).css_classes(["suggested-action"]).build();
+    let buttons = gtk::Box::builder().spacing(6).halign(gtk::Align::End).build();
+    margins(&buttons);
+    buttons.append(&discard);
+    buttons.append(&save);
+    body.append(&buttons);
+
+    let close = dialog.clone();
+    discard.connect_clicked(move |_| {
+        close.close();
+    });
+    let (ctx, dialog, target, weak) = (ctx.clone(), dialog.clone(), target.clone(), Rc::downgrade(&pair));
+    save.connect_clicked(move |_| {
+        let Some(pair) = weak.upgrade() else { return };
+        let Some(fixer) = &ctx.explain.fixer else { return };
+        let show = |message: &str| {
+            error.set_label(message);
+            error.set_visible(true);
+        };
+        let script = match merge_dialog::validate(&target.category, &target.key, &pair.right.text()) {
+            Ok(script) => script,
+            Err(message) => return show(&message),
+        };
+        // Fingerprints of both sources, so the patch flags this copy as
+        // outdated if the game or the mod changes again.
+        let prints = vec![
+            Print::new(VANILLA, "Vanilla", &target.game.file, &target.game.text),
+            Print::new(&target.mod_id, &target.mod_name, &target.mod_copy.file, &target.mod_copy.text),
+        ];
+        match (fixer.save)(&target.category, &target.key, &script, prints) {
+            Ok(()) => {
+                (fixer.saved)();
+                on_saved();
+                dialog.close();
+            }
+            Err(message) => show(&message),
+        }
+    });
+    // Keeps the comparison refreshing while it's on screen.
+    let cell = std::cell::RefCell::new(Some(pair));
+    body.connect_destroy(move |_| drop(cell.take()));
+    body
 }
 
 fn open(widget: &impl IsA<gtk::Widget>, path: &std::path::Path) {

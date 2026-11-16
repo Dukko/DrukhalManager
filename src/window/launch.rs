@@ -1,5 +1,7 @@
 //! Launching the game, its error report, and window-level dialogs.
 
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 use adw::prelude::*;
@@ -391,19 +393,55 @@ impl Window {
                 .filter_map(|m| Some((m.id.clone(), archive::cached(m.content.as_deref()?)?)))
                 .collect()
         };
+        let report = self.error_report();
+        let provider = self.settings.borrow().ready_provider();
+        let game_version = self.game.as_ref().and_then(|g| g.version.clone());
+        let game = self.game.as_ref().and_then(|g| Some((g.dir.clone(), g.version.clone()?)));
         let weak = Rc::downgrade(self);
-        let explainer = error_report_dialog::Explainer {
-            provider: self.settings.borrow().ready_provider(),
-            game_version: self.game.as_ref().and_then(|g| g.version.clone()),
-            open_preferences: Box::new(move || {
+        let open_preferences = {
+            let weak = weak.clone();
+            Box::new(move || {
                 if let Some(ui) = weak.upgrade() {
                     ui.open_preferences(Some(crate::preferences::AI_PAGE));
                 }
-            }),
+            })
         };
-        error_report_dialog::present(&self.window, &self.error_report(), log, modified, roots, explainer);
+        let explainer = error_report_dialog::Explainer { provider, game_version, open_preferences, fixer: None };
+        let Some((game_dir, version)) = game else {
+            return error_report_dialog::present(&self.window, &report, log, modified, roots, explainer);
+        };
+        // Finding the objects the errors fall in reads files, so it's off the UI thread.
+        glib::spawn_future_local(async move {
+            let job = {
+                let (report, roots, game_dir) = (report.clone(), roots.clone(), game_dir.clone());
+                gio::spawn_blocking(move || fix_targets(&report, &roots, &game_dir))
+            };
+            let targets = job.await.unwrap_or_default();
+            let Some(ui) = weak.upgrade() else { return };
+            let is_merged = {
+                let weak = weak.clone();
+                Box::new(move |category: &str, key: &str| weak.upgrade().is_some_and(|ui| ui.patch.borrow().as_ref().is_some_and(|p| p.get(category, key).is_some())))
+            };
+            let save = {
+                let weak = weak.clone();
+                Box::new(move |category: &str, key: &str, script: &str, prints: Vec<patch::Print>| {
+                    let ui = weak.upgrade().ok_or_else(|| "The window was closed".to_owned())?;
+                    ui.save_merge(category, key, script, prints)
+                })
+            };
+            let saved = {
+                let weak = weak.clone();
+                Box::new(move || {
+                    if let Some(ui) = weak.upgrade() {
+                        ui.patch_saved();
+                    }
+                })
+            };
+            let fixer = error_report_dialog::Fixer { game_dir, game_version: version, targets, is_merged, save, saved };
+            let explainer = error_report_dialog::Explainer { fixer: Some(fixer), ..explainer };
+            error_report_dialog::present(&ui.window, &report, log, modified, roots, explainer);
+        });
     }
-
     pub(super) fn confirm_close(self: &Rc<Self>) {
         let dialog = adw::AlertDialog::new(
             Some(&t!("Save Changes?")),
@@ -434,6 +472,56 @@ impl Window {
         });
         dialog.present(Some(&self.window));
     }
+}
+
+/// The most problems looked at for Fix with AI.
+const MAX_FIX_TARGETS: usize = 50;
+
+/// The problems in `report` that are inside a mod's copy of a base-game object.
+/// Reads files, so it runs off the UI thread.
+fn fix_targets(
+    report: &error_log::Report,
+    roots: &HashMap<String, PathBuf>,
+    game_dir: &Path,
+) -> HashMap<String, error_report_dialog::Target> {
+    use crate::merge::source::{self, Source};
+    let mut found = HashMap::new();
+    let mut looked_at = 0;
+    for group in report.groups.iter().filter(|g| !g.is_patch) {
+        let Some(id) = &group.mod_id else { continue };
+        let Some(root) = roots.get(id) else { continue };
+        for entry in group.entries.iter().filter(|e| e.kind == error_log::Kind::Problem) {
+            if looked_at >= MAX_FIX_TARGETS {
+                return found;
+            }
+            looked_at += 1;
+            let Some(file) = &entry.file else { continue };
+            if !error_log::is_inside(file) || !file.to_ascii_lowercase().ends_with(".txt") {
+                continue;
+            }
+            let category = crate::merge::file_merge::category(file);
+            if category == "localisation" {
+                continue;
+            }
+            let Some(line) = error_log::find_line(&entry.message, file) else { continue };
+            let Ok(bytes) = std::fs::read(root.join(file)) else { continue };
+            let text = String::from_utf8_lossy(&bytes);
+            let Some((key, mod_text)) = source::object_at(&category, text.trim_start_matches('\u{feff}'), line) else { continue };
+            let Some(game) = source::vanilla(game_dir, &category, &key) else { continue };
+            found.insert(
+                entry.message.clone(),
+                error_report_dialog::Target {
+                    category,
+                    key,
+                    mod_id: id.clone(),
+                    mod_name: group.label.clone(),
+                    mod_copy: Source { label: group.label.clone(), file: file.clone(), text: mod_text },
+                    game,
+                },
+            );
+        }
+    }
+    found
 }
 
 fn workshop_url(id: u64) -> String {
