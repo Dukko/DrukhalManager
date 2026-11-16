@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: DrukhalManager 1.4.0\n"
 "Report-Msgid-Bugs-To: https://github.com/Dukko/DrukhalManager/issues\n"
-"POT-Creation-Date: 2026-11-16 17:43+0000\n"
+"POT-Creation-Date: 2026-11-16 18:07+0000\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -1621,16 +1621,16 @@ msgstr ""
 msgid "The model's reply did not contain the merged result."
 msgstr ""
 
-#: src/merge/conflicts.rs:330 src/mods/mod.rs:105
+#: src/merge/conflicts.rs:341 src/mods/mod.rs:105
 msgid "Mod files not found"
 msgstr ""
 
 #. Zips are unpacked before scanning; this one couldn't be.
-#: src/merge/conflicts.rs:335
+#: src/merge/conflicts.rs:346
 msgid "Could not unpack this zipped mod"
 msgstr ""
 
-#: src/merge/conflicts.rs:340
+#: src/merge/conflicts.rs:351
 msgid "Could not read mod files: {error}"
 msgstr ""
 
