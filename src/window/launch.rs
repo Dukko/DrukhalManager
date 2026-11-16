@@ -391,7 +391,17 @@ impl Window {
                 .filter_map(|m| Some((m.id.clone(), archive::cached(m.content.as_deref()?)?)))
                 .collect()
         };
-        error_report_dialog::present(&self.window, &self.error_report(), log, modified, roots);
+        let weak = Rc::downgrade(self);
+        let explainer = error_report_dialog::Explainer {
+            provider: self.settings.borrow().ready_provider(),
+            game_version: self.game.as_ref().and_then(|g| g.version.clone()),
+            open_preferences: Box::new(move || {
+                if let Some(ui) = weak.upgrade() {
+                    ui.open_preferences(Some(crate::preferences::AI_PAGE));
+                }
+            }),
+        };
+        error_report_dialog::present(&self.window, &self.error_report(), log, modified, roots, explainer);
     }
 
     pub(super) fn confirm_close(self: &Rc<Self>) {

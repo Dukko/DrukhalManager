@@ -467,10 +467,22 @@ impl Window {
         self.error_log_seen.set(modified);
         let weak = Rc::downgrade(self);
         glib::spawn_future_local(async move {
-            let count = gio::spawn_blocking(move || std::fs::read(&log).map(|b| String::from_utf8_lossy(&b).lines().filter(|l| !l.trim().is_empty()).count()).unwrap_or(0)).await.unwrap_or(0);
+            let (any, problems) = gio::spawn_blocking(move || match std::fs::read(&log) {
+                Ok(bytes) => {
+                    let text = String::from_utf8_lossy(&bytes);
+                    (text.lines().any(|l| !l.trim().is_empty()), crate::paradox::error_log::count_problems(&text))
+                }
+                Err(_) => (false, 0),
+            })
+            .await
+            .unwrap_or((false, 0));
             let Some(ui) = weak.upgrade() else { return };
-            ui.errors_link.set_label(&tf!("Last game logged {errors}", errors = tnf!("{count} error", "{count} errors", count = count)));
-            ui.errors_link.set_visible(count > 0);
+            ui.errors_link.set_label(&if problems > 0 {
+                tf!("Last game logged {problems}", problems = tnf!("{count} problem", "{count} problems", count = problems))
+            } else {
+                t!("Last game logged no real problems")
+            });
+            ui.errors_link.set_visible(any);
         });
     }
 
