@@ -163,8 +163,13 @@ fn child<'a>(anchors: &HashMap<String, Ctx>, known: &Known, anchor: &'a str, ctx
     if is_flow(key) || is_scope(known, key) {
         return (anchor, ctx);
     }
-    if ctx == Some(Ctx::Effect) && matches!(key, "hidden_effect" | "random_list") {
+    if ctx == Some(Ctx::Effect) && key == "hidden_effect" {
         return (anchor, Some(Ctx::Effect));
+    }
+    // The options of a random_list hold weight settings such as `modifier`,
+    // the same wherever the list is.
+    if ctx == Some(Ctx::Effect) && key == "random_list" {
+        return (key, Some(Ctx::Effect));
     }
     if known.effect_iters.contains(key) {
         return (anchor, Some(Ctx::Effect));
@@ -567,6 +572,19 @@ mod tests {
 
         // A file that doesn't parse is the scan's business.
         assert_eq!(check("country_event = {"), vec![]);
+        let _ = std::fs::remove_dir_all(game);
+    }
+
+    #[test]
+    fn random_list_options_have_their_own_settings() {
+        let game = game("random-list");
+        write(&game, &[("common/scripted_effects/v.txt", "vanilla_effect = { random_list = { 30 = { modifier = { factor = 2 has_flag = a } set_flag = a } 70 = { set_flag = b } } }")]);
+        let docs = docs();
+        let context = learn(&game, &docs, "4.0");
+        let known = known(&docs, &[&game]);
+        let text = "country_event = { id = r.1 immediate = { random_list = { 50 = { modifier = { factor = 0 } bogus_effect = yes } 50 = { set_flag = c } } } }";
+        let found = check_text(&context, &known, "events/m.txt", text);
+        assert_eq!(names(&found), [("bogus_effect", Ctx::Effect, Problem::Unknown)]);
         let _ = std::fs::remove_dir_all(game);
     }
 
