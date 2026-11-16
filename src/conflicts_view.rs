@@ -58,6 +58,8 @@ pub struct Analysis {
     /// the game versions compared, if a snapshot of an earlier version exists.
     pub behind: Vec<crate::merge::base_game::Behind>,
     pub behind_versions: Option<(String, String)>,
+    /// Mods most of whose files a bigger mod replaces, from this scan.
+    pub order: Vec<crate::merge::order_check::Relation>,
 }
 
 /// What the page needs from the window.
