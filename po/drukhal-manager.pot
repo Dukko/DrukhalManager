@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: DrukhalManager 1.4.1\n"
 "Report-Msgid-Bugs-To: https://github.com/Dukko/DrukhalManager/issues\n"
-"POT-Creation-Date: 2026-11-16 18:22+0000\n"
+"POT-Creation-Date: 2026-11-16 18:34+0000\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -650,7 +650,7 @@ msgstr ""
 msgid "Show only the conflicts of one mod"
 msgstr ""
 
-#: src/conflicts_view.rs:633 src/conflicts_view.rs:1137 src/paradox/error_log.rs:83
+#: src/conflicts_view.rs:633 src/conflicts_view.rs:1137 src/paradox/error_log.rs:174
 msgid "Problems"
 msgstr ""
 
@@ -2256,51 +2256,75 @@ msgstr ""
 msgid "Only the first {count} are shown. Type more of the name to narrow them."
 msgstr ""
 
-#: src/paradox/error_log.rs:84
+#: src/paradox/error_log.rs:175
 msgid "Saved empire designs"
 msgstr ""
 
-#: src/paradox/error_log.rs:85
-msgid "Missing icons"
-msgstr ""
-
-#: src/paradox/error_log.rs:86
+#: src/paradox/error_log.rs:176
 msgid "Defined twice"
 msgstr ""
 
-#: src/paradox/error_log.rs:87
-msgid "Unused modifiers"
-msgstr ""
-
-#: src/paradox/error_log.rs:88
+#: src/paradox/error_log.rs:177
 msgid "Removed settings"
 msgstr ""
 
-#: src/paradox/error_log.rs:96
+#: src/paradox/error_log.rs:178
+msgid "References to other mods"
+msgstr ""
+
+#: src/paradox/error_log.rs:179
+msgid "Missing text"
+msgstr ""
+
+#: src/paradox/error_log.rs:180
+msgid "Looks and sounds"
+msgstr ""
+
+#: src/paradox/error_log.rs:181
+msgid "Unused modifiers"
+msgstr ""
+
+#: src/paradox/error_log.rs:182
+msgid "Mod descriptors"
+msgstr ""
+
+#: src/paradox/error_log.rs:190
 msgid "Some of your saved empires use civics, origins or planets from mods that aren't enabled. They only matter if you play those empires."
 msgstr ""
 
-#: src/paradox/error_log.rs:97
-msgid "Something shows a blank icon or picture. It doesn't affect gameplay."
-msgstr ""
-
-#: src/paradox/error_log.rs:98
+#: src/paradox/error_log.rs:191
 msgid "A mod defines something that already exists, and the game keeps one of them. The Conflicts page shows which."
 msgstr ""
 
-#: src/paradox/error_log.rs:99
-msgid "Mods define resource modifiers nothing uses. The base game does this too."
-msgstr ""
-
-#: src/paradox/error_log.rs:100
+#: src/paradox/error_log.rs:192
 msgid "A mod sets something the game no longer has. The game skips it."
 msgstr ""
 
-#: src/paradox/error_log.rs:304
+#: src/paradox/error_log.rs:193
+msgid "A mod lists content from mods you don't have, such as resources in a panel. The game leaves it out."
+msgstr ""
+
+#: src/paradox/error_log.rs:194
+msgid "Some names or descriptions show their internal key instead of text. It doesn't affect gameplay."
+msgstr ""
+
+#: src/paradox/error_log.rs:195
+msgid "Something shows blank, plays no sound, or looks wrong. It doesn't affect gameplay."
+msgstr ""
+
+#: src/paradox/error_log.rs:196
+msgid "Mods define resource modifiers nothing uses. The base game does this too."
+msgstr ""
+
+#: src/paradox/error_log.rs:197
+msgid "A mod's descriptor file names a game version in a form the launcher doesn't read. It doesn't affect the game."
+msgstr ""
+
+#: src/paradox/error_log.rs:401
 msgid "Base game or missing files"
 msgstr ""
 
-#: src/paradox/error_log.rs:305
+#: src/paradox/error_log.rs:402
 msgid "Not tied to a file"
 msgstr ""
 

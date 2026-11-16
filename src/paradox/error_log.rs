@@ -32,21 +32,28 @@ pub struct Entry {
     pub reason: Option<String>,
 }
 
-/// What an error amounts to, from its text alone.
+/// What an error amounts to, from its text alone. The order is the order the
+/// dialog lists them in.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Kind {
     /// Anything not known to be harmless: shown first and counted.
     Problem,
     /// Saved empire designs that use content from mods that aren't enabled.
     SavedDesign,
-    /// A missing icon or texture: something shows blank.
-    Cosmetic,
     /// The same object or variable defined twice; the game keeps one.
     Duplicate,
-    /// Modifiers defined but never used.
-    Unused,
     /// A keyword the game removed; it ignores it.
     Removed,
+    /// A mod lists content from mods that aren't enabled; the game leaves it out.
+    OtherMods,
+    /// A name or description that shows its key instead of text.
+    Text,
+    /// Something blank, silent or wrong-looking: icons, textures, sounds, models.
+    Cosmetic,
+    /// Modifiers defined but never used.
+    Unused,
+    /// A mod descriptor the launcher can't fully read.
+    Descriptor,
 }
 
 /// For an `Unexpected token` error naming a keyword the game removed with no
@@ -58,23 +65,107 @@ pub fn removed_reason(message: &str) -> Option<String> {
     super::game_changes::removed(&super::suggest::unknown_keyword(message)?)
 }
 
+/// An extra condition on the file an error names.
+#[derive(Clone, Copy)]
+enum FileIs {
+    Any,
+    /// Under `gfx/` or `sound/`, or an `.asset`/`.gfx` file.
+    Graphics,
+}
+
+/// One classification rule: the game's source tag (`file.cpp`, or
+/// `file.cpp:NNN` for one line of it), message text of which at least one must
+/// appear (empty: no condition), and a condition on the file named.
+struct Rule {
+    tag: &'static str,
+    needles: &'static [&'static str],
+    file: FileIs,
+    kind: Kind,
+}
+
+const fn rule(tag: &'static str, needles: &'static [&'static str], kind: Kind) -> Rule {
+    Rule { tag, needles, file: FileIs::Any, kind }
+}
+
+/// Matched in order after the text rules in `classify`; no match is a Problem.
+/// Every source tag not listed here stays a Problem: references to missing
+/// objects, triggers, effects, modifiers...
+const RULES: &[Rule] = &[
+    rule("strategic_resources_gui_group.cpp", &["Failed to read key reference"], Kind::OtherMods),
+    rule("eventmanager.cpp:427", &["already exists"], Kind::Duplicate),
+    rule("ship_design_templates.cpp:150", &["used multiple times"], Kind::Duplicate),
+    rule("trigger.cpp:242", &["already exist"], Kind::Duplicate),
+    rule("effect.cpp:161", &["already exist"], Kind::Duplicate),
+    rule("prescripted_systems.cpp:968", &["already exists"], Kind::Duplicate),
+    rule("resolution.cpp:108", &["Missing localization"], Kind::Text),
+    rule("resolution.cpp:112", &["Missing localization"], Kind::Text),
+    rule("modifier.cpp:3279", &["Missing modifier localization"], Kind::Text),
+    rule("modifier.cpp:2250", &["is used but not localized"], Kind::Text),
+    rule("localization_util.cpp:26", &["Missing localization key"], Kind::Text),
+    rule("policy.cpp:21", &["Missing Policy Localization Key"], Kind::Text),
+    rule("job_type.cpp:31", &["Missing job Localization Key"], Kind::Text),
+    rule("meantimetohappen.cpp:375", &["missing specified localization key"], Kind::Text),
+    rule("localize.cpp:1975", &["utf-8-bom"], Kind::Text),
+    rule("localization_reader.cpp:83", &["Missing UTF8 BOM"], Kind::Text),
+    rule("pdx_entity.cpp:2559", &["Duplicate of"], Kind::Cosmetic),
+    rule("pdx_entity.cpp:135", &["Couldn't find particle"], Kind::Cosmetic),
+    rule("pdx_entity.cpp:266", &["does not have an animated mesh"], Kind::Cosmetic),
+    rule("graphics.cpp:520", &["already exists"], Kind::Cosmetic),
+    rule("projectile_graphics_data.cpp:460", &["already exists"], Kind::Cosmetic),
+    rule("portraits.cpp:623", &["Character texture"], Kind::Cosmetic),
+    rule("assetfactory_common.cpp:217", &["invalid curve"], Kind::Cosmetic),
+    rule("pdx_audio_util.cpp:169", &[], Kind::Cosmetic),
+    rule("pdx_audio_sdl.cpp:1211", &[], Kind::Cosmetic),
+    rule("pdx_audio_sdl.cpp:1238", &[], Kind::Cosmetic),
+    rule("pdx_audio.cpp:454", &[], Kind::Cosmetic),
+    rule("pdx_audio.cpp:1111", &[], Kind::Cosmetic),
+    rule("pdx_audio.cpp:1200", &[], Kind::Cosmetic),
+    rule("pdx_audio.cpp:1305", &[], Kind::Cosmetic),
+    rule("assetfactory_audio.cpp:925", &[], Kind::Cosmetic),
+    rule("assetfactory_audio.cpp:949", &[], Kind::Cosmetic),
+    Rule { tag: "persistent.cpp:41", needles: &[], file: FileIs::Graphics, kind: Kind::Cosmetic },
+    rule("dlc.cpp:346", &["Invalid supported_version"], Kind::Descriptor),
+];
+
+/// The source tag a message starts with: `("dlc.cpp", "dlc.cpp:346")` for
+/// `[dlc.cpp:346]: ...`.
+fn source_tag(message: &str) -> Option<(&str, &str)> {
+    let tag = message.trim_start().strip_prefix('[')?.split_once(']')?.0;
+    Some((tag.split(':').next()?, tag))
+}
+
 impl Kind {
     pub fn classify(message: &str) -> Kind {
         let has = |needles: &[&str]| needles.iter().any(|n| message.contains(n));
         if has(&["empire_design.cpp", "user_empire_designs"]) {
-            Kind::SavedDesign
+            return Kind::SavedDesign;
         } else if has(&["is never used from script"]) {
-            Kind::Unused
+            return Kind::Unused;
         } else if has(&["already exists, using the one at", "is already taken."]) {
-            Kind::Duplicate
+            return Kind::Duplicate;
         } else if removed_reason(message).is_some() {
             // Nothing is lost: the game removed this keyword and ignores it.
-            Kind::Removed
+            return Kind::Removed;
         } else if has(&["Missing modifier icon", "missing texture file", "Couldn't find texture file", "Error initialising texture"]) {
-            Kind::Cosmetic
-        } else {
-            Kind::Problem
+            return Kind::Cosmetic;
         }
+        let Some((name, tag)) = source_tag(message) else {
+            return Kind::Problem;
+        };
+        RULES
+            .iter()
+            .find(|r| {
+                (r.tag == tag || r.tag == name)
+                    && (r.needles.is_empty() || has(r.needles))
+                    && match r.file {
+                        FileIs::Any => true,
+                        FileIs::Graphics => find_path(message).is_some_and(|f| {
+                            let f = f.to_lowercase();
+                            f.starts_with("gfx/") || f.starts_with("sound/") || f.ends_with(".asset") || f.ends_with(".gfx")
+                        }),
+                    }
+            })
+            .map_or(Kind::Problem, |r| r.kind)
     }
 
     /// A short title for the dialog, e.g. "Unused modifiers".
@@ -82,10 +173,13 @@ impl Kind {
         match self {
             Kind::Problem => t!("Problems"),
             Kind::SavedDesign => t!("Saved empire designs"),
-            Kind::Cosmetic => t!("Missing icons"),
             Kind::Duplicate => t!("Defined twice"),
-            Kind::Unused => t!("Unused modifiers"),
             Kind::Removed => t!("Removed settings"),
+            Kind::OtherMods => t!("References to other mods"),
+            Kind::Text => t!("Missing text"),
+            Kind::Cosmetic => t!("Looks and sounds"),
+            Kind::Unused => t!("Unused modifiers"),
+            Kind::Descriptor => t!("Mod descriptors"),
         }
     }
 
@@ -94,10 +188,13 @@ impl Kind {
         match self {
             Kind::Problem => String::new(),
             Kind::SavedDesign => t!("Some of your saved empires use civics, origins or planets from mods that aren't enabled. They only matter if you play those empires."),
-            Kind::Cosmetic => t!("Something shows a blank icon or picture. It doesn't affect gameplay."),
             Kind::Duplicate => t!("A mod defines something that already exists, and the game keeps one of them. The Conflicts page shows which."),
-            Kind::Unused => t!("Mods define resource modifiers nothing uses. The base game does this too."),
             Kind::Removed => t!("A mod sets something the game no longer has. The game skips it."),
+            Kind::OtherMods => t!("A mod lists content from mods you don't have, such as resources in a panel. The game leaves it out."),
+            Kind::Text => t!("Some names or descriptions show their internal key instead of text. It doesn't affect gameplay."),
+            Kind::Cosmetic => t!("Something shows blank, plays no sound, or looks wrong. It doesn't affect gameplay."),
+            Kind::Unused => t!("Mods define resource modifiers nothing uses. The base game does this too."),
+            Kind::Descriptor => t!("A mod's descriptor file names a game version in a form the launcher doesn't read. It doesn't affect the game."),
         }
     }
 }
@@ -415,6 +512,67 @@ Supported Scopes: planet ship colony\n";
         ("Object with key: starbases already exists, using the one at  file: common/economic_categories/~~~modifiers_fix_categories.txt line: 1", Kind::Duplicate),
         ("Missing modifier icon \"gfx/interface/icons/modifiers/mod_unity_logistics_add.dds\"", Kind::Cosmetic),
     ];
+
+    #[test]
+    fn recalibrated_kinds_on_a_real_log() {
+        let cases: &[(&str, Kind)] = &[
+            ("[strategic_resources_gui_group.cpp:438]: Failed to read key reference sr_latinum from database  file: interface/resource_groups/tb_extras_group.txt line: 14", Kind::OtherMods),
+            ("[eventmanager.cpp:427]: an event with id [ancrel.4011] already exists!  file: events/ancrel.txt", Kind::Duplicate),
+            ("[pdx_entity.cpp:2559]: Duplicate of perdition_beam_windup_entity added to entity system", Kind::Cosmetic),
+            ("[resolution.cpp:108]: Missing localization for resolution: resolution_prime_directive", Kind::Text),
+            ("[resolution.cpp:112]: Missing localization for resolution: resolution_prime_directive_desc", Kind::Text),
+            ("[graphics.cpp:520]: a 3d-type with the name \"shroud_rays_mesh\" already exists!", Kind::Cosmetic),
+            ("[projectile_graphics_data.cpp:460]: An item with name \"ion_cannon\" already exists!  file: gfx/projectiles/x.txt", Kind::Cosmetic),
+            ("[modifier.cpp:3279]: Missing modifier localization: resolution_custodian_x", Kind::Text),
+            ("[modifier.cpp:2250]: mod_country_trade_cost_mult modifier is used but not localized!", Kind::Text),
+            ("[federation_law.cpp:329]: Federation law category 'a', is already set for law 'b'. Trying to set 'c'", Kind::Problem),
+            ("[localization_util.cpp:26]: Missing localization key [edict_x_tooltip] for custom tooltip at  file: common/edicts/x.txt", Kind::Text),
+            ("[policy.cpp:21]: Missing Policy Localization Key: emex_logistics_default_name", Kind::Text),
+            ("[ship_design_templates.cpp:150]: Component template key used multiple times: AFTERBURNER_1", Kind::Duplicate),
+            ("[pdx_entity.cpp:135]: Couldn't find particle 3D object \"astral_rift_particle\" (or it is not of 'pdxparticle' type)", Kind::Cosmetic),
+            ("[trigger.cpp:242]: A trigger with id = \"amoeba.x2.trigger.11\" already exist. id has to be unique", Kind::Duplicate),
+            ("[dlc.cpp:346]: Invalid supported_version in  file: mod/ugc_1142142725.mod line: 10", Kind::Descriptor),
+            ("[job_type.cpp:31]: Missing job Localization Key: job_xeno_zoo_animal_infernal_nascent", Kind::Text),
+            ("[prescripted_systems.cpp:968]: An initializer called \"Zrocursor_system\" already exists.", Kind::Duplicate),
+            ("[pdx_entity.cpp:266]: cetana_01_titan_mid_entity.death uses [animation = death] but the entity does not have an animated mesh!", Kind::Cosmetic),
+            ("[portraits.cpp:623]: Character texture 'gfx/x.tga', mentioned at 'common/y.txt', has a problem", Kind::Cosmetic),
+            ("[meantimetohappen.cpp:375]: script_value/weight field: missing specified localization key: is_ai", Kind::Text),
+            ("[assetfactory_common.cpp:217]: invalid curve. Expected pairs of timestamps and values.  file: gfx/particles/x.asset", Kind::Cosmetic),
+            ("[effect.cpp:161]: An effect with id = \"colony.180.effect.1\" already exist. id has to be unique", Kind::Duplicate),
+            ("[pdx_audio_util.cpp:169]: Could not find sound file sound/x.wav", Kind::Cosmetic),
+            ("[pdx_audio_sdl.cpp:1211]: Default sound file sound/x.wav does not exist", Kind::Cosmetic),
+            ("[pdx_audio_sdl.cpp:1238]: No valid sound files for sound x", Kind::Cosmetic),
+            ("[pdx_audio.cpp:454]: Missing sound: x", Kind::Cosmetic),
+            ("[pdx_audio.cpp:1111]: Sound effect with name 'x' already added", Kind::Cosmetic),
+            ("[pdx_audio.cpp:1200]: Missing sound effect: x", Kind::Cosmetic),
+            ("[pdx_audio.cpp:1305]: SoundEffect 'x' already has category y", Kind::Cosmetic),
+            ("[assetfactory_audio.cpp:925]: SoundEffect 'x' something", Kind::Cosmetic),
+            ("[assetfactory_audio.cpp:949]: SoundEffect 'x' does not have a category assigned", Kind::Cosmetic),
+            ("[persistent.cpp:41]: Error: \"Unknown thing\" in file: \"gfx/models/x.asset\" near line: 3", Kind::Cosmetic),
+            ("[persistent.cpp:41]: Error: \"Unknown thing\" in file: \"sound/x.txt\" near line: 3", Kind::Cosmetic),
+            ("[persistent.cpp:41]: Error: \"Unknown thing\" in file: \"common/x/y.txt\" near line: 3", Kind::Problem),
+            ("[persistent.cpp:41]: Error: \"Unknown thing\" in file: \"events/y.txt\" near line: 3", Kind::Problem),
+            ("[localize.cpp:1975]: Localization file 'x.yml' should be in in utf-8-bom encoding", Kind::Text),
+            ("[localization_reader.cpp:83]: Missing UTF8 BOM in localisation/x.yml", Kind::Text),
+            // Must stay problems.
+            ("[parser_deferred_database_objects.cpp:84]: Failed to read key reference foo from database 'common/x' file: common/y.txt line: 3", Kind::Problem),
+            ("[modifier.cpp:4256]: Invalid modifier foo", Kind::Problem),
+            ("[trigger_impl.cpp:100]: Invalid trigger foo", Kind::Problem),
+            ("[trigger.cpp:300]: Something else about a trigger", Kind::Problem),
+            ("[effect_impl_x.cpp:10]: Invalid effect foo", Kind::Problem),
+            ("[effect.cpp:919]: Wrong scope for effect 'x'", Kind::Problem),
+            ("[eventtarget.cpp:50]: Unknown event target", Kind::Problem),
+            ("[ship_growth_stage.cpp:20]: Something wrong", Kind::Problem),
+            ("[technology_level.cpp:20]: Something wrong", Kind::Problem),
+            ("[dlc.cpp:1847]: Could not find files for mod: /lib/workshop/content/281990/1", Kind::Problem),
+            ("[localization_reader.cpp:147]: Expected colon file: localisation/x.yml line: 4", Kind::Problem),
+        ];
+        for (line, want) in cases {
+            let full = format!("[05:42:45]{line}");
+            assert_eq!(Kind::classify(message(&full)), *want, "{line}");
+        }
+        assert_eq!(Kind::Cosmetic.title(), "Looks and sounds");
+    }
 
     #[test]
     fn joins_continuation_lines() {
