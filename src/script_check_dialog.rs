@@ -43,6 +43,7 @@ pub fn present(parent: &impl IsA<gtk::Widget>, analysis: Rc<Analysis>, hooks: Rc
     let mut objects: BTreeMap<(usize, String, String, String), Object> = BTreeMap::new();
     let mut loose: BTreeMap<usize, Vec<&Finding>> = BTreeMap::new();
     let mut less: BTreeMap<usize, Vec<Finding>> = BTreeMap::new();
+    let mut elsewhere: BTreeMap<usize, Vec<Finding>> = BTreeMap::new();
     for finding in &script.findings {
         match &finding.object {
             Some((category, key)) => {
@@ -50,18 +51,22 @@ pub fn present(parent: &impl IsA<gtk::Widget>, analysis: Rc<Analysis>, hooks: Rc
                 objects.entry(id).or_insert_with(|| Object { position: finding.mod_position, category: category.clone(), key: key.clone(), file: finding.file.clone(), findings: Vec::new() }).findings.push(finding.clone());
             }
             None if finding.problem == Problem::Unsure => less.entry(finding.mod_position).or_default().push(finding.clone()),
+            None if finding.problem == Problem::Elsewhere => elsewhere.entry(finding.mod_position).or_default().push(finding.clone()),
             None => loose.entry(finding.mod_position).or_default().push(finding),
         }
     }
     // Objects with only uncertain findings have nothing to fix.
     objects.retain(|_, object| {
-        let certain = object.findings.iter().any(|f| f.problem != Problem::Unsure);
+        let certain = object.findings.iter().any(|f| !matches!(f.problem, Problem::Unsure | Problem::Elsewhere));
         if !certain {
-            less.entry(object.position).or_default().extend(object.findings.iter().cloned());
+            for finding in &object.findings {
+                let list = if finding.problem == Problem::Elsewhere { &mut elsewhere } else { &mut less };
+                list.entry(object.position).or_default().push(finding.clone());
+            }
         }
         certain
     });
-    let mut positions: Vec<usize> = objects.values().map(|o| o.position).chain(loose.keys().copied()).chain(less.keys().copied()).collect();
+    let mut positions: Vec<usize> = objects.values().map(|o| o.position).chain(loose.keys().copied()).chain(less.keys().copied()).chain(elsewhere.keys().copied()).collect();
     positions.sort_unstable();
     positions.dedup();
     // Objects nothing calls have no effect in game, so they come last.
@@ -82,6 +87,17 @@ pub fn present(parent: &impl IsA<gtk::Widget>, analysis: Rc<Analysis>, hooks: Rc
             let expander = adw::ExpanderRow::builder().title(t!("Not used")).subtitle(t!("Nothing in the game or your enabled mods calls these, so they have no effect. Fixing them is optional.")).use_markup(false).build();
             for object in dead {
                 expander.add_row(&object_row(&navigation, &analysis, &hooks, object));
+            }
+            group.add(&expander);
+        }
+        if let Some(findings) = elsewhere.get(&position) {
+            let expander = adw::ExpanderRow::builder()
+                .title(t!("Probably from another mod"))
+                .subtitle(t!("Names that look like another mod's triggers or effects, and no installed mod defines them. The mod may expect a companion mod you don't have."))
+                .use_markup(false)
+                .build();
+            for finding in findings {
+                expander.add_row(&adw::ActionRow::builder().title(format!("{}:{}", finding.file, finding.line)).subtitle(describe(finding)).use_markup(false).build());
             }
             group.add(&expander);
         }
@@ -123,6 +139,7 @@ fn describe(f: &Finding) -> String {
         (Problem::Unknown, Ctx::Trigger) => tf!("Line {line}: {name} isn't a trigger this game has", line = f.line, name = &f.name),
         (Problem::WrongKind, Ctx::Effect) => tf!("Line {line}: {name} is a trigger, used where an effect belongs", line = f.line, name = &f.name),
         (Problem::WrongKind, Ctx::Trigger) => tf!("Line {line}: {name} is an effect, used where a trigger belongs", line = f.line, name = &f.name),
+        (Problem::Elsewhere, _) => tf!("Line {line}: {name} looks like it comes from another mod, and no installed mod defines it", line = f.line, name = &f.name),
         (Problem::Unsure, _) => tf!("Line {line}: {name} isn't a setting this kind of block takes in the base game", line = f.line, name = &f.name),
         (Problem::Capitalisation, _) => tf!("Line {line}: {name} has the wrong capitalisation", line = f.line, name = &f.name),
     }
@@ -149,6 +166,7 @@ fn problems_for_model(findings: &[Finding]) -> Vec<String> {
             let what = match f.problem {
                 Problem::Unknown => format!("`{}` isn't {kind} the current game has", f.name),
                 Problem::WrongKind => format!("`{}` is {other}, used where {kind} belongs", f.name),
+                Problem::Elsewhere => format!("`{}` may come from another mod; leave it", f.name),
                 Problem::Unsure => format!("`{}` isn't a setting this kind of block takes in the base game (it may be fine)", f.name),
                 Problem::Capitalisation => format!("`{}` has the wrong capitalisation; the game's names are lowercase", f.name),
             };
@@ -259,6 +277,8 @@ impl Fix {
         let mod_copy = Source { label: self.analysis.name(self.object.position).to_owned(), file: self.object.file.clone(), text: self.mod_text.clone() };
         let (category, key, file) = (self.object.category.clone(), self.object.key.clone(), self.object.file.clone());
         let problems = problems_for_model(&self.object.findings);
+        // Names that may come from a mod that isn't installed, which the model leaves.
+        let leave: std::collections::HashSet<String> = script.findings.iter().filter(|f| f.problem == Problem::Elsewhere).map(|f| f.name.clone()).collect();
         let mut names: Vec<String> = self.object.findings.iter().map(|f| f.name.clone()).collect();
         names.sort();
         names.dedup();
@@ -276,7 +296,7 @@ impl Fix {
                 let check = |text: &str| {
                     let script = merge_dialog::validate(&category, &key, text)?;
                     // Uncertain names don't make a fix fail.
-                    let remaining: Vec<_> = script_check::check_text(&context, &known, &file, &script).into_iter().filter(|(_, _, _, problem)| *problem != Problem::Unsure).collect();
+                    let remaining: Vec<_> = script_check::check_text(&context, &known, &file, &script).into_iter().filter(|(_, name, _, problem)| *problem != Problem::Unsure && !leave.contains(name)).collect();
                     if remaining.is_empty() {
                         return Ok(script);
                     }
