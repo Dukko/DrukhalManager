@@ -32,7 +32,7 @@ impl Window {
             let empty = adw::StatusPage::builder()
                 .icon_name("document-open-recent-symbolic")
                 .title(t!("No Backups Yet"))
-                .description(t!("The merged patch is backed up before each Merge All, and before merges are removed from it."))
+                .description(t!("The merged patch is backed up before each Merge All or Update All, and before merges are removed from it."))
                 .build();
             toolbar.set_content(Some(&empty));
             return dialog.present(Some(&self.window));
@@ -40,7 +40,7 @@ impl Window {
 
         let group = adw::PreferencesGroup::builder()
             .description(tf!(
-                "The merged patch is backed up before each Merge All, and before merges are removed from it. Restoring one replaces the patch's merges with the ones it holds; the patch as it is now is backed up first. The last {kept} are kept.",
+                "The merged patch is backed up before each Merge All or Update All, and before merges are removed from it. Restoring one replaces the patch's merges with the ones it holds; the patch as it is now is backed up first. The last {kept} are kept.",
                 kept = snapshot::KEPT
             ))
             .build();
