@@ -577,6 +577,206 @@ mod tests {
         std::fs::remove_dir_all(root).unwrap();
     }
 
+    /// Measures what expanding `inline_script` calls would add to the scan, on
+    /// real folders (read-only): `DRUKHAL_WORKSHOP` holds mod folders and
+    /// `DRUKHAL_GAME` is the game folder. Every mod counts as enabled at once;
+    /// load order, `replace_path` and file-name overrides are ignored, and `[[`
+    /// conditional parameter blocks are not expanded.
+    #[test]
+    #[ignore]
+    fn inline_script_survey() {
+        use crate::paradox::script::{Entries, Value};
+
+        let (Some(workshop), Some(game)) = (std::env::var_os("DRUKHAL_WORKSHOP"), std::env::var_os("DRUKHAL_GAME")) else {
+            println!("SURVEY skipped: set DRUKHAL_WORKSHOP and DRUKHAL_GAME");
+            return;
+        };
+        let (workshop, game) = (PathBuf::from(workshop), PathBuf::from(game));
+        let read = |path: &Path| std::fs::read(path).ok().map(|b| String::from_utf8_lossy(&b).trim_start_matches('\u{feff}').to_owned());
+
+        // Every mod: its id, root and files.
+        let mut mods: Vec<(String, PathBuf, Vec<String>)> = Vec::new();
+        for entry in std::fs::read_dir(&workshop).unwrap().flatten() {
+            if entry.file_type().is_ok_and(|k| k.is_dir()) {
+                let mut files = Vec::new();
+                let _ = walk(&entry.path(), &entry.path(), &mut files);
+                mods.push((entry.file_name().to_string_lossy().into_owned(), entry.path(), files));
+            }
+        }
+        mods.sort();
+        // Lowercased path -> real path, per mod, for `common/inline_scripts`.
+        let script_dir = "common/inline_scripts/";
+        let index: Vec<BTreeMap<String, String>> = mods
+            .iter()
+            .map(|(_, _, files)| files.iter().filter(|f| f.to_lowercase().starts_with(script_dir)).map(|f| (f.to_lowercase(), f.clone())).collect())
+            .collect();
+        let mut game_files = Vec::new();
+        let _ = walk(&game, &game, &mut game_files);
+        let game_index: BTreeMap<String, String> = game_files.iter().filter(|f| f.to_lowercase().starts_with(script_dir)).map(|f| (f.to_lowercase(), f.clone())).collect();
+
+        // Top-level keys that name objects: the rules of `object_keys`, but
+        // counting nested calls instead of dropping them silently.
+        let top_keys = |entries: &[Entry]| -> (Vec<String>, usize) {
+            let mut seen = BTreeMap::<&str, usize>::new();
+            let mut nested = 0;
+            for e in entries {
+                if let Entry::Assign { key, .. } = e {
+                    if key.eq_ignore_ascii_case("inline_script") {
+                        nested += 1;
+                    } else if !key.starts_with('@') {
+                        *seen.entry(key).or_default() += 1;
+                    }
+                }
+            }
+            (seen.into_iter().filter(|&(_, n)| n == 1).map(|(k, _)| k.to_owned()).collect(), nested)
+        };
+
+        let mut normal: BTreeMap<(String, String), BTreeSet<usize>> = BTreeMap::new();
+        let mut expanded: BTreeMap<(String, String), BTreeSet<usize>> = BTreeMap::new();
+        let (mut shipping, mut calling) = (0, 0);
+        let (mut scalar, mut block, mut unresolved, mut nested, mut with_conditionals, mut parse_failures, mut calls) = (0, 0, 0, 0, 0, 0, 0);
+        let mut bogus = 0;
+        let (mut source_parse_failures, mut source_failure_examples) = (0, Vec::new());
+        let mut failure_examples = Vec::new();
+        let mut unresolved_examples = Vec::new();
+
+        for (m, (id, root, files)) in mods.iter().enumerate() {
+            if !index[m].is_empty() {
+                shipping += 1;
+            }
+            let mut mod_calls = 0;
+            for file in files {
+                let Some(category) = object_category(file) else { continue };
+                let Some(src) = read(&root.join(file)) else { continue };
+                if let Ok(keys) = object_keys(&category, &src) {
+                    for key in keys {
+                        normal.entry((category.clone(), key)).or_default().insert(m);
+                    }
+                }
+                if category == "localisation" || category == "events" {
+                    continue;
+                }
+                let entries = match script::parse(&src) {
+                    Ok(entries) => entries,
+                    Err(e) => {
+                        // Files the scan itself can't parse yield no calls either.
+                        source_parse_failures += 1;
+                        if source_failure_examples.len() < 5 {
+                            source_failure_examples.push(format!("{id}/{file}: {e}"));
+                        }
+                        continue;
+                    }
+                };
+                let top_calls: Vec<&Value> = entries.values("inline_script").collect();
+                if top_calls.len() == 1 {
+                    bogus += 1;
+                }
+                for call in top_calls {
+                    calls += 1;
+                    mod_calls += 1;
+                    let (name, params) = match call {
+                        Value::Scalar(name) => {
+                            scalar += 1;
+                            (name.clone(), Vec::new())
+                        }
+                        Value::Block(b) => {
+                            block += 1;
+                            let params = b
+                                .iter()
+                                .filter_map(|e| match e {
+                                    Entry::Assign { key, value: Value::Scalar(v), .. } if key != "script" => Some((key.clone(), v.clone())),
+                                    _ => None,
+                                })
+                                .collect();
+                            (b.scalar("script").unwrap_or_default().to_owned(), params)
+                        }
+                    };
+                    let wanted = format!("{script_dir}{}.txt", name.to_lowercase());
+                    let text = index[m]
+                        .get(&wanted)
+                        .map(|f| root.join(f))
+                        .or_else(|| index.iter().enumerate().find_map(|(o, i)| i.get(&wanted).map(|f| mods[o].1.join(f))))
+                        .or_else(|| game_index.get(&wanted).map(|f| game.join(f)))
+                        .and_then(|path| read(&path));
+                    let Some(mut text) = text else {
+                        unresolved += 1;
+                        if unresolved_examples.len() < 5 {
+                            unresolved_examples.push(format!("{id}:{file}:{name}"));
+                        }
+                        continue;
+                    };
+                    for (k, v) in &params {
+                        text = text.replace(&format!("${k}$"), v);
+                    }
+                    if text.contains("[[") {
+                        with_conditionals += 1;
+                    }
+                    match script::parse(&text) {
+                        Ok(parsed) => {
+                            let (keys, n) = top_keys(&parsed);
+                            nested += n;
+                            for key in keys {
+                                expanded.entry((category.clone(), key)).or_default().insert(m);
+                            }
+                        }
+                        Err(e) => {
+                            parse_failures += 1;
+                            if failure_examples.len() < 5 {
+                                failure_examples.push(format!("{wanted}: {e}"));
+                            }
+                        }
+                    }
+                }
+            }
+            if mod_calls > 0 {
+                calling += 1;
+            }
+        }
+
+        let from_expansions = expanded.keys().filter(|k| !normal.contains_key(*k)).count();
+        let mut new_conflicts = Vec::new();
+        let mut gaining = 0;
+        for (key, via) in &expanded {
+            let direct = normal.get(key).cloned().unwrap_or_default();
+            let all: BTreeSet<usize> = direct.union(via).copied().collect();
+            if direct.len() >= 2 {
+                if !via.is_subset(&direct) {
+                    gaining += 1;
+                }
+            } else if all.len() >= 2 {
+                new_conflicts.push((key, all));
+            }
+        }
+        let mut categories = BTreeMap::<&str, usize>::new();
+        for (category, _) in expanded.keys().filter(|k| !normal.contains_key(*k)) {
+            *categories.entry(category).or_default() += 1;
+        }
+        let mut categories: Vec<_> = categories.into_iter().collect();
+        categories.sort_by_key(|&(c, n)| (std::cmp::Reverse(n), c));
+
+        println!("SURVEY mods={} mods_shipping_inline_scripts={shipping} mods_calling_inline_scripts={calling}", mods.len());
+        println!("SURVEY calls={calls} scalar={scalar} block={block} unresolved={unresolved} nested={nested} with_conditionals={with_conditionals} parse_failures={parse_failures}");
+        println!("SURVEY objects_from_expansions={from_expansions} new_conflicts={} conflicts_gaining_a_mod={gaining}", new_conflicts.len());
+        println!("SURVEY bogus_inline_script_objects_before_fix={bogus}");
+        for ((category, key), all) in new_conflicts.iter().take(15) {
+            let ids: Vec<&str> = all.iter().map(|&m| mods[m].0.as_str()).collect();
+            println!("SURVEY example {category} {key} mods={}", ids.join(","));
+        }
+        for (category, n) in categories.iter().take(10) {
+            println!("SURVEY category {category} objects={n}");
+        }
+        println!("SURVEY calling_files_that_fail_to_parse={source_parse_failures}");
+        for e in &source_failure_examples {
+            println!("SURVEY source_parse_failure_example {e}");
+        }
+        for e in &failure_examples {
+            println!("SURVEY parse_failure_example {e}");
+        }
+        for e in &unresolved_examples {
+            println!("SURVEY unresolved_example {e}");
+        }
+    }
+
     #[test]
     fn inline_script_calls_are_not_objects() {
         let root = std::env::temp_dir().join(format!("drukhal-inline-{}", std::process::id()));
