@@ -254,6 +254,60 @@ pub fn parse_with_spans(src: &str) -> Result<Vec<(Entry, std::ops::Range<usize>)
     Ok(entries.into_iter().zip(spans).collect())
 }
 
+/// A script entry with the line it starts on, for tools that report
+/// positions inside blocks. `kids` is `Some` for blocks.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Node {
+    pub key: Option<String>,
+    pub value: Option<String>,
+    pub line: usize,
+    pub kids: Option<Vec<Node>>,
+}
+
+impl Parser<'_> {
+    fn parse_nodes(&mut self, nested: bool) -> Result<Vec<Node>, ParseError> {
+        let mut nodes = Vec::new();
+        loop {
+            let Some((token, line, _)) = self.next()? else {
+                if nested {
+                    return Err(ParseError { line: self.lexer.line, message: "missing '}'".into() });
+                }
+                return Ok(nodes);
+            };
+            let (scalar, block) = match token {
+                Token::Close if nested => return Ok(nodes),
+                Token::Close => return Err(ParseError { line, message: "unexpected '}'".into() }),
+                Token::Op(_) => return Err(ParseError { line, message: "operator without a key".into() }),
+                Token::Open => (None, Some(self.parse_nodes(true)?)),
+                Token::Word(s) | Token::Quoted(s) => (Some(s), None),
+            };
+
+            if let Some((Token::Op(_), _, _)) = self.peek()? {
+                self.next()?;
+                let Some(key) = scalar else {
+                    return Err(ParseError { line, message: "a block cannot be used as a key".into() });
+                };
+                match self.next()? {
+                    Some((Token::Open, _, _)) => {
+                        let kids = self.parse_nodes(true)?;
+                        nodes.push(Node { key: Some(key), value: None, line, kids: Some(kids) });
+                    }
+                    Some((Token::Word(v) | Token::Quoted(v), _, _)) => nodes.push(Node { key: Some(key), value: Some(v), line, kids: None }),
+                    Some((_, l, _)) => return Err(ParseError { line: l, message: "expected a value".into() }),
+                    None => return Err(ParseError { line, message: "expected a value".into() }),
+                }
+            } else {
+                nodes.push(Node { key: None, value: scalar, line, kids: block });
+            }
+        }
+    }
+}
+
+/// Parses `src` into [`Node`]s. Same grammar and errors as [`parse`].
+pub fn parse_lines(src: &str) -> Result<Vec<Node>, ParseError> {
+    Parser { lexer: Lexer::new(src), peeked: None }.parse_nodes(false)
+}
+
 impl Value {
     pub fn as_scalar(&self) -> Option<&str> {
         match self {
@@ -331,6 +385,27 @@ mod tests {
         let src = "# head\n@cost = 5\nbuilding_lab = {\n\tcost = @cost # ünïcode\n}\nlone\nb = \"x\"";
         let spans: Vec<&str> = parse_with_spans(src).unwrap().iter().filter(|(_, r)| !r.is_empty()).map(|(_, r)| &src[r.clone()]).collect();
         assert_eq!(spans, ["@cost = 5", "building_lab = {\n\tcost = @cost # ünïcode\n}", "b = \"x\""]);
+    }
+
+    #[test]
+    fn parse_lines_numbers_nested_keys() {
+        let nodes = parse_lines("a = {\n\tb = 1\n\tc = { d = yes }\n}\n").unwrap();
+        assert_eq!((nodes[0].key.as_deref(), nodes[0].line), (Some("a"), 1));
+        let kids = nodes[0].kids.as_ref().unwrap();
+        assert_eq!((kids[0].key.as_deref(), kids[0].line, kids[0].value.as_deref()), (Some("b"), 2, Some("1")));
+        assert_eq!((kids[1].key.as_deref(), kids[1].line), (Some("c"), 3));
+        let d = &kids[1].kids.as_ref().unwrap()[0];
+        assert_eq!((d.key.as_deref(), d.line), (Some("d"), 3));
+    }
+
+    #[test]
+    fn parse_lines_matches_parse_errors() {
+        for src in ["a = {\n b = c", "a = b\n}", "= x", "a ="] {
+            assert_eq!(parse_lines(src).unwrap_err(), parse(src).unwrap_err());
+        }
+        let items = parse_lines("tags = { \"x y\" z }").unwrap();
+        let kids = items[0].kids.as_ref().unwrap();
+        assert_eq!((kids[0].key.clone(), kids[0].value.as_deref()), (None, Some("x y")));
     }
 
     #[test]
