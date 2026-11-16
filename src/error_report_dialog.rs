@@ -16,6 +16,7 @@ use crate::merge::source::Source;
 use crate::merge::{base_game, vocabulary};
 use crate::merge_dialog;
 use crate::paradox::error_log::{self, Entry, Group, Kind, Report};
+use crate::paradox::suggest::{self, HarmlessSuggestion, NoteSuggestion};
 use crate::thinking_view::{self, ThinkingView};
 
 /// Rows shown per group; the rest are summarised.
@@ -55,6 +56,8 @@ pub struct Fixer {
     pub game_version: String,
     /// Fixable problems, by error message.
     pub targets: HashMap<String, Target>,
+    /// Errors naming a keyword the game doesn't have, by message.
+    pub notes: HashMap<String, String>,
     /// Whether the patch already holds a merge of `(category, key)`.
     pub is_merged: IsMerged,
     pub save: SaveObject,
@@ -66,12 +69,14 @@ struct Context {
     explain: Explainer,
     /// Answers already fetched, by error message.
     answers: RefCell<HashMap<String, String>>,
+    /// What Fix with AI said about each error, by message.
+    ai_notes: RefCell<HashMap<String, String>>,
 }
 
 /// `roots` maps descriptor ids to mod folders, for opening the files
 /// errors mention.
 pub fn present(parent: &impl IsA<gtk::Widget>, report: &Report, log: PathBuf, modified: Option<String>, roots: HashMap<String, PathBuf>, explain: Explainer) {
-    let ctx = Rc::new(Context { explain, answers: RefCell::new(HashMap::new()) });
+    let ctx = Rc::new(Context { explain, answers: RefCell::new(HashMap::new()), ai_notes: RefCell::new(HashMap::new()) });
     let page = adw::PreferencesPage::new();
     let lines = tnf!("{count} line in error.log", "{count} lines in error.log", count = report.lines);
     let problems = match report.problems() {
@@ -197,6 +202,11 @@ fn group_row(g: &Group, shown: &[&Entry], root: Option<PathBuf>, ctx: Option<&Rc
                 entry.add_suffix(&done);
             }
         }
+        if let Some(ctx) = ctx
+            && !g.is_patch
+        {
+            entry.add_suffix(&suggest_menu(ctx, &e.message, g.mod_id.as_ref().map(|_| g.label.clone())));
+        }
         if let (Some(root), Some(file)) = (&root, &e.file)
             && root.join(file).is_file()
         {
@@ -211,6 +221,73 @@ fn group_row(g: &Group, shown: &[&Entry], root: Option<PathBuf>, ctx: Option<&Rc
         row.add_row(&adw::ActionRow::builder().title(tnf!("…and {count} more kind", "…and {count} more kinds", count = shown.len() - ROWS_PER_GROUP)).css_classes(["dim-label"]).build());
     }
     row
+}
+
+/// The menu on a problem row for suggesting a game note or a harmless rule.
+fn suggest_menu(ctx: &Rc<Context>, message: &str, mod_name: Option<String>) -> gtk::MenuButton {
+    let popover = gtk::Popover::new();
+    let list = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    popover.set_child(Some(&list));
+    let entry = |label: String| {
+        let b = gtk::Button::builder().label(label).css_classes(["flat"]).build();
+        list.append(&b);
+        b
+    };
+    if let Some(keyword) = ctx.explain.fixer.as_ref().and_then(|f| f.notes.get(message)) {
+        let (ctx, message, keyword, mod_name, popover) = (ctx.clone(), message.to_owned(), keyword.clone(), mod_name.clone(), popover.clone());
+        entry(t!("Suggest a Game Note…")).connect_clicked(move |b| {
+            popover.popdown();
+            let error = suggest::scrub(&message, &home());
+            let version = game_version(&ctx);
+            let ai_notes = ctx.ai_notes.borrow().get(&message).cloned();
+            let s = NoteSuggestion { keyword: &keyword, error: &error, mod_name: mod_name.as_deref(), game_version: &version, app_version: env!("CARGO_PKG_VERSION"), ai_notes: ai_notes.as_deref() };
+            send_suggestion(b, s.title(), s.body());
+        });
+    }
+    {
+        let (ctx, message, popover) = (ctx.clone(), message.to_owned(), popover.clone());
+        entry(t!("Report as Harmless…")).connect_clicked(move |b| {
+            popover.popdown();
+            let pattern = error_log::pattern(&suggest::scrub(&message, &home()));
+            let version = game_version(&ctx);
+            let s = HarmlessSuggestion { pattern: &pattern, mod_name: mod_name.as_deref(), game_version: &version, app_version: env!("CARGO_PKG_VERSION") };
+            send_suggestion(b, s.title(), s.body());
+        });
+    }
+    gtk::MenuButton::builder().icon_name("view-more-symbolic").tooltip_text(t!("Suggest an improvement")).valign(gtk::Align::Center).css_classes(["flat"]).popover(&popover).build()
+}
+
+fn home() -> String {
+    dirs::home_dir().map(|p| p.to_string_lossy().into_owned()).unwrap_or_default()
+}
+
+fn game_version(ctx: &Context) -> String {
+    ctx.explain.game_version.clone().unwrap_or_else(|| "unknown".to_owned())
+}
+
+/// Shows exactly what will be put in the issue, and opens it on GitHub when
+/// the player agrees.
+fn send_suggestion(parent: &impl IsA<gtk::Widget>, title: String, body: String) {
+    let dialog = adw::AlertDialog::new(
+        Some(&t!("Send a Suggestion")),
+        Some(&t!("This opens GitHub in your browser with the text below filled in. Nothing is sent until you submit it there, which needs a GitHub account. Check it doesn't contain anything you'd rather keep private.")),
+    );
+    let text = gtk::TextView::builder().editable(false).cursor_visible(false).monospace(true).wrap_mode(gtk::WrapMode::WordChar).build();
+    text.buffer().set_text(&format!("{title}\n\n{body}"));
+    let scrolled = gtk::ScrolledWindow::builder().child(&text).min_content_height(200).build();
+    dialog.set_extra_child(Some(&scrolled));
+    dialog.add_responses(&[("cancel", &t!("Cancel")), ("open", &t!("Open GitHub"))]);
+    dialog.set_response_appearance("open", adw::ResponseAppearance::Suggested);
+    dialog.set_default_response(Some("cancel"));
+    dialog.set_close_response("cancel");
+    let window = parent.root().and_downcast::<gtk::Window>();
+    let launcher_window = window.clone();
+    dialog.connect_response(None, move |_, response| {
+        if response == "open" {
+            gtk::UriLauncher::new(&suggest::issue_url(&title, &body)).launch(launcher_window.as_ref(), None::<&gio::Cancellable>, |_| {});
+        }
+    });
+    dialog.present(window.as_ref());
 }
 
 /// Asks the AI about one error in a child dialog; a repeat shows the saved answer.
@@ -339,6 +416,7 @@ fn fix(button: &gtk::Button, ctx: &Rc<Context>, message: String, target: Target,
         .await;
         match result {
             Some(Ok((checked, warnings))) => {
+                ctx.ai_notes.borrow_mut().insert(message.clone(), checked.merged.notes.clone());
                 let version = ctx.explain.fixer.as_ref().map(|f| f.game_version.clone()).unwrap_or_default();
                 let page = review(&ctx, &dialog, &target, checked, &warnings, &version, on_saved);
                 stack.add_named(&page, Some("review"));

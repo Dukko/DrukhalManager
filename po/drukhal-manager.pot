@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: DrukhalManager 1.1.0\n"
 "Report-Msgid-Bugs-To: https://github.com/Dukko/DrukhalManager/issues\n"
-"POT-Creation-Date: 2026-11-16 12:17+0000\n"
+"POT-Creation-Date: 2026-11-16 12:25+0000\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -77,15 +77,15 @@ msgstr ""
 msgid "Updated Copy"
 msgstr ""
 
-#: src/behind_dialog.rs:221 src/conflicts_view/object.rs:825 src/error_report_dialog.rs:390
+#: src/behind_dialog.rs:221 src/conflicts_view/object.rs:825 src/error_report_dialog.rs:468
 msgid "The model's result still has a problem after a correction: {problem}. Fix it by hand, or undo and try again."
 msgstr ""
 
-#: src/behind_dialog.rs:224 src/error_report_dialog.rs:394
+#: src/behind_dialog.rs:224 src/error_report_dialog.rs:472
 msgid "Discard"
 msgstr ""
 
-#: src/behind_dialog.rs:225 src/error_report_dialog.rs:395
+#: src/behind_dialog.rs:225 src/error_report_dialog.rs:473
 msgid "Save to Merged Patch"
 msgstr ""
 
@@ -886,148 +886,176 @@ msgstr ""
 msgid "Put This In"
 msgstr ""
 
-#: src/error_report_dialog.rs:76
+#: src/error_report_dialog.rs:81
 msgid "{count} line in error.log"
 msgid_plural "{count} lines in error.log"
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/error_report_dialog.rs:78
+#: src/error_report_dialog.rs:83
 msgid "None of them look like real problems."
 msgstr ""
 
-#: src/error_report_dialog.rs:79
+#: src/error_report_dialog.rs:84
 msgid "{count} is a real problem"
 msgid_plural "{count} are real problems"
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/error_report_dialog.rs:82
+#: src/error_report_dialog.rs:87
 msgid "{lines}, written {when}. {errors}"
 msgstr ""
 
-#: src/error_report_dialog.rs:83
+#: src/error_report_dialog.rs:88
 msgid "{lines}. {errors}"
 msgstr ""
 
-#: src/error_report_dialog.rs:86
+#: src/error_report_dialog.rs:91
 msgid "Open error.log"
 msgstr ""
 
 #. One row per harmless kind, with the lines of every mod under it.
-#: src/error_report_dialog.rs:106
+#: src/error_report_dialog.rs:111
 msgid "Probably Harmless"
 msgstr ""
 
-#: src/error_report_dialog.rs:114
+#: src/error_report_dialog.rs:119
 msgid "{count} line"
 msgid_plural "{count} lines"
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/error_report_dialog.rs:123 src/error_report_dialog.rs:211
+#: src/error_report_dialog.rs:128 src/error_report_dialog.rs:221
 msgid "…and {count} more kind"
 msgid_plural "…and {count} more kinds"
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/error_report_dialog.rs:131
+#: src/error_report_dialog.rs:136
 msgid "No Errors"
 msgstr ""
 
-#: src/error_report_dialog.rs:131
+#: src/error_report_dialog.rs:136
 msgid "The game didn't log any errors last time"
 msgstr ""
 
-#: src/error_report_dialog.rs:139
+#: src/error_report_dialog.rs:144
 msgid "Game Errors"
 msgstr ""
 
-#: src/error_report_dialog.rs:139
+#: src/error_report_dialog.rs:144
 msgid "From the last time Stellaris ran"
 msgstr ""
 
-#: src/error_report_dialog.rs:151
+#: src/error_report_dialog.rs:156
 msgid "{errors} · {kinds}"
 msgstr ""
 
-#: src/error_report_dialog.rs:151 src/error_report_dialog.rs:156
+#: src/error_report_dialog.rs:156 src/error_report_dialog.rs:161
 msgid "{count} error"
 msgid_plural "{count} errors"
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/error_report_dialog.rs:151
+#: src/error_report_dialog.rs:156
 msgid "{count} kind"
 msgid_plural "{count} kinds"
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/error_report_dialog.rs:155
+#: src/error_report_dialog.rs:160
 msgid "Errors from your merges and fixes"
 msgstr ""
 
-#: src/error_report_dialog.rs:156
+#: src/error_report_dialog.rs:161
 msgid "{errors} · from your merges and fixes"
 msgstr ""
 
-#: src/error_report_dialog.rs:168
+#: src/error_report_dialog.rs:173
 msgid "Explain"
 msgstr ""
 
-#: src/error_report_dialog.rs:168
+#: src/error_report_dialog.rs:173
 msgid "Ask your AI what this error means and what to do"
 msgstr ""
 
-#: src/error_report_dialog.rs:175
+#: src/error_report_dialog.rs:180
 msgid "Fixed in the merged patch"
 msgstr ""
 
-#: src/error_report_dialog.rs:177 src/fix_dialog.rs:42
+#: src/error_report_dialog.rs:182 src/fix_dialog.rs:42
 msgid "Fix with AI"
 msgstr ""
 
-#: src/error_report_dialog.rs:178
+#: src/error_report_dialog.rs:183
 msgid "Write a corrected copy of this mod's object into the merged patch"
 msgstr ""
 
-#: src/error_report_dialog.rs:204
+#: src/error_report_dialog.rs:214
 msgid "Open this file"
 msgstr ""
 
-#: src/error_report_dialog.rs:237
-msgid "What This Error Means"
+#: src/error_report_dialog.rs:238
+msgid "Suggest a Game Note…"
+msgstr ""
+
+#: src/error_report_dialog.rs:249
+msgid "Report as Harmless…"
+msgstr ""
+
+#: src/error_report_dialog.rs:257
+msgid "Suggest an improvement"
+msgstr ""
+
+#: src/error_report_dialog.rs:272
+msgid "Send a Suggestion"
 msgstr ""
 
 #: src/error_report_dialog.rs:273
+msgid "This opens GitHub in your browser with the text below filled in. Nothing is sent until you submit it there, which needs a GitHub account. Check it doesn't contain anything you'd rather keep private."
+msgstr ""
+
+#: src/error_report_dialog.rs:279 src/window/smart_sort_ui.rs:43
+msgid "Cancel"
+msgstr ""
+
+#: src/error_report_dialog.rs:279
+msgid "Open GitHub"
+msgstr ""
+
+#: src/error_report_dialog.rs:314
+msgid "What This Error Means"
+msgstr ""
+
+#: src/error_report_dialog.rs:350
 msgid "Couldn't get an explanation: {error}"
 msgstr ""
 
-#: src/error_report_dialog.rs:276
+#: src/error_report_dialog.rs:353
 msgid "Couldn't get an explanation."
 msgstr ""
 
-#: src/error_report_dialog.rs:297
+#: src/error_report_dialog.rs:374
 msgid "{name} replaces {key}, which the game has changed. The fix starts from the game's current version and keeps the mod's changes."
 msgstr ""
 
-#: src/error_report_dialog.rs:317
+#: src/error_report_dialog.rs:394
 msgid "Fix This Error"
 msgstr ""
 
-#: src/error_report_dialog.rs:348 src/error_report_dialog.rs:352
+#: src/error_report_dialog.rs:426 src/error_report_dialog.rs:430
 msgid "Couldn't get a fix: {error}"
 msgstr ""
 
-#: src/error_report_dialog.rs:352
+#: src/error_report_dialog.rs:430
 msgid "The request failed unexpectedly"
 msgstr ""
 
-#: src/error_report_dialog.rs:369
+#: src/error_report_dialog.rs:447
 msgid "Fixed Copy"
 msgstr ""
 
-#: src/error_report_dialog.rs:385
+#: src/error_report_dialog.rs:463
 msgid "Not found in Stellaris {version} or the mod's copy: {keys}. Check these before saving."
 msgstr ""
 
@@ -1511,23 +1539,23 @@ msgstr[1] ""
 msgid "under $0.01"
 msgstr ""
 
-#: src/merge/ai.rs:671
+#: src/merge/ai.rs:674
 msgid "Claude declined to merge this object."
 msgstr ""
 
-#: src/merge/ai.rs:672 src/merge/ai.rs:773 src/merge/ai.rs:851
+#: src/merge/ai.rs:675 src/merge/ai.rs:776 src/merge/ai.rs:854
 msgid "The merged result was too long and got cut off."
 msgstr ""
 
-#: src/merge/ai.rs:679
+#: src/merge/ai.rs:682
 msgid "Choose a model for the OpenAI-compatible provider in Preferences."
 msgstr ""
 
-#: src/merge/ai.rs:774 src/merge/ai.rs:852
+#: src/merge/ai.rs:777 src/merge/ai.rs:855
 msgid "The model declined to merge this object."
 msgstr ""
 
-#: src/merge/ai.rs:869
+#: src/merge/ai.rs:872
 msgid "The model's reply did not contain the merged result."
 msgstr ""
 
@@ -2198,11 +2226,11 @@ msgstr ""
 msgid "Mods define resource modifiers nothing uses. The base game does this too."
 msgstr ""
 
-#: src/paradox/error_log.rs:284
+#: src/paradox/error_log.rs:285
 msgid "Base game or missing files"
 msgstr ""
 
-#: src/paradox/error_log.rs:285
+#: src/paradox/error_log.rs:286
 msgid "Not tied to a file"
 msgstr ""
 
@@ -2664,7 +2692,7 @@ msgstr ""
 msgid "The merged patch goes back to {contents} from {when}. Its current merges are backed up first, so you can undo this from this list."
 msgstr ""
 
-#: src/window/backups_ui.rs:74 src/window/collections_ui.rs:263 src/window/collections_ui.rs:292 src/window/collections_ui.rs:360 src/window/collections_ui.rs:411 src/window/collections_ui.rs:638 src/window/collections_ui.rs:722 src/window/collections_ui.rs:794 src/window/crash_hunt_ui.rs:59 src/window/ignore_rules_ui.rs:88 src/window/launch.rs:451 src/window/list.rs:456 src/window/repair_ui.rs:89 src/window/saves_ui.rs:86 src/window/freeze_ui.rs:40 src/window/freeze_ui.rs:103
+#: src/window/backups_ui.rs:74 src/window/collections_ui.rs:263 src/window/collections_ui.rs:292 src/window/collections_ui.rs:360 src/window/collections_ui.rs:411 src/window/collections_ui.rs:638 src/window/collections_ui.rs:722 src/window/collections_ui.rs:794 src/window/crash_hunt_ui.rs:59 src/window/ignore_rules_ui.rs:88 src/window/launch.rs:452 src/window/list.rs:456 src/window/repair_ui.rs:89 src/window/saves_ui.rs:86 src/window/freeze_ui.rs:40 src/window/freeze_ui.rs:103
 msgid "_Cancel"
 msgstr ""
 
@@ -2839,7 +2867,7 @@ msgid_plural "{count} mods in this collection aren't installed; they're kept und
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/window/collections_ui.rs:260 src/window/launch.rs:447
+#: src/window/collections_ui.rs:260 src/window/launch.rs:448
 msgid "Save Changes?"
 msgstr ""
 
@@ -2847,11 +2875,11 @@ msgstr ""
 msgid "“{current}” has unsaved changes. Save them before switching to “{next}”?"
 msgstr ""
 
-#: src/window/collections_ui.rs:263 src/window/launch.rs:452
+#: src/window/collections_ui.rs:263 src/window/launch.rs:453
 msgid "_Discard"
 msgstr ""
 
-#: src/window/collections_ui.rs:263 src/window/ignore_rules_ui.rs:89 src/window/launch.rs:453 src/window/list.rs:461
+#: src/window/collections_ui.rs:263 src/window/ignore_rules_ui.rs:89 src/window/launch.rs:454 src/window/list.rs:461
 msgid "_Save"
 msgstr ""
 
@@ -3593,7 +3621,7 @@ msgstr ""
 msgid "No error.log yet; it's written when the game runs"
 msgstr ""
 
-#: src/window/launch.rs:448
+#: src/window/launch.rs:449
 msgid "The load order has unsaved changes. Unsaved changes will be lost if you close."
 msgstr ""
 
@@ -4723,10 +4751,6 @@ msgstr ""
 
 #: src/window/shortcuts.rs:88
 msgid "Previous Difference"
-msgstr ""
-
-#: src/window/smart_sort_ui.rs:43
-msgid "Cancel"
 msgstr ""
 
 #: src/window/smart_sort_ui.rs:44
