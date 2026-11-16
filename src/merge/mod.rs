@@ -15,3 +15,4 @@ pub mod snapshot;
 pub mod source;
 pub mod scan_cache;
 pub mod trivial;
+pub mod vocabulary;
