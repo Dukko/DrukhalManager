@@ -764,7 +764,7 @@ enum Outcome {
     Failed(String),
 }
 
-fn tokens(n: u64) -> String {
+pub(crate) fn tokens(n: u64) -> String {
     match n {
         0..1_000 => n.to_string(),
         1_000..1_000_000 => format!("{:.1}k", n as f64 / 1_000.0),
@@ -772,7 +772,7 @@ fn tokens(n: u64) -> String {
     }
 }
 
-fn dollars(d: f64) -> String {
+pub(crate) fn dollars(d: f64) -> String {
     if d < 0.01 { t!("under $0.01") } else { format!("${d:.2}") }
 }
 

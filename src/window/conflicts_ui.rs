@@ -550,6 +550,8 @@ impl Window {
                 ui.add_toast(adw::Toast::new(message));
             }
         });
+        let weak = Rc::downgrade(self);
+        let backup = Box::new(move |reason: &str| weak.upgrade().ok_or_else(|| "The window was closed".to_owned())?.snapshot_patch(reason));
         Rc::new(MergeHooks {
             is_merged,
             existing,
@@ -582,6 +584,8 @@ impl Window {
             open_merge_tool_settings,
             merge_tool,
             toast,
+            merges_at_once: self.settings.borrow().merges_at_once(),
+            backup,
             session: self.conflict_session.clone(),
         })
     }

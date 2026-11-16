@@ -209,6 +209,15 @@ pub fn estimate(category: &str, key: &str, vanilla: Option<&Source>, sources: &[
     Estimate { input, output_low, output_high }
 }
 
+/// What bringing one mod copy up to date with a game update is expected to use.
+pub fn estimate_update(category: &str, key: &str, versions: &Versions) -> Estimate {
+    let input = tokens(&with_notes(UPDATE_SYSTEM)) + tokens(&update_prompt(category, key, versions.before, versions.after, versions.mod_copy));
+    let largest = [versions.before, versions.after, versions.mod_copy].iter().map(|s| tokens(&s.text)).max().unwrap_or(0);
+    let output_low = largest + largest / 5 + 150;
+    let output_high = output_low + 1500 + input;
+    Estimate { input, output_low, output_high }
+}
+
 /// Dollars per million input and output tokens.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Price {
@@ -1278,6 +1287,16 @@ mod tests {
         assert!((p.input - 0.3).abs() < 1e-9 && (p.output - 1.2).abs() < 1e-9);
         assert_eq!(listed_price(&list, "free"), None);
         assert_eq!(listed_price(&list, "missing"), None);
+    }
+
+    #[test]
+    fn estimates_an_update_from_its_three_sources() {
+        let s = |text: &str| Source { label: "S".into(), file: "a.txt".into(), text: text.to_owned() };
+        let (small, big) = (s("x = { a = yes }"), s(&"x = { a = yes }".repeat(200)));
+        let e = estimate_update("common/buildings", "x", &Versions { before: &small, after: &small, mod_copy: &small });
+        let bigger = estimate_update("common/buildings", "x", &Versions { before: &small, after: &small, mod_copy: &big });
+        assert!(e.input > 0 && e.output_high > e.output_low);
+        assert!(bigger.input > e.input && bigger.output_low > e.output_low);
     }
 
     /// Sends one small merge with the saved provider and key. Costs real
