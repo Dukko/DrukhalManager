@@ -47,6 +47,7 @@ impl Snapshot {
         self.objects.get(&id(category, key))
     }
 
+    #[cfg(test)]
     pub fn len(&self) -> usize {
         self.objects.len()
     }
@@ -194,6 +195,7 @@ fn same(a: &str, b: &str) -> bool {
     }
 }
 
+#[cfg(test)]
 pub fn behind(previous: &Snapshot, current: &Snapshot, defined: &BTreeMap<(String, String), Vec<Definition>>, roots: &[Option<PathBuf>]) -> Vec<Behind> {
     behind_counting(previous, current, defined, roots).0
 }

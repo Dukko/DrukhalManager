@@ -54,6 +54,10 @@ pub struct Analysis {
     pub simple: HashMap<usize, String>,
     /// For each scanned mod, the scanned mods it depends on.
     pub depends_on: Vec<BTreeSet<usize>>,
+    /// Objects enabled mods replace that the last game update changed, and
+    /// the game versions compared, if a snapshot of an earlier version exists.
+    pub behind: Vec<crate::merge::base_game::Behind>,
+    pub behind_versions: Option<(String, String)>,
 }
 
 /// What the page needs from the window.
@@ -366,6 +370,22 @@ pub fn build(analysis: &Rc<Analysis>, rescan: gtk::Button, hooks: Rc<MergeHooks>
     let top = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(6).margin_top(12).margin_start(12).margin_end(12).margin_bottom(6).build();
     top.append(&summary);
     top.append(&details);
+    if let (false, Some((_, version))) = (analysis.behind.is_empty(), &analysis.behind_versions) {
+        let label = gtk::Label::builder()
+            .label(tnf!(
+                "{count} object your mods replace changed in Stellaris {version}…",
+                "{count} objects your mods replace changed in Stellaris {version}…",
+                count = analysis.behind.len(),
+                version = version
+            ))
+            .wrap(true)
+            .xalign(0.0)
+            .build();
+        let button = gtk::Button::builder().child(&label).css_classes(["flat"]).halign(gtk::Align::Start).build();
+        let analysis = analysis.clone();
+        button.connect_clicked(move |b| crate::behind_dialog::present(b, analysis.clone()));
+        top.append(&button);
+    }
     top.append(&progress);
     if let Some(dropdown) = mod_filter(analysis, &hooks, &involved) {
         dropdown.set_margin_top(6);

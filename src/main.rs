@@ -3,6 +3,7 @@
 
 #[macro_use]
 mod i18n;
+mod behind_dialog;
 mod conflicts_view;
 mod dds;
 mod diagnostics;
