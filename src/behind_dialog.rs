@@ -11,9 +11,10 @@ use gtk::glib;
 use crate::conflicts_view::{Analysis, MergeHooks};
 use crate::diff_view::{Compare, Header, Pair};
 use crate::merge::ai::{self, Checked, Versions};
-use crate::merge::base_game::{Behind, Saved};
+use crate::merge::base_game::{self, Behind, Saved};
 use crate::merge::patch::{Print, VANILLA};
 use crate::merge::source::{self, Source};
+use crate::merge::vocabulary;
 use crate::merge_dialog;
 use crate::thinking_view::{self, ThinkingView};
 
@@ -180,18 +181,29 @@ impl Update {
         let after = source(tf!("Stellaris {version}", version = &self.new), &self.now.file, &self.now.text);
         let mod_copy = source(self.analysis.name(self.b.mod_position).to_owned(), &self.b.file, &self.mod_text);
         let (category, key) = (self.b.category.clone(), self.b.key.clone());
+        let (game_dir, version) = (self.hooks.game_dir.clone(), self.new.clone());
         button.set_sensitive(false);
         error.set_visible(false);
         let (update, button, error, thinking) = (self.clone(), button.clone(), error.clone(), thinking.clone());
         glib::spawn_future_local(async move {
             let result = thinking_view::run(&thinking, None, move |on| {
                 let check = |text: &str| merge_dialog::validate(&category, &key, text);
-                ai::update_checked(&provider, &category, &key, &Versions { before: &before, after: &after, mod_copy: &mod_copy }, &check, on)
+                let checked = ai::update_checked(&provider, &category, &key, &Versions { before: &before, after: &after, mod_copy: &mod_copy }, &check, on)?;
+                let text = match &checked.script {
+                    Ok(script) => script.clone(),
+                    Err(_) => checked.merged.script.clone(),
+                };
+                // Keywords found in neither game version, the game's other
+                // objects, nor the mod's copy.
+                let snapshot = game_dir.as_deref().and_then(|dir| base_game::ensure(&base_game::dir(), dir, &version).ok());
+                let known = snapshot.iter().flat_map(|s| s.texts()).chain([before.text.as_str(), after.text.as_str(), mod_copy.text.as_str()]);
+                let warnings = vocabulary::unknown(&text, known);
+                Ok::<_, String>((checked, warnings))
             })
             .await;
             button.set_sensitive(true);
             match result {
-                Some(Ok(checked)) => update.review(checked),
+                Some(Ok((checked, warnings))) => update.review(checked, &warnings),
                 Some(Err(message)) => show_error(&error, &message),
                 None => show_error(&error, &t!("The merge failed unexpectedly")),
             }
@@ -199,7 +211,7 @@ impl Update {
     }
 
     /// Shows the result next to the mod's copy, to edit and save.
-    fn review(self: &Rc<Self>, checked: Checked) {
+    fn review(self: &Rc<Self>, checked: Checked, warnings: &[String]) {
         let (script, problem) = match checked.script {
             Ok(script) => (script, None),
             // Kept even when still rejected, to fix by hand.
@@ -215,6 +227,19 @@ impl Update {
         body.append(&pair.widget);
         if !checked.merged.notes.trim().is_empty() {
             body.append(&dim(checked.merged.notes.clone()));
+        }
+        if !warnings.is_empty() {
+            let warning = gtk::Label::builder()
+                .label(tf!("Not found in Stellaris {version} or the mod's copy: {keys}. Check these before saving.", version = &self.new, keys = warnings.join(", ")))
+                .wrap(true)
+                .xalign(0.0)
+                .selectable(true)
+                .css_classes(["warning"])
+                .margin_bottom(6)
+                .margin_start(12)
+                .margin_end(12)
+                .build();
+            body.append(&warning);
         }
         let error = error_label();
         if let Some(problem) = problem {

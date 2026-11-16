@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: DrukhalManager 1.2.0\n"
 "Report-Msgid-Bugs-To: https://github.com/Dukko/DrukhalManager/issues\n"
-"POT-Creation-Date: 2026-11-16 16:44+0000\n"
+"POT-Creation-Date: 2026-11-16 16:45+0000\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -27,69 +27,73 @@ msgid_plural "{count} mods"
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/behind_dialog.rs:26
+#: src/behind_dialog.rs:27
 msgid "These mods still load their own copies, so the game's changes to these objects don't apply until the mods are updated."
 msgstr ""
 
-#: src/behind_dialog.rs:38 src/behind_dialog.rs:122
+#: src/behind_dialog.rs:39 src/behind_dialog.rs:123
 msgid "Removed from the game"
 msgstr ""
 
 #. Shown once the object is in the patch, including after a save
 #. from the page this row opens.
-#: src/behind_dialog.rs:42
+#: src/behind_dialog.rs:43
 msgid "Updated in the merged patch"
 msgstr ""
 
-#: src/behind_dialog.rs:55
+#: src/behind_dialog.rs:56
 msgid "Changed by the Game Update"
 msgstr ""
 
-#: src/behind_dialog.rs:55
+#: src/behind_dialog.rs:56
 msgid "Objects your enabled mods replace that changed between Stellaris {old} and {new}"
 msgstr ""
 
-#: src/behind_dialog.rs:119 src/behind_dialog.rs:121 src/behind_dialog.rs:179 src/behind_dialog.rs:180 src/window/overview.rs:390
+#: src/behind_dialog.rs:120 src/behind_dialog.rs:122 src/behind_dialog.rs:180 src/behind_dialog.rs:181 src/window/overview.rs:390
 msgid "Stellaris {version}"
 msgstr ""
 
-#: src/behind_dialog.rs:128
+#: src/behind_dialog.rs:129
 msgid "{name} still uses its own copy, from {file}."
 msgstr ""
 
-#: src/behind_dialog.rs:140
+#: src/behind_dialog.rs:141
 msgid "The mod's copy couldn't be read, so it can't be updated here."
 msgstr ""
 
-#: src/behind_dialog.rs:156
+#: src/behind_dialog.rs:157
 msgid "Update with AI"
 msgstr ""
 
-#: src/behind_dialog.rs:174 src/conflicts_view/object.rs:437 src/conflicts_view/object.rs:803 src/script_check_dialog.rs:271
+#: src/behind_dialog.rs:175 src/conflicts_view/object.rs:437 src/conflicts_view/object.rs:803 src/script_check_dialog.rs:271
 msgid "Set up an AI provider in Preferences first"
 msgstr ""
 
-#: src/behind_dialog.rs:196 src/conflicts_view/object.rs:834 src/folder_merge_dialog.rs:676
+#: src/behind_dialog.rs:208 src/conflicts_view/object.rs:834 src/folder_merge_dialog.rs:676
 msgid "The merge failed unexpectedly"
 msgstr ""
 
-#: src/behind_dialog.rs:211
+#: src/behind_dialog.rs:223
 msgid "Updated Copy"
 msgstr ""
 
-#: src/behind_dialog.rs:221 src/conflicts_view/object.rs:825 src/error_report_dialog.rs:471 src/script_check_dialog.rs:340
+#: src/behind_dialog.rs:233 src/error_report_dialog.rs:466
+msgid "Not found in Stellaris {version} or the mod's copy: {keys}. Check these before saving."
+msgstr ""
+
+#: src/behind_dialog.rs:246 src/conflicts_view/object.rs:825 src/error_report_dialog.rs:471 src/script_check_dialog.rs:340
 msgid "The model's result still has a problem after a correction: {problem}. Fix it by hand, or undo and try again."
 msgstr ""
 
-#: src/behind_dialog.rs:224 src/error_report_dialog.rs:475 src/script_check_dialog.rs:343
+#: src/behind_dialog.rs:249 src/error_report_dialog.rs:475 src/script_check_dialog.rs:343
 msgid "Discard"
 msgstr ""
 
-#: src/behind_dialog.rs:225 src/error_report_dialog.rs:476 src/script_check_dialog.rs:344
+#: src/behind_dialog.rs:250 src/error_report_dialog.rs:476 src/script_check_dialog.rs:344
 msgid "Save to Merged Patch"
 msgstr ""
 
-#: src/behind_dialog.rs:265
+#: src/behind_dialog.rs:290
 msgid "Saved the updated {key} to the merged patch"
 msgstr ""
 
@@ -1065,10 +1069,6 @@ msgstr ""
 
 #: src/error_report_dialog.rs:450 src/script_check_dialog.rs:330
 msgid "Fixed Copy"
-msgstr ""
-
-#: src/error_report_dialog.rs:466
-msgid "Not found in Stellaris {version} or the mod's copy: {keys}. Check these before saving."
 msgstr ""
 
 #: src/file_merge_dialog.rs:37

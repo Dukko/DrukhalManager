@@ -333,7 +333,7 @@ pub struct Versions<'a> {
 /// Brings a mod's copy of a base-game object up to date with the game's
 /// changes, checking the result like a merge.
 pub fn update_checked(provider: &Provider, category: &str, key: &str, versions: &Versions, check: &dyn Fn(&str) -> Result<String, String>, on: &mut dyn FnMut(Progress)) -> Result<Checked, String> {
-    checked(provider, UPDATE_SYSTEM, &update_prompt(category, key, versions.before, versions.after, versions.mod_copy), check, on)
+    checked(provider, &with_notes(UPDATE_SYSTEM), &update_prompt(category, key, versions.before, versions.after, versions.mod_copy), check, on)
 }
 
 /// Rewrites a mod's copy of a base-game object that fails in the current
@@ -1078,6 +1078,7 @@ mod tests {
     fn prompts_carry_the_notes() {
         assert!(with_notes(EXPLAIN_SYSTEM).contains("every_system_planet_colony"));
         assert!(with_notes(REPAIR_SYSTEM).contains("every_system_planet_colony"));
+        assert!(with_notes(UPDATE_SYSTEM).contains("every_system_planet_colony"));
     }
 
     /// Checks the shipped notes against an installed game. Set
