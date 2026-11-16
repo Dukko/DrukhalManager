@@ -42,16 +42,26 @@ pub fn present(parent: &impl IsA<gtk::Widget>, analysis: Rc<Analysis>, hooks: Rc
 
     let mut objects: BTreeMap<(usize, String, String, String), Object> = BTreeMap::new();
     let mut loose: BTreeMap<usize, Vec<&Finding>> = BTreeMap::new();
+    let mut less: BTreeMap<usize, Vec<Finding>> = BTreeMap::new();
     for finding in &script.findings {
         match &finding.object {
             Some((category, key)) => {
                 let id = (finding.mod_position, category.clone(), key.clone(), finding.file.clone());
                 objects.entry(id).or_insert_with(|| Object { position: finding.mod_position, category: category.clone(), key: key.clone(), file: finding.file.clone(), findings: Vec::new() }).findings.push(finding.clone());
             }
+            None if finding.problem == Problem::Unsure => less.entry(finding.mod_position).or_default().push(finding.clone()),
             None => loose.entry(finding.mod_position).or_default().push(finding),
         }
     }
-    let mut positions: Vec<usize> = objects.values().map(|o| o.position).chain(loose.keys().copied()).collect();
+    // Objects with only uncertain findings have nothing to fix.
+    objects.retain(|_, object| {
+        let certain = object.findings.iter().any(|f| f.problem != Problem::Unsure);
+        if !certain {
+            less.entry(object.position).or_default().extend(object.findings.iter().cloned());
+        }
+        certain
+    });
+    let mut positions: Vec<usize> = objects.values().map(|o| o.position).chain(loose.keys().copied()).chain(less.keys().copied()).collect();
     positions.sort_unstable();
     positions.dedup();
     for position in positions {
@@ -75,6 +85,13 @@ pub fn present(parent: &impl IsA<gtk::Widget>, analysis: Rc<Analysis>, hooks: Rc
             let row = adw::ActionRow::builder().title(format!("{}:{}", finding.file, finding.line)).subtitle(describe(finding)).use_markup(false).build();
             group.add(&row);
         }
+        if let Some(findings) = less.get(&position) {
+            let expander = adw::ExpanderRow::builder().title(t!("Less certain")).subtitle(t!("Settings this kind of block doesn't take in the base game. They may be fine.")).use_markup(false).build();
+            for finding in findings {
+                expander.add_row(&adw::ActionRow::builder().title(format!("{}:{}", finding.file, finding.line)).subtitle(describe(finding)).use_markup(false).build());
+            }
+            group.add(&expander);
+        }
         page.add(&group);
     }
 
@@ -89,6 +106,7 @@ fn describe(f: &Finding) -> String {
         (Problem::Unknown, Ctx::Trigger) => tf!("Line {line}: {name} isn't a trigger this game has", line = f.line, name = &f.name),
         (Problem::WrongKind, Ctx::Effect) => tf!("Line {line}: {name} is a trigger, used where an effect belongs", line = f.line, name = &f.name),
         (Problem::WrongKind, Ctx::Trigger) => tf!("Line {line}: {name} is an effect, used where a trigger belongs", line = f.line, name = &f.name),
+        (Problem::Unsure, _) => tf!("Line {line}: {name} isn't a setting this kind of block takes in the base game", line = f.line, name = &f.name),
         (Problem::Capitalisation, _) => tf!("Line {line}: {name} has the wrong capitalisation", line = f.line, name = &f.name),
     }
 }
@@ -114,6 +132,7 @@ fn problems_for_model(findings: &[Finding]) -> Vec<String> {
             let what = match f.problem {
                 Problem::Unknown => format!("`{}` isn't {kind} the current game has", f.name),
                 Problem::WrongKind => format!("`{}` is {other}, used where {kind} belongs", f.name),
+                Problem::Unsure => format!("`{}` isn't a setting this kind of block takes in the base game (it may be fine)", f.name),
                 Problem::Capitalisation => format!("`{}` has the wrong capitalisation; the game's names are lowercase", f.name),
             };
             if n > 1 { format!("{what} (used {n} times)") } else { what }
@@ -239,7 +258,8 @@ impl Fix {
                 // names the game has, by the same rules as the scan.
                 let check = |text: &str| {
                     let script = merge_dialog::validate(&category, &key, text)?;
-                    let remaining = script_check::check_text(&context, &known, &file, &script);
+                    // Uncertain names don't make a fix fail.
+                    let remaining: Vec<_> = script_check::check_text(&context, &known, &file, &script).into_iter().filter(|(_, _, _, problem)| *problem != Problem::Unsure).collect();
                     if remaining.is_empty() {
                         return Ok(script);
                     }

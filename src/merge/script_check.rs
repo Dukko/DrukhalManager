@@ -38,6 +38,9 @@ pub enum Problem {
     WrongKind,
     /// It would be known if it were spelled in lowercase.
     Capitalisation,
+    /// Unknown here, but vanilla uses the name as a plain setting in some
+    /// other block, so it may be fine.
+    Unsure,
 }
 
 /// What vanilla teaches: which blocks hold effects or triggers, and which
@@ -48,6 +51,16 @@ pub struct Context {
     anchors: HashMap<String, Ctx>,
     /// Keys seen in vanilla, by "anchor\tE" or "anchor\tT".
     allowed: HashMap<String, HashSet<String>>,
+    /// Every key in `allowed`, whatever the anchor. Rebuilt on load.
+    #[serde(skip)]
+    seen: HashSet<String>,
+}
+
+impl Context {
+    fn indexed(mut self) -> Self {
+        self.seen = self.allowed.values().flatten().cloned().collect();
+        self
+    }
 }
 
 /// The names the game and the enabled mods define.
@@ -171,8 +184,8 @@ fn child<'a>(anchors: &HashMap<String, Ctx>, known: &Known, anchor: &'a str, ctx
         return (anchor, Some(Ctx::Effect));
     }
     // The options of a random_list hold weight settings such as `modifier`,
-    // the same wherever the list is.
-    if ctx == Some(Ctx::Effect) && key == "random_list" {
+    // the same wherever the list is, even inside a parameter block.
+    if key == "random_list" {
         return (key, Some(Ctx::Effect));
     }
     if known.effect_iters.contains(key) {
@@ -202,6 +215,10 @@ fn walk_nodes<'a>(anchors: &HashMap<String, Ctx>, known: &Known, nodes: &'a [Nod
         // its `trigger`, which is a parameter.
         if anchor != "switch" {
             f(&Visit { anchor, ctx, key, line: node.line });
+        }
+        // The arguments of an inline script belong to that script.
+        if key == "inline_script" {
+            continue;
         }
         if let Some(kids) = &node.kids {
             let (anchor, ctx) = child(anchors, known, anchor, ctx, key);
@@ -346,10 +363,10 @@ pub fn learn(game_dir: &Path, docs: &Docs, version: &str) -> Context {
         anchors.entry(anchor).or_insert(ctx);
     }
     if anchors == first {
-        return Context { version: version.to_owned(), anchors, allowed };
+        return Context { version: version.to_owned(), anchors, allowed, seen: HashSet::new() }.indexed();
     }
     let (_, allowed) = pass(&anchors, true);
-    Context { version: version.to_owned(), anchors, allowed }
+    Context { version: version.to_owned(), anchors, allowed, seen: HashSet::new() }.indexed()
 }
 
 fn context_path(cache_dir: &Path, version: &str) -> PathBuf {
@@ -360,7 +377,7 @@ fn context_path(cache_dir: &Path, version: &str) -> PathBuf {
 fn read_context(path: &Path) -> Option<Context> {
     let mut json = Vec::new();
     GzDecoder::new(std::fs::File::open(path).ok()?).read_to_end(&mut json).ok()?;
-    serde_json::from_slice(&json).ok()
+    serde_json::from_slice::<Context>(&json).ok().map(Context::indexed)
 }
 
 fn save_context(path: &Path, context: &Context) -> std::io::Result<()> {
@@ -407,6 +424,9 @@ fn judge(context: &Context, known: &Known, anchor: &str, key: &str, kind: Ctx) -
     }
     if right.contains(&key.to_lowercase()) {
         return Some(Problem::Capitalisation);
+    }
+    if context.seen.contains(key) {
+        return Some(Problem::Unsure);
     }
     Some(Problem::Unknown)
 }
@@ -498,7 +518,7 @@ mod tests {
     fn docs() -> Docs {
         let map = |names: &[&str]| names.iter().map(|n| ((*n).to_owned(), DocEntry { text: format!("{n} - doc"), scopes: None })).collect();
         Docs {
-            effects: map(&["every_owned_planet", "random_owned_planet", "add_modifier", "set_flag", "add_resource", "create_message", "country_event", "random_list", "switch"]),
+            effects: map(&["every_owned_planet", "random_owned_planet", "add_modifier", "set_flag", "add_resource", "create_message", "country_event", "random_list", "switch", "custom_tooltip"]),
             triggers: map(&["any_owned_planet", "is_capital", "has_technology", "has_flag", "has_job_type", "is_nomadic", "has_trait", "switch"]),
             scopes: ["owner", "capital_scope"].iter().map(|s| (*s).to_owned()).collect(),
             modifiers: ["pop_happiness"].iter().map(|s| (*s).to_owned()).collect(),
@@ -622,6 +642,45 @@ mod tests {
         let found = check_text(&context, &known, "events/m.txt", &event("random_list = { 50 = { modifier = { factor = 0 } } }"));
         assert_eq!(found, vec![]);
         let _ = std::fs::remove_dir_all(game);
+    }
+
+    #[test]
+    fn inline_script_arguments_and_random_lists_anywhere() {
+        let game = game("inline");
+        write(&game, &[("common/scripted_effects/v.txt", "vanilla_effect = { random_list = { 30 = { modifier = { factor = 2 } set_flag = a } 70 = { set_flag = b } } }")]);
+        let docs = docs();
+        let context = learn(&game, &docs, "4.0");
+        let known = known(&docs, &[&game]);
+        let event = |inner: &str| format!("country_event = {{ id = m.1 immediate = {{ {inner} }} }}");
+        let check = |inner: &str| check_text(&context, &known, "events/m.txt", &event(inner));
+        assert_eq!(check("inline_script = { script = x class = y climate = z }"), vec![]);
+        // A random_list in a parameter block, where no effect context reaches it.
+        let found = check("custom_tooltip = { random_list = { 1 = { set_flag = a modifier = { factor = 0 } } } }");
+        assert_eq!(found, vec![]);
+        let found = check("add_modifier = { random_list = { 1 = { modifier = { factor = 0 } } } }");
+        assert_eq!(found, vec![]);
+        let _ = std::fs::remove_dir_all(game);
+    }
+
+    #[test]
+    fn names_vanilla_uses_elsewhere_are_unsure() {
+        let game = game("unsure");
+        // `species_class` is a plain setting somewhere in vanilla.
+        write(&game, &[("common/scripted_effects/c.txt", "y = { species_class = x }")]);
+        let docs = docs();
+        let context = learn(&game, &docs, "4.0");
+        let known = known(&docs, &[&game]);
+        assert!(context.seen.contains("species_class"));
+        let text = "country_event = { id = m.1 immediate = { species_class = x every_system_colony = { } } }";
+        let found = check_text(&context, &known, "events/m.txt", text);
+        assert_eq!(names(&found), [("species_class", Ctx::Effect, Problem::Unsure), ("every_system_colony", Ctx::Effect, Problem::Unknown)]);
+        // The tier survives the saved copy.
+        let cache = temp("unsure-cache");
+        ensure_context(&cache, &game, &docs, "4.0");
+        let again = ensure_context(&cache, &temp("unsure-nogame"), &docs, "4.0");
+        assert!(again.seen.contains("species_class"));
+        let _ = std::fs::remove_dir_all(game);
+        let _ = std::fs::remove_dir_all(cache);
     }
 
     #[test]
