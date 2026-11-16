@@ -414,9 +414,10 @@ impl Window {
         glib::spawn_future_local(async move {
             let job = {
                 let (report, roots, game_dir) = (report.clone(), roots.clone(), game_dir.clone());
-                gio::spawn_blocking(move || fix_targets(&report, &roots, &game_dir))
+                let version = version.clone();
+                gio::spawn_blocking(move || (fix_targets(&report, &roots, &game_dir), unknown_keywords(&report, &game_dir, &version)))
             };
-            let targets = job.await.unwrap_or_default();
+            let (targets, notes) = job.await.unwrap_or_default();
             let Some(ui) = weak.upgrade() else { return };
             let is_merged = {
                 let weak = weak.clone();
@@ -437,7 +438,7 @@ impl Window {
                     }
                 })
             };
-            let fixer = error_report_dialog::Fixer { game_dir, game_version: version, targets, is_merged, save, saved };
+            let fixer = error_report_dialog::Fixer { game_dir, game_version: version, targets, notes, is_merged, save, saved };
             let explainer = error_report_dialog::Explainer { fixer: Some(fixer), ..explainer };
             error_report_dialog::present(&ui.window, &report, log, modified, roots, explainer);
         });
@@ -476,6 +477,31 @@ impl Window {
 
 /// The most problems looked at for Fix with AI.
 const MAX_FIX_TARGETS: usize = 50;
+
+/// Problems that name a script keyword found nowhere in the installed game and
+/// not in the shipped notes yet: error message to keyword. Reads the game's
+/// files, so it runs off the UI thread.
+fn unknown_keywords(report: &error_log::Report, game_dir: &Path, version: &str) -> HashMap<String, String> {
+    use crate::merge::{ai, base_game, vocabulary};
+    use crate::paradox::suggest;
+    let Ok(snapshot) = base_game::ensure(&base_game::dir(), game_dir, version) else { return HashMap::new() };
+    let mut known = std::collections::HashSet::new();
+    for text in snapshot.texts() {
+        known.extend(vocabulary::keys(text));
+    }
+    let mut found = HashMap::new();
+    for group in report.groups.iter().filter(|g| !g.is_patch) {
+        for entry in group.entries.iter().filter(|e| e.kind == error_log::Kind::Problem) {
+            if let Some(keyword) = suggest::unknown_keyword(&entry.message)
+                && !known.contains(&keyword)
+                && !ai::has_note(&keyword)
+            {
+                found.insert(entry.message.clone(), keyword);
+            }
+        }
+    }
+    found
+}
 
 /// The problems in `report` that are inside a mod's copy of a base-game object.
 /// Reads files, so it runs off the UI thread.

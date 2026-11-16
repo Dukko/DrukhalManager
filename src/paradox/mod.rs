@@ -7,4 +7,5 @@ pub mod launcher_db;
 pub mod script;
 pub mod session;
 pub mod steam;
+pub mod suggest;
 pub mod workshop;

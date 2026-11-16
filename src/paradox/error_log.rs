@@ -164,8 +164,9 @@ pub fn find_path(line: &str) -> Option<String> {
 }
 
 /// The same error repeated for numbered objects or lines (`group_1`,
-/// `group_2`, `line: 40`…) counts as one: digits are ignored.
-fn pattern(message: &str) -> String {
+/// `group_2`, `line: 40`…) counts as one: digits are ignored. Also used to
+/// describe an error as a rule.
+pub fn pattern(message: &str) -> String {
     let mut out = String::with_capacity(message.len());
     for c in message.chars() {
         if c.is_ascii_digit() {

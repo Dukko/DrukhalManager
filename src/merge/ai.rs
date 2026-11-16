@@ -409,7 +409,6 @@ Output rules:
 const NOTES: &str = include_str!("ai_notes.md");
 
 /// One entry of the shipped notes on game changes.
-#[cfg(test)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Note {
     pub old: String,
@@ -417,8 +416,7 @@ pub(crate) struct Note {
     pub new: Vec<String>,
 }
 
-/// The shipped notes, parsed: for checking them against the game.
-#[cfg(test)]
+/// The shipped notes, parsed.
 pub(crate) fn notes() -> Vec<Note> {
     let ticked = |s: &str| -> Vec<String> { s.split('`').skip(1).step_by(2).map(str::to_owned).collect() };
     NOTES
@@ -432,6 +430,11 @@ pub(crate) fn notes() -> Vec<Note> {
             Some(Note { old, new })
         })
         .collect()
+}
+
+/// Whether the shipped notes already mention `keyword` as a changed name.
+pub fn has_note(keyword: &str) -> bool {
+    notes().iter().any(|n| n.old == keyword)
 }
 
 /// `system` followed by the shipped notes on game changes.
