@@ -150,6 +150,13 @@ impl Window {
                 !v.is_empty() && !checks::version_matches(v, game)
             }).count()
         });
+        // Only while the scan matches the load order, like the conflict counts.
+        let misplaced = self
+            .analysis
+            .borrow()
+            .as_ref()
+            .filter(|a| a.revision.get() == state.revision)
+            .map_or(0, |a| a.order.iter().filter(|r| r.misplaced()).map(|r| r.patch).collect::<std::collections::BTreeSet<_>>().len());
         let health = super::overview::Health {
             enabled: state.enabled.len(),
             total: state.mods.len(),
@@ -158,6 +165,7 @@ impl Window {
             outdated,
             missing_required: missing_required.len(),
             misordered,
+            misplaced,
             no_achievements,
             stale_merges: self.stale.borrow().len(),
             frozen_updates,
@@ -224,7 +232,7 @@ impl Window {
             profiles.insert(i, cache[content].clone());
         }
         let overrides = self.settings.borrow().sort_categories.iter().filter_map(|(id, key)| Some((id.clone(), mods::smart_sort::Category::from_key(key)?))).collect();
-        mods::smart_sort::plan(&state.mods, &state.enabled, &profiles, &overrides, &patch::is_patch)
+        mods::smart_sort::plan(&state.mods, &state.enabled, &profiles, &overrides, &patch::is_patch, &self.below_map(state))
     }
 
     /// Whether the mod changes checksummed files, remembered until the
