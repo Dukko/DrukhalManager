@@ -36,6 +36,13 @@
     <control>keyboard</control>
   </supports>
   <releases>
+    <release version="1.2.0" date="2026-11-16">
+      <description>
+        <p><em>Fix errors with AI.</em> When a real problem in Game Errors comes from a mod's outdated copy of a game object, Fix with AI rewrites that copy from the game's current version, keeping the mod's changes. You review it side by side, can edit it, and save it to the merged patch, which flags it again if the game or the mod changes. Any keyword in the result that appears neither in your game nor in the mod's copy is pointed out before you save.</p>
+        <p>Explain and Fix with AI now also know about script names recent game versions renamed or removed, from notes checked against the game's files.</p>
+        <p><em>Suggest improvements.</em> Each real problem has a menu to suggest a note when an error names a keyword your game no longer has, or to report the error as harmless. It opens a pre-filled GitHub issue in your browser after showing you exactly what it contains, without your home folder; nothing is sent until you submit it there.</p>
+      </description>
+    </release>
     <release version="1.1.0" date="2026-11-16">
       <description>
         <p><em>Find the real problems in the game's error log.</em> Game Errors now shows real problems first, still grouped by mod, and collapses known-harmless messages into one line each with why they don't matter: unused modifiers, things defined twice, missing icons, and saved empire designs that use mods you've turned off. Errors that span several lines are read as one. The sidebar counts only real problems.</p>
