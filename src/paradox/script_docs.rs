@@ -19,7 +19,9 @@ pub struct Docs {
 pub struct Entry {
     /// The entry's lines, joined.
     pub text: String,
-    /// The scopes it can be used in, lowercase, if the entry lists them.
+    /// The scopes it can be used in, lowercase, if the entry lists them. The
+    /// text has them too; this is for code that needs them apart.
+    #[allow(dead_code)]
     pub scopes: Option<Vec<String>>,
 }
 

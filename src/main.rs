@@ -26,6 +26,7 @@ mod platform;
 mod secrets;
 mod preferences;
 mod resize_grip;
+mod script_check_dialog;
 mod settings;
 mod thinking_view;
 mod update;
