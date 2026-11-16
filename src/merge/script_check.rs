@@ -635,7 +635,8 @@ mod tests {
     #[test]
     fn the_context_is_saved_per_version() {
         let (game, context, _) = setup("cache");
-        let cache = temp("cache-dir");
+        let root = temp("cache-dir");
+        let cache = root.join("script-context");
         let docs = docs();
         let first = ensure_context(&cache, &game, &docs, "4.0");
         assert_eq!(first.anchors, context.anchors);
@@ -645,7 +646,7 @@ mod tests {
         let again = ensure_context(&cache, &game, &docs, "4.0");
         assert_eq!(again.anchors, context.anchors);
         assert_eq!(again.allowed, context.allowed);
-        let _ = std::fs::remove_dir_all(cache);
+        let _ = std::fs::remove_dir_all(root);
     }
 
     /// Runs the checker over real files, read only. Skips the override and

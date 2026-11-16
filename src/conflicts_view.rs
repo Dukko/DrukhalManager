@@ -86,7 +86,7 @@ impl ScriptCheck {
     /// there. Reads many files; call it off the UI thread.
     pub fn run(user_dir: &Path, game_dir: &Path, exe: &Path, version: &str, roots: &[Option<PathBuf>], report: &Report) -> Option<ScriptCheck> {
         let docs = script_docs::load(user_dir)?;
-        let context = script_check::ensure_context(&base_game::dir(), game_dir, &docs, version);
+        let context = script_check::ensure_context(&base_game::dir().join("script-context"), game_dir, &docs, version);
         let mut folders: Vec<&Path> = vec![game_dir];
         folders.extend(roots.iter().flatten().map(PathBuf::as_path));
         let known = script_check::known(&docs, &folders);
