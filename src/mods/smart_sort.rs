@@ -178,8 +178,10 @@ pub struct Placement {
 /// The enabled mods in smart order, each with where it went and why. The
 /// mod `pinned` picks (the merged patch), if enabled, stays last.
 /// `profiles` holds each enabled mod's folders, `overrides` the categories
-/// the user chose, by mod id.
-pub fn plan(mods: &[Mod], enabled: &[usize], profiles: &HashMap<usize, Profile>, overrides: &HashMap<String, Category>, pinned: &dyn Fn(&str) -> bool) -> Vec<Placement> {
+/// the user chose, by mod id. `below` maps a mod's index to
+/// the index of the mod it should sit directly below, found from the files
+/// they ship, see `merge::order_check`.
+pub fn plan(mods: &[Mod], enabled: &[usize], profiles: &HashMap<usize, Profile>, overrides: &HashMap<String, Category>, pinned: &dyn Fn(&str) -> bool, below: &HashMap<usize, usize>) -> Vec<Placement> {
     let by_name: HashMap<String, usize> = enabled.iter().map(|&i| (mods[i].descriptor.name.trim().to_lowercase(), i)).collect();
     let deps_of = |i: usize| -> Vec<usize> {
         let mut deps: Vec<usize> = Vec::new();
@@ -210,6 +212,9 @@ pub fn plan(mods: &[Mod], enabled: &[usize], profiles: &HashMap<usize, Profile>,
         let name = |d: usize| format!("“{}”", mods[d].descriptor.name.trim());
         let placement = match deps.as_slice() {
             [parent] => Placement { index: i, category, parent: Some(*parent), reason: tf!("Needs {name}, so it goes directly below it", name = name(*parent)), chosen: false },
+            [] if let Some(&target) = below.get(&i).filter(|&&t| t != i && enabled.contains(&t) && !pinned(&mods[t].id)) => {
+                Placement { index: i, category, parent: Some(target), reason: tf!("{name} replaces most of its files, so it goes directly below it", name = name(target)), chosen: false }
+            }
             [] => {
                 let lower = mods[i].descriptor.name.to_lowercase();
                 let patch_name = ["patch", "compat", "bridge"].iter().any(|w| lower.contains(w)) || plus_joined(&lower);
@@ -504,7 +509,7 @@ mod tests {
         let profiles: HashMap<usize, Profile> = profiles.into_iter().enumerate().collect();
         let pinned = &|id: &str| id == "mod/drukhalmanager_merged_patch.mod";
         let names = |placed: &[Placement]| placed.iter().map(|p| mods[p.index].descriptor.name.as_str()).collect::<Vec<_>>();
-        let placed = plan(&mods, &enabled, &profiles, &HashMap::new(), pinned);
+        let placed = plan(&mods, &enabled, &profiles, &HashMap::new(), pinned, &HashMap::new());
         assert_eq!(names(&placed), [
             "~ Unofficial Fixes",
             "Epic Explosions",
@@ -530,12 +535,31 @@ mod tests {
 
         // A category the user chose wins, and a sub-mod of it follows along.
         let overrides: HashMap<String, Category> = [(mods[1].id.clone(), Category::Galaxy)].into();
-        let placed = plan(&mods, &enabled, &profiles, &overrides, pinned);
+        let placed = plan(&mods, &enabled, &profiles, &overrides, pinned, &HashMap::new());
         let at = |name: &str| names(&placed).iter().position(|n| *n == name).unwrap();
         assert_eq!(at("Planetary Diversity"), at("Kleom's Colorful Ships") + 1, "first in Galaxy Generation");
         assert_eq!(at("Planetary Diversity - Exotic Worlds"), at("Planetary Diversity") + 1);
         assert_eq!(at("Whiter Stars"), at("Planetary Diversity - Exotic Worlds") + 1);
         assert!(placed.iter().find(|p| p.index == 1).unwrap().chosen);
+    }
+
+    #[test]
+    fn goes_below_the_mod_it_changes() {
+        let mods = vec![m("Aardvark Graphics", &[]), m("Beta Graphics", &[]), m("Zeta Textures", &[])];
+        let enabled = vec![0, 1, 2];
+        let profiles: HashMap<usize, Profile> = HashMap::new();
+        let below: HashMap<usize, usize> = [(2, 0)].into();
+        let pinned = &|_: &str| false;
+        let placed = plan(&mods, &enabled, &profiles, &HashMap::new(), pinned, &below);
+        let order: Vec<usize> = placed.iter().map(|p| p.index).collect();
+        let at = |i: usize| order.iter().position(|&x| x == i).unwrap();
+        assert_eq!(at(2), at(0) + 1, "directly after the mod it changes");
+        assert_eq!(placed.iter().find(|p| p.index == 2).unwrap().parent, Some(0));
+
+        // A declared dependency wins over what the files say.
+        let mods = vec![m("Aardvark Graphics", &[]), m("Beta Graphics", &[]), m("Zeta Textures", &["Beta Graphics"])];
+        let placed = plan(&mods, &enabled, &profiles, &HashMap::new(), pinned, &below);
+        assert_eq!(placed.iter().find(|p| p.index == 2).unwrap().parent, Some(1));
     }
 
     #[test]

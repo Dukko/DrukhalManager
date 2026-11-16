@@ -22,13 +22,15 @@ struct Input {
     mods: Vec<Mod>,
     enabled: Vec<usize>,
     profiles: HashMap<usize, Profile>,
+    /// Mods that belong directly below another, by index.
+    below: HashMap<usize, usize>,
 }
 
 impl Window {
     pub(super) fn open_smart_sort(self: &Rc<Self>) {
-        let (mods, enabled) = {
+        let (mods, enabled, below) = {
             let state = self.state.borrow();
-            (state.mods.clone(), state.enabled.clone())
+            (state.mods.clone(), state.enabled.clone(), self.below_map(&state))
         };
         if enabled.is_empty() {
             return self.add_toast(adw::Toast::new(&t!("No mods are enabled")));
@@ -70,7 +72,7 @@ impl Window {
             move || {
                 let input = input.borrow();
                 let Some(input) = input.as_ref() else { return };
-                let placed = smart_sort::plan(&input.mods, &input.enabled, &input.profiles, &overrides.borrow(), &patch::is_patch);
+                let placed = smart_sort::plan(&input.mods, &input.enabled, &input.profiles, &overrides.borrow(), &patch::is_patch, &input.below);
                 while let Some(child) = groups.first_child() {
                     groups.remove(&child);
                 }
@@ -156,7 +158,7 @@ impl Window {
                 let profiles = gio::spawn_blocking(move || jobs.into_iter().filter_map(|(i, content)| Some((i, Profile::read(&archive::files(&content).ok()?)))).collect::<HashMap<_, _>>())
                     .await
                     .unwrap_or_default();
-                input.replace(Some(Input { mods, enabled, profiles }));
+                input.replace(Some(Input { mods, enabled, profiles, below }));
                 if let Some(render) = render.borrow().as_ref() {
                     render();
                 }
