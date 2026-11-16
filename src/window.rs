@@ -814,6 +814,14 @@ pub fn build(
         }
     });
     window.add_action(&backups);
+    let lookup = gio::SimpleAction::new("object-lookup", None);
+    let weak = Rc::downgrade(&ui);
+    lookup.connect_activate(move |_, _| {
+        if let Some(ui) = weak.upgrade() {
+            ui.show_object_lookup();
+        }
+    });
+    window.add_action(&lookup);
     let find = gio::SimpleAction::new("find", None);
     let weak = Rc::downgrade(&ui);
     find.connect_activate(move |_, _| {
@@ -929,6 +937,15 @@ impl Window {
             toast.set_custom_title(Some(&label));
         }
         self.toasts.add_toast(toast);
+    }
+
+    /// The lookup reads the last conflict scan, so it needs one.
+    fn show_object_lookup(&self) {
+        let analysis = self.analysis.borrow().clone();
+        match analysis {
+            Some(analysis) => crate::object_lookup_dialog::present(&self.window, analysis),
+            None => self.add_toast(adw::Toast::new(&t!("Open Conflicts once to scan your mods first"))),
+        }
     }
 
     fn save_settings(&self, what: &str) {

@@ -19,6 +19,7 @@ mod merge_dialog;
 mod mods;
 mod multiplayer;
 mod multiplayer_dialog;
+mod object_lookup_dialog;
 mod paradox;
 mod platform;
 mod secrets;
