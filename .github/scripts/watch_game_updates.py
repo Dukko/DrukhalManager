@@ -47,8 +47,9 @@ def released_patches(news):
 
 
 def irony_rules(source):
-    """Irony's first-in-only-served folders and flat-merged folders, as
-    paths like ours (`common/traits`, `events`)."""
+    """Irony's first-in-only-served folders, as paths like ours
+    (`common/traits`, `events`), and the names of the blocks it flat-merges
+    into an existing object (`MergeTypes`, which are not folders)."""
 
     def path(name):
         name = name.replace("\\\\", "/").replace("\\", "/")
@@ -60,12 +61,12 @@ def irony_rules(source):
         raise SystemExit("Irony's FIOSPaths list wasn't found; its file may have moved or changed shape")
     return (
         {path(n) for n in re.findall(r'"([^"]+)"', fios.group(1))},
-        {path(n) for n in re.findall(r'"([^"]+)"', merges.group(1))} if merges else set(),
+        set(re.findall(r'"([^"]+)"', merges.group(1))) if merges else set(),
     )
 
 
 def our_rules(source):
-    """Our first-in-only-served and merged folder lists."""
+    """Our first-in-only-served folders and additive block names."""
 
     def listed(name):
         m = re.search(rf"const {name}: &\[&str\] = &\[(.*?)\];", source, re.S)
@@ -73,20 +74,24 @@ def our_rules(source):
             raise SystemExit(f"{name} wasn't found in {OURS}")
         return set(re.findall(r'"([^"]+)"', m.group(1)))
 
-    return listed("FIOS_FOLDERS"), listed("MERGED_FOLDERS")
+    m = re.search(r"const ADDITIVE_BLOCKS: &\[\(&str, &str\)\] = &\[(.*?)\];", source, re.S)
+    if not m:
+        raise SystemExit(f"ADDITIVE_BLOCKS wasn't found in {OURS}")
+    blocks = set(re.findall(r'\(\s*"[^"]+"\s*,\s*"([^"]+)"\s*\)', m.group(1)))
+    return listed("FIOS_FOLDERS"), blocks
 
 
 def compare():
     """Markdown describing how our rules differ from Irony's; empty if they
     don't."""
-    theirs_fios, theirs_merged = irony_rules(fetch(IRONY_RAW))
+    theirs_fios, theirs_blocks = irony_rules(fetch(IRONY_RAW))
     with open(OURS, encoding="utf-8") as f:
-        ours_fios, ours_merged = our_rules(f.read())
+        ours_fios, ours_blocks = our_rules(f.read())
     lines = []
     for title, items in [
         ("First-in-only-served in Irony, not here (`FIOS_FOLDERS`)", theirs_fios - ours_fios),
         ("First-in-only-served here, not in Irony", ours_fios - theirs_fios),
-        ("Merged by Irony, not here (`MERGED_FOLDERS`)", theirs_merged - ours_merged),
+        ("Added to objects by Irony, not here (`ADDITIVE_BLOCKS`)", theirs_blocks - ours_blocks),
     ]:
         if items:
             lines.append(f"**{title}:**")
