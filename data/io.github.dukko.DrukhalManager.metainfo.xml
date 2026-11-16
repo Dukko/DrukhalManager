@@ -36,6 +36,12 @@
     <control>keyboard</control>
   </supports>
   <releases>
+    <release version="1.0.6" date="2026-11-16">
+      <description>
+        <p><em>Spot mods whose changes load order throws away.</em> When two mods ship the same file, the game uses the copy from the one that loads last. After each conflict scan, a mod that loads above a bigger mod replacing most of its files gets a warning above the mod list, with a button to move it below that mod. Identical copies are ignored. Smart Sort now places such a mod directly below the mod it changes.</p>
+        <p>While dragging a mod, hold it near the top or bottom of the list to scroll.</p>
+      </description>
+    </release>
     <release version="1.0.5" date="2026-11-16">
       <description>
         <p><em>Bring outdated mod copies up to date with AI.</em> In the list of objects a game update changed under your mods, Update with AI applies the game's changes to the mod's copy and keeps the mod's own changes. You review the result side by side, can edit it, and save it to the merged patch, where it's checked again whenever the game or the mod changes.</p>
