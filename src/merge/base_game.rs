@@ -47,6 +47,11 @@ impl Snapshot {
         self.objects.get(&id(category, key))
     }
 
+    /// The text of every object, for collecting the game's keywords.
+    pub fn texts(&self) -> impl Iterator<Item = &str> {
+        self.objects.values().map(|s| s.text.as_str())
+    }
+
     #[cfg(test)]
     pub fn len(&self) -> usize {
         self.objects.len()

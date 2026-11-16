@@ -53,6 +53,27 @@ pub fn extract_parsed(category: &str, key: &str, src: &str, entries: &[(Entry, s
     Some(parts.join("\n"))
 }
 
+/// The key and text (as [`extract`] cuts it) of the top-level object in
+/// `src` whose definition covers 1-based `line`. Events are keyed by `id`.
+/// `None` for localisation, `@variable` lines, `namespace`, lines between
+/// objects, or a file that doesn't parse.
+pub fn object_at(category: &str, src: &str, line: usize) -> Option<(String, String)> {
+    if category == "localisation" || line == 0 {
+        return None;
+    }
+    let entries = script::parse_with_spans(src).ok()?;
+    let start = if line == 1 { 0 } else { src.match_indices('\n').nth(line - 2)?.0 + 1 };
+    let end = src[start..].find('\n').map_or(src.len(), |i| start + i);
+    let (entry, _) = entries.iter().find(|(_, range)| range.start <= end && range.end > start)?;
+    let Entry::Assign { key, value, .. } = entry else { return None };
+    if key.starts_with('@') || key == "namespace" {
+        return None;
+    }
+    let key = if category == "events" { value.as_block().and_then(|b| b.scalar("id"))?.to_owned() } else { key.clone() };
+    let text = extract_parsed(category, &key, src, &entries)?;
+    Some((key, text))
+}
+
 /// Every object `src` defines, as [`extract`] would cut each one out, by
 /// key. Parses the file once, for looking up many objects in it.
 pub fn index(category: &str, src: &str) -> HashMap<String, String> {
@@ -276,6 +297,21 @@ mod tests {
         let all = index("localisation", loc);
         assert_eq!(all.get("l_german:building_lab"), extract("localisation", "l_german:building_lab", loc).as_ref());
         assert_eq!(all.get("l_english:building_lab").map(String::as_str), Some("building_lab:0 \"Lab\""));
+    }
+
+    #[test]
+    fn finds_the_object_a_line_is_in() {
+        let src = "@var = 3\nfirst = {\n\ta = 1\n}\n\nsecond = {\n\tb = @var\n}\n";
+        let (key, text) = object_at("common/x", src, 7).unwrap();
+        assert_eq!(key, "second");
+        assert_eq!(text, "@var = 3\nsecond = {\n\tb = @var\n}");
+        assert_eq!(object_at("common/x", src, 3).unwrap().0, "first");
+        assert_eq!(object_at("common/x", src, 5), None);
+        assert_eq!(object_at("common/x", src, 1), None);
+        assert_eq!(object_at("common/x", src, 0), None);
+        let events = "namespace = ns\ncountry_event = { id = ns.1 }\nship_event = {\n\tid = ns.2\n}\n";
+        assert_eq!(object_at("events", events, 4).unwrap().0, "ns.2");
+        assert_eq!(object_at("events", events, 1), None);
     }
 
     #[test]
