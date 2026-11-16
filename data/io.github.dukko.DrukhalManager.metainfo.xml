@@ -36,6 +36,12 @@
     <control>keyboard</control>
   </supports>
   <releases>
+    <release version="1.0.3" date="2026-11-16">
+      <description>
+        <p><em>Look up any object.</em> The new search button under the Conflicts list finds which of your mods define an object, event or localisation key, even when only one mod does, and which version the game uses.</p>
+        <p><em>Fewer false conflicts.</em> Mods that pull in an inline script were sometimes shown as conflicting over an object called "inline_script", which doesn't exist. The first conflict scan after this update reads your mods' files again, once.</p>
+      </description>
+    </release>
     <release version="1.0.2" date="2026-11-15">
       <description>
         <p><em>Faster conflict scans after updates.</em> What a scan learns from reading your mods' files is now kept when DrukhalManager updates, so the first scan after an update no longer reads every file again. This takes effect from the update after this one.</p>
