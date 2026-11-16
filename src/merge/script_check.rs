@@ -24,13 +24,13 @@ use super::{file_merge, source};
 use crate::paradox::script::{self, Entry, Node};
 use crate::paradox::script_docs::Docs;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Ctx {
     Effect,
     Trigger,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Problem {
     /// The game has no such effect or trigger.
     Unknown,
@@ -561,6 +561,34 @@ pub fn check_text(context: &Context, known: &Known, rel_path: &str, text: &str) 
     check_parsed(context, known, rel_path, &nodes)
 }
 
+/// The names `after` uses that the game certainly doesn't have, and that
+/// `before` didn't already use wrongly the same way: what an edit made worse.
+/// Uncertain findings (`Unsure`, `Elsewhere`) don't count.
+pub fn introduced_names(context: &Context, known: &Known, rel_path: &str, before: &str, after: &str) -> Vec<String> {
+    let certain = |p: &Problem| matches!(p, Problem::Unknown | Problem::WrongKind | Problem::Capitalisation);
+    let had: HashSet<(String, Ctx, Problem)> = check_text(context, known, rel_path, before).into_iter().filter(|(_, _, _, p)| certain(p)).map(|(_, name, ctx, p)| (name, ctx, p)).collect();
+    let mut added: Vec<String> = check_text(context, known, rel_path, after).into_iter().filter(|(_, name, ctx, p)| certain(p) && !had.contains(&(name.clone(), *ctx, *p))).map(|(_, name, _, _)| name).collect();
+    added.sort();
+    added.dedup();
+    added
+}
+
+/// Names worth looking up in the game's documentation for an object's error:
+/// the identifiers in `error` (leaving out `file`'s path) and the names in
+/// `flagged`, sorted and without repeats.
+pub fn reference_names(error: &str, file: &str, flagged: impl IntoIterator<Item = String>) -> Vec<String> {
+    let mut names: Vec<String> = error
+        .replace(file, " ")
+        .split(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
+        .filter(|w| w.contains('_') && w.len() > 3 && w.chars().any(|c| c.is_ascii_alphabetic()))
+        .map(str::to_owned)
+        .chain(flagged)
+        .collect();
+    names.sort();
+    names.dedup();
+    names
+}
+
 fn check_parsed(context: &Context, known: &Known, rel_path: &str, nodes: &[Node]) -> Vec<(usize, String, Ctx, Problem)> {
     check_shaped(context, known, rel_path, nodes).into_iter().map(|(line, name, ctx, problem, _)| (line, name, ctx, problem)).collect()
 }
@@ -772,6 +800,27 @@ mod tests {
         let found = check_text(&context, &known, "events/m.txt", text);
         assert_eq!(names(&found), [("bogus_effect", Ctx::Effect, Problem::Unknown)]);
         let _ = std::fs::remove_dir_all(game);
+    }
+
+    #[test]
+    fn an_edit_may_keep_a_name_but_not_add_one() {
+        let (game, context, known) = setup("introduced");
+        let event = |inner: &str| format!("country_event = {{ id = m.1 immediate = {{ {inner} }} }}");
+        let before = event("every_system_colony = { }");
+        // Keeping the name the mod already had is fine.
+        assert_eq!(introduced_names(&context, &known, "events/m.txt", &before, &event("every_system_colony = { } set_flag = x")), Vec::<String>::new());
+        // Fixing it is fine too.
+        assert_eq!(introduced_names(&context, &known, "events/m.txt", &before, &event("set_flag = x")), Vec::<String>::new());
+        // A new unknown name, and a trigger used as an effect, are not.
+        let worse = event("every_system_colony = { } invented_effect = yes has_flag = x");
+        assert_eq!(introduced_names(&context, &known, "events/m.txt", &before, &worse), ["has_flag", "invented_effect"]);
+        let _ = std::fs::remove_dir_all(game);
+    }
+
+    #[test]
+    fn reference_names_come_from_the_error_and_the_findings() {
+        let names = reference_names("Unexpected token: has_job_x, near line: 4 file: common/scripted_effects/m.txt", "common/scripted_effects/m.txt", ["every_system_colony".to_owned(), "has_job_x".to_owned()]);
+        assert_eq!(names, ["every_system_colony", "has_job_x"]);
     }
 
     #[test]

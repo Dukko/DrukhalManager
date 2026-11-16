@@ -385,7 +385,7 @@ impl Window {
             })
             .and_then(|d| d.format("%A %H:%M").ok())
             .map(|s| s.to_string());
-        let roots = {
+        let roots: HashMap<String, PathBuf> = {
             let state = self.state.borrow();
             state
                 .mods
@@ -394,6 +394,8 @@ impl Window {
                 .collect()
         };
         let report = self.error_report();
+        let user_dir = self.paths.user_dir.clone();
+        let mod_roots: Vec<PathBuf> = roots.values().cloned().collect();
         let provider = self.settings.borrow().ready_provider();
         let game_version = self.game.as_ref().and_then(|g| g.version.clone());
         let game = self.game.as_ref().and_then(|g| Some((g.dir.clone(), g.version.clone()?)));
@@ -438,7 +440,7 @@ impl Window {
                     }
                 })
             };
-            let fixer = error_report_dialog::Fixer { game_dir, game_version: version, targets, notes, is_merged, save, saved };
+            let fixer = error_report_dialog::Fixer { game_dir, game_version: version, user_dir, mod_roots, targets, notes, is_merged, save, saved };
             let explainer = error_report_dialog::Explainer { fixer: Some(fixer), ..explainer };
             error_report_dialog::present(&ui.window, &report, log, modified, roots, explainer);
         });
@@ -503,7 +505,8 @@ fn unknown_keywords(report: &error_log::Report, game_dir: &Path, version: &str) 
     found
 }
 
-/// The problems in `report` that are inside a mod's copy of a base-game object.
+/// The problems in `report` that are inside one of a mod's objects: a copy
+/// of a base-game object, or one the mod defines itself.
 /// Reads files, so it runs off the UI thread.
 fn fix_targets(
     report: &error_log::Report,
@@ -533,7 +536,8 @@ fn fix_targets(
             let Ok(bytes) = std::fs::read(root.join(file)) else { continue };
             let text = String::from_utf8_lossy(&bytes);
             let Some((key, mod_text)) = source::object_at(&category, text.trim_start_matches('\u{feff}'), line) else { continue };
-            let Some(game) = source::vanilla(game_dir, &category, &key) else { continue };
+            // None for an object the mod defines itself.
+            let game = source::vanilla(game_dir, &category, &key);
             found.insert(
                 entry.message.clone(),
                 error_report_dialog::Target {
@@ -552,4 +556,45 @@ fn fix_targets(
 
 fn workshop_url(id: u64) -> String {
     format!("https://steamcommunity.com/sharedfiles/filedetails/?id={id}")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn temp(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("drukhal-launch-{}-{name}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn problem(file: &str, line: usize) -> error_log::Entry {
+        error_log::Entry { message: format!("Script error in {file}:{line}"), count: 1, file: Some(file.to_owned()), kind: error_log::Kind::Problem, reason: None }
+    }
+
+    #[test]
+    fn fix_targets_keep_objects_the_base_game_lacks() {
+        let (game, mod_root) = (temp("game"), temp("mod"));
+        std::fs::create_dir_all(game.join("common/scripted_effects")).unwrap();
+        std::fs::write(game.join("common/scripted_effects/base.txt"), "shared_effect = {\n    add_modifier = a\n}\n").unwrap();
+        std::fs::create_dir_all(mod_root.join("common/scripted_effects")).unwrap();
+        std::fs::write(mod_root.join("common/scripted_effects/m.txt"), "shared_effect = {\n    bad_effect = yes\n}\nown_effect = {\n    worse_effect = yes\n}\n").unwrap();
+        let file = "common/scripted_effects/m.txt";
+        let report = error_log::Report {
+            groups: vec![error_log::Group { label: "Mod".into(), mod_id: Some("m".into()), is_patch: false, no_file: false, entries: vec![problem(file, 2), problem(file, 5)] }],
+            lines: 2,
+        };
+        let roots = HashMap::from([("m".to_owned(), mod_root.clone())]);
+        let targets = fix_targets(&report, &roots, &game);
+        let base = &targets[&format!("Script error in {file}:2")];
+        assert_eq!(base.key, "shared_effect");
+        assert!(base.game.is_some());
+        let own = &targets[&format!("Script error in {file}:5")];
+        assert_eq!(own.key, "own_effect");
+        assert!(own.game.is_none());
+        assert!(own.mod_copy.text.contains("worse_effect"));
+        let _ = std::fs::remove_dir_all(game);
+        let _ = std::fs::remove_dir_all(mod_root);
+    }
 }
