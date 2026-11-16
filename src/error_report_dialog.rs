@@ -184,7 +184,7 @@ fn explain(button: &gtk::Button, ctx: &Rc<Context>, message: String, file: Optio
         let result = thinking_view::run(&thinking, None, move |on| {
             // Reading the mod's file happens here, off the UI thread.
             let excerpt = match (&root, &file) {
-                (Some(root), Some(file)) => std::fs::read(root.join(file)).ok().map(|b| {
+                (Some(root), Some(file)) if error_log::is_inside(file) => std::fs::read(root.join(file)).ok().map(|b| {
                     let text = String::from_utf8_lossy(&b);
                     error_log::excerpt(&text, error_log::find_line(&message, file), 15, 6000)
                 }),
