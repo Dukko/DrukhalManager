@@ -18,7 +18,7 @@
 //! folders it ships; tags are too often wrong to go by. The user can put
 //! any mod in another section by hand.
 
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::Path;
 
 use super::Mod;
@@ -180,8 +180,10 @@ pub struct Placement {
 /// `profiles` holds each enabled mod's folders, `overrides` the categories
 /// the user chose, by mod id. `below` maps a mod's index to
 /// the index of the mod it should sit directly below, found from the files
-/// they ship, see `merge::order_check`.
-pub fn plan(mods: &[Mod], enabled: &[usize], profiles: &HashMap<usize, Profile>, overrides: &HashMap<String, Category>, pinned: &dyn Fn(&str) -> bool, below: &HashMap<usize, usize>) -> Vec<Placement> {
+/// they ship, see `merge::order_check`. `by_hand` maps a mod's index to the
+/// index of the mod the user put it directly below; that wins over
+/// everything else.
+pub fn plan(mods: &[Mod], enabled: &[usize], profiles: &HashMap<usize, Profile>, overrides: &HashMap<String, Category>, pinned: &dyn Fn(&str) -> bool, below: &HashMap<usize, usize>, by_hand: &HashMap<usize, usize>) -> Vec<Placement> {
     let by_name: HashMap<String, usize> = enabled.iter().map(|&i| (mods[i].descriptor.name.trim().to_lowercase(), i)).collect();
     let deps_of = |i: usize| -> Vec<usize> {
         let mut deps: Vec<usize> = Vec::new();
@@ -201,6 +203,11 @@ pub fn plan(mods: &[Mod], enabled: &[usize], profiles: &HashMap<usize, Profile>,
     let mut placed: Vec<Placement> = Vec::new();
     for &i in enabled {
         if pinned(&mods[i].id) {
+            continue;
+        }
+        if let Some(&above) = by_hand.get(&i).filter(|&&a| a != i && enabled.contains(&a) && !pinned(&mods[a].id)) {
+            let (category, _) = base[&i].clone();
+            placed.push(Placement { index: i, category, parent: Some(above), reason: tf!("You placed it below {name}", name = format!("“{}”", mods[above].descriptor.name.trim())), chosen: true });
             continue;
         }
         if let Some(&category) = overrides.get(&mods[i].id) {
@@ -299,6 +306,26 @@ pub fn plan(mods: &[Mod], enabled: &[usize], profiles: &HashMap<usize, Profile>,
             by_index.remove(&i).or_else(|| pinned(&mods[i].id).then(|| Placement { index: i, category: Category::Universal, parent: None, reason: t!("The merged patch always loads last"), chosen: false }))
         })
         .collect()
+}
+
+/// Remembers that the user put mod `id` directly below `above` (`None`:
+/// at the top, which forgets it). A placement that would make a loop,
+/// e.g. A below B while B is kept below A, drops the older link in the loop.
+pub fn place_by_hand(placed_below: &mut BTreeMap<String, String>, id: &str, above: Option<&str>) {
+    let Some(above) = above.filter(|&a| a != id) else {
+        placed_below.remove(id);
+        return;
+    };
+    placed_below.insert(id.to_owned(), above.to_owned());
+    let mut at = above.to_owned();
+    for _ in 0..placed_below.len() {
+        let Some(next) = placed_below.get(&at).cloned() else { break };
+        if next == id {
+            placed_below.remove(&at);
+            break;
+        }
+        at = next;
+    }
 }
 
 /// Mods next to each other in the load order that share a category.
@@ -510,7 +537,7 @@ mod tests {
         let profiles: HashMap<usize, Profile> = profiles.into_iter().enumerate().collect();
         let pinned = &|id: &str| id == "mod/drukhalmanager_merged_patch.mod";
         let names = |placed: &[Placement]| placed.iter().map(|p| mods[p.index].descriptor.name.as_str()).collect::<Vec<_>>();
-        let placed = plan(&mods, &enabled, &profiles, &HashMap::new(), pinned, &HashMap::new());
+        let placed = plan(&mods, &enabled, &profiles, &HashMap::new(), pinned, &HashMap::new(), &HashMap::new());
         assert_eq!(names(&placed), [
             "~ Unofficial Fixes",
             "Epic Explosions",
@@ -536,7 +563,7 @@ mod tests {
 
         // A category the user chose wins, and a sub-mod of it follows along.
         let overrides: HashMap<String, Category> = [(mods[1].id.clone(), Category::Galaxy)].into();
-        let placed = plan(&mods, &enabled, &profiles, &overrides, pinned, &HashMap::new());
+        let placed = plan(&mods, &enabled, &profiles, &overrides, pinned, &HashMap::new(), &HashMap::new());
         let at = |name: &str| names(&placed).iter().position(|n| *n == name).unwrap();
         assert_eq!(at("Planetary Diversity"), at("Kleom's Colorful Ships") + 1, "first in Galaxy Generation");
         assert_eq!(at("Planetary Diversity - Exotic Worlds"), at("Planetary Diversity") + 1);
@@ -551,7 +578,7 @@ mod tests {
         let profiles: HashMap<usize, Profile> = HashMap::new();
         let below: HashMap<usize, usize> = [(2, 0)].into();
         let pinned = &|_: &str| false;
-        let placed = plan(&mods, &enabled, &profiles, &HashMap::new(), pinned, &below);
+        let placed = plan(&mods, &enabled, &profiles, &HashMap::new(), pinned, &below, &HashMap::new());
         let order: Vec<usize> = placed.iter().map(|p| p.index).collect();
         let at = |i: usize| order.iter().position(|&x| x == i).unwrap();
         assert_eq!(at(2), at(0) + 1, "directly after the mod it changes");
@@ -559,8 +586,52 @@ mod tests {
 
         // A declared dependency wins over what the files say.
         let mods = vec![m("Aardvark Graphics", &[]), m("Beta Graphics", &[]), m("Zeta Textures", &["Beta Graphics"])];
-        let placed = plan(&mods, &enabled, &profiles, &HashMap::new(), pinned, &below);
+        let placed = plan(&mods, &enabled, &profiles, &HashMap::new(), pinned, &below, &HashMap::new());
         assert_eq!(placed.iter().find(|p| p.index == 2).unwrap().parent, Some(1));
+    }
+
+    #[test]
+    fn keeps_mods_placed_by_hand() {
+        let mods = vec![m("Alpha", &[]), m("Beta", &[]), m("Gamma", &[])];
+        let enabled = vec![0, 1, 2];
+        let profiles: HashMap<usize, Profile> = HashMap::new();
+        let pinned = &|_: &str| false;
+        let by_hand: HashMap<usize, usize> = [(0, 2)].into();
+        let placed = plan(&mods, &enabled, &profiles, &HashMap::new(), pinned, &HashMap::new(), &by_hand);
+        let order: Vec<usize> = placed.iter().map(|p| p.index).collect();
+        let at = |i: usize| order.iter().position(|&x| x == i).unwrap();
+        assert_eq!(at(0), at(2) + 1, "directly after Gamma");
+        assert_eq!(placed.iter().find(|p| p.index == 0).unwrap().parent, Some(2));
+
+        // A section chosen for the mod doesn't beat where it was placed.
+        let overrides: HashMap<String, Category> = [(mods[0].id.clone(), Category::Ui)].into();
+        let placed = plan(&mods, &enabled, &profiles, &overrides, pinned, &HashMap::new(), &by_hand);
+        assert_eq!(placed.iter().find(|p| p.index == 0).unwrap().parent, Some(2));
+
+        // Dependencies still load first.
+        let mods = vec![m("Alpha", &["Beta"]), m("Beta", &[]), m("Gamma", &[])];
+        let placed = plan(&mods, &enabled, &profiles, &HashMap::new(), pinned, &HashMap::new(), &by_hand);
+        let order: Vec<usize> = placed.iter().map(|p| p.index).collect();
+        assert_eq!(placed.iter().find(|p| p.index == 0).unwrap().parent, Some(2));
+        assert!(order.iter().position(|&x| x == 0) > order.iter().position(|&x| x == 1));
+    }
+
+    #[test]
+    fn places_by_hand_without_loops() {
+        let links = |l: &[(&str, &str)]| -> BTreeMap<String, String> { l.iter().map(|&(a, b)| (a.to_owned(), b.to_owned())).collect() };
+        let mut p = BTreeMap::new();
+        place_by_hand(&mut p, "a", Some("b"));
+        assert_eq!(p, links(&[("a", "b")]));
+        place_by_hand(&mut p, "a", None);
+        assert!(p.is_empty());
+
+        let mut p = links(&[("b", "a")]);
+        place_by_hand(&mut p, "a", Some("b"));
+        assert_eq!(p, links(&[("a", "b")]));
+
+        let mut p = links(&[("c", "a"), ("b", "c")]);
+        place_by_hand(&mut p, "a", Some("b"));
+        assert_eq!(p, links(&[("a", "b"), ("b", "c")]));
     }
 
     #[test]

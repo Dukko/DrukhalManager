@@ -232,7 +232,12 @@ impl Window {
             profiles.insert(i, cache[content].clone());
         }
         let overrides = self.settings.borrow().sort_categories.iter().filter_map(|(id, key)| Some((id.clone(), mods::smart_sort::Category::from_key(key)?))).collect();
-        mods::smart_sort::plan(&state.mods, &state.enabled, &profiles, &overrides, &patch::is_patch, &self.below_map(state))
+        mods::smart_sort::plan(&state.mods, &state.enabled, &profiles, &overrides, &patch::is_patch, &self.below_map(state), &self.by_hand_map(state))
+    }
+
+    /// `settings.placed_below` as `state.mods` indexes, for `smart_sort::plan`.
+    pub(super) fn by_hand_map(&self, state: &State) -> HashMap<usize, usize> {
+        by_hand_indexes(&state.mods, &self.settings.borrow().placed_below)
     }
 
     /// Whether the mod changes checksummed files, remembered until the
@@ -331,6 +336,34 @@ impl Window {
             .action_name("win.undo")
             .build();
         self.add_toast(toast);
+    }
+
+    /// Moves the mod at load position `from` in front of the one at
+    /// `before`, as the user did by hand, and remembers it below the mod
+    /// now above it so Smart Sort keeps it there.
+    pub(super) fn move_by_hand(self: &Rc<Self>, from: usize, before: usize) {
+        let weak = Rc::downgrade(self);
+        glib::idle_add_local_once(move || {
+            let Some(ui) = weak.upgrade() else { return };
+            let (id, above) = {
+                let mut state = ui.state.borrow_mut();
+                let Some(&index) = state.enabled.get(from) else { return };
+                let id = state.mods[index].id.clone();
+                let was = state.enabled.clone();
+                state.move_enabled(from, before);
+                if state.enabled == was {
+                    return;
+                }
+                let at = state.enabled.iter().position(|&i| i == index);
+                let above = at.and_then(|at| at.checked_sub(1)).map(|above| state.mods[state.enabled[above]].id.clone());
+                (id, above)
+            };
+            if !patch::is_patch(&id) {
+                mods::smart_sort::place_by_hand(&mut ui.settings.borrow_mut().placed_below, &id, above.as_deref());
+                ui.save_settings("where you placed the mod");
+            }
+            ui.refresh();
+        });
     }
 
     /// Applies a state change after the current signal handler returns, since
@@ -810,7 +843,9 @@ impl Window {
                         // Applying rebuilds the list, which can also end
                         // this field's focus; reset it so that's a no-op.
                         entry.set_text(&(position + 1).to_string());
-                        ui.update(move |state| state.move_to(position, n.saturating_sub(1)));
+                        // The same position `State::move_to` moves it to.
+                        let to = n.saturating_sub(1).min(ui.state.borrow().enabled.len().saturating_sub(1));
+                        ui.move_by_hand(position, if to > position { to + 1 } else { to });
                     }
                     Ok(_) => {}
                     Err(_) => entry.set_text(&(position + 1).to_string()),
@@ -859,7 +894,7 @@ impl Window {
                 };
                 // Dropping on the lower half of a row places the mod after it.
                 let before = position.get() + usize::from(y > f64::from(row.height()) / 2.0);
-                ui.update(move |state| state.move_enabled(from as usize, before));
+                ui.move_by_hand(from as usize, before);
                 true
             }
         ));
@@ -975,6 +1010,13 @@ fn place(list: &gtk::ListBox, rows: &[adw::ActionRow]) {
         list.remove(&extra);
     }
     debug_assert!(rows.iter().enumerate().all(|(i, r)| list.row_at_index(i as i32).as_ref() == Some(r.upcast_ref::<gtk::ListBoxRow>())));
+}
+
+/// `placed_below` (ids) as indexes into `mods`, skipping pairs where either
+/// mod is missing.
+pub(super) fn by_hand_indexes(mods: &[Mod], placed_below: &std::collections::BTreeMap<String, String>) -> HashMap<usize, usize> {
+    let index = |id: &str| mods.iter().position(|m| m.id == id);
+    placed_below.iter().filter_map(|(id, above)| Some((index(id)?, index(above)?))).collect()
 }
 
 #[cfg(test)]

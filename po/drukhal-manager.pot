@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: DrukhalManager 1.0.6\n"
 "Report-Msgid-Bugs-To: https://github.com/Dukko/DrukhalManager/issues\n"
-"POT-Creation-Date: 2026-11-16 04:25+0000\n"
+"POT-Creation-Date: 2026-11-16 10:40+0000\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -1735,97 +1735,101 @@ msgstr ""
 msgid "Universal and global patches, loaded last to override everything."
 msgstr ""
 
-#: src/mods/smart_sort.rs:207
+#: src/mods/smart_sort.rs:210
+msgid "You placed it below {name}"
+msgstr ""
+
+#: src/mods/smart_sort.rs:214
 msgid "Chosen by you"
 msgstr ""
 
-#: src/mods/smart_sort.rs:215
+#: src/mods/smart_sort.rs:222
 msgid "Needs {name}, so it goes directly below it"
 msgstr ""
 
-#: src/mods/smart_sort.rs:217
+#: src/mods/smart_sort.rs:224
 msgid "{name} replaces most of its files, so it goes directly below it"
 msgstr ""
 
-#: src/mods/smart_sort.rs:223
+#: src/mods/smart_sort.rs:230
 msgid "An add-on or patch for UI Overhaul Dynamic"
 msgstr ""
 
-#: src/mods/smart_sort.rs:224
+#: src/mods/smart_sort.rs:231
 msgid "A patch for an interface mod"
 msgstr ""
 
-#: src/mods/smart_sort.rs:226
+#: src/mods/smart_sort.rs:233
 msgid "Its name says it's a patch"
 msgstr ""
 
-#: src/mods/smart_sort.rs:238
+#: src/mods/smart_sort.rs:245
 msgid "Patches {names}"
 msgstr ""
 
-#: src/mods/smart_sort.rs:299
+#: src/mods/smart_sort.rs:306
 msgid "The merged patch always loads last"
 msgstr ""
 
-#: src/mods/smart_sort.rs:394
+#: src/mods/smart_sort.rs:421
 msgid "Its name starts with ~"
 msgstr ""
 
-#: src/mods/smart_sort.rs:397
+#: src/mods/smart_sort.rs:424
 msgid "An unofficial patch"
 msgstr ""
 
-#: src/mods/smart_sort.rs:400
+#: src/mods/smart_sort.rs:427
 msgid "Its name starts with !, which goes towards the bottom"
 msgstr ""
 
-#: src/mods/smart_sort.rs:403
+#: src/mods/smart_sort.rs:430
 msgid "A universal patch"
 msgstr ""
 
-#: src/mods/smart_sort.rs:406
+#: src/mods/smart_sort.rs:433
 msgid "Part of UI Overhaul Dynamic"
 msgstr ""
 
-#: src/mods/smart_sort.rs:414
+#: src/mods/smart_sort.rs:441
 msgid "Its files couldn't be read"
 msgstr ""
 
-#: src/mods/smart_sort.rs:418
+#: src/mods/smart_sort.rs:445
 msgid "Only changes the interface"
 msgstr ""
 
-#: src/mods/smart_sort.rs:421
+#: src/mods/smart_sort.rs:448
 msgid "Changes {count} kind of game object"
 msgid_plural "Changes {count} kinds of game objects"
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/mods/smart_sort.rs:431
+#: src/mods/smart_sort.rs:458
 msgid "Changes ship models"
 msgstr ""
 
-#: src/mods/smart_sort.rs:434 src/mods/smart_sort.rs:447
+#: src/mods/smart_sort.rs:461 src/mods/smart_sort.rs:474
 msgid "Changes how the galaxy is made"
 msgstr ""
 
-#: src/mods/smart_sort.rs:437
+#: src/mods/smart_sort.rs:464
 msgid "Changes portraits, names or text"
 msgstr ""
 
-#: src/mods/smart_sort.rs:439
+#: src/mods/smart_sort.rs:466
 msgid "Only changes sounds"
 msgstr ""
 
-#: src/mods/smart_sort.rs:439
+#: src/mods/smart_sort.rs:466
 msgid "Only changes graphics"
 msgstr ""
 
-#: src/mods/smart_sort.rs:443
+#: src/mods/smart_sort.rs:470
 msgid "Adds species: portraits, names and the like"
 msgstr ""
 
-#: src/mods/smart_sort.rs:451
+#: src/mods/smart_sort.rs:478
 msgid "Changes game rules ({what}…)"
 msgstr ""
 
@@ -2561,7 +2565,7 @@ msgstr ""
 msgid "The merged patch goes back to {contents} from {when}. Its current merges are backed up first, so you can undo this from this list."
 msgstr ""
 
-#: src/window/backups_ui.rs:74 src/window/collections_ui.rs:263 src/window/collections_ui.rs:292 src/window/collections_ui.rs:360 src/window/collections_ui.rs:411 src/window/collections_ui.rs:638 src/window/collections_ui.rs:722 src/window/collections_ui.rs:794 src/window/crash_hunt_ui.rs:59 src/window/ignore_rules_ui.rs:88 src/window/launch.rs:403 src/window/list.rs:423 src/window/repair_ui.rs:89 src/window/saves_ui.rs:86 src/window/freeze_ui.rs:40 src/window/freeze_ui.rs:103
+#: src/window/backups_ui.rs:74 src/window/collections_ui.rs:263 src/window/collections_ui.rs:292 src/window/collections_ui.rs:360 src/window/collections_ui.rs:411 src/window/collections_ui.rs:638 src/window/collections_ui.rs:722 src/window/collections_ui.rs:794 src/window/crash_hunt_ui.rs:59 src/window/ignore_rules_ui.rs:88 src/window/launch.rs:403 src/window/list.rs:456 src/window/repair_ui.rs:89 src/window/saves_ui.rs:86 src/window/freeze_ui.rs:40 src/window/freeze_ui.rs:103
 msgid "_Cancel"
 msgstr ""
 
@@ -2658,7 +2662,7 @@ msgstr ""
 msgid "_Duplicate…"
 msgstr ""
 
-#: src/window/collections_ui.rs:160 src/window/list.rs:737
+#: src/window/collections_ui.rs:160 src/window/list.rs:770
 msgid "_Rename…"
 msgstr ""
 
@@ -2748,11 +2752,11 @@ msgstr ""
 msgid "_Discard"
 msgstr ""
 
-#: src/window/collections_ui.rs:263 src/window/ignore_rules_ui.rs:89 src/window/launch.rs:405 src/window/list.rs:428
+#: src/window/collections_ui.rs:263 src/window/ignore_rules_ui.rs:89 src/window/launch.rs:405 src/window/list.rs:461
 msgid "_Save"
 msgstr ""
 
-#: src/window/collections_ui.rs:282 src/window/list.rs:386 src/window.rs:402
+#: src/window/collections_ui.rs:282 src/window/list.rs:419 src/window.rs:402
 msgid "Name"
 msgstr ""
 
@@ -2780,7 +2784,7 @@ msgstr ""
 msgid "Rename Collection"
 msgstr ""
 
-#: src/window/collections_ui.rs:334 src/window/list.rs:386
+#: src/window/collections_ui.rs:334 src/window/list.rs:419
 msgid "_Rename"
 msgstr ""
 
@@ -3681,11 +3685,11 @@ msgstr ""
 msgid "Click a mod to see what's wrong with it, what it needs and what it overrides."
 msgstr ""
 
-#: src/window/overview.rs:521 src/window/list.rs:928 src/window.rs:1034
+#: src/window/overview.rs:521 src/window/list.rs:963 src/window.rs:1034
 msgid "Workshop"
 msgstr ""
 
-#: src/window/overview.rs:522 src/window/list.rs:929 src/window.rs:1034
+#: src/window/overview.rs:522 src/window/list.rs:964 src/window.rs:1034
 msgid "Local"
 msgstr ""
 
@@ -3697,7 +3701,7 @@ msgstr ""
 msgid "updated {when}"
 msgstr ""
 
-#: src/window/overview.rs:551 src/window/list.rs:419
+#: src/window/overview.rs:551 src/window/list.rs:452
 msgid "Note"
 msgstr ""
 
@@ -3749,7 +3753,7 @@ msgstr ""
 msgid "Open in Steam"
 msgstr ""
 
-#: src/window/overview.rs:731 src/window/list.rs:745
+#: src/window/overview.rs:731 src/window/list.rs:778
 msgid "Open Folder"
 msgstr ""
 
@@ -3949,169 +3953,169 @@ msgstr ""
 msgid "Needs {list}, {status}"
 msgstr ""
 
-#: src/window/list.rs:300
+#: src/window/list.rs:305
 msgid "Enabled {count} mod"
 msgid_plural "Enabled {count} mods"
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/window/list.rs:302
+#: src/window/list.rs:307
 msgid "Disabled {count} mod"
 msgid_plural "Disabled {count} mods"
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/window/list.rs:312
+#: src/window/list.rs:317
 msgid "Sorted mods after their dependencies"
 msgstr ""
 
-#: src/window/list.rs:317
+#: src/window/list.rs:322
 msgid "Already in alphabetical order"
 msgstr ""
 
-#: src/window/list.rs:320
+#: src/window/list.rs:325
 msgid "Sorted mods alphabetically, after their dependencies"
 msgstr ""
 
-#: src/window/list.rs:330 src/window/shortcuts.rs:26
+#: src/window/list.rs:335 src/window/shortcuts.rs:26
 msgid "Undo"
 msgstr ""
 
-#: src/window/list.rs:352
+#: src/window/list.rs:385
 msgid "Loads after {name} once it's installed"
 msgstr ""
 
-#: src/window/list.rs:353
+#: src/window/list.rs:386
 msgid "Loads first once it's installed"
 msgstr ""
 
-#: src/window/list.rs:356
+#: src/window/list.rs:389
 msgid "Not installed, so it's left out of the game's load order"
 msgstr ""
 
-#: src/window/list.rs:358
+#: src/window/list.rs:391
 msgid "Open on the Steam Workshop to subscribe"
 msgstr ""
 
-#: src/window/list.rs:365
+#: src/window/list.rs:398
 msgid "Remove from Collection"
 msgstr ""
 
-#: src/window/list.rs:386
+#: src/window/list.rs:419
 msgid "Rename Mod"
 msgstr ""
 
-#: src/window/list.rs:421
+#: src/window/list.rs:454
 msgid "Edit Note"
 msgstr ""
 
-#: src/window/list.rs:421
+#: src/window/list.rs:454
 msgid "Add Note"
 msgstr ""
 
-#: src/window/list.rs:425 src/window/repair_ui.rs:103
+#: src/window/list.rs:458 src/window/repair_ui.rs:103
 msgid "_Remove"
 msgstr ""
 
-#: src/window/list.rs:573
+#: src/window/list.rs:606
 msgid "Doesn't say it supports this game version"
 msgstr ""
 
-#: src/window/list.rs:573
+#: src/window/list.rs:606
 msgid "The game version it supports"
 msgstr ""
 
-#: src/window/list.rs:582
+#: src/window/list.rs:615
 msgid "{count} conflict; see the Conflicts page (Alt+2)"
 msgid_plural "{count} conflicts; see the Conflicts page (Alt+2)"
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/window/list.rs:593
+#: src/window/list.rs:626
 msgid "Turns off achievements: it changes files the game checksums"
 msgstr ""
 
-#: src/window/list.rs:646
+#: src/window/list.rs:679
 msgid "Always loads last, so its merges and fixes win"
 msgstr ""
 
-#: src/window/list.rs:694
+#: src/window/list.rs:727
 msgid "{count} merge saved by an older version needs checking; see the Conflicts page"
 msgid_plural "{count} merges saved by an older version need checking; see the Conflicts page"
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/window/list.rs:705
+#: src/window/list.rs:738
 msgid "{count} merge or fix is out of date because mods changed; see the Conflicts page"
 msgid_plural "{count} merges or fixes are out of date because mods changed; see the Conflicts page"
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/window/list.rs:723
+#: src/window/list.rs:756
 msgid "Move to _Top"
 msgstr ""
 
-#: src/window/list.rs:724
+#: src/window/list.rs:757
 msgid "Move to _Bottom"
 msgstr ""
 
-#: src/window/list.rs:733
+#: src/window/list.rs:766
 msgid "_Get Required Mods"
 msgstr ""
 
-#: src/window/list.rs:741
+#: src/window/list.rs:774
 msgid "Edit _Note…"
 msgstr ""
 
-#: src/window/list.rs:741
+#: src/window/list.rs:774
 msgid "Add _Note…"
 msgstr ""
 
-#: src/window/list.rs:750
+#: src/window/list.rs:783
 msgid "Show _Conflicts"
 msgstr ""
 
-#: src/window/list.rs:757
+#: src/window/list.rs:790
 msgid "Open in _Steam"
 msgstr ""
 
-#: src/window/list.rs:758
+#: src/window/list.rs:791
 msgid "Open Workshop Page in _Browser"
 msgstr ""
 
-#: src/window/list.rs:759
+#: src/window/list.rs:792
 msgid "Copy _Workshop Link"
 msgstr ""
 
-#: src/window/list.rs:760
+#: src/window/list.rs:793
 msgid "_Unsubscribe in Steam…"
 msgstr ""
 
-#: src/window/list.rs:799
+#: src/window/list.rs:832
 msgid "Load position: type a number to move this mod there"
 msgstr ""
 
-#: src/window/list.rs:876
+#: src/window/list.rs:911
 msgid "Update pending"
 msgstr ""
 
-#: src/window/list.rs:877
+#: src/window/list.rs:912
 msgid "Steam has a newer version it hasn't finished downloading. Let it finish before playing, or the game may load a half-updated mod."
 msgstr ""
 
-#: src/window/list.rs:880
+#: src/window/list.rs:915
 msgid "Downloading"
 msgstr ""
 
-#: src/window/list.rs:880
+#: src/window/list.rs:915
 msgid "Steam hasn't finished downloading this mod"
 msgstr ""
 
-#: src/window/list.rs:882
+#: src/window/list.rs:917
 msgid "Unsubscribed"
 msgstr ""
 
-#: src/window/list.rs:883
+#: src/window/list.rs:918
 msgid "You're no longer subscribed to this mod in Steam. Once Steam removes its files, Repair in the banner above the list can remove it from the list."
 msgstr ""
 
@@ -4553,23 +4557,23 @@ msgstr ""
 msgid "Moved {mods} to the {to}"
 msgstr ""
 
-#: src/window/selection_ui.rs:347
+#: src/window/selection_ui.rs:348
 msgid "Smart Sort will put {count} mod in {category}"
 msgid_plural "Smart Sort will put {count} mods in {category}"
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/window/selection_ui.rs:353
+#: src/window/selection_ui.rs:354
 msgid "Smart Sort will choose where {count} mod goes"
 msgid_plural "Smart Sort will choose where {count} mods go"
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/window/selection_ui.rs:371
+#: src/window/selection_ui.rs:372
 msgid "“{name}” already has them"
 msgstr ""
 
-#: src/window/selection_ui.rs:374
+#: src/window/selection_ui.rs:375
 msgid "Added {count} mod to “{name}”"
 msgid_plural "Added {count} mods to “{name}”"
 msgstr[0] ""
@@ -4612,55 +4616,59 @@ msgstr ""
 msgid "Previous Difference"
 msgstr ""
 
-#: src/window/smart_sort_ui.rs:42
+#: src/window/smart_sort_ui.rs:43
 msgid "Cancel"
 msgstr ""
 
-#: src/window/smart_sort_ui.rs:43
+#: src/window/smart_sort_ui.rs:44
 msgid "Apply"
 msgstr ""
 
-#: src/window/smart_sort_ui.rs:50
+#: src/window/smart_sort_ui.rs:51
 msgid "Reading Mods…"
 msgstr ""
 
-#: src/window/smart_sort_ui.rs:57
+#: src/window/smart_sort_ui.rs:58
 msgid "Smart Sort"
 msgstr ""
 
-#: src/window/smart_sort_ui.rs:83
+#: src/window/smart_sort_ui.rs:85
 msgid "Your load order already follows this order."
 msgstr ""
 
-#: src/window/smart_sort_ui.rs:86
+#: src/window/smart_sort_ui.rs:88
 msgid "Mods are grouped by what they change, the way the Stellaris community's load order guides suggest; {count} mod changes place. Sub-mods go directly below the mod they need, and every mod still loads after its dependencies. If a mod is in the wrong section, choose another for it; it's remembered."
 msgid_plural "Mods are grouped by what they change, the way the Stellaris community's load order guides suggest; {count} mods change place. Sub-mods go directly below the mod they need, and every mod still loads after its dependencies. If a mod is in the wrong section, choose another for it; it's remembered."
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/window/smart_sort_ui.rs:104
+#: src/window/smart_sort_ui.rs:106
 msgid "{category} · {count}"
 msgstr ""
 
-#: src/window/smart_sort_ui.rs:111
+#: src/window/smart_sort_ui.rs:113
 msgid " · was {position}"
 msgstr ""
 
-#: src/window/smart_sort_ui.rs:145
+#: src/window/smart_sort_ui.rs:153
 msgid "Sorted the load order into sections"
 msgstr ""
 
-#: src/window/smart_sort_ui.rs:175
+#: src/window/smart_sort_ui.rs:183
 msgid "Automatic"
 msgstr ""
 
-#: src/window/smart_sort_ui.rs:180
+#: src/window/smart_sort_ui.rs:188
 msgid "Which section this mod goes in"
 msgstr ""
 
 #. Shows the section it's in, while still following the rules.
-#: src/window/smart_sort_ui.rs:185
+#: src/window/smart_sort_ui.rs:193
 msgid "Automatic: {category}"
+msgstr ""
+
+#: src/window/smart_sort_ui.rs:218
+msgid "Forget where you placed it, so Smart Sort decides"
 msgstr ""
 
 #: src/window/dlc_ui.rs:17
