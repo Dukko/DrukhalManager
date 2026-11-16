@@ -135,7 +135,7 @@ impl MergeHooks {
     }
 
     /// Notes that something was saved to the patch.
-    fn saved(&self) {
+    pub(crate) fn saved(&self) {
         (self.patch_saved)();
         self.stale.replace((self.reload_stale)());
     }
@@ -370,20 +370,22 @@ pub fn build(analysis: &Rc<Analysis>, rescan: gtk::Button, hooks: Rc<MergeHooks>
     let top = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(6).margin_top(12).margin_start(12).margin_end(12).margin_bottom(6).build();
     top.append(&summary);
     top.append(&details);
-    if let (false, Some((_, version))) = (analysis.behind.is_empty(), &analysis.behind_versions) {
+    // Objects already updated in the patch no longer need attention.
+    let pending = analysis.behind.iter().filter(|b| !(hooks.is_merged)(&b.category, &b.key)).count();
+    if let (true, Some((_, version))) = (pending > 0, &analysis.behind_versions) {
         let label = gtk::Label::builder()
             .label(tnf!(
                 "{count} object your mods replace changed in Stellaris {version}…",
                 "{count} objects your mods replace changed in Stellaris {version}…",
-                count = analysis.behind.len(),
+                count = pending,
                 version = version
             ))
             .wrap(true)
             .xalign(0.0)
             .build();
         let button = gtk::Button::builder().child(&label).css_classes(["flat"]).halign(gtk::Align::Start).build();
-        let analysis = analysis.clone();
-        button.connect_clicked(move |b| crate::behind_dialog::present(b, analysis.clone()));
+        let (analysis, hooks) = (analysis.clone(), hooks.clone());
+        button.connect_clicked(move |b| crate::behind_dialog::present(b, analysis.clone(), hooks.clone()));
         top.append(&button);
     }
     top.append(&progress);
