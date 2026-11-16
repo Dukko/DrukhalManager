@@ -415,6 +415,52 @@ mod tests {
         let _ = std::fs::remove_dir_all(&cache);
     }
 
+    /// What the check adds to every scan once an older snapshot exists:
+    /// loading both snapshots and comparing them against all Workshop mods.
+    /// `DRUKHAL_GAME=<game folder> DRUKHAL_WORKSHOP=<workshop folder> cargo test --release base_game_check_cost -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn base_game_check_cost() {
+        let (Some(game), Some(workshop)) = (std::env::var_os("DRUKHAL_GAME"), std::env::var_os("DRUKHAL_WORKSHOP")) else {
+            println!("DRUKHAL_GAME or DRUKHAL_WORKSHOP is not set");
+            return;
+        };
+        let now = take(Path::new(&game), "vnow");
+        let mut folders: Vec<PathBuf> = std::fs::read_dir(&workshop).unwrap().flatten().map(|e| e.path()).filter(|p| p.is_dir()).collect();
+        folders.sort();
+        let inputs: Vec<conflicts::ModInput> = folders.iter().map(|f| conflicts::ModInput { root: Some(f.clone()), replace_path: Vec::new() }).collect();
+        let roots: Vec<Option<PathBuf>> = folders.iter().cloned().map(Some).collect();
+        let report = conflicts::analyze(&inputs, None);
+
+        // The older copy differs from the current one only by a comment, like
+        // an update that left most objects alone.
+        let mut old = Snapshot { version: "vold".into(), objects: BTreeMap::new() };
+        for (key, saved) in &now.objects {
+            old.objects.insert(key.clone(), Saved { file: saved.file.clone(), text: format!("{}\n# old", saved.text) });
+        }
+        let cache = temp("check-cost");
+        now.save(&cache).unwrap();
+        old.save(&cache).unwrap();
+        let file = std::fs::File::options().write(true).open(path(&cache, "vold")).unwrap();
+        file.set_modified(std::time::SystemTime::now() - std::time::Duration::from_secs(1000)).unwrap();
+
+        let best = |mut run: Box<dyn FnMut()>| {
+            (0..3)
+                .map(|_| {
+                    let started = std::time::Instant::now();
+                    run();
+                    started.elapsed().as_secs_f64() * 1000.0
+                })
+                .fold(f64::MAX, f64::min)
+        };
+        let load_ms = best(Box::new(|| drop(std::hint::black_box(load(&cache, "vnow")))));
+        let previous_ms = best(Box::new(|| drop(std::hint::black_box(previous(&cache, "vnow")))));
+        let behind_ms = best(Box::new(|| drop(std::hint::black_box(behind_counting(&old, &now, &report.defined, &roots)))));
+        let overlapping = report.defined.keys().filter(|(c, k)| old.get(c, k).is_some()).count();
+        println!("COST load_ms={load_ms:.1} previous_ms={previous_ms:.1} behind_ms={behind_ms:.1} overlapping_keys={overlapping}");
+        let _ = std::fs::remove_dir_all(&cache);
+    }
+
     /// Pretends the real game was updated: an older copy of it differs from
     /// the current one in 5 objects that Workshop mods also define, and only
     /// by comments in every other one. Reads the game and the mods only.
