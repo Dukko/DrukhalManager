@@ -147,9 +147,11 @@ mod tests {
     use super::*;
     use crate::merge::conflicts::{self, ModInput};
 
+    type Files = Vec<(String, String)>;
+
     /// Builds each mod's (path, contents) files in a fresh temp folder, scans
     /// them and returns the relations. `depends` lists (mod, builds on).
-    fn run(tag: &str, mods: &[Vec<(String, String)>], depends: &[(usize, usize)]) -> Vec<Relation> {
+    fn run(tag: &str, mods: &[Files], depends: &[(usize, usize)]) -> Vec<Relation> {
         let root = std::env::temp_dir().join(format!("drukhal-order-{tag}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         let mut inputs = Vec::new();
@@ -180,7 +182,7 @@ mod tests {
     }
 
     /// A small mod whose first `shared` files are also in a big one.
-    fn pair(small_count: usize, shared: usize, small_text: &str, big_text: &str) -> (Vec<(String, String)>, Vec<(String, String)>) {
+    fn pair(small_count: usize, shared: usize, small_text: &str, big_text: &str) -> (Files, Files) {
         let small = files("s", small_count, small_text);
         let mut big = files("b", 10, big_text);
         for (path, _) in small.iter().take(shared) {

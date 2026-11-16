@@ -11,6 +11,7 @@ mod overview;
 mod patches_ui;
 mod list;
 mod notifications;
+mod order_check_ui;
 mod persist;
 mod reload;
 mod repair_ui;
