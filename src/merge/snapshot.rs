@@ -30,6 +30,7 @@ pub const BEFORE_RESTORING: &str = "Before restoring a backup";
 pub const BEFORE_IMPORTING: &str = "Before importing a shared patch";
 pub const BEFORE_DELETING: &str = "Before deleting its collection";
 pub const BEFORE_UPDATING_PICKS: &str = "Before updating picked versions";
+pub const BEFORE_UPDATING_ALL: &str = "Before Update All after a game update";
 
 /// Why a snapshot was taken before Merge All of `category`.
 pub fn before_merge_all(category: &str) -> String {

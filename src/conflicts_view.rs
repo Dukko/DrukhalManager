@@ -161,6 +161,11 @@ pub struct MergeHooks {
     /// The external merge tool's command; empty for none.
     pub merge_tool: Box<dyn Fn() -> String>,
     pub toast: Box<dyn Fn(&str)>,
+    /// How many requests a batch of AI calls may run at once.
+    pub merges_at_once: usize,
+    /// Backs up the merged patch before a batch of changes, for the reason
+    /// given; an error means nothing should be changed.
+    pub backup: Box<dyn Fn(&str) -> Result<(), String>>,
     /// What the page remembers between rebuilds.
     pub session: Rc<RefCell<Session>>,
 }
