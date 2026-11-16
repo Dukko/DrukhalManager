@@ -457,9 +457,13 @@ pub fn learn(game_dir: &Path, docs: &Docs, version: &str) -> Context {
     Context { version: version.to_owned(), anchors, allowed, seen, used }.indexed()
 }
 
+/// Part of the saved context's name. Bump whenever learn() or the Context
+/// layout changes, so a context learned by older rules isn't used.
+const CONTEXT_RULES: u32 = 2;
+
 fn context_path(cache_dir: &Path, version: &str) -> PathBuf {
     let safe: String = version.chars().map(|c| if c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-') { c } else { '_' }).collect();
-    cache_dir.join(format!("script-context-{safe}.json.gz"))
+    cache_dir.join(format!("script-context-r{CONTEXT_RULES}-{safe}.json.gz"))
 }
 
 fn read_context(path: &Path) -> Option<Context> {
@@ -479,6 +483,17 @@ fn save_context(path: &Path, context: &Context) -> std::io::Result<()> {
     crate::platform::rename(tmp, path)
 }
 
+/// Deletes the saved contexts of other versions and rules from `dir`.
+fn remove_other_contexts(dir: &Path, keep: &Path) {
+    let Ok(entries) = std::fs::read_dir(dir) else { return };
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if entry.path() != keep && name.starts_with("script-context-") && name.ends_with(".json.gz") {
+            let _ = std::fs::remove_file(entry.path());
+        }
+    }
+}
+
 /// The saved context of `version`, or one learned and saved now.
 pub fn ensure_context(cache_dir: &Path, game_dir: &Path, docs: &Docs, version: &str) -> Context {
     let path = context_path(cache_dir, version);
@@ -487,7 +502,9 @@ pub fn ensure_context(cache_dir: &Path, game_dir: &Path, docs: &Docs, version: &
     }
     let learned = learn(game_dir, docs, version);
     // Learning again next time is the only cost of a failed save.
-    let _ = save_context(&path, &learned);
+    if save_context(&path, &learned).is_ok() {
+        remove_other_contexts(cache_dir, &path);
+    }
     learned
 }
 
@@ -916,6 +933,25 @@ mod tests {
         let again = ensure_context(&cache, &game, &docs, "4.0");
         assert_eq!(again.anchors, context.anchors);
         assert_eq!(again.allowed, context.allowed);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn a_context_from_older_rules_is_replaced() {
+        let (game, context, _) = setup("rules");
+        let root = temp("rules-cache");
+        let old = root.join("script-context-4.0.json.gz");
+        save_context(&old, &context).unwrap();
+        let unrelated = root.join("other.json.gz");
+        std::fs::write(&unrelated, "x").unwrap();
+        assert!(read_context(&old).is_some());
+        // Not loaded: a fresh one is learned and the old file goes.
+        let docs = docs();
+        ensure_context(&root, &game, &docs, "4.0");
+        assert!(context_path(&root, "4.0").is_file());
+        assert!(!old.exists());
+        assert!(unrelated.exists());
+        let _ = std::fs::remove_dir_all(game);
         let _ = std::fs::remove_dir_all(root);
     }
 
