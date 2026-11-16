@@ -55,6 +55,10 @@ pub struct Context {
     /// block, except the names of top-level objects, plus all of `allowed`.
     #[serde(default)]
     seen: HashSet<String>,
+    /// The documented and scripted effect and trigger names vanilla's own
+    /// files use (see [`collect_used`]).
+    #[serde(default)]
+    used: HashSet<String>,
 }
 
 impl Context {
@@ -87,6 +91,9 @@ pub struct Finding {
     pub problem: Problem,
     /// The object it's in, if found: (category, key)
     pub object: Option<(String, String)>,
+    /// The object is a scripted effect or trigger that nothing in the game
+    /// or the enabled mods calls, so the finding has no effect in game.
+    pub unused: bool,
 }
 
 const LOGIC: [&str; 5] = ["and", "or", "not", "nor", "nand"];
@@ -231,9 +238,14 @@ fn walk_nodes<'a>(anchors: &HashMap<String, Ctx>, known: &Known, nodes: &'a [Nod
 
 /// Visits every keyed node under the top-level blocks of a file.
 fn walk_file(anchors: &HashMap<String, Ctx>, known: &Known, rel: &str, text: &str, f: &mut dyn FnMut(&Visit<'_>)) {
-    let Some((anchor, ctx)) = start(rel) else { return };
     let Ok(nodes) = script::parse_lines(text) else { return };
-    for node in &nodes {
+    walk_parsed(anchors, known, rel, &nodes, f);
+}
+
+/// As [`walk_file`], for a file already parsed.
+fn walk_parsed(anchors: &HashMap<String, Ctx>, known: &Known, rel: &str, nodes: &[Node], f: &mut dyn FnMut(&Visit<'_>)) {
+    let Some((anchor, ctx)) = start(rel) else { return };
+    for node in nodes {
         let (Some(key), Some(kids)) = (node.key.as_deref(), &node.kids) else { continue };
         if key.starts_with('@') {
             continue;
@@ -245,6 +257,14 @@ fn walk_file(anchors: &HashMap<String, Ctx>, known: &Known, rel: &str, text: &st
 /// The script files under `common/` and `events/` of `root`, relative,
 /// sorted.
 fn script_files(root: &Path) -> Vec<String> {
+    let mut files = all_files(root);
+    files.retain(|f| start(f).is_some());
+    files
+}
+
+/// Every `.txt` file under `common/` and `events/` of `root`, relative,
+/// sorted, including the inline script fragments.
+fn all_files(root: &Path) -> Vec<String> {
     let mut files = Vec::new();
     for folder in ["common", "events"] {
         let dir = root.join(folder);
@@ -252,9 +272,43 @@ fn script_files(root: &Path) -> Vec<String> {
             let _ = conflicts::walk(root, &dir, &mut files);
         }
     }
-    files.retain(|f| start(f).is_some());
+    files.retain(|f| f.to_lowercase().ends_with(".txt"));
     files.sort();
     files
+}
+
+fn is_scripted_file(rel: &str) -> bool {
+    let lower = rel.to_lowercase();
+    lower.starts_with("common/scripted_effects/") || lower.starts_with("common/scripted_triggers/")
+}
+
+fn add_used(known: &Known, nodes: &[Node], own: Option<&str>, out: &mut HashSet<String>) {
+    for node in nodes {
+        for word in [node.key.as_deref(), node.value.as_deref()].into_iter().flatten() {
+            if Some(word) != own && (known.effects.contains(word) || known.triggers.contains(word)) && !out.contains(word) {
+                out.insert(word.to_owned());
+            }
+        }
+        if let Some(kids) = &node.kids {
+            add_used(known, kids, own, out);
+        }
+    }
+}
+
+/// Adds the effect and trigger names a file uses to `out`: every key and
+/// every scalar value, which covers `name = yes`, `name = { PARAM = x }`
+/// and `trigger = name`. The definitions of scripted effects and triggers
+/// don't count, and neither does an object's own name inside its body.
+fn collect_used(known: &Known, rel: &str, nodes: &[Node], out: &mut HashSet<String>) {
+    if !is_scripted_file(rel) {
+        add_used(known, nodes, None, out);
+        return;
+    }
+    for node in nodes {
+        if let Some(kids) = &node.kids {
+            add_used(known, kids, node.key.as_deref(), out);
+        }
+    }
 }
 
 fn read_text(path: &Path) -> Option<String> {
@@ -335,25 +389,20 @@ fn collect_keys(nodes: &[Node], out: &mut HashSet<String>) {
 
 /// Every key the game's script files use, in any block, except the names of
 /// top-level objects.
-fn vanilla_keys(game_dir: &Path) -> HashSet<String> {
-    let mut files = Vec::new();
-    for folder in ["common", "events"] {
-        let dir = game_dir.join(folder);
-        if dir.is_dir() {
-            let _ = conflicts::walk(game_dir, &dir, &mut files);
-        }
-    }
+fn vanilla_keys(game_dir: &Path, known: &Known) -> (HashSet<String>, HashSet<String>) {
     let mut keys = HashSet::new();
-    for file in files.iter().filter(|f| f.to_lowercase().ends_with(".txt")) {
+    let mut used = HashSet::new();
+    for file in &all_files(game_dir) {
         let Some(text) = read_text(&game_dir.join(file)) else { continue };
         let Ok(nodes) = script::parse_lines(&text) else { continue };
+        collect_used(known, file, &nodes, &mut used);
         for node in &nodes {
             if let Some(kids) = &node.kids {
                 collect_keys(kids, &mut keys);
             }
         }
     }
-    keys
+    (keys, used)
 }
 
 /// Reads the base game's files and learns where its effects and triggers
@@ -390,7 +439,7 @@ pub fn learn(game_dir: &Path, docs: &Docs, version: &str) -> Context {
         }
         (tallies, allowed)
     };
-    let seen = vanilla_keys(game_dir);
+    let (seen, used) = vanilla_keys(game_dir, &known);
     // The traversal depends on the anchors, so they're learned in two passes.
     let (first, _) = pass(&HashMap::new(), false);
     let first = learn_anchors(&first);
@@ -402,10 +451,10 @@ pub fn learn(game_dir: &Path, docs: &Docs, version: &str) -> Context {
         anchors.entry(anchor).or_insert(ctx);
     }
     if anchors == first {
-        return Context { version: version.to_owned(), anchors, allowed, seen }.indexed();
+        return Context { version: version.to_owned(), anchors, allowed, seen, used }.indexed();
     }
     let (_, allowed) = pass(&anchors, true);
-    Context { version: version.to_owned(), anchors, allowed, seen }.indexed()
+    Context { version: version.to_owned(), anchors, allowed, seen, used }.indexed()
 }
 
 fn context_path(cache_dir: &Path, version: &str) -> PathBuf {
@@ -474,8 +523,13 @@ fn judge(context: &Context, known: &Known, anchor: &str, key: &str, kind: Ctx) -
 /// `rel_path` is relative to the mod's folder. A file that doesn't parse
 /// gives nothing.
 pub fn check_text(context: &Context, known: &Known, rel_path: &str, text: &str) -> Vec<(usize, String, Ctx, Problem)> {
+    let Ok(nodes) = script::parse_lines(text) else { return Vec::new() };
+    check_parsed(context, known, rel_path, &nodes)
+}
+
+fn check_parsed(context: &Context, known: &Known, rel_path: &str, nodes: &[Node]) -> Vec<(usize, String, Ctx, Problem)> {
     let mut found = Vec::new();
-    walk_file(&context.anchors, known, rel_path, text, &mut |v| {
+    walk_parsed(&context.anchors, known, rel_path, nodes, &mut |v| {
         if let Some(kind) = v.ctx
             && let Some(problem) = judge(context, known, v.anchor, v.key, kind)
         {
@@ -489,7 +543,7 @@ pub fn check_text(context: &Context, known: &Known, rel_path: &str, text: &str) 
 /// at the same path is skipped, and so are objects another mod's definition
 /// replaces, since the game never reads those.
 pub fn check_mods(context: &Context, known: &Known, roots: &[Option<PathBuf>], report: &Report) -> Vec<Finding> {
-    let files: Vec<Vec<String>> = roots.iter().map(|root| root.as_deref().map(script_files).unwrap_or_default()).collect();
+    let files: Vec<Vec<String>> = roots.iter().map(|root| root.as_deref().map(all_files).unwrap_or_default()).collect();
     let mut last: HashMap<String, usize> = HashMap::new();
     for (position, files) in files.iter().enumerate() {
         for file in files {
@@ -497,6 +551,8 @@ pub fn check_mods(context: &Context, known: &Known, roots: &[Option<PathBuf>], r
         }
     }
     let mut found = Vec::new();
+    // Each file is parsed once, for the check and for what it calls.
+    let mut used = context.used.clone();
     for (position, (root, files)) in roots.iter().zip(&files).enumerate() {
         let Some(root) = root else { continue };
         for file in files {
@@ -504,7 +560,9 @@ pub fn check_mods(context: &Context, known: &Known, roots: &[Option<PathBuf>], r
                 continue;
             }
             let Some(text) = read_text(&root.join(file)) else { continue };
-            let problems = check_text(context, known, file, &text);
+            let Ok(nodes) = script::parse_lines(&text) else { continue };
+            collect_used(known, file, &nodes, &mut used);
+            let problems = check_parsed(context, known, file, &nodes);
             if problems.is_empty() {
                 continue;
             }
@@ -523,9 +581,15 @@ pub fn check_mods(context: &Context, known: &Known, roots: &[Option<PathBuf>], r
                         continue;
                     }
                 }
-                found.push(Finding { mod_position: position, file: file.clone(), line, name, ctx, problem, object });
+                found.push(Finding { mod_position: position, file: file.clone(), line, name, ctx, problem, object, unused: false });
             }
         }
+    }
+    for finding in &mut found {
+        finding.unused = finding.object.as_ref().is_some_and(|(category, key)| {
+            let scripted = ["common/scripted_effects", "common/scripted_triggers"].iter().any(|folder| category == folder || category.strip_prefix(folder).is_some_and(|rest| rest.starts_with('/')));
+            scripted && !used.contains(key)
+        });
     }
     found.sort_by(|a, b| (a.mod_position, &a.file, a.line).cmp(&(b.mod_position, &b.file, b.line)));
     found
@@ -723,6 +787,59 @@ mod tests {
         let _ = std::fs::remove_dir_all(cache);
     }
 
+    /// The findings in one mod over the fake game, with whether each is unused.
+    fn unused_in(name: &str, files: &[(&str, &str)]) -> Vec<(String, bool)> {
+        let (game, context, _) = setup(name);
+        let root = temp(&format!("{name}-mod"));
+        write(&root, files);
+        let known = known(&docs(), &[&game, &root]);
+        let found = check_mods(&context, &known, &[Some(root.clone())], &Report::default());
+        let _ = std::fs::remove_dir_all(game);
+        let _ = std::fs::remove_dir_all(root);
+        found.into_iter().map(|f| (f.object.map(|(_, key)| key).unwrap_or_default(), f.unused)).collect()
+    }
+
+    #[test]
+    fn findings_in_uncalled_scripted_objects_are_unused() {
+        let dead = ("common/scripted_effects/x.txt", "dead_fx = { every_system_colony = { } }");
+        assert_eq!(unused_in("unused-dead", &[dead]), [("dead_fx".to_owned(), true)]);
+
+        let call = ("events/e.txt", "country_event = { id = e.1 immediate = { dead_fx = yes } }");
+        assert_eq!(unused_in("unused-called", &[dead, call]), [("dead_fx".to_owned(), false)]);
+
+        let trigger = ("common/scripted_triggers/t.txt", "my_trg = { bogus_trigger_word = yes }");
+        let switch = ("events/e.txt", "country_event = { id = e.1 immediate = { switch = { trigger = my_trg a = { } } } }");
+        assert_eq!(unused_in("unused-switch", &[trigger, switch]), [("my_trg".to_owned(), false)]);
+        assert_eq!(unused_in("unused-trigger", &[trigger]), [("my_trg".to_owned(), true)]);
+
+        let own = ("common/scripted_effects/y.txt", "loop_fx = { every_system_colony = { } loop_fx = yes }");
+        assert_eq!(unused_in("unused-self", &[own]), [("loop_fx".to_owned(), true)]);
+
+        // Called by another mod's file, or by a fragment, counts too.
+        let fragment = ("common/inline_scripts/f.txt", "dead_fx = yes");
+        assert_eq!(unused_in("unused-fragment", &[dead, fragment]), [("dead_fx".to_owned(), false)]);
+        // Other objects are never unused.
+        let event = ("events/o.txt", "country_event = { id = o.1 immediate = { every_system_colony = { } } }");
+        assert_eq!(unused_in("unused-event", &[event]), [("o.1".to_owned(), false)]);
+    }
+
+    #[test]
+    fn scripted_names_vanilla_calls_are_used() {
+        let game = game("unused-vanilla");
+        write(&game, &[("common/scripted_effects/v.txt", "vanilla_fx = { set_flag = a }"), ("events/v.txt", "country_event = { id = v.1 immediate = { vanilla_fx = yes } }")]);
+        let docs = docs();
+        let context = learn(&game, &docs, "4.0");
+        assert!(context.used.contains("vanilla_fx"));
+        let root = temp("unused-vanilla-mod");
+        write(&root, &[("common/scripted_effects/v.txt", "vanilla_fx = { every_system_colony = { } }")]);
+        let known = known(&docs, &[&game, &root]);
+        let found = check_mods(&context, &known, &[Some(root.clone())], &Report::default());
+        assert_eq!(found.len(), 1);
+        assert!(!found[0].unused);
+        let _ = std::fs::remove_dir_all(game);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
     #[test]
     fn scripted_names_count_as_known() {
         let (game, context, _) = setup("scripted");
@@ -874,5 +991,20 @@ mod tests {
             println!("{uses:5} {word} ({problem}) e.g. {example}");
         }
         println!("{total} findings, {} distinct names, in {} ms", ranked.len(), started.elapsed().as_millis());
+
+        // The same, split by whether anything calls the object they're in.
+        let timed = std::time::Instant::now();
+        let roots: Vec<Option<PathBuf>> = mods.iter().map(|(_, root)| Some(root.clone())).collect();
+        let found = check_mods(&context, &known, &roots, &Report::default());
+        println!("check_mods took {} ms", timed.elapsed().as_millis());
+        for (position, (name, _)) in mods.iter().enumerate() {
+            let here: Vec<&Finding> = found.iter().filter(|f| f.mod_position == position).collect();
+            if here.is_empty() {
+                continue;
+            }
+            let unused = here.iter().filter(|f| f.unused).count();
+            let unsure = here.iter().filter(|f| !f.unused && f.problem == Problem::Unsure).count();
+            println!("{:5} live, {unused:5} unused, {unsure:5} unsure  {name}", here.len() - unused - unsure);
+        }
     }
 }
