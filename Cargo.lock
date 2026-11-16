@@ -435,7 +435,7 @@ dependencies = [
 
 [[package]]
 name = "drukhal-manager"
-version = "1.0.2"
+version = "1.0.3"
 dependencies = [
  "async-channel",
  "dirs",
