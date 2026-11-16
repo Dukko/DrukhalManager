@@ -36,6 +36,11 @@
     <control>keyboard</control>
   </supports>
   <releases>
+    <release version="1.0.5" date="2026-11-16">
+      <description>
+        <p><em>Bring outdated mod copies up to date with AI.</em> In the list of objects a game update changed under your mods, Update with AI applies the game's changes to the mod's copy and keeps the mod's own changes. You review the result side by side, can edit it, and save it to the merged patch, where it's checked again whenever the game or the mod changes.</p>
+      </description>
+    </release>
     <release version="1.0.4" date="2026-11-16">
       <description>
         <p><em>See what a game update changed under your mods.</em> When a mod replaces a technology, job, event or other object with its own copy and a Stellaris update then changes that object, the mod keeps loading its old copy and the game's change doesn't apply. After an update, a line above the Conflicts list now counts these objects, and each one shows what the game changed side by side.</p>
