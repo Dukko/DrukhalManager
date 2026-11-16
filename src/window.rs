@@ -4,6 +4,7 @@ mod backups_ui;
 mod collections_ui;
 mod conflicts_ui;
 mod crash_hunt_ui;
+mod drag_scroll;
 mod ignore_rules_ui;
 mod game_update_ui;
 mod launch;
@@ -433,7 +434,9 @@ pub fn build(
         .content(&{
             // The bar for several selected mods sits under the list.
             let page = gtk::Box::new(gtk::Orientation::Vertical, 0);
-            page.append(&scrolled_page(&content));
+            let scroller = scrolled_page(&content);
+            drag_scroll::scroll_while_dragging(&scroller);
+            page.append(&scroller);
             page.append(&bulk.revealer);
             page
         })
