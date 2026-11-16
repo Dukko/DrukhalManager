@@ -36,6 +36,12 @@
     <control>keyboard</control>
   </supports>
   <releases>
+    <release version="1.4.1" date="2026-11-16">
+      <description>
+        <p>Mods that only add an advanced authority swap to an existing authority (holding nothing but advanced_authority_swap blocks) are no longer shown as conflicting with each other, or as replacing the base game's authority, since the game adds their swaps instead.</p>
+        <p>The first conflict scan after updating re-reads every mod once.</p>
+      </description>
+    </release>
     <release version="1.4.0" date="2026-11-16">
       <description>
         <p><em>Update All with AI.</em> "Changed by the Game Update" can now bring every pending object up to date in one go. It asks first, with the number of requests and the estimated cost, then runs them without saving anything. You then review each result side by side and choose Save or Skip. The merged patch is backed up before the first save, and anything that failed is listed at the end so you can open it on its own.</p>
