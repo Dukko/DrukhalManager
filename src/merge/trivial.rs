@@ -169,7 +169,7 @@ mod tests {
             std::fs::write(dir.join("common/things/t.txt"), text).unwrap();
         }
         let conflict = |key: &str| ObjectConflict { category: "common/things".into(), key: key.into(), definitions: vec![Definition { mod_position: 0, file: "common/things/t.txt".into() }, Definition { mod_position: 1, file: "common/things/t.txt".into() }] };
-        let report = Report { files: vec![], objects: vec![conflict("x"), conflict("y")], errors: vec![], skipped: vec![] };
+        let report = Report { files: vec![], objects: vec![conflict("x"), conflict("y")], errors: vec![], skipped: vec![], ..Default::default() };
         let simple = simple_conflicts(&report, &[Some(a), Some(b)], &["A".into(), "B".into()], Some(&game));
         assert_eq!(simple.get(&0).map(String::as_str), Some("Only B changed it from the base game"));
         assert!(!simple.contains_key(&1), "both changed y differently");

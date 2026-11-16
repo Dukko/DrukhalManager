@@ -36,6 +36,37 @@ pub struct Report {
     pub errors: Vec<FileError>,
     /// Mods that could not be scanned, by load position, with the reason.
     pub skipped: Vec<(usize, String)>,
+    /// Every object the scan found, conflicting or not, by (category, key),
+    /// with its definitions in load order, for looking objects up.
+    pub defined: BTreeMap<(String, String), Vec<Definition>>,
+}
+
+impl Report {
+    /// Objects whose key contains `query`, ignoring case, exact matches
+    /// first, then by key; at most `limit`.
+    pub fn look_up(&self, query: &str, limit: usize) -> Vec<ObjectConflict> {
+        let query = query.trim().to_lowercase();
+        if query.is_empty() {
+            return Vec::new();
+        }
+        // Localisation keys are stored as `l_english:key`; people type the key.
+        let name = |key: &str| key.split_once(':').map_or(key, |(_, name)| name).to_lowercase();
+        let mut found: Vec<(bool, &(String, String))> = self
+            .defined
+            .keys()
+            .filter_map(|id| {
+                let (whole, part) = (id.1.to_lowercase(), name(&id.1));
+                (whole.contains(&query) || part.contains(&query)).then_some((whole == query || part == query, id))
+            })
+            .collect();
+        // Stable sort keeps the map's (category, key) order within each group.
+        found.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1 .1.cmp(&b.1 .1)));
+        found
+            .into_iter()
+            .take(limit)
+            .map(|(_, id)| ObjectConflict { category: id.0.clone(), key: id.1.clone(), definitions: self.defined[id].clone() })
+            .collect()
+    }
 }
 
 /// The same file shipped by several mods.
@@ -342,13 +373,14 @@ pub fn analyze_cached(mods: &[ModInput], languages: Option<&BTreeSet<String>>, c
         }
     }
 
-    for ((category, key), mut definitions) in objects {
+    for ((category, key), definitions) in &mut objects {
+        definitions.sort_by(|a, b| (a.mod_position, &a.file).cmp(&(b.mod_position, &b.file)));
         let distinct: BTreeSet<usize> = definitions.iter().map(|d| d.mod_position).collect();
         if distinct.len() > 1 {
-            definitions.sort_by(|a, b| (a.mod_position, &a.file).cmp(&(b.mod_position, &b.file)));
-            report.objects.push(ObjectConflict { category, key, definitions });
+            report.objects.push(ObjectConflict { category: category.clone(), key: key.clone(), definitions: definitions.clone() });
         }
     }
+    report.defined = objects;
     report
 }
 
@@ -813,6 +845,35 @@ mod tests {
         let report = analyze(&[input(&root, "a", &[]), input(&root, "b", &[])], None);
         assert!(report.objects.iter().all(|c| c.key != "inline_script"), "{:?}", report.objects);
         assert!(report.objects.is_empty(), "{:?}", report.objects);
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn looks_up_objects_defined_by_one_mod_or_more() {
+        let root = std::env::temp_dir().join(format!("drukhal-lookup-{}", std::process::id()));
+        write(&root.join("a"), &[
+            ("common/buildings/a.txt", "building_lab = {}\nbuilding_only_a = {}"),
+            ("localisation/english/a_l_english.yml", "l_english:\n only_a: \"A\"\n"),
+        ]);
+        write(&root.join("b"), &[("common/buildings/b.txt", "building_lab = {}")]);
+
+        let report = analyze(&[input(&root, "a", &[]), input(&root, "b", &[])], None);
+
+        let one = report.look_up("building_only_a", 10);
+        assert_eq!(one.len(), 1);
+        assert_eq!(one[0].definitions.iter().map(|d| d.mod_position).collect::<Vec<_>>(), [0]);
+        assert!(one[0].winner().is_some());
+        let both = report.look_up("BUILDING", 10);
+        assert_eq!(both.iter().map(|c| c.key.as_str()).collect::<Vec<_>>(), ["building_lab", "building_only_a"]);
+        let exact = report.look_up("building_lab", 10);
+        assert_eq!(exact[0].key, "building_lab");
+        assert_eq!(exact[0].definitions.len(), 2);
+        assert!(report.look_up("only_a", 10).iter().any(|c| c.category == "localisation" && c.key == "l_english:only_a"));
+        assert!(report.look_up("  ", 10).is_empty());
+        assert_eq!(report.look_up("building", 1).len(), 1);
+        assert!(report.objects.iter().any(|c| c.key == "building_lab"));
+        assert!(!report.objects.iter().any(|c| c.key == "building_only_a"));
 
         std::fs::remove_dir_all(root).unwrap();
     }
