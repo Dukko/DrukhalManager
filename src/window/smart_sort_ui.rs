@@ -128,6 +128,15 @@ impl Window {
             }
         }));
 
+        // Held until the dialog closes, so the pickers' weak handles work;
+        // dropping the callback then also frees what it captured.
+        dialog.connect_closed({
+            let render = render.clone();
+            move |_| {
+                render.borrow_mut().take();
+            }
+        });
+
         apply.connect_clicked(glib::clone!(
             #[strong(rename_to = ui)]
             self,

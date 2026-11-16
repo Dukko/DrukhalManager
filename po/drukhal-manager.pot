@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: DrukhalManager 1.0.6\n"
 "Report-Msgid-Bugs-To: https://github.com/Dukko/DrukhalManager/issues\n"
-"POT-Creation-Date: 2026-11-16 10:40+0000\n"
+"POT-Creation-Date: 2026-11-16 10:50+0000\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -4650,24 +4650,24 @@ msgstr ""
 msgid " · was {position}"
 msgstr ""
 
-#: src/window/smart_sort_ui.rs:153
+#: src/window/smart_sort_ui.rs:162
 msgid "Sorted the load order into sections"
 msgstr ""
 
-#: src/window/smart_sort_ui.rs:183
+#: src/window/smart_sort_ui.rs:192
 msgid "Automatic"
 msgstr ""
 
-#: src/window/smart_sort_ui.rs:188
+#: src/window/smart_sort_ui.rs:197
 msgid "Which section this mod goes in"
 msgstr ""
 
 #. Shows the section it's in, while still following the rules.
-#: src/window/smart_sort_ui.rs:193
+#: src/window/smart_sort_ui.rs:202
 msgid "Automatic: {category}"
 msgstr ""
 
-#: src/window/smart_sort_ui.rs:218
+#: src/window/smart_sort_ui.rs:227
 msgid "Forget where you placed it, so Smart Sort decides"
 msgstr ""
 
