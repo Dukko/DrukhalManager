@@ -157,6 +157,10 @@ struct Visit<'a> {
 
 /// The anchor and context of the children of `key`'s block.
 fn child<'a>(anchors: &HashMap<String, Ctx>, known: &Known, anchor: &'a str, ctx: Option<Ctx>, key: &'a str) -> (&'a str, Option<Ctx>) {
+    // The blocks of a `switch`'s cases hold what the switch is used for.
+    if anchor == "switch" {
+        return ("switch_case", ctx);
+    }
     if key == "limit" || is_logic(key) {
         return (anchor, Some(Ctx::Trigger));
     }
@@ -180,6 +184,10 @@ fn child<'a>(anchors: &HashMap<String, Ctx>, known: &Known, anchor: &'a str, ctx
     if ctx == Some(Ctx::Trigger) && matches!(key, "calc_true_if" | "hidden_trigger" | "custom_tooltip") {
         return (anchor, Some(Ctx::Trigger));
     }
+    // Unlike other effects that are also triggers, a switch's cases aren't parameters.
+    if key == "switch" && ctx.is_some() {
+        return (key, ctx);
+    }
     if ctx.is_some() && (known.effects.contains(key) || known.triggers.contains(key)) {
         // Its block holds parameters, which aren't checked.
         return (key, None);
@@ -190,7 +198,11 @@ fn child<'a>(anchors: &HashMap<String, Ctx>, known: &Known, anchor: &'a str, ctx
 fn walk_nodes<'a>(anchors: &HashMap<String, Ctx>, known: &Known, nodes: &'a [Node], anchor: &'a str, ctx: Option<Ctx>, f: &mut dyn FnMut(&Visit<'_>)) {
     for node in nodes {
         let Some(key) = node.key.as_deref() else { continue };
-        f(&Visit { anchor, ctx, key, line: node.line });
+        // The keys of a switch are case labels, which can be any value, and
+        // its `trigger`, which is a parameter.
+        if anchor != "switch" {
+            f(&Visit { anchor, ctx, key, line: node.line });
+        }
         if let Some(kids) = &node.kids {
             let (anchor, ctx) = child(anchors, known, anchor, ctx, key);
             walk_nodes(anchors, known, kids, anchor, ctx, f);
@@ -486,8 +498,8 @@ mod tests {
     fn docs() -> Docs {
         let map = |names: &[&str]| names.iter().map(|n| ((*n).to_owned(), DocEntry { text: format!("{n} - doc"), scopes: None })).collect();
         Docs {
-            effects: map(&["every_owned_planet", "random_owned_planet", "add_modifier", "set_flag", "add_resource", "create_message", "country_event", "random_list"]),
-            triggers: map(&["any_owned_planet", "is_capital", "has_technology", "has_flag", "has_job_type", "is_nomadic", "has_trait"]),
+            effects: map(&["every_owned_planet", "random_owned_planet", "add_modifier", "set_flag", "add_resource", "create_message", "country_event", "random_list", "switch"]),
+            triggers: map(&["any_owned_planet", "is_capital", "has_technology", "has_flag", "has_job_type", "is_nomadic", "has_trait", "switch"]),
             scopes: ["owner", "capital_scope"].iter().map(|s| (*s).to_owned()).collect(),
             modifiers: ["pop_happiness"].iter().map(|s| (*s).to_owned()).collect(),
         }
@@ -585,6 +597,30 @@ mod tests {
         let text = "country_event = { id = r.1 immediate = { random_list = { 50 = { modifier = { factor = 0 } bogus_effect = yes } 50 = { set_flag = c } } } }";
         let found = check_text(&context, &known, "events/m.txt", text);
         assert_eq!(names(&found), [("bogus_effect", Ctx::Effect, Problem::Unknown)]);
+        let _ = std::fs::remove_dir_all(game);
+    }
+
+    #[test]
+    fn switch_cases_are_checked_as_their_context() {
+        let game = game("switch");
+        write(
+            &game,
+            &[
+                ("common/scripted_effects/v.txt", "vanilla_effect = { random_list = { 30 = { modifier = { factor = 2 } set_flag = a } 70 = { set_flag = b } } }"),
+                ("events/v.txt", "country_event = { id = v.1 immediate = { switch = { trigger = has_authority auth_democratic = { add_modifier = { modifier = m } } default = { } } } }"),
+            ],
+        );
+        let docs = docs();
+        let context = learn(&game, &docs, "4.0");
+        let known = known(&docs, &[&game]);
+        let vanilla = std::fs::read_to_string(game.join("events/v.txt")).unwrap();
+        assert_eq!(check_text(&context, &known, "events/v.txt", &vanilla), vec![]);
+
+        let event = |inner: &str| format!("country_event = {{ id = m.1 immediate = {{ switch = {{ trigger = has_authority auth_other = {{ {inner} }} }} }} }}");
+        let found = check_text(&context, &known, "events/m.txt", &event("every_system_colony = { }"));
+        assert_eq!(names(&found), [("every_system_colony", Ctx::Effect, Problem::Unknown)]);
+        let found = check_text(&context, &known, "events/m.txt", &event("random_list = { 50 = { modifier = { factor = 0 } } }"));
+        assert_eq!(found, vec![]);
         let _ = std::fs::remove_dir_all(game);
     }
 
