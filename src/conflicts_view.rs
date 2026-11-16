@@ -13,16 +13,20 @@ mod object;
 use std::any::Any;
 use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
+use std::sync::Arc;
 
 use adw::prelude::*;
 use gtk::{gio, glib};
 
 use crate::diff_view::{self, Pair};
 use crate::merge::ai::Provider;
+use crate::merge::base_game;
 use crate::merge::conflicts::Report;
 use crate::merge::file_merge;
+use crate::merge::script_check;
+use crate::paradox::script_docs::{self, Docs};
 use crate::merge::ignore_rules::Rules;
 use crate::merge::patch::{Merge, Print, Stale};
 
@@ -60,6 +64,40 @@ pub struct Analysis {
     pub behind_versions: Option<(String, String)>,
     /// Mods most of whose files a bigger mod replaces, from this scan.
     pub order: Vec<crate::merge::order_check::Relation>,
+    /// Effects, triggers and scopes mods use that the game doesn't have;
+    /// `None` when the game hasn't written its script documentation.
+    pub script: Option<ScriptCheck>,
+}
+
+/// The result of the Script Check, with what's needed to check a fix. The
+/// tables are shared so a fix can be checked off the UI thread.
+pub struct ScriptCheck {
+    pub findings: Vec<script_check::Finding>,
+    pub context: Arc<script_check::Context>,
+    pub known: Arc<script_check::Known>,
+    pub docs: Arc<Docs>,
+    pub game_dir: PathBuf,
+    /// The documentation is from before the game's last update.
+    pub docs_outdated: bool,
+}
+
+impl ScriptCheck {
+    /// Checks the enabled mods' scripts. `None` if the documentation isn't
+    /// there. Reads many files; call it off the UI thread.
+    pub fn run(user_dir: &Path, game_dir: &Path, exe: &Path, version: &str, roots: &[Option<PathBuf>], report: &Report) -> Option<ScriptCheck> {
+        let docs = script_docs::load(user_dir)?;
+        let context = script_check::ensure_context(&base_game::dir(), game_dir, &docs, version);
+        let mut folders: Vec<&Path> = vec![game_dir];
+        folders.extend(roots.iter().flatten().map(PathBuf::as_path));
+        let known = script_check::known(&docs, &folders);
+        let findings = script_check::check_mods(&context, &known, roots, report);
+        Some(ScriptCheck { findings, context: Arc::new(context), known: Arc::new(known), docs: Arc::new(docs), game_dir: game_dir.to_owned(), docs_outdated: script_docs::older_than(user_dir, exe) })
+    }
+
+    /// How many mods the findings are in.
+    pub fn mods(&self) -> usize {
+        self.findings.iter().map(|f| f.mod_position).collect::<BTreeSet<_>>().len()
+    }
 }
 
 /// What the page needs from the window.

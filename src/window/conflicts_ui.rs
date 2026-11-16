@@ -78,6 +78,8 @@ impl Window {
         let weak = Rc::downgrade(self);
         let game_dir = self.game.as_ref().map(|g| g.dir.clone());
         let game_version = self.game.as_ref().and_then(|g| g.version.clone());
+        let game_exe = self.game.as_ref().map(|g| g.exe.clone());
+        let user_dir = self.paths.user_dir.clone();
         let cache = self.scan_cache.clone();
         let saved = cache.clone();
         let languages = self.settings.borrow().game.languages(&self.paths.user_dir);
@@ -133,7 +135,21 @@ impl Window {
                 let base = base.elapsed();
                 let order = std::time::Instant::now();
                 let order_relations = order_check::relations(&report, &roots, &order_depends);
-                (report, roots, simple, [unpacking, reading, checking, base, order.elapsed()], behind, behind_versions, order_relations)
+                let order = order.elapsed();
+                // Which effects and triggers mods use that the game doesn't have.
+                let script_started = std::time::Instant::now();
+                let script = match (game_dir.as_deref(), game_exe.as_deref(), game_version.as_deref()) {
+                    (Some(game_dir), Some(exe), Some(version)) => {
+                        let script = conflicts_view::ScriptCheck::run(&user_dir, game_dir, exe, version, &roots, &report);
+                        match &script {
+                            Some(script) => crate::diagnostics::log!("scan", "Script Check found {} problems in {} mods", script.findings.len(), script.mods()),
+                            None => crate::diagnostics::log!("scan", "Script Check skipped: the game hasn't written its script documentation yet"),
+                        }
+                        script
+                    }
+                    _ => None,
+                };
+                (report, roots, simple, [unpacking, reading, checking, base, order, script_started.elapsed()], behind, behind_versions, order_relations, script)
             })
             .await;
             // Written after the results show; the next scan waits for it.
@@ -147,16 +163,17 @@ impl Window {
             let Some(ui) = weak.upgrade() else { return };
             ui.scanning.set(false);
             match result {
-                Ok((report, roots, simple, [unpacking, reading, checking, base, order_time], behind, behind_versions, order)) => {
+                Ok((report, roots, simple, [unpacking, reading, checking, base, order_time, script_time], behind, behind_versions, order, script)) => {
                     crate::diagnostics::log!(
                         "scan",
-                        "Scan done in {:.1}s (unpacking {:.1}s, reading files {:.1}s, merge checks {:.1}s, base game {:.1}s, order check {:.1}s): {} file and {} object conflicts, {} files with errors, {} mods skipped, {} objects left behind by a game update, {} mods load above a mod that replaces most of their files",
+                        "Scan done in {:.1}s (unpacking {:.1}s, reading files {:.1}s, merge checks {:.1}s, base game {:.1}s, order check {:.1}s, script check {:.1}s): {} file and {} object conflicts, {} files with errors, {} mods skipped, {} objects left behind by a game update, {} mods load above a mod that replaces most of their files",
                         started.elapsed().as_secs_f32(),
                         unpacking.as_secs_f32(),
                         reading.as_secs_f32(),
                         checking.as_secs_f32(),
                         base.as_secs_f32(),
                         order_time.as_secs_f32(),
+                        script_time.as_secs_f32(),
                         report.files.len(),
                         report.objects.len(),
                         report.errors.len(),
@@ -181,6 +198,7 @@ impl Window {
                         behind,
                         behind_versions,
                         order,
+                        script,
                     })));
                     ui.render_conflicts();
                     // Shows the per-mod counts, and rescans if the load order
