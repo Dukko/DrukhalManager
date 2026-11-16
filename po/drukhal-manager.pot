@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: DrukhalManager 1.2.0\n"
 "Report-Msgid-Bugs-To: https://github.com/Dukko/DrukhalManager/issues\n"
-"POT-Creation-Date: 2026-11-16 16:03+0000\n"
+"POT-Creation-Date: 2026-11-16 16:28+0000\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -65,7 +65,7 @@ msgstr ""
 msgid "Update with AI"
 msgstr ""
 
-#: src/behind_dialog.rs:174 src/conflicts_view/object.rs:437 src/conflicts_view/object.rs:803 src/script_check_dialog.rs:253
+#: src/behind_dialog.rs:174 src/conflicts_view/object.rs:437 src/conflicts_view/object.rs:803 src/script_check_dialog.rs:271
 msgid "Set up an AI provider in Preferences first"
 msgstr ""
 
@@ -77,15 +77,15 @@ msgstr ""
 msgid "Updated Copy"
 msgstr ""
 
-#: src/behind_dialog.rs:221 src/conflicts_view/object.rs:825 src/error_report_dialog.rs:469 src/script_check_dialog.rs:320
+#: src/behind_dialog.rs:221 src/conflicts_view/object.rs:825 src/error_report_dialog.rs:469 src/script_check_dialog.rs:340
 msgid "The model's result still has a problem after a correction: {problem}. Fix it by hand, or undo and try again."
 msgstr ""
 
-#: src/behind_dialog.rs:224 src/error_report_dialog.rs:473 src/script_check_dialog.rs:323
+#: src/behind_dialog.rs:224 src/error_report_dialog.rs:473 src/script_check_dialog.rs:343
 msgid "Discard"
 msgstr ""
 
-#: src/behind_dialog.rs:225 src/error_report_dialog.rs:474 src/script_check_dialog.rs:324
+#: src/behind_dialog.rs:225 src/error_report_dialog.rs:474 src/script_check_dialog.rs:344
 msgid "Save to Merged Patch"
 msgstr ""
 
@@ -991,11 +991,11 @@ msgstr ""
 
 #. Shown once the object is in the patch, including after a save
 #. from the page this row opens.
-#: src/error_report_dialog.rs:180 src/script_check_dialog.rs:108
+#: src/error_report_dialog.rs:180 src/script_check_dialog.rs:124
 msgid "Fixed in the merged patch"
 msgstr ""
 
-#: src/error_report_dialog.rs:182 src/fix_dialog.rs:42 src/script_check_dialog.rs:238
+#: src/error_report_dialog.rs:182 src/fix_dialog.rs:42 src/script_check_dialog.rs:256
 msgid "Fix with AI"
 msgstr ""
 
@@ -1063,7 +1063,7 @@ msgstr ""
 msgid "The request failed unexpectedly"
 msgstr ""
 
-#: src/error_report_dialog.rs:448 src/script_check_dialog.rs:310
+#: src/error_report_dialog.rs:448 src/script_check_dialog.rs:330
 msgid "Fixed Copy"
 msgstr ""
 
@@ -2644,69 +2644,81 @@ msgstr ""
 msgid "The game's script documentation is from before its last update. Start Stellaris once to refresh it, then rescan."
 msgstr ""
 
-#: src/script_check_dialog.rs:82
+#: src/script_check_dialog.rs:87
 msgid "Not used"
 msgstr ""
 
-#: src/script_check_dialog.rs:82
+#: src/script_check_dialog.rs:87
 msgid "Nothing in the game or your enabled mods calls these, so they have no effect. Fixing them is optional."
 msgstr ""
 
-#: src/script_check_dialog.rs:89
+#: src/script_check_dialog.rs:95
+msgid "Probably from another mod"
+msgstr ""
+
+#: src/script_check_dialog.rs:96
+msgid "Names that look like another mod's triggers or effects, and no installed mod defines them. The mod may expect a companion mod you don't have."
+msgstr ""
+
+#: src/script_check_dialog.rs:105
 msgid "Less certain"
 msgstr ""
 
-#: src/script_check_dialog.rs:89
+#: src/script_check_dialog.rs:105
 msgid "Settings this kind of block doesn't take in the base game. They may be fine."
 msgstr ""
 
-#: src/script_check_dialog.rs:98
+#: src/script_check_dialog.rs:114
 msgid "Script Problems"
 msgstr ""
 
-#: src/script_check_dialog.rs:104 src/window/overview.rs:481
+#: src/script_check_dialog.rs:120 src/window/overview.rs:481
 msgid "{count} problem"
 msgid_plural "{count} problems"
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/script_check_dialog.rs:105
+#: src/script_check_dialog.rs:121
 msgid "{category} · {problems}"
 msgstr ""
 
-#: src/script_check_dialog.rs:122
+#: src/script_check_dialog.rs:138
 msgid "Line {line}: {name} isn't an effect this game has"
 msgstr ""
 
-#: src/script_check_dialog.rs:123
+#: src/script_check_dialog.rs:139
 msgid "Line {line}: {name} isn't a trigger this game has"
 msgstr ""
 
-#: src/script_check_dialog.rs:124
+#: src/script_check_dialog.rs:140
 msgid "Line {line}: {name} is a trigger, used where an effect belongs"
 msgstr ""
 
-#: src/script_check_dialog.rs:125
+#: src/script_check_dialog.rs:141
 msgid "Line {line}: {name} is an effect, used where a trigger belongs"
 msgstr ""
 
-#: src/script_check_dialog.rs:126
+#: src/script_check_dialog.rs:142
+msgid "Line {line}: {name} looks like it comes from another mod, and no installed mod defines it"
+msgstr ""
+
+#: src/script_check_dialog.rs:143
 msgid "Line {line}: {name} isn't a setting this kind of block takes in the base game"
 msgstr ""
 
-#: src/script_check_dialog.rs:127
+#: src/script_check_dialog.rs:144
 msgid "Line {line}: {name} has the wrong capitalisation"
 msgstr ""
 
-#: src/script_check_dialog.rs:226
+#: src/script_check_dialog.rs:244
 msgid "The mod's copy couldn't be read, so it can't be fixed here."
 msgstr ""
 
-#: src/script_check_dialog.rs:295
+#: src/script_check_dialog.rs:315
 msgid "The fix failed unexpectedly"
 msgstr ""
 
-#: src/script_check_dialog.rs:365
+#: src/script_check_dialog.rs:385
 msgid "Saved the fixed {key} to the merged patch"
 msgstr ""
 

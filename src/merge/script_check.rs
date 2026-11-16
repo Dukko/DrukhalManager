@@ -41,6 +41,9 @@ pub enum Problem {
     /// Unknown here, but vanilla uses the name as a plain setting in some
     /// other block, so it may be fine.
     Unsure,
+    /// Unknown, and every use looks like a call of another mod's scripted
+    /// trigger or effect that no installed mod defines.
+    Elsewhere,
 }
 
 /// What vanilla teaches: which blocks hold effects or triggers, and which
@@ -94,6 +97,9 @@ pub struct Finding {
     /// The object is a scripted effect or trigger that nothing in the game
     /// or the enabled mods calls, so the finding has no effect in game.
     pub unused: bool,
+    /// The use is shaped like a call of a scripted effect or trigger: `yes`,
+    /// `no`, or a block of UPPERCASE parameters.
+    pub call: bool,
 }
 
 const LOGIC: [&str; 5] = ["and", "or", "not", "nor", "nand"];
@@ -175,6 +181,17 @@ struct Visit<'a> {
     ctx: Option<Ctx>,
     key: &'a str,
     line: usize,
+    node: &'a Node,
+}
+
+/// Whether a use is shaped like a call of a scripted effect or trigger.
+fn is_call(node: &Node) -> bool {
+    let parameter = |k: &str| k.chars().any(|c| c.is_ascii_alphabetic()) && k.chars().all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_');
+    match (&node.value, &node.kids) {
+        (Some(value), None) => value == "yes" || value == "no",
+        (None, Some(kids)) => !kids.is_empty() && kids.iter().all(|k| k.key.as_deref().is_some_and(parameter)),
+        _ => false,
+    }
 }
 
 /// The anchor and context of the children of `key`'s block.
@@ -223,7 +240,7 @@ fn walk_nodes<'a>(anchors: &HashMap<String, Ctx>, known: &Known, nodes: &'a [Nod
         // The keys of a switch are case labels, which can be any value, and
         // its `trigger`, which is a parameter.
         if anchor != "switch" {
-            f(&Visit { anchor, ctx, key, line: node.line });
+            f(&Visit { anchor, ctx, key, line: node.line, node });
         }
         // The arguments of an inline script belong to that script.
         if key == "inline_script" {
@@ -545,12 +562,17 @@ pub fn check_text(context: &Context, known: &Known, rel_path: &str, text: &str) 
 }
 
 fn check_parsed(context: &Context, known: &Known, rel_path: &str, nodes: &[Node]) -> Vec<(usize, String, Ctx, Problem)> {
+    check_shaped(context, known, rel_path, nodes).into_iter().map(|(line, name, ctx, problem, _)| (line, name, ctx, problem)).collect()
+}
+
+/// As [`check_parsed`], also saying whether each use is shaped like a call.
+fn check_shaped(context: &Context, known: &Known, rel_path: &str, nodes: &[Node]) -> Vec<(usize, String, Ctx, Problem, bool)> {
     let mut found = Vec::new();
     walk_parsed(&context.anchors, known, rel_path, nodes, &mut |v| {
         if let Some(kind) = v.ctx
             && let Some(problem) = judge(context, known, v.anchor, v.key, kind)
         {
-            found.push((v.line, v.key.to_owned(), kind, problem));
+            found.push((v.line, v.key.to_owned(), kind, problem, is_call(v.node)));
         }
     });
     found
@@ -579,13 +601,13 @@ pub fn check_mods(context: &Context, known: &Known, roots: &[Option<PathBuf>], r
             let Some(text) = read_text(&root.join(file)) else { continue };
             let Ok(nodes) = script::parse_lines(&text) else { continue };
             collect_used(known, file, &nodes, &mut used);
-            let problems = check_parsed(context, known, file, &nodes);
+            let problems = check_shaped(context, known, file, &nodes);
             if problems.is_empty() {
                 continue;
             }
             let category = file_merge::category(file);
             let mut objects: HashMap<usize, Option<(String, String)>> = HashMap::new();
-            for (line, name, ctx, problem) in problems {
+            for (line, name, ctx, problem, call) in problems {
                 let object = objects.entry(line).or_insert_with(|| source::object_at(&category, &text, line).map(|(key, _)| (category.clone(), key))).clone();
                 if let Some((category, key)) = &object
                     && let Some(definitions) = report.defined.get(&(category.clone(), key.clone()))
@@ -598,8 +620,20 @@ pub fn check_mods(context: &Context, known: &Known, roots: &[Option<PathBuf>], r
                         continue;
                     }
                 }
-                found.push(Finding { mod_position: position, file: file.clone(), line, name, ctx, problem, object, unused: false });
+                found.push(Finding { mod_position: position, file: file.clone(), line, name, ctx, problem, object, unused: false, call });
             }
+        }
+    }
+    // A name only ever used like a call, that nothing defines, probably
+    // comes from a mod that isn't installed.
+    let mut calls: HashMap<String, bool> = HashMap::new();
+    for finding in &found {
+        let all = calls.entry(finding.name.clone()).or_insert(true);
+        *all &= finding.problem == Problem::Unknown && finding.call;
+    }
+    for finding in &mut found {
+        if finding.problem == Problem::Unknown && calls[&finding.name] {
+            finding.problem = Problem::Elsewhere;
         }
     }
     for finding in &mut found {
@@ -804,6 +838,18 @@ mod tests {
         let _ = std::fs::remove_dir_all(cache);
     }
 
+    /// The findings in one mod over the fake game.
+    fn unused_findings(name: &str, files: &[(&str, &str)]) -> Vec<Finding> {
+        let (game, context, _) = setup(name);
+        let root = temp(&format!("{name}-mod"));
+        write(&root, files);
+        let known = known(&docs(), &[&game, &root]);
+        let found = check_mods(&context, &known, &[Some(root.clone())], &Report::default());
+        let _ = std::fs::remove_dir_all(game);
+        let _ = std::fs::remove_dir_all(root);
+        found
+    }
+
     /// The findings in one mod over the fake game, with whether each is unused.
     fn unused_in(name: &str, files: &[(&str, &str)]) -> Vec<(String, bool)> {
         let (game, context, _) = setup(name);
@@ -855,6 +901,22 @@ mod tests {
         assert!(!found[0].unused);
         let _ = std::fs::remove_dir_all(game);
         let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn call_shaped_names_nothing_defines_are_elsewhere() {
+        let call = |a: &str, b: &str| format!("country_event = {{ id = c.1 immediate = {{ {a} }} }}\ncountry_event = {{ id = c.2 immediate = {{ {b} }} }}");
+        let problems = |name: &str, text: String| {
+            let found = unused_findings(name, &[("events/c.txt", &text)]);
+            found.into_iter().map(|f| (f.name, f.problem)).collect::<Vec<_>>()
+        };
+        let elsewhere = |n: &str| (n.to_owned(), Problem::Elsewhere);
+        let unknown = |n: &str| (n.to_owned(), Problem::Unknown);
+        assert_eq!(problems("else-yes", call("foo_trg = yes", "foo_trg = no")), [elsewhere("foo_trg"), elsewhere("foo_trg")]);
+        assert_eq!(problems("else-mixed", call("foo_trg = yes", "foo_trg = miner")), [unknown("foo_trg"), unknown("foo_trg")]);
+        assert_eq!(problems("else-block", call("fx = { PARAM = 1 OTHER_2 = x }", "set_flag = a")), [elsewhere("fx")]);
+        assert_eq!(problems("else-iterator", call("every_system_colony = { limit = { } }", "set_flag = a")), [unknown("every_system_colony")]);
+        assert_eq!(problems("else-empty", call("fx = { }", "set_flag = a")), [unknown("fx")]);
     }
 
     #[test]
@@ -1040,7 +1102,15 @@ mod tests {
             }
             let unused = here.iter().filter(|f| f.unused).count();
             let unsure = here.iter().filter(|f| !f.unused && f.problem == Problem::Unsure).count();
-            println!("{:5} live, {unused:5} unused, {unsure:5} unsure  {name}", here.len() - unused - unsure);
+            let elsewhere = here.iter().filter(|f| !f.unused && f.problem == Problem::Elsewhere).count();
+            println!("{:5} live, {unused:5} unused, {unsure:5} unsure, {elsewhere:5} elsewhere  {name}", here.len() - unused - unsure - elsewhere);
+        }
+        let mut elsewhere: BTreeMap<&str, usize> = BTreeMap::new();
+        for finding in found.iter().filter(|f| f.problem == Problem::Elsewhere) {
+            *elsewhere.entry(finding.name.as_str()).or_default() += 1;
+        }
+        for (name, uses) in &elsewhere {
+            println!("ELSEWHERE {uses:5} {name}");
         }
     }
 }
