@@ -6,9 +6,9 @@
 #, fuzzy
 msgid ""
 msgstr ""
-"Project-Id-Version: DrukhalManager 1.3.0\n"
+"Project-Id-Version: DrukhalManager 1.4.0\n"
 "Report-Msgid-Bugs-To: https://github.com/Dukko/DrukhalManager/issues\n"
-"POT-Creation-Date: 2026-11-16 17:15+0000\n"
+"POT-Creation-Date: 2026-11-16 17:43+0000\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -2829,11 +2829,11 @@ msgid "No Backups Yet"
 msgstr ""
 
 #: src/window/backups_ui.rs:35
-msgid "The merged patch is backed up before each Merge All, and before merges are removed from it."
+msgid "The merged patch is backed up before each Merge All or Update All, and before merges are removed from it."
 msgstr ""
 
 #: src/window/backups_ui.rs:43
-msgid "The merged patch is backed up before each Merge All, and before merges are removed from it. Restoring one replaces the patch's merges with the ones it holds; the patch as it is now is backed up first. The last {kept} are kept."
+msgid "The merged patch is backed up before each Merge All or Update All, and before merges are removed from it. Restoring one replaces the patch's merges with the ones it holds; the patch as it is now is backed up first. The last {kept} are kept."
 msgstr ""
 
 #: src/window/backups_ui.rs:49
