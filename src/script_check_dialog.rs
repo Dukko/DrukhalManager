@@ -64,26 +64,26 @@ pub fn present(parent: &impl IsA<gtk::Widget>, analysis: Rc<Analysis>, hooks: Rc
     let mut positions: Vec<usize> = objects.values().map(|o| o.position).chain(loose.keys().copied()).chain(less.keys().copied()).collect();
     positions.sort_unstable();
     positions.dedup();
+    // Objects nothing calls have no effect in game, so they come last.
+    let unused = |o: &Object| o.findings.iter().all(|f| f.unused);
+    let live = |position: usize| loose.contains_key(&position) || objects.values().any(|o| o.position == position && !unused(o));
+    positions.sort_by_key(|&position| !live(position));
     for position in positions {
         let group = adw::PreferencesGroup::builder().title(glib_escape(analysis.name(position))).build();
-        for object in objects.values().filter(|o| o.position == position) {
-            let problems = tnf!("{count} problem", "{count} problems", count = object.findings.len());
-            let row = adw::ActionRow::builder().title(&object.key).subtitle(tf!("{category} · {problems}", category = &object.category, problems = problems)).use_markup(false).activatable(true).build();
-            // Shown once the object is in the patch, including after a save
-            // from the page this row opens.
-            let fixed = gtk::Label::builder().label(t!("Fixed in the merged patch")).css_classes(["success"]).visible((hooks.is_merged)(&object.category, &object.key)).build();
-            row.add_suffix(&fixed);
-            row.add_suffix(&gtk::Image::from_icon_name("go-next-symbolic"));
-            let (navigation, analysis, hooks, object) = (navigation.clone(), analysis.clone(), hooks.clone(), object.clone());
-            row.connect_activated(move |_| {
-                let fixed = fixed.clone();
-                navigation.push(&detail(&analysis, &hooks, &navigation, &object, Rc::new(move || fixed.set_visible(true))));
-            });
-            group.add(&row);
+        for object in objects.values().filter(|o| o.position == position && !unused(o)) {
+            group.add(&object_row(&navigation, &analysis, &hooks, object));
         }
         for finding in loose.get(&position).into_iter().flatten() {
             let row = adw::ActionRow::builder().title(format!("{}:{}", finding.file, finding.line)).subtitle(describe(finding)).use_markup(false).build();
             group.add(&row);
+        }
+        let dead: Vec<&Object> = objects.values().filter(|o| o.position == position && unused(o)).collect();
+        if !dead.is_empty() {
+            let expander = adw::ExpanderRow::builder().title(t!("Not used")).subtitle(t!("Nothing in the game or your enabled mods calls these, so they have no effect. Fixing them is optional.")).use_markup(false).build();
+            for object in dead {
+                expander.add_row(&object_row(&navigation, &analysis, &hooks, object));
+            }
+            group.add(&expander);
         }
         if let Some(findings) = less.get(&position) {
             let expander = adw::ExpanderRow::builder().title(t!("Less certain")).subtitle(t!("Settings this kind of block doesn't take in the base game. They may be fine.")).use_markup(false).build();
@@ -97,6 +97,23 @@ pub fn present(parent: &impl IsA<gtk::Widget>, analysis: Rc<Analysis>, hooks: Rc
 
     navigation.add(&wrap(&t!("Script Problems"), None, &page));
     adw::Dialog::builder().content_width(900).content_height(720).child(&navigation).build().present(Some(parent));
+}
+
+/// A row that opens the page for fixing one object.
+fn object_row(navigation: &adw::NavigationView, analysis: &Rc<Analysis>, hooks: &Rc<MergeHooks>, object: &Object) -> adw::ActionRow {
+    let problems = tnf!("{count} problem", "{count} problems", count = object.findings.len());
+    let row = adw::ActionRow::builder().title(&object.key).subtitle(tf!("{category} · {problems}", category = &object.category, problems = problems)).use_markup(false).activatable(true).build();
+    // Shown once the object is in the patch, including after a save
+    // from the page this row opens.
+    let fixed = gtk::Label::builder().label(t!("Fixed in the merged patch")).css_classes(["success"]).visible((hooks.is_merged)(&object.category, &object.key)).build();
+    row.add_suffix(&fixed);
+    row.add_suffix(&gtk::Image::from_icon_name("go-next-symbolic"));
+    let (navigation, analysis, hooks, object) = (navigation.clone(), analysis.clone(), hooks.clone(), object.clone());
+    row.connect_activated(move |_| {
+        let fixed = fixed.clone();
+        navigation.push(&detail(&analysis, &hooks, &navigation, &object, Rc::new(move || fixed.set_visible(true))));
+    });
+    row
 }
 
 /// What a finding says, for the player.
