@@ -430,7 +430,7 @@ pub fn build(analysis: &Rc<Analysis>, rescan: gtk::Button, hooks: Rc<MergeHooks>
     }
     // Names mods use that the game doesn't have, unless the patch already holds a fix.
     if let Some(script) = &analysis.script {
-        let pending: Vec<&script_check::Finding> = script.findings.iter().filter(|f| f.problem != script_check::Problem::Unsure && !f.object.as_ref().is_some_and(|(category, key)| (hooks.is_merged)(category, key))).collect();
+        let pending: Vec<&script_check::Finding> = script.findings.iter().filter(|f| f.problem != script_check::Problem::Unsure && !f.unused && !f.object.as_ref().is_some_and(|(category, key)| (hooks.is_merged)(category, key))).collect();
         if !pending.is_empty() {
             let mods = pending.iter().map(|f| f.mod_position).collect::<BTreeSet<_>>().len();
             let label = gtk::Label::builder()
