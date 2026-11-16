@@ -14,5 +14,6 @@ pub mod patch;
 pub mod snapshot;
 pub mod source;
 pub mod scan_cache;
+pub mod script_check;
 pub mod trivial;
 pub mod vocabulary;
