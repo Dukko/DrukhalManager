@@ -23,6 +23,7 @@ It does the usual mod manager things (load orders, collections, Paradox Launcher
 * Shows every file and object that more than one mod changes, side by side, and tells you which version the game ends up using and why.
 * Merges two conflicting versions with Claude or any OpenAI-compatible model, using the base game's version as a reference, and saves the result to a patch mod that loads last. Your mods are never touched.
 * Merges the easy ones without AI: if only one mod actually changed something, let's not burn computing power for no reason.
+* Checks your mods' scripts against the game's own documentation and finds effects and triggers the current game no longer has, which it otherwise skips without a word. Fix with AI rewrites them for you to review.
 * Sorts your load order the way the community guides suggest, with sub-mods under the mod they belong to.
 * Remembers which mods each campaign was played with, and can freeze a collection so a Workshop update doesn't break a game in progress (like Irony's collection merge, but faster).
 
