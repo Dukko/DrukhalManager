@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 use super::source::Source;
+use crate::paradox::game_changes::{NOTES, notes};
 
 /// The Claude model merges use unless another is chosen in Preferences.
 pub const CLAUDE_MODEL: &str = "claude-opus-5-5";
@@ -439,32 +440,6 @@ Output rules:
 - For an event, output exactly one event block, without a `namespace` line.
 - `notes` is a short plain-text summary for the player, for example \"Replaced every_system_colony with the planet and ship loops; removed one has_job check that has no replacement.\" No markdown.
 - Reply with a JSON object with exactly the string fields `script` and `notes`.";
-
-const NOTES: &str = include_str!("ai_notes.md");
-
-/// One entry of the shipped notes on game changes.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct Note {
-    pub old: String,
-    /// The names that replace `old`; empty when it was removed.
-    pub new: Vec<String>,
-}
-
-/// The shipped notes, parsed.
-pub(crate) fn notes() -> Vec<Note> {
-    let ticked = |s: &str| -> Vec<String> { s.split('`').skip(1).step_by(2).map(str::to_owned).collect() };
-    NOTES
-        .lines()
-        .map(str::trim)
-        .filter(|l| l.starts_with("- "))
-        .filter_map(|line| {
-            let (old, rest) = line.split_once('→')?;
-            let old = ticked(old).into_iter().next()?;
-            let new = ticked(rest.split(':').next().unwrap_or(rest));
-            Some(Note { old, new })
-        })
-        .collect()
-}
 
 /// Whether the shipped notes already mention `keyword` as a changed name.
 pub fn has_note(keyword: &str) -> bool {
