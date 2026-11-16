@@ -636,6 +636,7 @@ mod tests {
         let (mut shipping, mut calling) = (0, 0);
         let (mut scalar, mut block, mut unresolved, mut nested, mut with_conditionals, mut parse_failures, mut calls) = (0, 0, 0, 0, 0, 0, 0);
         let mut bogus = 0;
+        let mut event_calls = 0;
         let (mut source_parse_failures, mut source_failure_examples) = (0, Vec::new());
         let mut failure_examples = Vec::new();
         let mut unresolved_examples = Vec::new();
@@ -653,7 +654,7 @@ mod tests {
                         normal.entry((category.clone(), key)).or_default().insert(m);
                     }
                 }
-                if category == "localisation" || category == "events" {
+                if category == "localisation" {
                     continue;
                 }
                 let entries = match script::parse(&src) {
@@ -668,11 +669,15 @@ mod tests {
                     }
                 };
                 let top_calls: Vec<&Value> = entries.values("inline_script").collect();
-                if top_calls.len() == 1 {
+                // Event files never produced the bogus key (events are keyed by id).
+                if top_calls.len() == 1 && category != "events" {
                     bogus += 1;
                 }
                 for call in top_calls {
                     calls += 1;
+                    if category == "events" {
+                        event_calls += 1;
+                    }
                     mod_calls += 1;
                     let (name, params) = match call {
                         Value::Scalar(name) => {
@@ -713,8 +718,18 @@ mod tests {
                     }
                     match script::parse(&text) {
                         Ok(parsed) => {
-                            let (keys, n) = top_keys(&parsed);
+                            let (mut keys, n) = top_keys(&parsed);
                             nested += n;
+                            if category == "events" {
+                                // As `object_keys` keys events: by the `id` in each top-level block.
+                                keys = parsed
+                                    .iter()
+                                    .filter_map(|e| match e {
+                                        Entry::Assign { key, value, .. } if !key.eq_ignore_ascii_case("namespace") && !key.starts_with('@') => value.as_block()?.scalar("id").map(str::to_owned),
+                                        _ => None,
+                                    })
+                                    .collect();
+                            }
                             for key in keys {
                                 expanded.entry((category.clone(), key)).or_default().insert(m);
                             }
@@ -733,20 +748,27 @@ mod tests {
             }
         }
 
-        let from_expansions = expanded.keys().filter(|k| !normal.contains_key(*k)).count();
-        let mut new_conflicts = Vec::new();
-        let mut gaining = 0;
-        for (key, via) in &expanded {
-            let direct = normal.get(key).cloned().unwrap_or_default();
-            let all: BTreeSet<usize> = direct.union(via).copied().collect();
-            if direct.len() >= 2 {
-                if !via.is_subset(&direct) {
-                    gaining += 1;
+        // (objects only from expansions, new conflicts, conflicts gaining a mod) over
+        // the categories `wanted` accepts.
+        let stats = |wanted: &dyn Fn(&str) -> bool| {
+            let from_expansions = expanded.keys().filter(|k| wanted(&k.0) && !normal.contains_key(*k)).count();
+            let mut new_conflicts = Vec::new();
+            let mut gaining = 0;
+            for (key, via) in expanded.iter().filter(|(k, _)| wanted(&k.0)) {
+                let direct = normal.get(key).cloned().unwrap_or_default();
+                let all: BTreeSet<usize> = direct.union(via).copied().collect();
+                if direct.len() >= 2 {
+                    if !via.is_subset(&direct) {
+                        gaining += 1;
+                    }
+                } else if all.len() >= 2 {
+                    new_conflicts.push((key, all));
                 }
-            } else if all.len() >= 2 {
-                new_conflicts.push((key, all));
             }
-        }
+            (from_expansions, new_conflicts, gaining)
+        };
+        let (from_expansions, new_conflicts, gaining) = stats(&|_| true);
+        let (event_objects, event_new, event_gaining) = stats(&|c| c == "events");
         let mut categories = BTreeMap::<&str, usize>::new();
         for (category, _) in expanded.keys().filter(|k| !normal.contains_key(*k)) {
             *categories.entry(category).or_default() += 1;
@@ -757,6 +779,7 @@ mod tests {
         println!("SURVEY mods={} mods_shipping_inline_scripts={shipping} mods_calling_inline_scripts={calling}", mods.len());
         println!("SURVEY calls={calls} scalar={scalar} block={block} unresolved={unresolved} nested={nested} with_conditionals={with_conditionals} parse_failures={parse_failures}");
         println!("SURVEY objects_from_expansions={from_expansions} new_conflicts={} conflicts_gaining_a_mod={gaining}", new_conflicts.len());
+        println!("SURVEY events calls={event_calls} objects_from_expansions={event_objects} new_conflicts={} conflicts_gaining_a_mod={event_gaining}", event_new.len());
         println!("SURVEY bogus_inline_script_objects_before_fix={bogus}");
         for ((category, key), all) in new_conflicts.iter().take(15) {
             let ids: Vec<&str> = all.iter().map(|&m| mods[m].0.as_str()).collect();
