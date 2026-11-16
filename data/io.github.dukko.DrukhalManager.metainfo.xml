@@ -36,6 +36,12 @@
     <control>keyboard</control>
   </supports>
   <releases>
+    <release version="1.0.7" date="2026-11-16">
+      <description>
+        <p><em>Smart Sort keeps mods where you put them.</em> When you drag a mod or type a new position for it, Smart Sort now keeps it directly below the mod above it, and its preview says so. Choosing a section for the mod, or the Forget button in the Smart Sort preview, hands the decision back to Smart Sort.</p>
+        <p>In the Smart Sort preview, choosing a section for a mod now moves it right away, and Apply uses exactly the order shown.</p>
+      </description>
+    </release>
     <release version="1.0.6" date="2026-11-16">
       <description>
         <p><em>Spot mods whose changes load order throws away.</em> When two mods ship the same file, the game uses the copy from the one that loads last. After each conflict scan, a mod that loads above a bigger mod replacing most of its files gets a warning above the mod list, with a button to move it below that mod. Identical copies are ignored. Smart Sort now places such a mod directly below the mod it changes.</p>
