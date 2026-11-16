@@ -12,6 +12,7 @@ use crate::conflicts_view::{self, Analysis, MergeHooks};
 use crate::file_merge_dialog;
 use crate::folder_merge_dialog;
 use crate::fix_dialog;
+use crate::merge::base_game;
 use crate::merge::conflicts::{self, ModInput};
 use crate::merge::patch::{self, Patch};
 use crate::merge::scan_cache::ScanCache;
@@ -105,7 +106,29 @@ impl Window {
                 let reading = reading.elapsed();
                 let checking = std::time::Instant::now();
                 let simple = crate::merge::trivial::simple_conflicts_cached(&report, &roots, &labels, game_dir.as_deref(), game_version.as_deref(), cache);
-                (report, roots, simple, [unpacking, reading, checking.elapsed()])
+                let checking = checking.elapsed();
+                // Which objects the mods replace that the last game update
+                // changed. Takes a snapshot of the game once per version.
+                let base = std::time::Instant::now();
+                let mut behind = Vec::new();
+                let mut behind_versions = None;
+                if let (Some(game_dir), Some(version)) = (game_dir.as_deref(), game_version.as_ref()) {
+                    let dir = base_game::dir();
+                    match base_game::ensure(&dir, game_dir, version) {
+                        Ok(current) => {
+                            if let Some(previous) = base_game::previous(&dir, version) {
+                                let (found, unreadable) = base_game::behind_counting(&previous, &current, &report.defined, &roots);
+                                if unreadable > 0 {
+                                    crate::diagnostics::log!("scan", "Could not read {unreadable} objects mods replace, so they weren't compared with the game");
+                                }
+                                behind_versions = Some((previous.version.clone(), version.clone()));
+                                behind = found;
+                            }
+                        }
+                        Err(e) => crate::diagnostics::log!("scan", "Could not save the base game's objects: {e}"),
+                    }
+                }
+                (report, roots, simple, [unpacking, reading, checking, base.elapsed()], behind, behind_versions)
             })
             .await;
             // Written after the results show; the next scan waits for it.
@@ -119,18 +142,20 @@ impl Window {
             let Some(ui) = weak.upgrade() else { return };
             ui.scanning.set(false);
             match result {
-                Ok((report, roots, simple, [unpacking, reading, checking])) => {
+                Ok((report, roots, simple, [unpacking, reading, checking, base], behind, behind_versions)) => {
                     crate::diagnostics::log!(
                         "scan",
-                        "Scan done in {:.1}s (unpacking {:.1}s, reading files {:.1}s, merge checks {:.1}s): {} file and {} object conflicts, {} files with errors, {} mods skipped",
+                        "Scan done in {:.1}s (unpacking {:.1}s, reading files {:.1}s, merge checks {:.1}s, base game {:.1}s): {} file and {} object conflicts, {} files with errors, {} mods skipped, {} objects left behind by a game update",
                         started.elapsed().as_secs_f32(),
                         unpacking.as_secs_f32(),
                         reading.as_secs_f32(),
                         checking.as_secs_f32(),
+                        base.as_secs_f32(),
                         report.files.len(),
                         report.objects.len(),
                         report.errors.len(),
-                        report.skipped.len()
+                        report.skipped.len(),
+                        behind.len()
                     );
                     for (position, reason) in &report.skipped {
                         crate::diagnostics::log!("scan", "Skipped {}: {reason}", names.get(*position).map_or("a mod", String::as_str));
@@ -146,6 +171,8 @@ impl Window {
                         report,
                         simple,
                         depends_on,
+                        behind,
+                        behind_versions,
                     })));
                     ui.render_conflicts();
                     // Shows the per-mod counts, and rescans if the load order
