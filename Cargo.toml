@@ -22,6 +22,7 @@ shlex = "2.0.1"
 ureq = { version = "3", features = ["json"] }
 uuid = { version = "1.29.2", features = ["v4"] }
 zip = { version = "9.5.0", default-features = false, features = ["deflate-flate2-zlib-rs"] }
+flate2 = { version = "1.1", default-features = false, features = ["zlib-rs"] }
 
 # The system keyring: the Secret Service (or the Secret portal in the
 # Flatpak) on Linux, Credential Manager on Windows.

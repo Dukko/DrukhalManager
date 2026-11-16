@@ -415,7 +415,7 @@ pub(crate) fn is_under(path: &str, folder: &str) -> bool {
 
 /// The folder whose objects share a namespace, if the file defines objects
 /// this module understands.
-fn object_category(path: &str) -> Option<String> {
+pub(crate) fn object_category(path: &str) -> Option<String> {
     let lower = path.to_lowercase();
     let (dir, file) = lower.rsplit_once('/')?;
     if lower.starts_with("localisation/") || lower.starts_with("localization/") {

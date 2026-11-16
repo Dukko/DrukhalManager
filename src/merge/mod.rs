@@ -1,6 +1,7 @@
 //! Conflict detection and AI-assisted merging of overlapping mod files.
 
 pub mod ai;
+pub mod base_game;
 pub mod bundle;
 pub mod collection;
 pub mod conflicts;
