@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: DrukhalManager 1.2.0\n"
 "Report-Msgid-Bugs-To: https://github.com/Dukko/DrukhalManager/issues\n"
-"POT-Creation-Date: 2026-11-16 16:28+0000\n"
+"POT-Creation-Date: 2026-11-16 16:44+0000\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -77,15 +77,15 @@ msgstr ""
 msgid "Updated Copy"
 msgstr ""
 
-#: src/behind_dialog.rs:221 src/conflicts_view/object.rs:825 src/error_report_dialog.rs:469 src/script_check_dialog.rs:340
+#: src/behind_dialog.rs:221 src/conflicts_view/object.rs:825 src/error_report_dialog.rs:471 src/script_check_dialog.rs:340
 msgid "The model's result still has a problem after a correction: {problem}. Fix it by hand, or undo and try again."
 msgstr ""
 
-#: src/behind_dialog.rs:224 src/error_report_dialog.rs:473 src/script_check_dialog.rs:343
+#: src/behind_dialog.rs:224 src/error_report_dialog.rs:475 src/script_check_dialog.rs:343
 msgid "Discard"
 msgstr ""
 
-#: src/behind_dialog.rs:225 src/error_report_dialog.rs:474 src/script_check_dialog.rs:344
+#: src/behind_dialog.rs:225 src/error_report_dialog.rs:476 src/script_check_dialog.rs:344
 msgid "Save to Merged Patch"
 msgstr ""
 
@@ -550,7 +550,7 @@ msgstr ""
 msgid "Show only the conflicts of one mod"
 msgstr ""
 
-#: src/conflicts_view.rs:628 src/conflicts_view.rs:1132 src/paradox/error_log.rs:66
+#: src/conflicts_view.rs:628 src/conflicts_view.rs:1132 src/paradox/error_log.rs:83
 msgid "Problems"
 msgstr ""
 
@@ -935,139 +935,139 @@ msgid_plural "{count} lines"
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/error_report_dialog.rs:128 src/error_report_dialog.rs:221
+#: src/error_report_dialog.rs:130 src/error_report_dialog.rs:223
 msgid "…and {count} more kind"
 msgid_plural "…and {count} more kinds"
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/error_report_dialog.rs:136
+#: src/error_report_dialog.rs:138
 msgid "No Errors"
 msgstr ""
 
-#: src/error_report_dialog.rs:136
+#: src/error_report_dialog.rs:138
 msgid "The game didn't log any errors last time"
 msgstr ""
 
-#: src/error_report_dialog.rs:144
+#: src/error_report_dialog.rs:146
 msgid "Game Errors"
 msgstr ""
 
-#: src/error_report_dialog.rs:144
+#: src/error_report_dialog.rs:146
 msgid "From the last time Stellaris ran"
 msgstr ""
 
-#: src/error_report_dialog.rs:156
+#: src/error_report_dialog.rs:158
 msgid "{errors} · {kinds}"
 msgstr ""
 
-#: src/error_report_dialog.rs:156 src/error_report_dialog.rs:161
+#: src/error_report_dialog.rs:158 src/error_report_dialog.rs:163
 msgid "{count} error"
 msgid_plural "{count} errors"
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/error_report_dialog.rs:156
+#: src/error_report_dialog.rs:158
 msgid "{count} kind"
 msgid_plural "{count} kinds"
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/error_report_dialog.rs:160
+#: src/error_report_dialog.rs:162
 msgid "Errors from your merges and fixes"
 msgstr ""
 
-#: src/error_report_dialog.rs:161
+#: src/error_report_dialog.rs:163
 msgid "{errors} · from your merges and fixes"
 msgstr ""
 
-#: src/error_report_dialog.rs:173
+#: src/error_report_dialog.rs:175
 msgid "Explain"
 msgstr ""
 
-#: src/error_report_dialog.rs:173
+#: src/error_report_dialog.rs:175
 msgid "Ask your AI what this error means and what to do"
 msgstr ""
 
 #. Shown once the object is in the patch, including after a save
 #. from the page this row opens.
-#: src/error_report_dialog.rs:180 src/script_check_dialog.rs:124
+#: src/error_report_dialog.rs:182 src/script_check_dialog.rs:124
 msgid "Fixed in the merged patch"
 msgstr ""
 
-#: src/error_report_dialog.rs:182 src/fix_dialog.rs:42 src/script_check_dialog.rs:256
+#: src/error_report_dialog.rs:184 src/fix_dialog.rs:42 src/script_check_dialog.rs:256
 msgid "Fix with AI"
 msgstr ""
 
-#: src/error_report_dialog.rs:183
+#: src/error_report_dialog.rs:185
 msgid "Write a corrected copy of this mod's object into the merged patch"
 msgstr ""
 
-#: src/error_report_dialog.rs:214
+#: src/error_report_dialog.rs:216
 msgid "Open this file"
 msgstr ""
 
-#: src/error_report_dialog.rs:238
+#: src/error_report_dialog.rs:240
 msgid "Suggest a Game Note…"
 msgstr ""
 
-#: src/error_report_dialog.rs:249
+#: src/error_report_dialog.rs:251
 msgid "Report as Harmless…"
 msgstr ""
 
-#: src/error_report_dialog.rs:257
+#: src/error_report_dialog.rs:259
 msgid "Suggest an improvement"
 msgstr ""
 
-#: src/error_report_dialog.rs:273
+#: src/error_report_dialog.rs:275
 msgid "Send a Suggestion"
 msgstr ""
 
-#: src/error_report_dialog.rs:274
+#: src/error_report_dialog.rs:276
 msgid "This opens GitHub in your browser with the text below filled in. Nothing is sent until you submit it there, which needs a GitHub account. Check it doesn't contain anything you'd rather keep private."
 msgstr ""
 
-#: src/error_report_dialog.rs:280 src/window/smart_sort_ui.rs:43
+#: src/error_report_dialog.rs:282 src/window/smart_sort_ui.rs:43
 msgid "Cancel"
 msgstr ""
 
-#: src/error_report_dialog.rs:280
+#: src/error_report_dialog.rs:282
 msgid "Open GitHub"
 msgstr ""
 
-#: src/error_report_dialog.rs:315
+#: src/error_report_dialog.rs:317
 msgid "What This Error Means"
 msgstr ""
 
-#: src/error_report_dialog.rs:351
+#: src/error_report_dialog.rs:353
 msgid "Couldn't get an explanation: {error}"
 msgstr ""
 
-#: src/error_report_dialog.rs:354
+#: src/error_report_dialog.rs:356
 msgid "Couldn't get an explanation."
 msgstr ""
 
-#: src/error_report_dialog.rs:375
+#: src/error_report_dialog.rs:377
 msgid "{name} replaces {key}, which the game has changed. The fix starts from the game's current version and keeps the mod's changes."
 msgstr ""
 
-#: src/error_report_dialog.rs:395
+#: src/error_report_dialog.rs:397
 msgid "Fix This Error"
 msgstr ""
 
-#: src/error_report_dialog.rs:427 src/error_report_dialog.rs:431
+#: src/error_report_dialog.rs:429 src/error_report_dialog.rs:433
 msgid "Couldn't get a fix: {error}"
 msgstr ""
 
-#: src/error_report_dialog.rs:431
+#: src/error_report_dialog.rs:433
 msgid "The request failed unexpectedly"
 msgstr ""
 
-#: src/error_report_dialog.rs:448 src/script_check_dialog.rs:330
+#: src/error_report_dialog.rs:450 src/script_check_dialog.rs:330
 msgid "Fixed Copy"
 msgstr ""
 
-#: src/error_report_dialog.rs:464
+#: src/error_report_dialog.rs:466
 msgid "Not found in Stellaris {version} or the mod's copy: {keys}. Check these before saving."
 msgstr ""
 
@@ -1551,23 +1551,23 @@ msgstr[1] ""
 msgid "under $0.01"
 msgstr ""
 
-#: src/merge/ai.rs:708
+#: src/merge/ai.rs:683
 msgid "Claude declined to merge this object."
 msgstr ""
 
-#: src/merge/ai.rs:709 src/merge/ai.rs:810 src/merge/ai.rs:904
+#: src/merge/ai.rs:684 src/merge/ai.rs:785 src/merge/ai.rs:879
 msgid "The merged result was too long and got cut off."
 msgstr ""
 
-#: src/merge/ai.rs:716
+#: src/merge/ai.rs:691
 msgid "Choose a model for the OpenAI-compatible provider in Preferences."
 msgstr ""
 
-#: src/merge/ai.rs:811 src/merge/ai.rs:905
+#: src/merge/ai.rs:786 src/merge/ai.rs:880
 msgid "The model declined to merge this object."
 msgstr ""
 
-#: src/merge/ai.rs:922
+#: src/merge/ai.rs:897
 msgid "The model's reply did not contain the merged result."
 msgstr ""
 
@@ -2206,43 +2206,51 @@ msgstr ""
 msgid "Only the first {count} are shown. Type more of the name to narrow them."
 msgstr ""
 
-#: src/paradox/error_log.rs:67
+#: src/paradox/error_log.rs:84
 msgid "Saved empire designs"
 msgstr ""
 
-#: src/paradox/error_log.rs:68
+#: src/paradox/error_log.rs:85
 msgid "Missing icons"
 msgstr ""
 
-#: src/paradox/error_log.rs:69
+#: src/paradox/error_log.rs:86
 msgid "Defined twice"
 msgstr ""
 
-#: src/paradox/error_log.rs:70
+#: src/paradox/error_log.rs:87
 msgid "Unused modifiers"
 msgstr ""
 
-#: src/paradox/error_log.rs:78
+#: src/paradox/error_log.rs:88
+msgid "Removed settings"
+msgstr ""
+
+#: src/paradox/error_log.rs:96
 msgid "Some of your saved empires use civics, origins or planets from mods that aren't enabled. They only matter if you play those empires."
 msgstr ""
 
-#: src/paradox/error_log.rs:79
+#: src/paradox/error_log.rs:97
 msgid "Something shows a blank icon or picture. It doesn't affect gameplay."
 msgstr ""
 
-#: src/paradox/error_log.rs:80
+#: src/paradox/error_log.rs:98
 msgid "A mod defines something that already exists, and the game keeps one of them. The Conflicts page shows which."
 msgstr ""
 
-#: src/paradox/error_log.rs:81
+#: src/paradox/error_log.rs:99
 msgid "Mods define resource modifiers nothing uses. The base game does this too."
 msgstr ""
 
-#: src/paradox/error_log.rs:285
+#: src/paradox/error_log.rs:100
+msgid "A mod sets something the game no longer has. The game skips it."
+msgstr ""
+
+#: src/paradox/error_log.rs:304
 msgid "Base game or missing files"
 msgstr ""
 
-#: src/paradox/error_log.rs:286
+#: src/paradox/error_log.rs:305
 msgid "Not tied to a file"
 msgstr ""
 

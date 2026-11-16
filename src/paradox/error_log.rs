@@ -27,6 +27,9 @@ pub struct Entry {
     /// The game-relative file it mentions, if any.
     pub file: Option<String>,
     pub kind: Kind,
+    /// Why this line in particular is harmless, when its kind's explanation
+    /// isn't enough: what the shipped notes say about a removed keyword.
+    pub reason: Option<String>,
 }
 
 /// What an error amounts to, from its text alone.
@@ -42,6 +45,17 @@ pub enum Kind {
     Duplicate,
     /// Modifiers defined but never used.
     Unused,
+    /// A keyword the game removed; it ignores it.
+    Removed,
+}
+
+/// For an `Unexpected token` error naming a keyword the game removed with no
+/// replacement, what the shipped notes say about it.
+pub fn removed_reason(message: &str) -> Option<String> {
+    if !message.contains("Unexpected token:") || message.contains("Invalid scripted effect:") {
+        return None;
+    }
+    super::game_changes::removed(&super::suggest::unknown_keyword(message)?)
 }
 
 impl Kind {
@@ -53,6 +67,9 @@ impl Kind {
             Kind::Unused
         } else if has(&["already exists, using the one at", "is already taken."]) {
             Kind::Duplicate
+        } else if removed_reason(message).is_some() {
+            // Nothing is lost: the game removed this keyword and ignores it.
+            Kind::Removed
         } else if has(&["Missing modifier icon", "missing texture file", "Couldn't find texture file", "Error initialising texture"]) {
             Kind::Cosmetic
         } else {
@@ -68,6 +85,7 @@ impl Kind {
             Kind::Cosmetic => t!("Missing icons"),
             Kind::Duplicate => t!("Defined twice"),
             Kind::Unused => t!("Unused modifiers"),
+            Kind::Removed => t!("Removed settings"),
         }
     }
 
@@ -79,6 +97,7 @@ impl Kind {
             Kind::Cosmetic => t!("Something shows a blank icon or picture. It doesn't affect gameplay."),
             Kind::Duplicate => t!("A mod defines something that already exists, and the game keeps one of them. The Conflicts page shows which."),
             Kind::Unused => t!("Mods define resource modifiers nothing uses. The base game does this too."),
+            Kind::Removed => t!("A mod sets something the game no longer has. The game skips it."),
         }
     }
 }
@@ -313,7 +332,7 @@ pub fn analyze(log: &str, mods: &[LogMod]) -> Report {
             Some(&e) => entries[e].count += 1,
             None => {
                 seen.insert(pattern(msg), entries.len());
-                entries.push(Entry { message: msg.to_owned(), count: 1, kind: Kind::classify(msg), file });
+                entries.push(Entry { message: msg.to_owned(), count: 1, kind: Kind::classify(msg), reason: removed_reason(msg), file });
             }
         }
     }
@@ -413,8 +432,25 @@ Supported Scopes: planet ship colony\n";
         for (line, want) in HARMLESS {
             assert_eq!(Kind::classify(message(line)), *want, "{line}");
         }
-        for line in joined(&format!("{UNEXPECTED}{SCOPE}{COMPILING}{INVALID}")) {
+        for line in joined(&format!("{SCOPE}{COMPILING}{INVALID}")) {
             assert_eq!(Kind::classify(message(&line)), Kind::Problem, "{line}");
+        }
+    }
+
+    #[test]
+    fn a_removed_keyword_is_harmless_with_the_notes_reason() {
+        let line = joined(UNEXPECTED).remove(0);
+        assert_eq!(Kind::classify(message(&line)), Kind::Removed);
+        let reason = removed_reason(message(&line)).unwrap();
+        assert!(reason.contains("technologies no longer have this field"), "{reason}");
+        let report = analyze(UNEXPECTED, &[]);
+        assert_eq!(report.groups[0].entries[0].reason.as_deref(), Some(reason.as_str()));
+        assert_eq!(report.problems(), 0);
+        // A keyword with a replacement, or none at all, is still a problem.
+        for name in ["every_system_colony", "some_typo"] {
+            let line = format!("[15:28:00][persistent.cpp:41]: Error: \"Unexpected token: {name}, near line: 7\n");
+            assert_eq!(Kind::classify(message(&line)), Kind::Problem, "{name}");
+            assert_eq!(removed_reason(message(&line)), None);
         }
     }
 
@@ -425,8 +461,8 @@ Supported Scopes: planet ship colony\n";
             log.push_str(line);
             log.push('\n');
         }
-        assert_eq!(count_problems(&log), 4);
-        assert_eq!(analyze(&log, &[]).problems(), 4);
+        assert_eq!(count_problems(&log), 3);
+        assert_eq!(analyze(&log, &[]).problems(), 3);
     }
 
     #[test]

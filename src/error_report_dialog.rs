@@ -122,6 +122,8 @@ pub fn present(parent: &impl IsA<gtk::Widget>, report: &Report, log: PathBuf, mo
             if e.count > 1 {
                 subtitle.push(format!("×{}", e.count));
             }
+            // Why this line is harmless, when its kind's text isn't enough.
+            subtitle.extend(e.reason.clone());
             row.add_row(&adw::ActionRow::builder().title(e.message.trim()).subtitle(subtitle.join(" · ")).use_markup(false).title_lines(3).build());
         }
         if rows.len() > ROWS_PER_GROUP {
