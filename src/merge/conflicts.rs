@@ -419,9 +419,11 @@ fn object_keys(category: &str, src: &str) -> Result<Vec<String>, ScanError> {
     } else {
         let mut seen = BTreeMap::<&str, usize>::new();
         for e in &entries {
-            // `@name = value` variables are file-local.
+            // `@name = value` variables are file-local, and `inline_script`
+            // is a call that pastes another file in, not an object.
             if let Entry::Assign { key, .. } = e
                 && !key.starts_with('@')
+                && !key.eq_ignore_ascii_case("inline_script")
             {
                 *seen.entry(key).or_default() += 1;
             }
@@ -571,6 +573,23 @@ mod tests {
         assert_eq!(report.objects[0].definitions[1], Definition { mod_position: 1, file: "common/buildings/b_buildings.txt".into() });
         assert!(report.errors.is_empty(), "{:?}", report.errors);
         assert_eq!(report.counts_by_mod(2), [4, 4]);
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn inline_script_calls_are_not_objects() {
+        let root = std::env::temp_dir().join(format!("drukhal-inline-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        write(&root.join("a"), &[
+            ("common/technology/a.txt", "inline_script = \"tech/shared\"\ntech_a = { cost = 1 }"),
+            ("common/inline_scripts/tech/shared.txt", "tech_from_script = { cost = 3 }"),
+        ]);
+        write(&root.join("b"), &[("common/technology/b.txt", "inline_script = { script = tech/shared NAME = b }\ntech_b = { cost = 2 }")]);
+
+        let report = analyze(&[input(&root, "a", &[]), input(&root, "b", &[])], None);
+        assert!(report.objects.iter().all(|c| c.key != "inline_script"), "{:?}", report.objects);
+        assert!(report.objects.is_empty(), "{:?}", report.objects);
 
         std::fs::remove_dir_all(root).unwrap();
     }
