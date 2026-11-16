@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: DrukhalManager 1.1.0\n"
 "Report-Msgid-Bugs-To: https://github.com/Dukko/DrukhalManager/issues\n"
-"POT-Creation-Date: 2026-11-16 11:47+0000\n"
+"POT-Creation-Date: 2026-11-16 12:17+0000\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -77,15 +77,15 @@ msgstr ""
 msgid "Updated Copy"
 msgstr ""
 
-#: src/behind_dialog.rs:221 src/conflicts_view/object.rs:825
+#: src/behind_dialog.rs:221 src/conflicts_view/object.rs:825 src/error_report_dialog.rs:390
 msgid "The model's result still has a problem after a correction: {problem}. Fix it by hand, or undo and try again."
 msgstr ""
 
-#: src/behind_dialog.rs:224
+#: src/behind_dialog.rs:224 src/error_report_dialog.rs:394
 msgid "Discard"
 msgstr ""
 
-#: src/behind_dialog.rs:225
+#: src/behind_dialog.rs:225 src/error_report_dialog.rs:395
 msgid "Save to Merged Patch"
 msgstr ""
 
@@ -886,113 +886,149 @@ msgstr ""
 msgid "Put This In"
 msgstr ""
 
-#: src/error_report_dialog.rs:38
+#: src/error_report_dialog.rs:76
 msgid "{count} line in error.log"
 msgid_plural "{count} lines in error.log"
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/error_report_dialog.rs:40
+#: src/error_report_dialog.rs:78
 msgid "None of them look like real problems."
 msgstr ""
 
-#: src/error_report_dialog.rs:41
+#: src/error_report_dialog.rs:79
 msgid "{count} is a real problem"
 msgid_plural "{count} are real problems"
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/error_report_dialog.rs:44
+#: src/error_report_dialog.rs:82
 msgid "{lines}, written {when}. {errors}"
 msgstr ""
 
-#: src/error_report_dialog.rs:45
+#: src/error_report_dialog.rs:83
 msgid "{lines}. {errors}"
 msgstr ""
 
-#: src/error_report_dialog.rs:48
+#: src/error_report_dialog.rs:86
 msgid "Open error.log"
 msgstr ""
 
 #. One row per harmless kind, with the lines of every mod under it.
-#: src/error_report_dialog.rs:68
+#: src/error_report_dialog.rs:106
 msgid "Probably Harmless"
 msgstr ""
 
-#: src/error_report_dialog.rs:76
+#: src/error_report_dialog.rs:114
 msgid "{count} line"
 msgid_plural "{count} lines"
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/error_report_dialog.rs:85 src/error_report_dialog.rs:146
+#: src/error_report_dialog.rs:123 src/error_report_dialog.rs:211
 msgid "…and {count} more kind"
 msgid_plural "…and {count} more kinds"
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/error_report_dialog.rs:93
+#: src/error_report_dialog.rs:131
 msgid "No Errors"
 msgstr ""
 
-#: src/error_report_dialog.rs:93
+#: src/error_report_dialog.rs:131
 msgid "The game didn't log any errors last time"
 msgstr ""
 
-#: src/error_report_dialog.rs:101
+#: src/error_report_dialog.rs:139
 msgid "Game Errors"
 msgstr ""
 
-#: src/error_report_dialog.rs:101
+#: src/error_report_dialog.rs:139
 msgid "From the last time Stellaris ran"
 msgstr ""
 
-#: src/error_report_dialog.rs:113
+#: src/error_report_dialog.rs:151
 msgid "{errors} · {kinds}"
 msgstr ""
 
-#: src/error_report_dialog.rs:113 src/error_report_dialog.rs:118
+#: src/error_report_dialog.rs:151 src/error_report_dialog.rs:156
 msgid "{count} error"
 msgid_plural "{count} errors"
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/error_report_dialog.rs:113
+#: src/error_report_dialog.rs:151
 msgid "{count} kind"
 msgid_plural "{count} kinds"
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/error_report_dialog.rs:117
+#: src/error_report_dialog.rs:155
 msgid "Errors from your merges and fixes"
 msgstr ""
 
-#: src/error_report_dialog.rs:118
+#: src/error_report_dialog.rs:156
 msgid "{errors} · from your merges and fixes"
 msgstr ""
 
-#: src/error_report_dialog.rs:130
+#: src/error_report_dialog.rs:168
 msgid "Explain"
 msgstr ""
 
-#: src/error_report_dialog.rs:130
+#: src/error_report_dialog.rs:168
 msgid "Ask your AI what this error means and what to do"
 msgstr ""
 
-#: src/error_report_dialog.rs:139
+#: src/error_report_dialog.rs:175
+msgid "Fixed in the merged patch"
+msgstr ""
+
+#: src/error_report_dialog.rs:177 src/fix_dialog.rs:42
+msgid "Fix with AI"
+msgstr ""
+
+#: src/error_report_dialog.rs:178
+msgid "Write a corrected copy of this mod's object into the merged patch"
+msgstr ""
+
+#: src/error_report_dialog.rs:204
 msgid "Open this file"
 msgstr ""
 
-#: src/error_report_dialog.rs:172
+#: src/error_report_dialog.rs:237
 msgid "What This Error Means"
 msgstr ""
 
-#: src/error_report_dialog.rs:208
+#: src/error_report_dialog.rs:273
 msgid "Couldn't get an explanation: {error}"
 msgstr ""
 
-#: src/error_report_dialog.rs:211
+#: src/error_report_dialog.rs:276
 msgid "Couldn't get an explanation."
+msgstr ""
+
+#: src/error_report_dialog.rs:297
+msgid "{name} replaces {key}, which the game has changed. The fix starts from the game's current version and keeps the mod's changes."
+msgstr ""
+
+#: src/error_report_dialog.rs:317
+msgid "Fix This Error"
+msgstr ""
+
+#: src/error_report_dialog.rs:348 src/error_report_dialog.rs:352
+msgid "Couldn't get a fix: {error}"
+msgstr ""
+
+#: src/error_report_dialog.rs:352
+msgid "The request failed unexpectedly"
+msgstr ""
+
+#: src/error_report_dialog.rs:369
+msgid "Fixed Copy"
+msgstr ""
+
+#: src/error_report_dialog.rs:385
+msgid "Not found in Stellaris {version} or the mod's copy: {keys}. Check these before saving."
 msgstr ""
 
 #: src/file_merge_dialog.rs:37
@@ -1137,10 +1173,6 @@ msgstr ""
 
 #: src/file_merge_dialog.rs:399
 msgid "{tool} was closed without saving, so nothing changed."
-msgstr ""
-
-#: src/fix_dialog.rs:42
-msgid "Fix with AI"
 msgstr ""
 
 #: src/fix_dialog.rs:46
@@ -1479,23 +1511,23 @@ msgstr[1] ""
 msgid "under $0.01"
 msgstr ""
 
-#: src/merge/ai.rs:615
+#: src/merge/ai.rs:671
 msgid "Claude declined to merge this object."
 msgstr ""
 
-#: src/merge/ai.rs:616 src/merge/ai.rs:717 src/merge/ai.rs:779
+#: src/merge/ai.rs:672 src/merge/ai.rs:773 src/merge/ai.rs:851
 msgid "The merged result was too long and got cut off."
 msgstr ""
 
-#: src/merge/ai.rs:623
+#: src/merge/ai.rs:679
 msgid "Choose a model for the OpenAI-compatible provider in Preferences."
 msgstr ""
 
-#: src/merge/ai.rs:718 src/merge/ai.rs:780
+#: src/merge/ai.rs:774 src/merge/ai.rs:852
 msgid "The model declined to merge this object."
 msgstr ""
 
-#: src/merge/ai.rs:797
+#: src/merge/ai.rs:869
 msgid "The model's reply did not contain the merged result."
 msgstr ""
 
@@ -2632,7 +2664,7 @@ msgstr ""
 msgid "The merged patch goes back to {contents} from {when}. Its current merges are backed up first, so you can undo this from this list."
 msgstr ""
 
-#: src/window/backups_ui.rs:74 src/window/collections_ui.rs:263 src/window/collections_ui.rs:292 src/window/collections_ui.rs:360 src/window/collections_ui.rs:411 src/window/collections_ui.rs:638 src/window/collections_ui.rs:722 src/window/collections_ui.rs:794 src/window/crash_hunt_ui.rs:59 src/window/ignore_rules_ui.rs:88 src/window/launch.rs:413 src/window/list.rs:456 src/window/repair_ui.rs:89 src/window/saves_ui.rs:86 src/window/freeze_ui.rs:40 src/window/freeze_ui.rs:103
+#: src/window/backups_ui.rs:74 src/window/collections_ui.rs:263 src/window/collections_ui.rs:292 src/window/collections_ui.rs:360 src/window/collections_ui.rs:411 src/window/collections_ui.rs:638 src/window/collections_ui.rs:722 src/window/collections_ui.rs:794 src/window/crash_hunt_ui.rs:59 src/window/ignore_rules_ui.rs:88 src/window/launch.rs:451 src/window/list.rs:456 src/window/repair_ui.rs:89 src/window/saves_ui.rs:86 src/window/freeze_ui.rs:40 src/window/freeze_ui.rs:103
 msgid "_Cancel"
 msgstr ""
 
@@ -2807,7 +2839,7 @@ msgid_plural "{count} mods in this collection aren't installed; they're kept und
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/window/collections_ui.rs:260 src/window/launch.rs:409
+#: src/window/collections_ui.rs:260 src/window/launch.rs:447
 msgid "Save Changes?"
 msgstr ""
 
@@ -2815,11 +2847,11 @@ msgstr ""
 msgid "“{current}” has unsaved changes. Save them before switching to “{next}”?"
 msgstr ""
 
-#: src/window/collections_ui.rs:263 src/window/launch.rs:414
+#: src/window/collections_ui.rs:263 src/window/launch.rs:452
 msgid "_Discard"
 msgstr ""
 
-#: src/window/collections_ui.rs:263 src/window/ignore_rules_ui.rs:89 src/window/launch.rs:415 src/window/list.rs:461
+#: src/window/collections_ui.rs:263 src/window/ignore_rules_ui.rs:89 src/window/launch.rs:453 src/window/list.rs:461
 msgid "_Save"
 msgstr ""
 
@@ -3349,7 +3381,7 @@ msgid "Stellaris didn't crash with all the mods on, so there was nothing to narr
 "Your load order is back as it was."
 msgstr ""
 
-#: src/window/crash_hunt_ui.rs:180 src/window/launch.rs:58 src/window/persist.rs:93 src/window/saves_ui.rs:142 src/window/freeze_ui.rs:165
+#: src/window/crash_hunt_ui.rs:180 src/window/launch.rs:60 src/window/persist.rs:93 src/window/saves_ui.rs:142 src/window/freeze_ui.rs:165
 msgid "_Close"
 msgstr ""
 
@@ -3479,89 +3511,89 @@ msgid_plural "Disabled {count} mods; “{name}” has the full load order"
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/window/launch.rs:39
+#: src/window/launch.rs:41
 msgid "Allow Access to Steam"
 msgstr ""
 
-#: src/window/launch.rs:41
+#: src/window/launch.rs:43
 msgid "Steam is installed at {paths}, outside your home folder, so DrukhalManager can't see it from its sandbox and can't find Stellaris. Run this once in a terminal, then restart DrukhalManager:"
 msgstr ""
 
-#: src/window/launch.rs:46
+#: src/window/launch.rs:48
 msgid " and "
 msgstr ""
 
-#: src/window/launch.rs:58
+#: src/window/launch.rs:60
 msgid "_Copy Command"
 msgstr ""
 
-#: src/window/launch.rs:113
+#: src/window/launch.rs:115
 msgid "Click Unsubscribe on {name}'s page in Steam, then reload the mods (F5)"
 msgstr ""
 
-#: src/window/launch.rs:119
+#: src/window/launch.rs:121
 msgid "Copied the Workshop link"
 msgstr ""
 
-#: src/window/launch.rs:129
+#: src/window/launch.rs:131
 msgid "_Continue {empire}"
 msgstr ""
 
-#: src/window/launch.rs:130
+#: src/window/launch.rs:132
 msgid "_Continue {empire}, {date}"
 msgstr ""
 
-#: src/window/launch.rs:131
+#: src/window/launch.rs:133
 msgid "_Continue Last Save (none found)"
 msgstr ""
 
-#: src/window/launch.rs:161
+#: src/window/launch.rs:163
 msgid "Check the game launch options in Preferences: {error}"
 msgstr ""
 
-#: src/window/launch.rs:197
+#: src/window/launch.rs:199
 msgid "Starting Stellaris through Steam…"
 msgstr ""
 
-#: src/window/launch.rs:216
+#: src/window/launch.rs:218
 msgid "Could not start Stellaris: {error}"
 msgstr ""
 
-#: src/window/launch.rs:227
+#: src/window/launch.rs:229
 msgid "Starting Stellaris…"
 msgstr ""
 
-#: src/window/launch.rs:297
+#: src/window/launch.rs:299
 msgid "Stellaris crashed"
 msgstr ""
 
-#: src/window/launch.rs:299
+#: src/window/launch.rs:301
 msgid "Stellaris crashed and logged {count} error from your mods"
 msgid_plural "Stellaris crashed and logged {count} errors from your mods"
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/window/launch.rs:304
+#: src/window/launch.rs:306
 msgid "Stellaris logged {count} error from your mods"
 msgid_plural "Stellaris logged {count} errors from your mods"
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/window/launch.rs:311
+#: src/window/launch.rs:313
 msgid ", {count} from the merged patch"
 msgid_plural ", {count} from the merged patch"
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/window/launch.rs:318 src/window/overview.rs:333 src/window/overview.rs:337 src/window/overview.rs:345 src/window/overview.rs:354 src/window/overview.rs:361 src/window/overview.rs:368 src/window/overview.rs:378 src/window/persist.rs:79
+#: src/window/launch.rs:320 src/window/overview.rs:333 src/window/overview.rs:337 src/window/overview.rs:345 src/window/overview.rs:354 src/window/overview.rs:361 src/window/overview.rs:368 src/window/overview.rs:378 src/window/persist.rs:79
 msgid "Show"
 msgstr ""
 
-#: src/window/launch.rs:372
+#: src/window/launch.rs:374
 msgid "No error.log yet; it's written when the game runs"
 msgstr ""
 
-#: src/window/launch.rs:410
+#: src/window/launch.rs:448
 msgid "The load order has unsaved changes. Unsaved changes will be lost if you close."
 msgstr ""
 

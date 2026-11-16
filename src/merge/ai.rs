@@ -337,6 +337,7 @@ pub fn update_checked(provider: &Provider, category: &str, key: &str, versions: 
 
 /// Rewrites a mod's copy of a base-game object that fails in the current
 /// game, working from the game's current version, and checks it like a merge.
+#[allow(clippy::too_many_arguments)]
 pub fn repair_checked(provider: &Provider, category: &str, key: &str, game: &Source, mod_copy: &Source, error: &str, check: &dyn Fn(&str) -> Result<String, String>, on: &mut dyn FnMut(Progress)) -> Result<Checked, String> {
     checked(provider, &with_notes(REPAIR_SYSTEM), &repair_prompt(category, key, game, mod_copy, error), check, on)
 }
@@ -408,6 +409,7 @@ Output rules:
 const NOTES: &str = include_str!("ai_notes.md");
 
 /// One entry of the shipped notes on game changes.
+#[cfg(test)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Note {
     pub old: String,
@@ -415,6 +417,8 @@ pub(crate) struct Note {
     pub new: Vec<String>,
 }
 
+/// The shipped notes, parsed: for checking them against the game.
+#[cfg(test)]
 pub(crate) fn notes() -> Vec<Note> {
     let ticked = |s: &str| -> Vec<String> { s.split('`').skip(1).step_by(2).map(str::to_owned).collect() };
     NOTES
@@ -1035,10 +1039,10 @@ mod tests {
                 let path = entry.path();
                 if path.is_dir() {
                     walk(&path, out);
-                } else if path.extension().is_some_and(|e| e.eq_ignore_ascii_case("txt")) {
-                    if let Ok(bytes) = std::fs::read(&path) {
-                        out.push(String::from_utf8_lossy(&bytes).into_owned());
-                    }
+                } else if path.extension().is_some_and(|e| e.eq_ignore_ascii_case("txt"))
+                    && let Ok(bytes) = std::fs::read(&path)
+                {
+                    out.push(String::from_utf8_lossy(&bytes).into_owned());
                 }
             }
         }
