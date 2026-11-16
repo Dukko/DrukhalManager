@@ -307,6 +307,17 @@ fn reads(path: &str, languages: Option<&BTreeSet<String>>) -> bool {
 /// Folders whose objects the game merges rather than overrides.
 const MERGED_FOLDERS: &[&str] = &["common/on_actions", "common/defines"];
 
+/// Blocks the game adds to an existing object instead of replacing it,
+/// by folder: an object holding nothing but these blocks is an addition.
+pub const ADDITIVE_BLOCKS: &[(&str, &str)] = &[("common/governments/authorities", "advanced_authority_swap")];
+
+/// Whether an object of `category` with this `body` only adds blocks to an
+/// object defined elsewhere, so it defines nothing itself.
+pub fn is_addition(category: &str, body: &[Entry]) -> bool {
+    let blocks: Vec<&str> = ADDITIVE_BLOCKS.iter().filter(|(f, _)| category.eq_ignore_ascii_case(f) || is_under(category, f)).map(|(_, b)| *b).collect();
+    !body.is_empty() && !blocks.is_empty() && body.iter().all(|e| matches!(e, Entry::Assign { key, .. } if blocks.iter().any(|b| key.eq_ignore_ascii_case(b))))
+}
+
 /// Folders of script fragments pasted into other scripts, not objects.
 pub const FRAGMENT_FOLDERS: &[&str] = &["common/inline_scripts"];
 
@@ -457,9 +468,10 @@ fn object_keys(category: &str, src: &str) -> Result<Vec<String>, ScanError> {
         for e in &entries {
             // `@name = value` variables are file-local, and `inline_script`
             // is a call that pastes another file in, not an object.
-            if let Entry::Assign { key, .. } = e
+            if let Entry::Assign { key, value, .. } = e
                 && !key.starts_with('@')
                 && !key.eq_ignore_ascii_case("inline_script")
+                && !value.as_block().is_some_and(|b| is_addition(category, b))
             {
                 *seen.entry(key).or_default() += 1;
             }
@@ -907,6 +919,37 @@ mod tests {
         let report = analyze(&[input(&root, "a", &[]), input(&root, "b", &[])], None);
         assert_eq!(report.shipped, vec![2, 3]);
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn additions_define_nothing() {
+        let swap = "auth_corporate = { advanced_authority_swap = { name = a } }\n";
+        let full = "auth_corporate = { cost = 1 }\n";
+        let file = "common/governments/authorities/x.txt";
+        let run = |tag: &str, a: (&str, &str), b: (&str, &str)| {
+            let root = std::env::temp_dir().join(format!("dm-additions-{tag}-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&root);
+            write(&root.join("a"), &[a]);
+            write(&root.join("b"), &[b]);
+            let report = analyze(&[input(&root, "a", &[]), input(&root, "b", &[])], None);
+            std::fs::remove_dir_all(&root).unwrap();
+            report
+        };
+        let both_swaps = run("1", (file, swap), ("common/governments/authorities/y.txt", swap));
+        assert!(both_swaps.objects.is_empty());
+        assert!(both_swaps.defined.is_empty());
+        let mixed = run("2", (file, full), ("common/governments/authorities/y.txt", swap));
+        assert!(mixed.objects.is_empty());
+        assert_eq!(mixed.defined.len(), 1);
+        let both_full = run("3", (file, full), ("common/governments/authorities/y.txt", full));
+        assert_eq!(both_full.objects.len(), 1);
+        let with_other = "auth_corporate = { advanced_authority_swap = { } has_heir = yes }\n";
+        let not_only = run("4", (file, with_other), ("common/governments/authorities/y.txt", with_other));
+        assert_eq!(not_only.objects.len(), 1);
+        let elsewhere = run("5", ("common/governments/civics/x.txt", swap), ("common/governments/civics/y.txt", swap));
+        assert_eq!(elsewhere.objects.len(), 1);
+        assert!(is_addition("Common/Governments/Authorities", &script::parse("ADVANCED_AUTHORITY_SWAP = {}").unwrap()));
+        assert!(!is_addition("common/governments/authorities", &[]));
     }
 
     #[test]
