@@ -439,6 +439,7 @@ version = "1.0.3"
 dependencies = [
  "async-channel",
  "dirs",
+ "flate2",
  "formatx",
  "fs4",
  "futures-lite",
