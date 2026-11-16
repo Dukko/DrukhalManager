@@ -17,7 +17,7 @@ use sha2::{Digest, Sha256};
 /// Caches of another version are started again. Bump it whenever how files
 /// are parsed into keys changes (`object_keys`, `localisation_keys`,
 /// `object_category`, the script parser in `src/paradox/script.rs`).
-const VERSION: u32 = 2;
+const VERSION: u32 = 3;
 /// Caches written by another version of the app keep their files' keys but
 /// lose their verdicts, which depend on the merge logic.
 const APP: &str = env!("CARGO_PKG_VERSION");
