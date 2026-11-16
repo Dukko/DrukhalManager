@@ -10,7 +10,7 @@
 //! have no findings by construction: blocks like `immediate` hold effects,
 //! `potential` holds triggers, and each holds some plain settings too.
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{HashMap, HashSet};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
@@ -458,6 +458,8 @@ pub fn check_mods(context: &Context, known: &Known, roots: &[Option<PathBuf>], r
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::BTreeMap;
+
     use crate::merge::conflicts::Definition;
     use crate::paradox::script_docs::Entry as DocEntry;
 

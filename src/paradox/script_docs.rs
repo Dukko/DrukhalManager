@@ -28,6 +28,17 @@ pub fn dir(user_dir: &Path) -> PathBuf {
     user_dir.join("logs").join("script_documentation")
 }
 
+/// Whether the documentation was written before `exe` was last changed,
+/// that is, before the game's latest update. The game rewrites `effects.log`
+/// at each start; a folder's own time only changes when files are added.
+pub fn older_than(user_dir: &Path, exe: &Path) -> bool {
+    let modified = |path: PathBuf| std::fs::metadata(path).and_then(|m| m.modified()).ok();
+    match (modified(dir(user_dir).join("effects.log")), modified(exe.to_path_buf())) {
+        (Some(docs), Some(exe)) => docs < exe,
+        _ => false,
+    }
+}
+
 fn read(dir: &Path, name: &str) -> Option<String> {
     Some(String::from_utf8_lossy(&std::fs::read(dir.join(name)).ok()?).into_owned())
 }
