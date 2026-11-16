@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: DrukhalManager 1.0.5\n"
 "Report-Msgid-Bugs-To: https://github.com/Dukko/DrukhalManager/issues\n"
-"POT-Creation-Date: 2026-11-16 04:13+0000\n"
+"POT-Creation-Date: 2026-11-16 04:17+0000\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -1739,93 +1739,93 @@ msgstr ""
 msgid "Chosen by you"
 msgstr ""
 
-#: src/mods/smart_sort.rs:214
+#: src/mods/smart_sort.rs:215
 msgid "Needs {name}, so it goes directly below it"
 msgstr ""
 
-#: src/mods/smart_sort.rs:216
+#: src/mods/smart_sort.rs:217
 msgid "{name} replaces most of its files, so it goes directly below it"
 msgstr ""
 
-#: src/mods/smart_sort.rs:222
+#: src/mods/smart_sort.rs:223
 msgid "An add-on or patch for UI Overhaul Dynamic"
 msgstr ""
 
-#: src/mods/smart_sort.rs:223
+#: src/mods/smart_sort.rs:224
 msgid "A patch for an interface mod"
 msgstr ""
 
-#: src/mods/smart_sort.rs:225
+#: src/mods/smart_sort.rs:226
 msgid "Its name says it's a patch"
 msgstr ""
 
-#: src/mods/smart_sort.rs:237
+#: src/mods/smart_sort.rs:238
 msgid "Patches {names}"
 msgstr ""
 
-#: src/mods/smart_sort.rs:298
+#: src/mods/smart_sort.rs:299
 msgid "The merged patch always loads last"
 msgstr ""
 
-#: src/mods/smart_sort.rs:393
+#: src/mods/smart_sort.rs:394
 msgid "Its name starts with ~"
 msgstr ""
 
-#: src/mods/smart_sort.rs:396
+#: src/mods/smart_sort.rs:397
 msgid "An unofficial patch"
 msgstr ""
 
-#: src/mods/smart_sort.rs:399
+#: src/mods/smart_sort.rs:400
 msgid "Its name starts with !, which goes towards the bottom"
 msgstr ""
 
-#: src/mods/smart_sort.rs:402
+#: src/mods/smart_sort.rs:403
 msgid "A universal patch"
 msgstr ""
 
-#: src/mods/smart_sort.rs:405
+#: src/mods/smart_sort.rs:406
 msgid "Part of UI Overhaul Dynamic"
 msgstr ""
 
-#: src/mods/smart_sort.rs:413
+#: src/mods/smart_sort.rs:414
 msgid "Its files couldn't be read"
 msgstr ""
 
-#: src/mods/smart_sort.rs:417
+#: src/mods/smart_sort.rs:418
 msgid "Only changes the interface"
 msgstr ""
 
-#: src/mods/smart_sort.rs:420
+#: src/mods/smart_sort.rs:421
 msgid "Changes {count} kind of game object"
 msgid_plural "Changes {count} kinds of game objects"
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/mods/smart_sort.rs:430
+#: src/mods/smart_sort.rs:431
 msgid "Changes ship models"
 msgstr ""
 
-#: src/mods/smart_sort.rs:433 src/mods/smart_sort.rs:446
+#: src/mods/smart_sort.rs:434 src/mods/smart_sort.rs:447
 msgid "Changes how the galaxy is made"
 msgstr ""
 
-#: src/mods/smart_sort.rs:436
+#: src/mods/smart_sort.rs:437
 msgid "Changes portraits, names or text"
 msgstr ""
 
-#: src/mods/smart_sort.rs:438
+#: src/mods/smart_sort.rs:439
 msgid "Only changes sounds"
 msgstr ""
 
-#: src/mods/smart_sort.rs:438
+#: src/mods/smart_sort.rs:439
 msgid "Only changes graphics"
 msgstr ""
 
-#: src/mods/smart_sort.rs:442
+#: src/mods/smart_sort.rs:443
 msgid "Adds species: portraits, names and the like"
 msgstr ""
 
-#: src/mods/smart_sort.rs:450
+#: src/mods/smart_sort.rs:451
 msgid "Changes game rules ({what}…)"
 msgstr ""
 
