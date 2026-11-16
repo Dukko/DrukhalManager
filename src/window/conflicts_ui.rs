@@ -14,6 +14,7 @@ use crate::folder_merge_dialog;
 use crate::fix_dialog;
 use crate::merge::base_game;
 use crate::merge::conflicts::{self, ModInput};
+use crate::merge::order_check;
 use crate::merge::patch::{self, Patch};
 use crate::merge::scan_cache::ScanCache;
 use crate::merge::snapshot;
@@ -81,6 +82,7 @@ impl Window {
         let saved = cache.clone();
         let languages = self.settings.borrow().game.languages(&self.paths.user_dir);
         let labels: Vec<String> = names.clone();
+        let order_depends = depends_on.clone();
         crate::diagnostics::log!("scan", "Scanning {} mods for conflicts", inputs.len());
         let started = std::time::Instant::now();
         glib::spawn_future_local(async move {
@@ -128,7 +130,10 @@ impl Window {
                         Err(e) => crate::diagnostics::log!("scan", "Could not save the base game's objects: {e}"),
                     }
                 }
-                (report, roots, simple, [unpacking, reading, checking, base.elapsed()], behind, behind_versions)
+                let base = base.elapsed();
+                let order = std::time::Instant::now();
+                let order_relations = order_check::relations(&report, &roots, &order_depends);
+                (report, roots, simple, [unpacking, reading, checking, base, order.elapsed()], behind, behind_versions, order_relations)
             })
             .await;
             // Written after the results show; the next scan waits for it.
@@ -142,20 +147,22 @@ impl Window {
             let Some(ui) = weak.upgrade() else { return };
             ui.scanning.set(false);
             match result {
-                Ok((report, roots, simple, [unpacking, reading, checking, base], behind, behind_versions)) => {
+                Ok((report, roots, simple, [unpacking, reading, checking, base, order_time], behind, behind_versions, order)) => {
                     crate::diagnostics::log!(
                         "scan",
-                        "Scan done in {:.1}s (unpacking {:.1}s, reading files {:.1}s, merge checks {:.1}s, base game {:.1}s): {} file and {} object conflicts, {} files with errors, {} mods skipped, {} objects left behind by a game update",
+                        "Scan done in {:.1}s (unpacking {:.1}s, reading files {:.1}s, merge checks {:.1}s, base game {:.1}s, order check {:.1}s): {} file and {} object conflicts, {} files with errors, {} mods skipped, {} objects left behind by a game update, {} mods load above a mod that replaces most of their files",
                         started.elapsed().as_secs_f32(),
                         unpacking.as_secs_f32(),
                         reading.as_secs_f32(),
                         checking.as_secs_f32(),
                         base.as_secs_f32(),
+                        order_time.as_secs_f32(),
                         report.files.len(),
                         report.objects.len(),
                         report.errors.len(),
                         report.skipped.len(),
-                        behind.len()
+                        behind.len(),
+                        order.iter().filter(|r| r.misplaced()).map(|r| r.patch).collect::<std::collections::BTreeSet<_>>().len()
                     );
                     for (position, reason) in &report.skipped {
                         crate::diagnostics::log!("scan", "Skipped {}: {reason}", names.get(*position).map_or("a mod", String::as_str));
@@ -173,6 +180,7 @@ impl Window {
                         depends_on,
                         behind,
                         behind_versions,
+                        order,
                     })));
                     ui.render_conflicts();
                     // Shows the per-mod counts, and rescans if the load order
