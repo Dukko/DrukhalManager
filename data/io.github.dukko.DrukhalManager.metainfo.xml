@@ -36,6 +36,12 @@
     <control>keyboard</control>
   </supports>
   <releases>
+    <release version="1.0.4" date="2026-11-16">
+      <description>
+        <p><em>See what a game update changed under your mods.</em> When a mod replaces a technology, job, event or other object with its own copy and a Stellaris update then changes that object, the mod keeps loading its old copy and the game's change doesn't apply. After an update, a line above the Conflicts list now counts these objects, and each one shows what the game changed side by side.</p>
+        <p>This works from the next Stellaris update after you install this version: DrukhalManager keeps a compressed copy of the base game's objects (about 3.5 MB per version, the last three versions) the first time it scans each version.</p>
+      </description>
+    </release>
     <release version="1.0.3" date="2026-11-16">
       <description>
         <p><em>Look up any object.</em> The new search button under the Conflicts list finds which of your mods define an object, event or localisation key, even when only one mod does, and which version the game uses.</p>
