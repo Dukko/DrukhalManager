@@ -210,12 +210,13 @@ pub fn plan(mods: &[Mod], enabled: &[usize], profiles: &HashMap<usize, Profile>,
         let (category, reason) = base[&i].clone();
         let deps = deps_of(i);
         let name = |d: usize| format!("“{}”", mods[d].descriptor.name.trim());
-        let placement = match deps.as_slice() {
-            [parent] => Placement { index: i, category, parent: Some(*parent), reason: tf!("Needs {name}, so it goes directly below it", name = name(*parent)), chosen: false },
-            [] if let Some(&target) = below.get(&i).filter(|&&t| t != i && enabled.contains(&t) && !pinned(&mods[t].id)) => {
+        let below_target = below.get(&i).copied().filter(|&t| t != i && enabled.contains(&t) && !pinned(&mods[t].id));
+        let placement = match (deps.as_slice(), below_target) {
+            ([parent], _) => Placement { index: i, category, parent: Some(*parent), reason: tf!("Needs {name}, so it goes directly below it", name = name(*parent)), chosen: false },
+            ([], Some(target)) => {
                 Placement { index: i, category, parent: Some(target), reason: tf!("{name} replaces most of its files, so it goes directly below it", name = name(target)), chosen: false }
             }
-            [] => {
+            ([], None) => {
                 let lower = mods[i].descriptor.name.to_lowercase();
                 let patch_name = ["patch", "compat", "bridge"].iter().any(|w| lower.contains(w)) || plus_joined(&lower);
                 match category {
@@ -226,7 +227,7 @@ pub fn plan(mods: &[Mod], enabled: &[usize], profiles: &HashMap<usize, Profile>,
                     _ => Placement { index: i, category, parent: None, reason, chosen: false },
                 }
             }
-            many => {
+            (many, _) => {
                 let names = many.iter().map(|&d| name(d)).collect::<Vec<_>>().join(", ");
                 let ui = category == Category::Ui || many.iter().any(|d| base[d].0 == Category::Ui);
                 let category = match category {
