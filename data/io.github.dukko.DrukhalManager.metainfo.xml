@@ -36,6 +36,12 @@
     <control>keyboard</control>
   </supports>
   <releases>
+    <release version="2.0.0" date="2026-11-17">
+      <description>
+        <p>A new look, in the style of Material 3. The interface uses the Google Sans Flex font, with Fira Code for scripts and Material Symbols icons, all bundled with the app. Buttons are pills, Launch and Sort Load Order are split pills, Load Order and Conflicts switch with a pill toggle, and the cards, panels and switches are rounded. Mods in the load order sit as separate tiles, and the selected one stands out. Colors still follow your desktop's accent and light or dark mode, including palettes from tools like DankMaterialShell and matugen.</p>
+        <p>Long links in the sidebar and long folder names on the Conflicts page now wrap instead of being cut off.</p>
+      </description>
+    </release>
     <release version="1.4.6" date="2026-11-17">
       <description>
         <p>On the Conflicts page, conflicts saved to the merged patch move to a Resolved section at the bottom of the list, closed until you open it. Problems moves there too once every file with errors has a fix, instead of staying under Needs Attention. The list's headings are title-cased, and the mod filter now really reads Filter by Mod until you pick a mod.</p>
