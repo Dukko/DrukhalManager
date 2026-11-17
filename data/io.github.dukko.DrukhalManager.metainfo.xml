@@ -36,6 +36,11 @@
     <control>keyboard</control>
   </supports>
   <releases>
+    <release version="1.4.6" date="2026-11-17">
+      <description>
+        <p>On the Conflicts page, conflicts saved to the merged patch move to a Resolved section at the bottom of the list, closed until you open it. Problems moves there too once every file with errors has a fix, instead of staying under Needs Attention. The list's headings are title-cased, and the mod filter now really reads Filter by Mod until you pick a mod.</p>
+      </description>
+    </release>
     <release version="1.4.5" date="2026-11-17">
       <description>
         <p>Interface updates. The header's Collections button now always says Collections and marks the active one in its menu. The cards above the load order sit in rows of three, smaller, with the overview first and problems below. Search folds into an icon until you use it (or press Ctrl+F). Smart Sort is now Sort Load Order. In the sidebar, clicking a category jumps to its section and clicking its count shows only that section.</p>
