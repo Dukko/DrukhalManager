@@ -1,0 +1,323 @@
+/* Material 3 shapes and type over libadwaita (see src/theme.rs).
+   Colours are libadwaita's variables, so the desktop's palette applies. */
+
+:root {
+  --m3-font: "Google Sans Flex", "Adwaita Sans", "Cantarell", sans-serif;
+  --m3-display: "DM Serif Display", serif;
+  --monospace-font-family: "Fira Code";
+  --document-font-family: "Google Sans Flex";
+  /* Tonal surfaces: the window, then containers a step up, tinted with
+     the accent the way Material's surface containers are. */
+  --m3-container-low: color-mix(in srgb, var(--accent-bg-color) 4%, color-mix(in srgb, currentColor 3%, var(--window-bg-color)));
+  --m3-container: color-mix(in srgb, var(--accent-bg-color) 5%, color-mix(in srgb, currentColor 6%, var(--window-bg-color)));
+  --m3-container-high: color-mix(in srgb, var(--accent-bg-color) 6%, color-mix(in srgb, currentColor 10%, var(--window-bg-color)));
+  --m3-secondary: color-mix(in srgb, var(--accent-bg-color) 24%, var(--window-bg-color));
+  --m3-outline: color-mix(in srgb, currentColor 35%, transparent);
+}
+
+window, popover > contents, tooltip, dialog {
+  font-family: var(--m3-font);
+}
+
+.monospace, .code-view, .code-view text, .line-numbers, .line-numbers text {
+  font-family: "Fira Code", monospace;
+  font-feature-settings: "calt" 0;
+}
+
+.title-1, .title-2 { font-family: var(--m3-display); font-weight: 400; }
+.title-3, .title-4, .heading { font-weight: 650; }
+.numeric { font-feature-settings: "tnum"; }
+
+/* ---------- Header bar ---------- */
+
+headerbar {
+  background: transparent;
+  box-shadow: none;
+  min-height: 60px;
+  padding: 4px 6px;
+}
+
+/* ---------- Buttons: pills ---------- */
+
+button.text-button,
+button.image-text-button,
+button.image-button,
+menubutton > button,
+splitbutton > button,
+splitbutton > menubutton > button,
+dropdown > button {
+  border-radius: 999px;
+  min-height: 36px;
+}
+
+button.text-button, button.image-text-button { font-weight: 600; }
+button.text-button:not(.flat), button.image-text-button:not(.flat) {
+  padding-left: 16px;
+  padding-right: 16px;
+}
+
+button.image-button { min-width: 36px; padding-left: 0; padding-right: 0; }
+
+headerbar button.image-button,
+headerbar menubutton > button.image-button {
+  min-width: 40px;
+  min-height: 40px;
+}
+/* Icon buttons in the header are standard icon buttons: no fill. */
+headerbar button.image-button:not(.suggested-action),
+headerbar menubutton > button.image-button {
+  background-color: transparent;
+}
+headerbar button.image-button:not(.suggested-action):hover,
+headerbar menubutton > button.image-button:hover {
+  background-color: color-mix(in srgb, currentColor 8%, transparent);
+}
+/* Window controls: one circle, drawn by the image, darker on hover.
+   As specific as the header's icon-button rules above, so theirs don't
+   add a second shape behind it. */
+headerbar windowcontrols > button.image-button:not(.suggested-action),
+headerbar windowcontrols > button.image-button:not(.suggested-action):hover,
+headerbar windowcontrols > button.image-button:not(.suggested-action):active,
+windowcontrols > button, windowcontrols > button:hover, windowcontrols > button:active {
+  background: none;
+  box-shadow: none;
+  min-width: 28px;
+  min-height: 28px;
+}
+windowcontrols > button > image { background-color: color-mix(in srgb, currentColor 10%, transparent); border-radius: 999px; padding: 4px; transition: background-color 150ms ease; }
+windowcontrols > button:hover > image { background-color: color-mix(in srgb, currentColor 18%, transparent); }
+windowcontrols > button:active > image { background-color: color-mix(in srgb, currentColor 26%, transparent); }
+
+/* The Load Order / Conflicts switcher: a pill holding pills. */
+viewswitcher {
+  background-color: var(--m3-container-low);
+  border-radius: 999px;
+  padding: 4px;
+  border-spacing: 4px;
+}
+viewswitcher button.toggle {
+  border-radius: 999px;
+  min-height: 40px;
+  padding: 0 18px;
+  background-color: transparent;
+  font-weight: 600;
+}
+viewswitcher button.toggle:hover { background-color: color-mix(in srgb, currentColor 6%, transparent); }
+viewswitcher button.toggle:checked {
+  background-color: var(--m3-secondary);
+  font-weight: 700;
+}
+
+/* Buttons with text are tonal; flat and accent ones keep their look. */
+button.text-button:not(.flat):not(.suggested-action):not(.destructive-action):not(.osd):not(.toggle),
+button.image-text-button:not(.flat):not(.suggested-action):not(.destructive-action):not(.osd):not(.toggle),
+splitbutton:not(.suggested-action):not(.flat) > button,
+splitbutton:not(.suggested-action):not(.flat) > menubutton > button {
+  background-color: var(--m3-secondary);
+}
+button.text-button:not(.flat):not(.suggested-action):not(.destructive-action):not(.osd):not(.toggle):hover,
+button.image-text-button:not(.flat):not(.suggested-action):not(.destructive-action):not(.osd):not(.toggle):hover,
+splitbutton:not(.suggested-action):not(.flat) > button:hover,
+splitbutton:not(.suggested-action):not(.flat) > menubutton > button:hover {
+  background-color: color-mix(in srgb, var(--accent-bg-color) 34%, var(--window-bg-color));
+}
+
+button.suggested-action, splitbutton.suggested-action > button, splitbutton.suggested-action > menubutton > button {
+  font-weight: 700;
+}
+
+/* A split button's two halves: a pill cut in two, 2 px apart. */
+splitbutton { border-spacing: 2px; }
+splitbutton > separator { opacity: 0; min-width: 0; }
+splitbutton > button { border-radius: 999px 8px 8px 999px; }
+splitbutton > menubutton > button { border-radius: 8px 999px 999px 8px; padding-left: 8px; padding-right: 10px; }
+headerbar splitbutton > button, headerbar splitbutton > menubutton > button { min-height: 44px; }
+headerbar splitbutton > button { padding-left: 18px; padding-right: 20px; }
+
+/* Linked groups keep their outer ends round. */
+.linked:not(.vertical) > button,
+.linked:not(.vertical) > menubutton > button,
+.linked:not(.vertical) > dropdown > button { border-radius: 8px; }
+.linked:not(.vertical) > :first-child,
+.linked:not(.vertical) > menubutton:first-child > button,
+.linked:not(.vertical) > dropdown:first-child > button { border-top-left-radius: 999px; border-bottom-left-radius: 999px; }
+.linked:not(.vertical) > :last-child,
+.linked:not(.vertical) > menubutton:last-child > button,
+.linked:not(.vertical) > dropdown:last-child > button { border-top-right-radius: 999px; border-bottom-right-radius: 999px; }
+
+button.pill { padding: 10px 28px; }
+
+/* ---------- Text fields ---------- */
+
+entry, searchbar entry, spinbutton {
+  border-radius: 14px;
+  min-height: 38px;
+}
+entry.search {
+  border-radius: 999px;
+  min-height: 46px;
+  padding-left: 16px;
+  padding-right: 12px;
+  background-color: var(--m3-container-high);
+}
+
+/* ---------- Switches ---------- */
+
+switch {
+  min-width: 48px;
+  min-height: 28px;
+  padding: 0;
+  border-radius: 999px;
+  border: 2px solid var(--m3-outline);
+  background-color: var(--m3-container-high);
+}
+switch > slider {
+  min-width: 16px;
+  min-height: 16px;
+  margin: 6px;
+  border-radius: 999px;
+  background-color: color-mix(in srgb, currentColor 55%, transparent);
+  box-shadow: none;
+}
+switch:checked {
+  border-color: transparent;
+  background-color: var(--accent-bg-color);
+}
+switch:checked > slider {
+  min-width: 24px;
+  min-height: 24px;
+  margin: 2px;
+  background-color: var(--accent-fg-color);
+}
+switch:hover > slider { box-shadow: 0 0 0 8px color-mix(in srgb, currentColor 8%, transparent); }
+
+/* ---------- Cards, lists, panels ---------- */
+
+.card, .boxed-list, .boxed-list-separate > row {
+  border-radius: 24px;
+  box-shadow: none;
+  background-color: var(--m3-container);
+}
+list.boxed-list > row:first-child, .boxed-list > row:first-child { border-top-left-radius: 24px; border-top-right-radius: 24px; }
+list.boxed-list > row:last-child, .boxed-list > row:last-child { border-bottom-left-radius: 24px; border-bottom-right-radius: 24px; }
+
+/* The load order: rows as separate tiles, 2 px apart; the selected one
+   rounds off and takes the accent's container colour. */
+list.mod-list {
+  background: transparent;
+  box-shadow: none;
+  border-radius: 24px;
+}
+list.mod-list > row {
+  background-color: var(--m3-container);
+  border: none;
+  margin-bottom: 2px;
+  border-radius: 6px;
+  transition: border-radius 200ms cubic-bezier(0.2, 0, 0, 1), background-color 150ms ease;
+}
+list.mod-list > row:first-child { border-top-left-radius: 24px; border-top-right-radius: 24px; }
+list.mod-list > row:last-child { border-bottom-left-radius: 24px; border-bottom-right-radius: 24px; }
+list.mod-list > row:hover { background-color: var(--m3-container-high); }
+list.mod-list > row:selected,
+list.mod-list > row:selected:hover {
+  background-color: var(--m3-secondary);
+  border-radius: 20px;
+}
+list.mod-list > row.mod-row > box.header { min-height: 48px; }
+.mod-thumbnail { border-radius: 12px; }
+
+.category-header {
+  background: transparent;
+  border: none;
+  padding: 18px 16px 8px 16px;
+  font-weight: 650;
+}
+.category-dot { min-width: 10px; min-height: 10px; border-radius: 4px; }
+
+/* Side panels: rounded, borderless, a tone above the window. */
+.side-panel, .conflict-sidebar {
+  border-radius: 28px;
+  box-shadow: none;
+  background-color: var(--m3-container-low);
+  margin: 0 8px 8px 8px;
+}
+.conflict-sidebar:backdrop { background-color: var(--m3-container-low); }
+
+.navigation-sidebar > row {
+  border-radius: 999px;
+  min-height: 40px;
+  margin: 1px 8px;
+  padding: 0 14px;
+}
+.navigation-sidebar > row:selected,
+.navigation-sidebar > row.category-shown {
+  background-color: var(--m3-secondary);
+  font-weight: 700;
+}
+button.category-count { border-radius: 999px; min-height: 24px; min-width: 28px; padding: 0 8px; font-weight: 600; }
+
+/* Health cards: big numbers. */
+.health-card {
+  padding: 16px 20px;
+  border-radius: 24px;
+  background-color: var(--m3-container);
+}
+.health-card .number {
+  font-size: 30px;
+  font-weight: 650;
+  letter-spacing: -0.5px;
+  font-feature-settings: "tnum";
+}
+.health-card .caption { font-size: 12px; }
+
+.inspector-problem { border-radius: 20px; padding: 14px 16px; }
+.conflict-count, .badge, .card-mode { border-radius: 8px; }
+.chip { border-radius: 8px; padding: 4px 12px; }
+
+/* Conflicts. */
+.conflict-list row.conflict { border-radius: 14px; margin: 1px 8px; padding: 8px 10px; }
+.conflict-list row.conflict:selected { border-radius: 999px; background-color: var(--m3-secondary); }
+.conflict-title { font-family: "Fira Code", monospace; font-weight: 600; font-size: 1.5em; }
+.code-card { border-radius: 24px; }
+.code-card.editable { box-shadow: inset 0 0 0 2px var(--accent-bg-color); }
+
+/* ---------- Menus, popovers, dialogs, toasts ---------- */
+
+popover > contents { border-radius: 20px; padding: 8px; }
+popover.menu > contents { padding: 6px; }
+popover.menu modelbutton { border-radius: 12px; min-height: 36px; padding: 0 12px; }
+dialog.floating sheet, window.dialog.message { border-radius: 28px; }
+toast { border-radius: 16px; }
+banner > revealer > widget { padding: 6px 12px; }
+
+checkbutton check { border-radius: 4px; }
+progressbar > trough, progressbar > trough > progress { border-radius: 999px; min-height: 4px; }
+
+/* Menu buttons with text are tonal too; the header's icon-only ones
+   (notifications, main menu) stay plain. */
+menubutton:not(.flat) > button { background-color: var(--m3-secondary); border-radius: 999px; }
+menubutton:not(.flat) > button:hover { background-color: color-mix(in srgb, var(--accent-bg-color) 34%, var(--window-bg-color)); }
+headerbar box.end > menubutton > button,
+headerbar box.start > menubutton > button { background-color: transparent; }
+headerbar box.end > menubutton > button:hover,
+headerbar box.start > menubutton > button:hover { background-color: color-mix(in srgb, currentColor 8%, transparent); }
+
+/* Material's icons are drawn for 20–24 px. */
+headerbar image, viewswitcher image, .navigation-sidebar image, button.image-text-button image { -gtk-icon-size: 18px; }
+splitbutton.suggested-action > menubutton > button { background-color: var(--accent-bg-color); color: var(--accent-fg-color); }
+splitbutton.suggested-action > menubutton > button:hover { background-color: color-mix(in srgb, white 10%, var(--accent-bg-color)); }
+splitbutton > separator { min-width: 2px; background: transparent; }
+
+/* Split buttons last, so the menu button rules above don't turn the
+   arrow half back into a whole pill. */
+splitbutton > menubutton > button,
+splitbutton > menubutton:not(.flat) > button { border-radius: 8px 999px 999px 8px; box-shadow: none; border: none; }
+splitbutton > button { box-shadow: none; border: none; }
+/* The container would paint one rectangle behind both halves. */
+splitbutton, splitbutton.suggested-action, splitbutton:disabled { background: none; box-shadow: none; border-radius: 999px; }
+splitbutton.suggested-action > button,
+splitbutton.suggested-action > menubutton > button { background-color: var(--accent-bg-color); color: var(--accent-fg-color); }
+splitbutton.suggested-action > button:hover,
+splitbutton.suggested-action > menubutton > button:hover { background-color: color-mix(in srgb, white 10%, var(--accent-bg-color)); }
+splitbutton.suggested-action > button:active,
+splitbutton.suggested-action > menubutton > button:active { background-color: color-mix(in srgb, black 10%, var(--accent-bg-color)); }

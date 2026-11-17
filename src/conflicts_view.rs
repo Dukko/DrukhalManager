@@ -933,7 +933,7 @@ impl Page {
 
     fn group_heading(self: &Rc<Self>, group: &Group, count: usize) -> gtk::ListBoxRow {
         let heading = gtk::Box::builder().spacing(6).margin_start(6).build();
-        heading.append(&gtk::Label::builder().label(&group.title).xalign(0.0).hexpand(true).ellipsize(gtk::pango::EllipsizeMode::Start).tooltip_text(&group.title).css_classes(["dim-label"]).build());
+        heading.append(&gtk::Label::builder().label(&group.title).xalign(0.0).hexpand(true).wrap(true).wrap_mode(gtk::pango::WrapMode::WordChar).css_classes(["dim-label"]).build());
         heading.append(&gtk::Label::builder().label(count.to_string()).css_classes(["dim-label", "numeric"]).build());
         if let Some(folder_key) = &group.folder_key {
             let menu = gio::Menu::new();

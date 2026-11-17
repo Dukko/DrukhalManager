@@ -65,6 +65,7 @@ for theme in "$out"/share/icons/*/; do
     gtk4-update-icon-cache -q -t -f "$theme"
 done
 
-cp LICENSE NOTICE "$out/"
+cp LICENSE NOTICE data/fonts/*-OFL.txt "$out/"
+cp data/icons/material/LICENSE "$out/MaterialSymbols-LICENSE.txt"
 
 echo "Bundled into $out ($(du -sh "$out" | cut -f1))"

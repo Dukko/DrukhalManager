@@ -114,7 +114,18 @@ fn category_dot(category: Category) -> gtk::Box {
 
 /// A small link-like button for the sidebar, running `action`.
 pub(super) fn sidebar_link(label: &str, action: &str) -> gtk::Button {
-    gtk::Button::builder().label(label).action_name(action).halign(gtk::Align::Start).css_classes(["flat", "sidebar-link", "caption-heading", "accent"]).build()
+    let button = gtk::Button::builder().label(label).action_name(action).halign(gtk::Align::Start).css_classes(["flat", "sidebar-link", "caption-heading", "accent"]).build();
+    // Long text wraps inside the panel instead of running past its edge.
+    // Setting the label makes a new one, so this runs again each time.
+    let wrap = |button: &gtk::Button| {
+        if let Some(label) = button.child().and_downcast::<gtk::Label>() {
+            label.set_wrap(true);
+            label.set_xalign(0.0);
+        }
+    };
+    wrap(&button);
+    button.connect_label_notify(wrap);
+    button
 }
 
 pub(super) fn sidebar_page(views: &gtk::ListBox, categories: &gtk::ListBox, find_patches: &gtk::Button, info: &gtk::Label, errors: &gtk::Button) -> gtk::Box {
@@ -133,7 +144,9 @@ pub(super) fn sidebar_page(views: &gtk::ListBox, categories: &gtk::ListBox, find
     lists.append(find_patches);
     page.append(&gtk::ScrolledWindow::builder().child(&lists).vexpand(true).hscrollbar_policy(gtk::PolicyType::Never).build());
     page.append(info);
-    errors.set_margin_start(6);
+    // In line with the game summary above it.
+    errors.set_margin_start(12);
+    errors.set_margin_end(12);
     errors.set_margin_bottom(8);
     page.append(errors);
     page

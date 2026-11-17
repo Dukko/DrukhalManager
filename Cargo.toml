@@ -7,6 +7,8 @@ description = "Stellaris mod manager for Linux and Windows, a fork of Irony Mod 
 repository = "https://github.com/Dukko/DrukhalManager"
 
 [dependencies]
+# Loading the bundled fonts (src/theme.rs): Pango 1.56.
+pango = { version = "0.22.9", features = ["v1_56"] }
 adw = { version = "0.9.2", package = "libadwaita", features = ["v1_8"] }
 async-channel = "2.5.0"
 dirs = "7.0.0"

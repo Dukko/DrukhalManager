@@ -28,6 +28,7 @@ mod preferences;
 mod resize_grip;
 mod script_check_dialog;
 mod settings;
+mod theme;
 mod thinking_view;
 mod update;
 mod window;
@@ -57,6 +58,7 @@ fn build_ui(app: &adw::Application) {
     {
         gtk::IconTheme::for_display(&display).add_search_path(icons);
     }
+    theme::install();
     diagnostics::log!("app", "DrukhalManager {} started ({})", update::CURRENT, if platform::is_flatpak() { "Flatpak" } else { "native" });
     let home = platform::home_dir();
     // Folders chosen in Preferences replace the detected ones.

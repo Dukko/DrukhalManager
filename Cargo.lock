@@ -448,6 +448,7 @@ dependencies = [
  "keyring-core",
  "libadwaita",
  "oo7",
+ "pango",
  "rusqlite",
  "serde",
  "serde_json",

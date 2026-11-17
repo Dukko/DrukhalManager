@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: DrukhalManager 1.4.6\n"
 "Report-Msgid-Bugs-To: https://github.com/Dukko/DrukhalManager/issues\n"
-"POT-Creation-Date: 2026-11-17 19:06+0000\n"
+"POT-Creation-Date: 2026-11-17 21:55+0000\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -17,11 +17,11 @@ msgstr ""
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
 
-#: src/i18n.rs:182 src/window/overview.rs:469
+#: src/i18n.rs:182 src/window/overview.rs:482
 msgid "Last save: {empire}, {date}"
 msgstr ""
 
-#: src/i18n.rs:183 src/i18n.rs:184 src/conflicts_view.rs:454 src/conflicts_view.rs:791 src/conflicts_view.rs:815 src/window/collections_ui.rs:407 src/window/overview.rs:463 src/window/patches_ui.rs:155 src/window/saves_ui.rs:127 src/window/selection_ui.rs:313 src/window/selection_ui.rs:324 src/window/freeze_ui.rs:56
+#: src/i18n.rs:183 src/i18n.rs:184 src/conflicts_view.rs:454 src/conflicts_view.rs:791 src/conflicts_view.rs:815 src/window/collections_ui.rs:407 src/window/overview.rs:476 src/window/patches_ui.rs:155 src/window/saves_ui.rs:127 src/window/selection_ui.rs:313 src/window/selection_ui.rs:324 src/window/freeze_ui.rs:56
 msgid "{count} mod"
 msgid_plural "{count} mods"
 msgstr[0] ""
@@ -53,7 +53,7 @@ msgstr ""
 msgid "Objects your enabled mods replace that changed between Stellaris {old} and {new}"
 msgstr ""
 
-#: src/behind_dialog.rs:181 src/behind_dialog.rs:182 src/behind_dialog.rs:288 src/behind_dialog.rs:290 src/window/overview.rs:458
+#: src/behind_dialog.rs:181 src/behind_dialog.rs:182 src/behind_dialog.rs:288 src/behind_dialog.rs:290 src/window/overview.rs:471
 msgid "Stellaris {version}"
 msgstr ""
 
@@ -439,7 +439,7 @@ msgstr ""
 msgid "Edited"
 msgstr ""
 
-#: src/conflicts_view/object.rs:521 src/window/overview.rs:741
+#: src/conflicts_view/object.rs:521 src/window/overview.rs:754
 msgid "Kept"
 msgstr ""
 
@@ -616,7 +616,7 @@ msgstr ""
 msgid "Look Up Objects…"
 msgstr ""
 
-#: src/conflicts_view.rs:518 src/window/overview.rs:739 src/window/shortcuts.rs:32 src/window/shortcuts.rs:82 src/window.rs:486 src/window.rs:1081
+#: src/conflicts_view.rs:518 src/window/overview.rs:752 src/window/shortcuts.rs:32 src/window/shortcuts.rs:82 src/window.rs:486 src/window.rs:1081
 msgid "Conflicts"
 msgstr ""
 
@@ -806,7 +806,7 @@ msgstr ""
 msgid "Ignored"
 msgstr ""
 
-#: src/conflicts_view.rs:1054 src/window/ignore_rules_ui.rs:175 src/window/overview.rs:736
+#: src/conflicts_view.rs:1054 src/window/ignore_rules_ui.rs:175 src/window/overview.rs:749
 msgid "{count} conflict"
 msgid_plural "{count} conflicts"
 msgstr[0] ""
@@ -1836,7 +1836,7 @@ msgstr ""
 msgid "Turns Off Achievements"
 msgstr ""
 
-#: src/mods/filter.rs:57 src/window/overview.rs:598 src/window.rs:416
+#: src/mods/filter.rs:57 src/window/overview.rs:611 src/window.rs:416
 msgid "Disabled"
 msgstr ""
 
@@ -2480,7 +2480,7 @@ msgstr ""
 msgid "Extra Mod Folder"
 msgstr ""
 
-#: src/preferences.rs:249 src/window/overview.rs:735 src/window.rs:1081
+#: src/preferences.rs:249 src/window/overview.rs:748 src/window.rs:1081
 msgid "None"
 msgstr ""
 
@@ -2544,7 +2544,7 @@ msgstr ""
 msgid "The game's language"
 msgstr ""
 
-#: src/preferences.rs:326 src/window/overview.rs:737
+#: src/preferences.rs:326 src/window/overview.rs:750
 msgid "Not scanned"
 msgstr ""
 
@@ -2796,7 +2796,7 @@ msgstr ""
 msgid "Script Problems"
 msgstr ""
 
-#: src/script_check_dialog.rs:120 src/window/overview.rs:549
+#: src/script_check_dialog.rs:120 src/window/overview.rs:562
 msgid "{count} problem"
 msgid_plural "{count} problems"
 msgstr[0] ""
@@ -3743,7 +3743,7 @@ msgstr ""
 msgid "_Disable Them for Now"
 msgstr ""
 
-#: src/window/game_update_ui.rs:92 src/window/overview.rs:610
+#: src/window/game_update_ui.rs:92 src/window/overview.rs:623
 msgid "Supports {version}"
 msgstr ""
 
@@ -3751,7 +3751,7 @@ msgstr ""
 msgid " · Updated since the game was"
 msgstr ""
 
-#: src/window/game_update_ui.rs:98 src/window/overview.rs:807 src/window/patches_ui.rs:341
+#: src/window/game_update_ui.rs:98 src/window/overview.rs:820 src/window/patches_ui.rs:341
 msgid "Open Workshop Page"
 msgstr ""
 
@@ -3839,7 +3839,7 @@ msgid_plural ", {count} from the merged patch"
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/window/launch.rs:320 src/window/overview.rs:390 src/window/overview.rs:397 src/window/overview.rs:404 src/window/overview.rs:414 src/window/overview.rs:427 src/window/overview.rs:435 src/window/overview.rs:446 src/window/persist.rs:79
+#: src/window/launch.rs:320 src/window/overview.rs:403 src/window/overview.rs:410 src/window/overview.rs:417 src/window/overview.rs:427 src/window/overview.rs:440 src/window/overview.rs:448 src/window/overview.rs:459 src/window/persist.rs:79
 msgid "Show"
 msgstr ""
 
@@ -3859,290 +3859,290 @@ msgstr ""
 msgid "Show only this section"
 msgstr ""
 
-#: src/window/overview.rs:124
+#: src/window/overview.rs:135
 msgid "Views"
 msgstr ""
 
-#: src/window/overview.rs:126
+#: src/window/overview.rs:137
 msgid "Categories"
 msgstr ""
 
-#: src/window/overview.rs:127
+#: src/window/overview.rs:138
 msgid "The sections Sort Load Order puts enabled mods in"
 msgstr ""
 
-#: src/window/overview.rs:147
+#: src/window/overview.rs:160
 msgid "{category} (manually ordered)"
 msgstr ""
 
-#: src/window/overview.rs:155
+#: src/window/overview.rs:168
 msgid "Smart Sort would put this mod elsewhere in {category}: moved here by hand"
 msgid_plural "Smart Sort would put these mods elsewhere in {category}: moved here by hand"
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/window/overview.rs:164
+#: src/window/overview.rs:177
 msgid "Find More…"
 msgstr ""
 
-#: src/window/overview.rs:164
+#: src/window/overview.rs:177
 msgid "Search the Workshop for patches between your enabled mods"
 msgstr ""
 
-#: src/window/overview.rs:201
+#: src/window/overview.rs:214
 msgid "today"
 msgstr ""
 
-#: src/window/overview.rs:202
+#: src/window/overview.rs:215
 msgid "yesterday"
 msgstr ""
 
-#: src/window/overview.rs:203
+#: src/window/overview.rs:216
 msgid "{count} day ago"
 msgid_plural "{count} days ago"
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/window/overview.rs:204
+#: src/window/overview.rs:217
 msgid "{count} week ago"
 msgid_plural "{count} weeks ago"
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/window/overview.rs:205
+#: src/window/overview.rs:218
 msgid "{count} month ago"
 msgid_plural "{count} months ago"
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/window/overview.rs:206
+#: src/window/overview.rs:219
 msgid "{count} year ago"
 msgid_plural "{count} years ago"
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/window/overview.rs:381
+#: src/window/overview.rs:394
 msgid "of {total} enabled · unsaved"
 msgstr ""
 
-#: src/window/overview.rs:383
+#: src/window/overview.rs:396
 msgid "of {total} enabled"
 msgstr ""
 
-#: src/window/overview.rs:389
+#: src/window/overview.rs:402
 msgid "mod updated since you last played"
 msgid_plural "mods updated since you last played"
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/window/overview.rs:396
+#: src/window/overview.rs:409
 msgid "mod update Steam hasn't downloaded yet"
 msgid_plural "mod updates Steam hasn't downloaded yet"
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/window/overview.rs:403
+#: src/window/overview.rs:416
 msgid "frozen mod updated on the Workshop"
 msgid_plural "frozen mods updated on the Workshop"
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/window/overview.rs:410
+#: src/window/overview.rs:423
 msgid "On"
 msgstr ""
 
-#: src/window/overview.rs:410
+#: src/window/overview.rs:423
 msgid "achievements stay on"
 msgstr ""
 
-#: src/window/overview.rs:413
+#: src/window/overview.rs:426
 msgid "mod turns off achievements"
 msgid_plural "mods turn off achievements"
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/window/overview.rs:417
+#: src/window/overview.rs:430
 msgid "No enabled mod changes the files the game checksums, so achievements stay on"
 msgstr ""
 
-#: src/window/overview.rs:419
+#: src/window/overview.rs:432
 msgid "Achievements are off because these mods change the files the game checksums:\n"
 "{mods}"
 msgstr ""
 
-#: src/window/overview.rs:426
+#: src/window/overview.rs:439
 msgid "required mod missing"
 msgid_plural "required mods missing"
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/window/overview.rs:430
+#: src/window/overview.rs:443
 msgid "loads before a mod it needs"
 msgid_plural "load before mods they need"
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/window/overview.rs:431 src/window/overview.rs:684
+#: src/window/overview.rs:444 src/window/overview.rs:697
 msgid "Sort"
 msgstr ""
 
-#: src/window/overview.rs:434
+#: src/window/overview.rs:447
 msgid "loads above a mod that replaces most of its files"
 msgid_plural "load above mods that replace most of their files"
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/window/overview.rs:438
+#: src/window/overview.rs:451
 msgid "merge out of date"
 msgid_plural "merges out of date"
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/window/overview.rs:439 src/window/overview.rs:679
+#: src/window/overview.rs:452 src/window/overview.rs:692
 msgid "Review"
 msgstr ""
 
-#: src/window/overview.rs:442
+#: src/window/overview.rs:455
 msgid "this game"
 msgstr ""
 
-#: src/window/overview.rs:443
+#: src/window/overview.rs:456
 msgid "not updated for {version}"
 msgstr ""
 
-#: src/window/overview.rs:446
+#: src/window/overview.rs:459
 msgid "Disable for Now…"
 msgstr ""
 
-#: src/window/overview.rs:461
+#: src/window/overview.rs:474
 msgid "Achievements on"
 msgstr ""
 
-#: src/window/overview.rs:463
+#: src/window/overview.rs:476
 msgid "Achievements off, because of {mods}"
 msgstr ""
 
-#: src/window/overview.rs:467
+#: src/window/overview.rs:480
 msgid "Last save: {empire}"
 msgstr ""
 
-#: src/window/overview.rs:474
+#: src/window/overview.rs:487
 msgid " · same mods"
 msgstr ""
 
-#: src/window/overview.rs:474
+#: src/window/overview.rs:487
 msgid " · played with other mods"
 msgstr ""
 
-#: src/window/overview.rs:549
+#: src/window/overview.rs:562
 msgid "Last game logged {problems}"
 msgstr ""
 
-#: src/window/overview.rs:551
+#: src/window/overview.rs:564
 msgid "Last game logged no real problems"
 msgstr ""
 
-#: src/window/overview.rs:563
+#: src/window/overview.rs:576
 msgid "No Mod Selected"
 msgstr ""
 
-#: src/window/overview.rs:564
+#: src/window/overview.rs:577
 msgid "Click a mod to see what's wrong with it, what it needs and what it overrides."
 msgstr ""
 
-#: src/window/overview.rs:601 src/window/list.rs:963 src/window.rs:1079
+#: src/window/overview.rs:614 src/window/list.rs:963 src/window.rs:1079
 msgid "Workshop"
 msgstr ""
 
-#: src/window/overview.rs:602 src/window/list.rs:964 src/window.rs:1079
+#: src/window/overview.rs:615 src/window/list.rs:964 src/window.rs:1079
 msgid "Local"
 msgstr ""
 
-#: src/window/overview.rs:605
+#: src/window/overview.rs:618
 msgid "Always loads last"
 msgstr ""
 
-#: src/window/overview.rs:613 src/window/patches_ui.rs:336
+#: src/window/overview.rs:626 src/window/patches_ui.rs:336
 msgid "updated {when}"
 msgstr ""
 
-#: src/window/overview.rs:631 src/window/list.rs:452
+#: src/window/overview.rs:644 src/window/list.rs:452
 msgid "Note"
 msgstr ""
 
-#: src/window/overview.rs:686
+#: src/window/overview.rs:699
 msgid "Get"
 msgstr ""
 
-#: src/window/overview.rs:690
+#: src/window/overview.rs:703
 msgid "Not Needed"
 msgstr ""
 
-#: src/window/overview.rs:690
+#: src/window/overview.rs:703
 msgid "Stop treating “{name}” as required"
 msgstr ""
 
-#: src/window/overview.rs:701
+#: src/window/overview.rs:714
 msgid "No problems found"
 msgstr ""
 
-#: src/window/overview.rs:741
+#: src/window/overview.rs:754
 msgid "Turns them off"
 msgstr ""
 
-#: src/window/overview.rs:742 src/window.rs:1080
+#: src/window/overview.rs:755 src/window.rs:1080
 msgid "Achievements"
 msgstr ""
 
-#: src/window/overview.rs:773
+#: src/window/overview.rs:786
 msgid "Needs"
 msgstr ""
 
-#: src/window/overview.rs:778
+#: src/window/overview.rs:791
 msgid "not installed"
 msgstr ""
 
-#: src/window/overview.rs:779 src/window/patches_ui.rs:414
+#: src/window/overview.rs:792 src/window/patches_ui.rs:414
 msgid "enabled"
 msgstr ""
 
-#: src/window/overview.rs:780
+#: src/window/overview.rs:793
 msgid "disabled"
 msgstr ""
 
-#: src/window/overview.rs:795 src/window.rs:1078
+#: src/window/overview.rs:808 src/window.rs:1078
 msgid "Enabled"
 msgstr ""
 
-#: src/window/overview.rs:808
+#: src/window/overview.rs:821
 msgid "Open in Steam"
 msgstr ""
 
-#: src/window/overview.rs:811 src/window/list.rs:778
+#: src/window/overview.rs:824 src/window/list.rs:778
 msgid "Open Folder"
 msgstr ""
 
-#: src/window/overview.rs:814
+#: src/window/overview.rs:827
 msgid "Show Conflicts"
 msgstr ""
 
-#: src/window/overview.rs:816
+#: src/window/overview.rs:829
 msgid "Rename…"
 msgstr ""
 
-#: src/window/overview.rs:818
+#: src/window/overview.rs:831
 msgid "Add Note…"
 msgstr ""
 
-#: src/window/overview.rs:821 src/window/selection_ui.rs:30
+#: src/window/overview.rs:834 src/window/selection_ui.rs:30
 msgid "Move to Top"
 msgstr ""
 
-#: src/window/overview.rs:822 src/window/selection_ui.rs:31
+#: src/window/overview.rs:835 src/window/selection_ui.rs:31
 msgid "Move to Bottom"
 msgstr ""
 
-#: src/window/overview.rs:825
+#: src/window/overview.rs:838
 msgid "Unsubscribe in Steam…"
 msgstr ""
 

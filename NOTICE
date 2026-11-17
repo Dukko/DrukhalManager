@@ -27,3 +27,22 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+-------------------------------------------------------------------------------
+
+Bundled fonts and icons (in data/fonts and data/icons/material, built into
+the program; see tools/subset-fonts.sh and tools/material-icons.py):
+
+- Google Sans Flex, copyright 2025 The Google Sans Flex Project Authors.
+  SIL Open Font License 1.1 (GoogleSansFlex-OFL.txt). "Google", "Google Sans"
+  and "Google Sans Flex" are trademarks of Google LLC; DrukhalManager is not
+  affiliated with or endorsed by Google.
+- Fira Code, copyright 2014-2020 The Fira Code Project Authors.
+  SIL Open Font License 1.1 (FiraCode-OFL.txt).
+- DM Serif Display, copyright 2014-2018 Adobe, 2019 Google LLC.
+  SIL Open Font License 1.1 (DMSerifDisplay-OFL.txt).
+- Material Symbols Rounded, by Google. Apache License 2.0
+  (MaterialSymbols-LICENSE.txt).
+
+The fonts are subsets of the originals; the icons are drawn from the
+Material Symbols font as SVG files.
