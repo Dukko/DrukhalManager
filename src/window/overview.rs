@@ -746,7 +746,7 @@ impl Window {
         let overrides = match conflicts {
             _ if position.is_none() => "—".to_owned(),
             Some(0) => t!("None"),
-            Some(n) => tn!("{count} conflict", "{count} conflicts", n),
+            Some(n) => tnf!("{count} conflict", "{count} conflicts", count = n),
             None => t!("Not scanned"),
         };
         stats.append(&stat(&t!("Conflicts"), &overrides));

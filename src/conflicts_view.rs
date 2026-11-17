@@ -788,7 +788,7 @@ impl Page {
             Item::Object(i) => {
                 let c = &analysis.report.objects[i];
                 let mods: BTreeSet<usize> = c.definitions.iter().map(|d| d.mod_position).collect();
-                let mods = tn!("{count} mod", "{count} mods", mods.len());
+                let mods = tnf!("{count} mod", "{count} mods", count = mods.len());
                 if self.is_ignored(item) {
                     return (Status::Ignored, tf!("{mods} · {reason}", mods = &mods, reason = self.ignored_label(item)));
                 }
@@ -812,7 +812,7 @@ impl Page {
             }
             Item::File(i) => {
                 let c = &analysis.report.files[i];
-                let mods = tn!("{count} mod", "{count} mods", c.mods.len());
+                let mods = tnf!("{count} mod", "{count} mods", count = c.mods.len());
                 if self.is_ignored(item) {
                     (Status::Ignored, tf!("{mods} · {reason}", mods = &mods, reason = self.ignored_label(item)))
                 } else if self.hooks.stale_file(&c.path).is_some() {

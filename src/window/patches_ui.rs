@@ -271,7 +271,7 @@ impl Window {
                     shown += usize::from(kind && recent);
                     too_old += usize::from(kind && !recent);
                 }
-                group.set_title(&if shown == 0 { t!("Nothing to Suggest") } else { tn!("{count} Suggestion", "{count} Suggestions", shown) });
+                group.set_title(&if shown == 0 { t!("Nothing to Suggest") } else { tnf!("{count} Suggestion", "{count} Suggestions", count = shown) });
                 none.set_visible(shown == 0);
                 none.set_title(&if too_old > 0 {
                     tnf!(
