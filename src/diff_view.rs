@@ -972,6 +972,7 @@ button.chip { min-height: 0; }
 .conflict-sidebar .navigation-sidebar { background: transparent; }
 .conflict-list row.folder { padding-top: 14px; }
 .conflict-list row.folder label { font-size: 0.85em; font-weight: bold; }
+.conflict-list row.folder button.resolved-toggle { min-height: 0; padding: 2px 6px; }
 .conflict-list row.conflict { padding: 6px 8px; border-radius: 8px; margin: 1px 6px; }
 .conflict-title { font-size: 1.6em; font-weight: 800; }
 .card-mode { font-size: 0.8em; font-weight: bold; border-radius: 99px; padding: 1px 8px 1px 6px; }

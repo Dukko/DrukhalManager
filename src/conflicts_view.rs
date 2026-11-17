@@ -12,7 +12,7 @@ mod object;
 
 use std::any::Any;
 use std::cell::{Cell, RefCell};
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::Arc;
@@ -205,6 +205,8 @@ pub struct Session {
     pub ignore_whitespace: bool,
     /// Whether comparisons fold runs of unchanged lines.
     pub fold_unchanged: bool,
+    /// Whether the list's Resolved section is open; it starts closed.
+    pub show_resolved: bool,
 }
 
 impl Session {
@@ -354,6 +356,10 @@ pub struct Page {
     objects: Vec<usize>,
     involved: usize,
     n_ignored: usize,
+    /// The items listed under Resolved at the last [`Page::fill`].
+    resolved: RefCell<HashSet<Item>>,
+    /// Set while a refill is waiting, after an item was resolved or reopened.
+    refill_pending: Cell<bool>,
 }
 
 /// Builds the page. The window keeps the returned value for as long as it
@@ -392,7 +398,7 @@ pub fn build(analysis: &Rc<Analysis>, rescan: gtk::Button, hooks: Rc<MergeHooks>
         attention.push(Item::Problems);
     }
     if !attention.is_empty() {
-        groups.push(Group { title: t!("needs attention"), folder_key: None, merge_all: false, items: attention });
+        groups.push(Group { title: t!("Needs Attention"), folder_key: None, merge_all: false, items: attention });
     }
     let mut by_category: BTreeMap<&str, Vec<Item>> = BTreeMap::new();
     for &i in &objects {
@@ -406,7 +412,7 @@ pub fn build(analysis: &Rc<Analysis>, rescan: gtk::Button, hooks: Rc<MergeHooks>
         by_folder.entry(file_folder(&report.files[i].path)).or_default().push(Item::File(i));
     }
     for (folder, items) in by_folder {
-        let title = if folder.is_empty() { t!("overridden files") } else { tf!("overridden files · {folder}", folder = folder) };
+        let title = if folder.is_empty() { t!("Overridden Files") } else { tf!("Overridden Files · {folder}", folder = folder) };
         let merge_all = items.iter().any(|i| matches!(i, Item::File(f) if file_merge::mergeable(&report.files[*f].path)));
         groups.push(Group { title, folder_key: Some(files_folder_key(folder)), merge_all, items });
     }
@@ -538,6 +544,8 @@ pub fn build(analysis: &Rc<Analysis>, rescan: gtk::Button, hooks: Rc<MergeHooks>
         objects,
         involved: involved.len(),
         n_ignored,
+        resolved: RefCell::default(),
+        refill_pending: Cell::new(false),
     });
     page.update_summary();
 
@@ -619,10 +627,12 @@ fn mod_filter(analysis: &Rc<Analysis>, hooks: &Rc<MergeHooks>, involved: &BTreeS
         let Some(item) = item.downcast_ref::<gtk::ListItem>() else { return };
         item.set_child(Some(&gtk::Label::builder().xalign(0.0).ellipsize(gtk::pango::EllipsizeMode::End).build()));
     });
-    button_factory.connect_bind(|_, item| {
+    // By the item, not its position: the button's item has none.
+    let all_mods = labels[0].clone();
+    button_factory.connect_bind(move |_, item| {
         let Some(item) = item.downcast_ref::<gtk::ListItem>() else { return };
         let (Some(label), Some(text)) = (item.child().and_downcast::<gtk::Label>(), item.item().and_downcast::<gtk::StringObject>()) else { return };
-        label.set_label(&if item.position() == 0 { t!("Filter by Mod") } else { text.string().to_string() });
+        label.set_label(&if text.string() == all_mods { t!("Filter by Mod") } else { text.string().to_string() });
     });
     let list_factory = gtk::SignalListItemFactory::new();
     list_factory.connect_setup(|_, item| {
@@ -751,6 +761,26 @@ impl Page {
         }
     }
 
+    /// Whether `item` is done with: a conflict saved to the patch, or every
+    /// problem fixed. Resolved items move to the list's Resolved section.
+    fn is_resolved(&self, item: Item) -> bool {
+        match item {
+            Item::Object(_) | Item::File(_) => self.is_saved(item),
+            Item::Problems => self.problems_resolved(),
+            Item::Outdated | Item::Untracked => false,
+        }
+    }
+
+    /// Whether every mod was scanned and every file with errors has an
+    /// up-to-date fix in the merged patch.
+    fn problems_resolved(&self) -> bool {
+        let (report, filter) = (&self.analysis.report, self.hooks.filter);
+        let errors: Vec<_> = report.errors.iter().filter(|e| filter.is_none_or(|p| e.mod_position == p)).collect();
+        !errors.is_empty()
+            && !report.skipped.iter().any(|(p, _)| filter.is_none_or(|f| *p == f))
+            && errors.iter().all(|e| (self.hooks.is_file_merged)(&e.file) && self.hooks.stale_file(&e.file).is_none())
+    }
+
     /// The item's status and the subtitle under its name.
     fn status_of(&self, item: Item) -> (Status, String) {
         let analysis = &self.analysis;
@@ -804,6 +834,9 @@ impl Page {
                 if skipped > 0 {
                     parts.push(tnf!("{count} mod not scanned", "{count} mods not scanned", count = skipped));
                 }
+                if self.problems_resolved() {
+                    return (Status::Saved, tnf!("{count} file fixed", "{count} files fixed", count = errors));
+                }
                 (Status::Attention, parts.join(" · "))
             }
             Item::Outdated => (Status::Attention, outdated_summary(&self.hooks.stale.borrow())),
@@ -819,26 +852,40 @@ impl Page {
         let query = self.hooks.session.borrow().search.to_lowercase();
         let mut rows = Vec::new();
         let mut parts = HashMap::new();
-        for group in &self.groups {
-            let items: Vec<Item> = group.items.iter().copied().filter(|&i| self.matches(i, &query)).collect();
-            if items.is_empty() {
-                continue;
-            }
-            self.list.append(&self.group_heading(group, items.len()));
-            rows.push(None);
+        let mut add_items = |list: &gtk::ListBox, items: &[Item], rows: &mut Vec<Option<Item>>| {
             for &item in items.iter().take(ROWS_PER_GROUP) {
                 let (row, status, subtitle) = self.item_row(item);
-                self.list.append(&row);
+                list.append(&row);
                 rows.push(Some(item));
                 parts.insert(item, (status, subtitle, row));
             }
             if items.len() > ROWS_PER_GROUP {
                 let more = gtk::ListBoxRow::builder().selectable(false).activatable(false).build();
                 more.set_child(Some(&gtk::Label::builder().label(tf!("…and {count} more. Search to find them.", count = items.len() - ROWS_PER_GROUP)).xalign(0.0).css_classes(["dim-label", "caption"]).margin_start(12).build()));
-                self.list.append(&more);
+                list.append(&more);
                 rows.push(None);
             }
+        };
+        let mut resolved = Vec::new();
+        for group in &self.groups {
+            let (done, items): (Vec<Item>, Vec<Item>) = group.items.iter().copied().filter(|&i| self.matches(i, &query)).partition(|&i| self.is_resolved(i));
+            resolved.extend(done);
+            if items.is_empty() {
+                continue;
+            }
+            self.list.append(&self.group_heading(group, items.len()));
+            rows.push(None);
+            add_items(&self.list, &items, &mut rows);
         }
+        if !resolved.is_empty() {
+            let open = self.hooks.session.borrow().show_resolved;
+            self.list.append(&self.resolved_heading(resolved.len(), open));
+            rows.push(None);
+            if open {
+                add_items(&self.list, &resolved, &mut rows);
+            }
+        }
+        self.resolved.replace(resolved.into_iter().collect());
         if rows.is_empty() {
             let none = gtk::ListBoxRow::builder().selectable(false).activatable(false).build();
             none.set_child(Some(&gtk::Label::builder().label(t!("No matches")).css_classes(["dim-label"]).margin_top(24).build()));
@@ -858,6 +905,30 @@ impl Page {
         {
             self.list.select_row(Some(row));
         }
+    }
+
+    /// The heading of the Resolved section, which opens and closes it.
+    fn resolved_heading(self: &Rc<Self>, count: usize, open: bool) -> gtk::ListBoxRow {
+        let heading = gtk::Box::builder().spacing(6).build();
+        heading.append(&gtk::Image::builder().icon_name(if open { "pan-down-symbolic" } else { "pan-end-symbolic" }).css_classes(["dim-label"]).build());
+        heading.append(&gtk::Label::builder().label(t!("Resolved")).xalign(0.0).hexpand(true).css_classes(["dim-label"]).build());
+        heading.append(&gtk::Label::builder().label(count.to_string()).css_classes(["dim-label", "numeric"]).build());
+        let button = gtk::Button::builder()
+            .child(&heading)
+            .tooltip_text(if open { t!("Hide the conflicts saved to the merged patch") } else { t!("Show the conflicts saved to the merged patch") })
+            .css_classes(["flat", "resolved-toggle"])
+            .build();
+        let weak = Rc::downgrade(self);
+        button.connect_clicked(move |_| {
+            if let Some(page) = weak.upgrade() {
+                {
+                    let mut session = page.hooks.session.borrow_mut();
+                    session.show_resolved = !session.show_resolved;
+                }
+                page.fill();
+            }
+        });
+        gtk::ListBoxRow::builder().child(&button).selectable(false).activatable(false).css_classes(["folder"]).build()
     }
 
     fn group_heading(self: &Rc<Self>, group: &Group, count: usize) -> gtk::ListBoxRow {
@@ -928,9 +999,20 @@ impl Page {
     }
 
     /// Refreshes the dot and subtitle of `item`'s row, and the summary.
-    pub fn update_status(&self, item: Item) {
+    /// An item resolved or reopened moves section once the current change
+    /// is done, so moving on to the next conflict still starts from it.
+    pub fn update_status(self: &Rc<Self>, item: Item) {
         self.set_status(item);
         self.update_summary();
+        if self.is_resolved(item) != self.resolved.borrow().contains(&item) && !self.refill_pending.replace(true) {
+            let weak = Rc::downgrade(self);
+            glib::idle_add_local_once(move || {
+                if let Some(page) = weak.upgrade() {
+                    page.refill_pending.set(false);
+                    page.fill();
+                }
+            });
+        }
     }
 
     /// Refreshes the dot and subtitle of `item`'s row.
@@ -1200,9 +1282,9 @@ impl Page {
                     (None, false) => t!("Fix…"),
                 });
                 let (fixed_ref, button_ref) = (fixed.downgrade(), button.downgrade());
-                let hooks = hooks.clone();
+                let (hooks, page) = (hooks.clone(), Rc::downgrade(self));
                 button.connect_clicked(move |_| {
-                    let (fixed, button) = (fixed_ref.clone(), button_ref.clone());
+                    let (fixed, button, page) = (fixed_ref.clone(), button_ref.clone(), page.clone());
                     (hooks.open_fix)(
                         index,
                         Box::new(move || {
@@ -1211,6 +1293,10 @@ impl Page {
                                 f.set_css_classes(&["success"]);
                                 f.set_visible(true);
                                 b.set_label(&t!("Edit Fix…"));
+                            }
+                            // Every fix saved moves Problems to Resolved.
+                            if let Some(page) = page.upgrade() {
+                                page.update_status(Item::Problems);
                             }
                         }),
                     )

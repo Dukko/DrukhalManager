@@ -6,9 +6,9 @@
 #, fuzzy
 msgid ""
 msgstr ""
-"Project-Id-Version: DrukhalManager 1.4.5\n"
+"Project-Id-Version: DrukhalManager 1.4.6\n"
 "Report-Msgid-Bugs-To: https://github.com/Dukko/DrukhalManager/issues\n"
-"POT-Creation-Date: 2026-11-17 18:42+0000\n"
+"POT-Creation-Date: 2026-11-17 19:06+0000\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -21,7 +21,7 @@ msgstr ""
 msgid "Last save: {empire}, {date}"
 msgstr ""
 
-#: src/i18n.rs:183 src/i18n.rs:184 src/conflicts_view.rs:448 src/conflicts_view.rs:761 src/conflicts_view.rs:785 src/window/collections_ui.rs:407 src/window/overview.rs:463 src/window/patches_ui.rs:155 src/window/saves_ui.rs:127 src/window/selection_ui.rs:313 src/window/selection_ui.rs:324 src/window/freeze_ui.rs:56
+#: src/i18n.rs:183 src/i18n.rs:184 src/conflicts_view.rs:454 src/conflicts_view.rs:791 src/conflicts_view.rs:815 src/window/collections_ui.rs:407 src/window/overview.rs:463 src/window/patches_ui.rs:155 src/window/saves_ui.rs:127 src/window/selection_ui.rs:313 src/window/selection_ui.rs:324 src/window/freeze_ui.rs:56
 msgid "{count} mod"
 msgid_plural "{count} mods"
 msgstr[0] ""
@@ -382,7 +382,7 @@ msgstr ""
 msgid "Go through the versions again from the first"
 msgstr ""
 
-#: src/conflicts_view/object.rs:434 src/conflicts_view.rs:326
+#: src/conflicts_view/object.rs:434 src/conflicts_view.rs:328
 msgid "Merge with AI"
 msgstr ""
 
@@ -520,493 +520,511 @@ msgstr ""
 msgid "Copy the right card's side of the highlighted difference into the result"
 msgstr ""
 
-#: src/conflicts_view.rs:270
+#: src/conflicts_view.rs:272
 msgid "#{position} · {file}"
 msgstr ""
 
-#: src/conflicts_view.rs:275
+#: src/conflicts_view.rs:277
 msgid "Scanning Mods…"
 msgstr ""
 
-#: src/conflicts_view.rs:275
+#: src/conflicts_view.rs:277
 msgid "Reading every enabled mod's files"
 msgstr ""
 
-#: src/conflicts_view.rs:322
+#: src/conflicts_view.rs:324
 msgid "Next Conflict"
 msgstr ""
 
-#: src/conflicts_view.rs:323
+#: src/conflicts_view.rs:325
 msgid "Previous Conflict"
 msgstr ""
 
-#: src/conflicts_view.rs:324
+#: src/conflicts_view.rs:326
 msgid "Use the Left Version"
 msgstr ""
 
-#: src/conflicts_view.rs:325
+#: src/conflicts_view.rs:327
 msgid "Use the Right Version"
 msgstr ""
 
-#: src/conflicts_view.rs:327
+#: src/conflicts_view.rs:329
 msgid "Ignore the Conflict, or Stop Ignoring It"
 msgstr ""
 
-#: src/conflicts_view.rs:395
-msgid "needs attention"
+#: src/conflicts_view.rs:401 src/mods/filter.rs:53
+msgid "Needs Attention"
 msgstr ""
 
-#: src/conflicts_view.rs:409
-msgid "overridden files"
+#: src/conflicts_view.rs:415
+msgid "Overridden Files"
 msgstr ""
 
-#: src/conflicts_view.rs:409
-msgid "overridden files · {folder}"
+#: src/conflicts_view.rs:415
+msgid "Overridden Files · {folder}"
 msgstr ""
 
-#: src/conflicts_view.rs:426
+#: src/conflicts_view.rs:432
 msgid "{count} object your mods replace changed in Stellaris {version}…"
 msgid_plural "{count} objects your mods replace changed in Stellaris {version}…"
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/conflicts_view.rs:446
+#: src/conflicts_view.rs:452
 msgid "{problems} in {mods}…"
 msgstr ""
 
-#: src/conflicts_view.rs:447
+#: src/conflicts_view.rs:453
 msgid "{count} script problem"
 msgid_plural "{count} script problems"
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/conflicts_view.rs:464
+#: src/conflicts_view.rs:470
 msgid "Search conflicts"
 msgstr ""
 
-#: src/conflicts_view.rs:471
+#: src/conflicts_view.rs:477
 msgid "Show Ignored"
 msgstr ""
 
-#: src/conflicts_view.rs:476
+#: src/conflicts_view.rs:482
 msgid "Rules…"
 msgstr ""
 
-#: src/conflicts_view.rs:476
+#: src/conflicts_view.rs:482
 msgid "Ignore conflicts by path, like gfx/** or localisation/*"
 msgstr ""
 
 #. The window's actions: the merged patch's backups, and looking up any
 #. object from the last scan.
-#: src/conflicts_view.rs:483
+#: src/conflicts_view.rs:489
 msgid "Backups"
 msgstr ""
 
 #. The window's actions: the merged patch's backups, and looking up any
 #. object from the last scan.
-#: src/conflicts_view.rs:483
+#: src/conflicts_view.rs:489
 msgid "Merged Patch Backups…"
 msgstr ""
 
-#: src/conflicts_view.rs:485
+#: src/conflicts_view.rs:491
 msgid "Look Up"
 msgstr ""
 
-#: src/conflicts_view.rs:485
+#: src/conflicts_view.rs:491
 msgid "Look Up Objects…"
 msgstr ""
 
-#: src/conflicts_view.rs:512 src/window/overview.rs:739 src/window/shortcuts.rs:32 src/window/shortcuts.rs:82 src/window.rs:486 src/window.rs:1081
+#: src/conflicts_view.rs:518 src/window/overview.rs:739 src/window/shortcuts.rs:32 src/window/shortcuts.rs:82 src/window.rs:486 src/window.rs:1081
 msgid "Conflicts"
 msgstr ""
 
 #. Scrolls sideways when the window is too narrow for a conflict's
 #. toolbar and cards, instead of asking for more width than there is.
-#: src/conflicts_view.rs:515
+#: src/conflicts_view.rs:521
 msgid "Conflict"
 msgstr ""
 
-#: src/conflicts_view.rs:546
+#: src/conflicts_view.rs:554
 msgid "{name} Has No Conflicts"
 msgstr ""
 
-#: src/conflicts_view.rs:546
+#: src/conflicts_view.rs:554
 msgid "Choose All Mods to see the others"
 msgstr ""
 
-#: src/conflicts_view.rs:547
+#: src/conflicts_view.rs:555
 msgid "No Conflicts Left"
 msgstr ""
 
-#: src/conflicts_view.rs:547
+#: src/conflicts_view.rs:555
 msgid "{count} conflict is ignored"
 msgid_plural "{count} conflicts are ignored"
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/conflicts_view.rs:548
+#: src/conflicts_view.rs:556
 msgid "No Conflicts"
 msgstr ""
 
-#: src/conflicts_view.rs:548
+#: src/conflicts_view.rs:556
 msgid "None of the enabled mods change the same files or objects"
 msgstr ""
 
-#: src/conflicts_view.rs:610
+#: src/conflicts_view.rs:618
 msgid "All Mods"
 msgstr ""
 
-#: src/conflicts_view.rs:613
+#: src/conflicts_view.rs:621
 msgid "Show only the conflicts of one mod"
 msgstr ""
 
-#: src/conflicts_view.rs:625
+#: src/conflicts_view.rs:635
 msgid "Filter by Mod"
 msgstr ""
 
-#: src/conflicts_view.rs:670 src/conflicts_view.rs:1180 src/paradox/error_log.rs:174
+#: src/conflicts_view.rs:680 src/conflicts_view.rs:1262 src/paradox/error_log.rs:174
 msgid "Problems"
 msgstr ""
 
-#: src/conflicts_view.rs:671
+#: src/conflicts_view.rs:681
 msgid "{count} outdated merge"
 msgid_plural "{count} outdated merges"
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/conflicts_view.rs:672
+#: src/conflicts_view.rs:682
 msgid "{count} merge to check"
 msgid_plural "{count} merges to check"
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/conflicts_view.rs:732
+#: src/conflicts_view.rs:742
 msgid "ignored by rule {line}"
 msgstr ""
 
-#: src/conflicts_view.rs:735
+#: src/conflicts_view.rs:745
 msgid "a patch of its dependency"
 msgstr ""
 
-#: src/conflicts_view.rs:737
+#: src/conflicts_view.rs:747
 msgid "ignored"
 msgstr ""
 
-#: src/conflicts_view.rs:763 src/conflicts_view.rs:787
+#: src/conflicts_view.rs:793 src/conflicts_view.rs:817
 msgid "{mods} · {reason}"
 msgstr ""
 
-#: src/conflicts_view.rs:766 src/conflicts_view.rs:789
+#: src/conflicts_view.rs:796 src/conflicts_view.rs:819
 msgid "{mods} · merge out of date"
 msgstr ""
 
-#: src/conflicts_view.rs:770
+#: src/conflicts_view.rs:800
 msgid "{mods} · ready to save"
 msgstr ""
 
-#: src/conflicts_view.rs:770
+#: src/conflicts_view.rs:800
 msgid "{mods} · step {step} of {total}"
 msgstr ""
 
-#: src/conflicts_view.rs:773 src/conflicts_view.rs:791
+#: src/conflicts_view.rs:803 src/conflicts_view.rs:821
 msgid "{mods} · saved to patch"
 msgstr ""
 
-#: src/conflicts_view.rs:776
+#: src/conflicts_view.rs:806
 msgid "{mods} · simple, no AI needed"
 msgstr ""
 
-#: src/conflicts_view.rs:778 src/conflicts_view.rs:793
+#: src/conflicts_view.rs:808 src/conflicts_view.rs:823
 msgid "{mods} · {name} wins"
 msgstr ""
 
-#: src/conflicts_view.rs:802
+#: src/conflicts_view.rs:832
 msgid "{count} file with errors"
 msgid_plural "{count} files with errors"
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/conflicts_view.rs:805
+#: src/conflicts_view.rs:835
 msgid "{count} mod not scanned"
 msgid_plural "{count} mods not scanned"
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/conflicts_view.rs:810 src/conflicts_view.rs:1235
+#: src/conflicts_view.rs:838
+msgid "{count} file fixed"
+msgid_plural "{count} files fixed"
+msgstr[0] ""
+msgstr[1] ""
+
+#: src/conflicts_view.rs:843 src/conflicts_view.rs:1321
 msgid "Saved by an older version"
 msgstr ""
 
-#: src/conflicts_view.rs:837
+#: src/conflicts_view.rs:864
 msgid "…and {count} more. Search to find them."
 msgstr ""
 
-#: src/conflicts_view.rs:844
+#: src/conflicts_view.rs:891
 msgid "No matches"
 msgstr ""
 
-#: src/conflicts_view.rs:871
+#: src/conflicts_view.rs:914
+msgid "Resolved"
+msgstr ""
+
+#: src/conflicts_view.rs:918
+msgid "Hide the conflicts saved to the merged patch"
+msgstr ""
+
+#: src/conflicts_view.rs:918
+msgid "Show the conflicts saved to the merged patch"
+msgstr ""
+
+#: src/conflicts_view.rs:942
 msgid "Merge All with AI…"
 msgstr ""
 
-#: src/conflicts_view.rs:889
+#: src/conflicts_view.rs:960
 msgid "Stop Ignoring Folder"
 msgstr ""
 
-#: src/conflicts_view.rs:889
+#: src/conflicts_view.rs:960
 msgid "Ignore Folder"
 msgstr ""
 
-#: src/conflicts_view.rs:900
+#: src/conflicts_view.rs:971
 msgid "Folder actions"
 msgstr ""
 
-#: src/conflicts_view.rs:923
+#: src/conflicts_view.rs:994
 msgid "{name}: {file}"
 msgstr ""
 
-#: src/conflicts_view.rs:947
+#: src/conflicts_view.rs:1029
 msgid "Not resolved yet"
 msgstr ""
 
-#: src/conflicts_view.rs:953
+#: src/conflicts_view.rs:1035
 msgid "Simple merge, no AI needed: {reason}"
 msgstr ""
 
-#: src/conflicts_view.rs:955
+#: src/conflicts_view.rs:1037
 msgid "Being merged"
 msgstr ""
 
-#: src/conflicts_view.rs:956
+#: src/conflicts_view.rs:1038
 msgid "Saved to the merged patch"
 msgstr ""
 
-#: src/conflicts_view.rs:957
+#: src/conflicts_view.rs:1039
 msgid "Its mods or the base game changed since this was merged"
 msgstr ""
 
-#: src/conflicts_view.rs:958
+#: src/conflicts_view.rs:1040
 msgid "Ignored"
 msgstr ""
 
-#: src/conflicts_view.rs:972 src/window/ignore_rules_ui.rs:175 src/window/overview.rs:736
+#: src/conflicts_view.rs:1054 src/window/ignore_rules_ui.rs:175 src/window/overview.rs:736
 msgid "{count} conflict"
 msgid_plural "{count} conflicts"
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/conflicts_view.rs:973
+#: src/conflicts_view.rs:1055
 msgid "{summary} · {saved} saved"
 msgstr ""
 
-#: src/conflicts_view.rs:975
+#: src/conflicts_view.rs:1057
 msgid "Only {name}'s conflicts"
 msgstr ""
 
-#: src/conflicts_view.rs:976
+#: src/conflicts_view.rs:1058
 msgid "{involved} of {total} mods involved"
 msgstr ""
 
-#: src/conflicts_view.rs:979
+#: src/conflicts_view.rs:1061
 msgid " · {count} ignored"
 msgstr ""
 
-#: src/conflicts_view.rs:1008
+#: src/conflicts_view.rs:1090
 msgid "{tooltip} ({keys})"
 msgstr ""
 
-#: src/conflicts_view.rs:1122
+#: src/conflicts_view.rs:1204
 msgid "Back to the list"
 msgstr ""
 
-#: src/conflicts_view.rs:1150
+#: src/conflicts_view.rs:1232
 msgid "Ignored by rule {line}; click to edit the ignore rules"
 msgstr ""
 
-#: src/conflicts_view.rs:1151
+#: src/conflicts_view.rs:1233
 msgid "Hidden because the later mods depend on the earlier ones, as patches do; click to change this"
 msgstr ""
 
-#: src/conflicts_view.rs:1152
+#: src/conflicts_view.rs:1234
 msgid "Stop ignoring this conflict"
 msgstr ""
 
-#: src/conflicts_view.rs:1153
+#: src/conflicts_view.rs:1235
 msgid "Ignore this conflict, so it no longer shows or counts"
 msgstr ""
 
-#: src/conflicts_view.rs:1159
+#: src/conflicts_view.rs:1241
 msgid "Stop Ignoring"
 msgstr ""
 
-#: src/conflicts_view.rs:1159
+#: src/conflicts_view.rs:1241
 msgid "Ignore Conflict"
 msgstr ""
 
-#: src/conflicts_view.rs:1180
+#: src/conflicts_view.rs:1262
 msgid "Files the game will misread, and mods that couldn't be scanned"
 msgstr ""
 
-#: src/conflicts_view.rs:1187
+#: src/conflicts_view.rs:1269
 msgid "line {line}: {message}"
 msgstr ""
 
-#: src/conflicts_view.rs:1190
+#: src/conflicts_view.rs:1272
 msgid "{mod_name} · {message}"
 msgstr ""
 
-#: src/conflicts_view.rs:1196
+#: src/conflicts_view.rs:1278
 msgid "Fixed through the merged patch"
 msgstr ""
 
-#: src/conflicts_view.rs:1198
+#: src/conflicts_view.rs:1280
 msgid "Fix Again…"
 msgstr ""
 
-#: src/conflicts_view.rs:1199 src/conflicts_view.rs:1213
+#: src/conflicts_view.rs:1281 src/conflicts_view.rs:1295
 msgid "Edit Fix…"
 msgstr ""
 
-#: src/conflicts_view.rs:1200
+#: src/conflicts_view.rs:1282
 msgid "Fix…"
 msgstr ""
 
-#: src/conflicts_view.rs:1224
+#: src/conflicts_view.rs:1310
 msgid "The game keeps reading after a missing or extra }, but everything after it gets nested inside the broken object and stops working. Fix… repairs the braces, and the fixed copy is saved through the merged patch, so the mod itself is never modified."
 msgstr ""
 
-#: src/conflicts_view.rs:1235
+#: src/conflicts_view.rs:1321
 msgid "Merges to Check"
 msgstr ""
 
-#: src/conflicts_view.rs:1235
+#: src/conflicts_view.rs:1321
 msgid "These were merged by an older version of DrukhalManager, which didn't record what the mods looked like, so their updates can't be noticed. If one still looks right, keep it to track changes from now on; otherwise re-merge it from the list, or remove it."
 msgstr ""
 
-#: src/conflicts_view.rs:1237
+#: src/conflicts_view.rs:1323
 msgid "Mods or the base game"
 msgstr ""
 
-#: src/conflicts_view.rs:1237
+#: src/conflicts_view.rs:1323
 msgid "Mods"
 msgstr ""
 
-#: src/conflicts_view.rs:1238
+#: src/conflicts_view.rs:1324
 msgid "Outdated Merges"
 msgstr ""
 
-#: src/conflicts_view.rs:1238
+#: src/conflicts_view.rs:1324
 msgid "{what} changed since these were merged or fixed, so the patch may be undoing their updates. Re-merge them from the list, or remove them from the patch."
 msgstr ""
 
-#: src/conflicts_view.rs:1243
+#: src/conflicts_view.rs:1329
 msgid "{description} Where you chose one mod's version and only that mod changed, you can take its new version instead."
 msgstr ""
 
-#: src/conflicts_view.rs:1248
+#: src/conflicts_view.rs:1334
 msgid "Use {count} New Version"
 msgid_plural "Use {count} New Versions"
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/conflicts_view.rs:1248
+#: src/conflicts_view.rs:1334
 msgid "Replace each picked version with the new one from the same mod. The patch is backed up first"
 msgstr ""
 
-#: src/conflicts_view.rs:1268
+#: src/conflicts_view.rs:1354
 msgid "{category} · {reasons}"
 msgstr ""
 
-#: src/conflicts_view.rs:1269
+#: src/conflicts_view.rs:1355
 msgid "{path} · {reasons}"
 msgstr ""
 
-#: src/conflicts_view.rs:1272
+#: src/conflicts_view.rs:1358
 msgid "{subtitle} · you picked {name}'s version"
 msgstr ""
 
-#: src/conflicts_view.rs:1285 src/conflicts_view.rs:1445
+#: src/conflicts_view.rs:1371 src/conflicts_view.rs:1531
 msgid "Re-merge…"
 msgstr ""
 
-#: src/conflicts_view.rs:1295
+#: src/conflicts_view.rs:1381
 msgid "Use New Version"
 msgstr ""
 
-#: src/conflicts_view.rs:1295
+#: src/conflicts_view.rs:1381
 msgid "Replace the picked version with {name}'s new one. The patch is backed up first"
 msgstr ""
 
-#: src/conflicts_view.rs:1301
+#: src/conflicts_view.rs:1387
 msgid "Keep As Is"
 msgstr ""
 
-#: src/conflicts_view.rs:1301
+#: src/conflicts_view.rs:1387
 msgid "Track changes to its mods from their current versions"
 msgstr ""
 
-#: src/conflicts_view.rs:1306
+#: src/conflicts_view.rs:1392
 msgid "Remove from Patch"
 msgstr ""
 
-#: src/conflicts_view.rs:1351
+#: src/conflicts_view.rs:1437
 msgid "Previous difference (Alt+Up)"
 msgstr ""
 
-#: src/conflicts_view.rs:1352
+#: src/conflicts_view.rs:1438
 msgid "Next difference (Alt+Down)"
 msgstr ""
 
-#: src/conflicts_view.rs:1366
+#: src/conflicts_view.rs:1452
 msgid "Marking each version's changes from the base game"
 msgstr ""
 
-#: src/conflicts_view.rs:1367
+#: src/conflicts_view.rs:1453
 msgid "No differences"
 msgstr ""
 
-#: src/conflicts_view.rs:1368
+#: src/conflicts_view.rs:1454
 msgid "Difference {number} of {total}"
 msgstr ""
 
-#: src/conflicts_view.rs:1369
+#: src/conflicts_view.rs:1455
 msgid "{count} difference"
 msgid_plural "{count} differences"
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/conflicts_view.rs:1431
+#: src/conflicts_view.rs:1517
 msgid "The base game changed since they were merged"
 msgstr ""
 
-#: src/conflicts_view.rs:1432
+#: src/conflicts_view.rs:1518
 msgid "Mods or the base game changed since they were merged"
 msgstr ""
 
-#: src/conflicts_view.rs:1433
+#: src/conflicts_view.rs:1519
 msgid "Mods changed since they were merged"
 msgstr ""
 
-#: src/conflicts_view.rs:1438 src/folder_merge_dialog.rs:689 src/folder_merge_dialog.rs:748
+#: src/conflicts_view.rs:1524 src/folder_merge_dialog.rs:689 src/folder_merge_dialog.rs:748
 msgid "Merged into the patch"
 msgstr ""
 
-#: src/conflicts_view.rs:1443
+#: src/conflicts_view.rs:1529
 msgid "Out of date: {reasons}"
 msgstr ""
 
-#: src/conflicts_view.rs:1447
+#: src/conflicts_view.rs:1533
 msgid "Edit Merge…"
 msgstr ""
 
-#: src/conflicts_view.rs:1448
+#: src/conflicts_view.rs:1534
 msgid "Merge…"
 msgstr ""
 
-#: src/conflicts_view.rs:1492
+#: src/conflicts_view.rs:1578
 msgid "Waiting for {tool}…"
 msgstr ""
 
-#: src/conflicts_view.rs:1499
+#: src/conflicts_view.rs:1585
 msgid "The merge tool failed"
 msgstr ""
 
@@ -1804,10 +1822,6 @@ msgstr ""
 
 #: src/mods/filter.rs:52 src/window/order_check_ui.rs:94 src/window/shortcuts.rs:21 src/window/shortcuts.rs:32 src/window.rs:398 src/window.rs:478
 msgid "Load Order"
-msgstr ""
-
-#: src/mods/filter.rs:53
-msgid "Needs Attention"
 msgstr ""
 
 #: src/mods/filter.rs:54
