@@ -39,6 +39,9 @@ const ROWS_PER_GROUP: usize = 300;
 /// A lightning bolt, for conflicts that merge without AI.
 const SIMPLE_ICON: &str = "io.github.dukko.DrukhalManager-simple-symbolic";
 
+/// Sparkles, on the buttons that ask an AI.
+pub(crate) const AI_ICON: &str = "io.github.dukko.DrukhalManager-ai-symbolic";
+
 /// A finished scan of a particular load order.
 pub struct Analysis {
     /// The load order revision this describes. Bumped in place for changes
@@ -464,27 +467,31 @@ pub fn build(analysis: &Rc<Analysis>, rescan: gtk::Button, hooks: Rc<MergeHooks>
     let list = gtk::ListBox::builder().selection_mode(gtk::SelectionMode::Single).css_classes(["navigation-sidebar", "conflict-list"]).build();
     let list_scroll = gtk::ScrolledWindow::builder().child(&list).hscrollbar_policy(gtk::PolicyType::Never).vexpand(true).build();
 
-    let footer = gtk::Box::builder().spacing(6).margin_top(6).margin_bottom(6).margin_start(12).margin_end(6).build();
-    let show_ignored = gtk::CheckButton::builder().label(t!("Show Ignored")).active(hooks.show_ignored).hexpand(true).build();
+    let footer = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(6).margin_top(6).margin_bottom(8).margin_start(8).margin_end(8).build();
+    let show_ignored = gtk::CheckButton::builder().label(t!("Show Ignored")).active(hooks.show_ignored).margin_start(4).build();
     {
         let hooks = hooks.clone();
         show_ignored.connect_toggled(move |_| (hooks.toggle_show_ignored)());
     }
-    rescan.add_css_class("flat");
-    let rules = gtk::Button::builder().label(t!("Rules…")).tooltip_text(t!("Ignore conflicts by path, like gfx/** or localisation/*")).css_classes(["flat"]).build();
+    let rules = footer_button("view-list-symbolic", &t!("Rules…"), &t!("Ignore conflicts by path, like gfx/** or localisation/*"));
     {
         let hooks = hooks.clone();
         rules.connect_clicked(move |_| (hooks.edit_rules)());
     }
-    // The window's action: the merged patch's backups.
-    let backups = gtk::Button::builder().icon_name("document-open-recent-symbolic").tooltip_text(t!("Merged Patch Backups…")).action_name("win.patch-backups").css_classes(["flat"]).build();
+    // The window's actions: the merged patch's backups, and looking up any
+    // object from the last scan.
+    let backups = footer_button("document-open-recent-symbolic", &t!("Backups"), &t!("Merged Patch Backups…"));
+    backups.set_action_name(Some("win.patch-backups"));
+    let lookup = footer_button("system-search-symbolic", &t!("Look Up"), &t!("Look Up Objects…"));
+    lookup.set_action_name(Some("win.object-lookup"));
+    rescan.set_hexpand(true);
+    let buttons = gtk::Grid::builder().row_spacing(6).column_spacing(6).column_homogeneous(true).build();
+    buttons.attach(&rules, 0, 0, 1, 1);
+    buttons.attach(&backups, 1, 0, 1, 1);
+    buttons.attach(&lookup, 0, 1, 1, 1);
+    buttons.attach(&rescan, 1, 1, 1, 1);
     footer.append(&show_ignored);
-    // The window's action: look up any object from the last scan.
-    let lookup = gtk::Button::builder().icon_name("system-search-symbolic").tooltip_text(t!("Look Up Objects…")).action_name("win.object-lookup").css_classes(["flat"]).build();
-    footer.append(&lookup);
-    footer.append(&rules);
-    footer.append(&backups);
-    footer.append(&rescan);
+    footer.append(&buttons);
 
     // A rounded card inset from the window's edges, like the code cards.
     let sidebar = gtk::Box::builder()
@@ -588,6 +595,11 @@ pub fn build(analysis: &Rc<Analysis>, rescan: gtk::Button, hooks: Rc<MergeHooks>
 }
 
 /// The "All Mods" dropdown, when several mods have conflicts.
+/// One of the even buttons under the conflict list: an icon and a label.
+fn footer_button(icon: &str, label: &str, tooltip: &str) -> gtk::Button {
+    gtk::Button::builder().child(&adw::ButtonContent::builder().icon_name(icon).label(label).build()).tooltip_text(tooltip).hexpand(true).build()
+}
+
 fn mod_filter(analysis: &Rc<Analysis>, hooks: &Rc<MergeHooks>, involved: &BTreeSet<usize>) -> Option<gtk::DropDown> {
     let filter = hooks.filter;
     // Mods with conflicts, in load order, plus the filtered one if it has none.
@@ -600,6 +612,31 @@ fn mod_filter(analysis: &Rc<Analysis>, hooks: &Rc<MergeHooks>, involved: &BTreeS
     dropdown.set_enable_search(true);
     dropdown.set_tooltip_text(Some(&t!("Show only the conflicts of one mod")));
     dropdown.set_selected(filter.and_then(|f| choices.iter().position(|&p| p == f)).map_or(0, |i| i as u32 + 1));
+    // The button says what it's for until a mod is picked; the list still
+    // offers All Mods to clear it.
+    let button_factory = gtk::SignalListItemFactory::new();
+    button_factory.connect_setup(|_, item| {
+        let Some(item) = item.downcast_ref::<gtk::ListItem>() else { return };
+        item.set_child(Some(&gtk::Label::builder().xalign(0.0).ellipsize(gtk::pango::EllipsizeMode::End).build()));
+    });
+    button_factory.connect_bind(|_, item| {
+        let Some(item) = item.downcast_ref::<gtk::ListItem>() else { return };
+        let (Some(label), Some(text)) = (item.child().and_downcast::<gtk::Label>(), item.item().and_downcast::<gtk::StringObject>()) else { return };
+        label.set_label(&if item.position() == 0 { t!("Filter by Mod") } else { text.string().to_string() });
+    });
+    let list_factory = gtk::SignalListItemFactory::new();
+    list_factory.connect_setup(|_, item| {
+        let Some(item) = item.downcast_ref::<gtk::ListItem>() else { return };
+        item.set_child(Some(&gtk::Label::builder().xalign(0.0).ellipsize(gtk::pango::EllipsizeMode::End).max_width_chars(40).build()));
+    });
+    list_factory.connect_bind(|_, item| {
+        let Some(item) = item.downcast_ref::<gtk::ListItem>() else { return };
+        if let (Some(label), Some(text)) = (item.child().and_downcast::<gtk::Label>(), item.item().and_downcast::<gtk::StringObject>()) {
+            label.set_label(&text.string());
+        }
+    });
+    dropdown.set_factory(Some(&button_factory));
+    dropdown.set_list_factory(Some(&list_factory));
     // Search by the shown text.
     dropdown.set_expression(Some(gtk::PropertyExpression::new(gtk::StringObject::static_type(), None::<gtk::Expression>, "string")));
     let hooks = hooks.clone();
@@ -1091,7 +1128,8 @@ impl Page {
             }
         });
         let titles = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(2).hexpand(true).build();
-        titles.append(&gtk::Label::builder().label(title).xalign(0.0).ellipsize(gtk::pango::EllipsizeMode::End).tooltip_text(title).css_classes(["conflict-title"]).build());
+        // Long paths and names wrap rather than being cut short.
+        titles.append(&gtk::Label::builder().label(title).xalign(0.0).wrap(true).wrap_mode(gtk::pango::WrapMode::WordChar).css_classes(["conflict-title"]).build());
         titles.append(&gtk::Label::builder().label(subtitle).xalign(0.0).ellipsize(gtk::pango::EllipsizeMode::End).tooltip_text(subtitle).css_classes(["dim-label"]).build());
         let actions = gtk::Box::builder().spacing(6).valign(gtk::Align::Center).build();
         let top = gtk::Box::builder().spacing(12).build();
@@ -1105,7 +1143,7 @@ impl Page {
         DetailHeader { widget, chips, actions }
     }
 
-    /// The eye button that ignores `item`.
+    /// The button that ignores `item`, or stops ignoring it.
     pub fn ignore_button(self: &Rc<Self>, item: Item) -> gtk::Button {
         let ignored = self.is_ignored(item);
         let tooltip = match self.hidden_by_rule(item) {
@@ -1115,7 +1153,12 @@ impl Page {
             None => t!("Ignore this conflict, so it no longer shows or counts"),
         };
         let button = gtk::Button::builder()
-            .icon_name(if ignored { "view-reveal-symbolic" } else { "view-conceal-symbolic" })
+            .child(
+                &adw::ButtonContent::builder()
+                    .icon_name(if ignored { "view-reveal-symbolic" } else { "view-conceal-symbolic" })
+                    .label(if ignored { t!("Stop Ignoring") } else { t!("Ignore Conflict") })
+                    .build(),
+            )
             .tooltip_text(tooltip)
             .valign(gtk::Align::Center)
             .css_classes(["flat"])

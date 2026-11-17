@@ -68,7 +68,7 @@ struct Window {
     /// Set while `refresh` updates `all_toggle`, so it isn't taken as a click.
     syncing: Cell<bool>,
     /// What's wrong with the load order, as buttons that show or fix it.
-    health: gtk::Box,
+    health: gtk::Grid,
     /// The sidebar's views, the one showing, and each one's count.
     views_list: gtk::ListBox,
     view: Rc<Cell<filter::View>>,
@@ -92,10 +92,10 @@ struct Window {
     /// When the error log counted for `errors_link` was written.
     error_log_seen: Cell<Option<std::time::SystemTime>>,
     /// The sidebar's Smart Sort categories, the one showing, if any, and
-    /// each one's row and count.
+    /// each one's row and count, which shows only that category.
     categories_list: gtk::ListBox,
     category: Rc<Cell<Option<Category>>>,
-    category_counts: Vec<(Category, gtk::ListBoxRow, gtk::Label)>,
+    category_counts: Vec<(Category, gtk::ListBoxRow, gtk::Button)>,
     /// The load order's category runs, by the mod each starts with, for the
     /// list's headers.
     category_runs: RefCell<std::collections::HashMap<usize, smart_sort::Run>>,
@@ -282,7 +282,10 @@ pub fn build(
     header.pack_end(&bell.button);
     header.pack_end(&launch);
     header.pack_end(&save);
+    // Always "Collections": the menu marks which one is active.
     let collection_button = gtk::MenuButton::builder()
+        .child(&adw::ButtonContent::builder().icon_name("io.github.dukko.DrukhalManager-collections-symbolic").label(t!("Collections")).build())
+        .always_show_arrow(true)
         .tooltip_text(t!("Collections: switch between saved load orders"))
         .build();
     header.pack_start(&collection_button);
@@ -317,20 +320,25 @@ pub fn build(
     sort_menu.append(Some(&t!("Sort A–Z, Dependencies First")), Some("win.sort-alphabetically"));
     sort_menu.append(Some(&t!("Show _Category Headers")), Some("win.category-headers"));
     let sort_alpha_button = adw::SplitButton::builder()
-        .child(&adw::ButtonContent::builder().icon_name("view-sort-ascending-symbolic").label(t!("Smart Sort…")).build())
+        .child(&adw::ButtonContent::builder().icon_name("view-sort-ascending-symbolic").label(t!("Sort Load Order…")).build())
         .tooltip_text(t!("Sort into sections by what each mod changes, keeping sub-mods below their mods and every mod after its dependencies"))
         .dropdown_tooltip(t!("More ways to sort"))
         .menu_model(&sort_menu)
         .valign(gtk::Align::Center)
         .build();
     // What's wrong and what to do about it, at a glance; see `refresh_health`.
-    let health = gtk::Box::builder().spacing(8).homogeneous(true).build();
+    // Rows of three cards: the overview first, then the problems.
+    let health = gtk::Grid::builder().row_spacing(6).column_spacing(6).column_homogeneous(true).build();
     let search = gtk::SearchEntry::builder()
         .placeholder_text(t!("Search mods (Ctrl+F), or try source:local or enabled:no"))
         .hexpand(true)
         .build();
     let search_row = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+    // Folded into an icon until used, leaving the buttons more room.
+    let (search_open, search_gap) = collapsible_search(&search);
+    search_row.append(&search_open);
     search_row.append(&search);
+    search_row.append(&search_gap);
     search_row.append(&filter_button(&search));
     search_row.append(&sort_alpha_button);
     search_row.append(&all_toggle);
@@ -831,6 +839,7 @@ pub fn build(
     find.connect_activate(move |_, _| {
         if let Some(ui) = weak.upgrade() {
             ui.stack.set_visible_child_name("load-order");
+            ui.search.set_visible(true);
             ui.search.grab_focus();
         }
     });
@@ -1022,6 +1031,42 @@ fn boxed_list(placeholder: &str) -> gtk::ListBox {
             .build(),
     ));
     list
+}
+
+/// A search icon standing in for `search` while it's empty and not in use,
+/// and the gap that takes its room meanwhile. The search opens when the
+/// icon is clicked (or Ctrl+F pressed) and while it has text.
+fn collapsible_search(search: &gtk::SearchEntry) -> (gtk::Button, gtk::Box) {
+    let open = gtk::Button::builder().icon_name("system-search-symbolic").tooltip_text(t!("Search Mods (Ctrl+F)")).build();
+    let gap = gtk::Box::builder().hexpand(true).build();
+    search.set_visible(false);
+    search.bind_property("visible", &open, "visible").invert_boolean().sync_create().build();
+    search.bind_property("visible", &gap, "visible").invert_boolean().sync_create().build();
+    open.connect_clicked(glib::clone!(
+        #[weak]
+        search,
+        move |_| {
+            search.set_visible(true);
+            search.grab_focus();
+        }
+    ));
+    search.connect_search_changed(|search| {
+        if !search.text().is_empty() {
+            search.set_visible(true);
+        }
+    });
+    let focus = gtk::EventControllerFocus::new();
+    focus.connect_leave(glib::clone!(
+        #[weak]
+        search,
+        move |_| {
+            if search.text().is_empty() {
+                search.set_visible(false);
+            }
+        }
+    ));
+    search.add_controller(focus);
+    (open, gap)
 }
 
 /// A "Filters" button whose popover sets the search's `key:value` terms.

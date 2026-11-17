@@ -21,8 +21,9 @@ const CSS: &str = "
 .load-order-split > .sidebar-pane { background: transparent; box-shadow: none; border: none; }
 .side-panel { background: @sidebar_bg_color; color: @sidebar_fg_color; border-radius: 12px; margin: 8px; box-shadow: 0 0 0 1px alpha(@borders, 0.6), 0 2px 6px alpha(black, 0.12); }
 .side-panel .navigation-sidebar { background: transparent; }
-.health-card { padding: 10px 14px; }
-.health-card .number { font-size: 20px; font-weight: 700; }
+.health-card { padding: 6px 10px; border-radius: 8px; }
+.health-card .number { font-size: 15px; font-weight: 700; }
+.health-card .caption { font-size: 11px; }
 /* Buttons that read as links: on health cards with two actions, in the
    sidebar, and on the Compatibility Patches header. */
 button.health-action, button.sidebar-link { min-height: 0; padding: 2px 4px; margin-left: -4px; }
@@ -34,6 +35,9 @@ button.health-action, button.sidebar-link { min-height: 0; padding: 2px 4px; mar
 .inspector-problem.info { background: alpha(currentColor, 0.06); }
 .inspector-stat { padding: 8px 12px; }
 .inspector-note textview, .inspector-note textview text { background: transparent; color: inherit; }
+.navigation-sidebar > row.category-shown { background: alpha(currentColor, 0.1); }
+button.category-count { min-height: 24px; min-width: 30px; padding: 0 6px; border-radius: 6px; background: alpha(currentColor, 0.08); }
+button.category-count:hover { background: alpha(currentColor, 0.16); }
 .category-dot { min-width: 8px; min-height: 8px; border-radius: 99px; }
 .category-header { padding: 7px 12px 5px 12px; background: alpha(currentColor, 0.03); border-bottom: 1px solid alpha(currentColor, 0.08); }
 .category-dot.unofficial { background: #57e389; }
@@ -82,17 +86,21 @@ pub(super) fn views_sidebar() -> (gtk::ListBox, Vec<(View, gtk::Label)>, gtk::La
 }
 
 /// The Smart Sort categories, each with its row and count; a category with
-/// no enabled mods is hidden.
-pub(super) fn categories_sidebar() -> (gtk::ListBox, Vec<(Category, gtk::ListBoxRow, gtk::Label)>) {
-    let list = gtk::ListBox::builder().css_classes(["navigation-sidebar"]).build();
+/// no enabled mods is hidden. Clicking a row jumps to its section in the
+/// load order; clicking its count shows only that section.
+pub(super) fn categories_sidebar() -> (gtk::ListBox, Vec<(Category, gtk::ListBoxRow, gtk::Button)>) {
+    let list = gtk::ListBox::builder().selection_mode(gtk::SelectionMode::None).css_classes(["navigation-sidebar"]).build();
     let mut counts = Vec::new();
     for category in Category::ALL {
         let line = gtk::Box::new(gtk::Orientation::Horizontal, 10);
         line.append(&category_dot(category));
-        line.append(&gtk::Label::builder().label(category.title()).xalign(0.0).hexpand(true).ellipsize(gtk::pango::EllipsizeMode::End).build());
-        let count = gtk::Label::builder().css_classes(["dim-label", "numeric", "caption"]).build();
+        let name = gtk::Label::builder().label(category.title()).xalign(0.0).hexpand(true).ellipsize(gtk::pango::EllipsizeMode::End).build();
+        let (title, description) = (category.title(), category.description());
+        name.set_tooltip_text(Some(&tf!("Jump to {category} in the load order. {description}", category = title, description = description)));
+        line.append(&name);
+        let count = gtk::Button::builder().valign(gtk::Align::Center).tooltip_text(t!("Show only this section")).css_classes(["flat", "category-count", "numeric", "caption"]).build();
         line.append(&count);
-        let row = gtk::ListBoxRow::builder().child(&line).tooltip_text(category.description()).visible(false).build();
+        let row = gtk::ListBoxRow::builder().child(&line).visible(false).build();
         list.append(&row);
         counts.push((category, row, count));
     }
@@ -116,7 +124,7 @@ pub(super) fn sidebar_page(views: &gtk::ListBox, categories: &gtk::ListBox, find
     lists.append(&heading(&t!("Views")));
     lists.append(views);
     let categories_heading = heading(&t!("Categories"));
-    categories_heading.set_tooltip_text(Some(&t!("The sections Smart Sort puts enabled mods in")));
+    categories_heading.set_tooltip_text(Some(&t!("The sections Sort Load Order puts enabled mods in")));
     lists.append(&categories_heading);
     lists.append(categories);
     // Hidden with the list while no category has a mod.
@@ -209,20 +217,31 @@ impl Window {
         self.views_list.connect_row_selected(move |_, row| {
             let (Some(ui), Some(row)) = (weak.upgrade(), row) else { return };
             let view = View::ALL.get(row.index() as usize).copied().unwrap_or_default();
-            ui.categories_list.unselect_all();
             ui.category.set(None);
             ui.view.set(view);
             ui.apply_view();
         });
         let weak = Rc::downgrade(self);
-        self.categories_list.connect_row_selected(move |_, row| {
-            let (Some(ui), Some(row)) = (weak.upgrade(), row) else { return };
-            let Some(&category) = Category::ALL.get(row.index() as usize) else { return };
-            ui.views_list.unselect_all();
-            ui.category.set(Some(category));
-            ui.view.set(View::All);
-            ui.apply_view();
+        self.categories_list.connect_row_activated(move |_, row| {
+            let Some(ui) = weak.upgrade() else { return };
+            if let Some(&category) = Category::ALL.get(row.index() as usize) {
+                ui.jump_to_category(category);
+            }
         });
+        for (category, _, count) in &self.category_counts {
+            let (weak, category) = (Rc::downgrade(self), *category);
+            count.connect_clicked(move |_| {
+                let Some(ui) = weak.upgrade() else { return };
+                if ui.category.get() == Some(category) {
+                    ui.set_view(View::All);
+                } else {
+                    ui.views_list.unselect_all();
+                    ui.category.set(Some(category));
+                    ui.view.set(View::All);
+                    ui.apply_view();
+                }
+            });
+        }
         self.views_list.select_row(self.views_list.row_at_index(0).as_ref());
         self.setup_category_headers();
         self.show_inspector();
@@ -237,6 +256,13 @@ impl Window {
     fn apply_view(&self) {
         let view = self.view.get();
         let category = self.category.get();
+        for (c, row, _) in &self.category_counts {
+            if category == Some(*c) {
+                row.add_css_class("category-shown");
+            } else {
+                row.remove_css_class("category-shown");
+            }
+        }
         self.enabled_section.set_visible(view != View::Disabled);
         self.disabled_section.set_visible(category.is_none() && matches!(view, View::All | View::Attention | View::Disabled));
         let show_missing = self.missing_list.first_child().is_some() && view == View::All && category.is_none();
@@ -246,6 +272,38 @@ impl Window {
         self.disabled_list.invalidate_filter();
         self.enabled_list.invalidate_headers();
         self.update_select_shown();
+    }
+
+    /// Shows the whole load order and scrolls to where `category` starts.
+    fn jump_to_category(self: &Rc<Self>, category: Category) {
+        if self.view.get() != View::All || self.category.get().is_some() {
+            self.set_view(View::All);
+        }
+        // The search filters a moment after its text changes.
+        let delay = if self.search.text().is_empty() { 30 } else { 250 };
+        self.search.set_text("");
+        let weak = Rc::downgrade(self);
+        glib::timeout_add_local_once(std::time::Duration::from_millis(delay), move || {
+            let Some(ui) = weak.upgrade() else { return };
+            let facts = ui.search_facts.borrow();
+            let mut child = ui.enabled_list.first_child();
+            let first = std::iter::from_fn(|| {
+                let row = child.take()?;
+                child = row.next_sibling();
+                Some(row)
+            })
+            .filter_map(|w| w.downcast::<gtk::ListBoxRow>().ok())
+            .find(|row| row.is_child_visible() && row.widget_name().strip_prefix("mod-").and_then(|i| i.parse().ok()).and_then(|i: usize| facts.get(&i)).is_some_and(|f| f.category == Some(category)));
+            drop(facts);
+            let Some(row) = first else { return };
+            let target = row.header().unwrap_or_else(|| row.clone().upcast());
+            let Some(scroller) = ui.enabled_list.ancestor(gtk::ScrolledWindow::static_type()).and_downcast::<gtk::ScrolledWindow>() else { return };
+            let Some(child) = scroller.child() else { return };
+            let content = child.downcast_ref::<gtk::Viewport>().and_then(|v| v.child()).unwrap_or(child);
+            if let Some(bounds) = target.compute_bounds(&content) {
+                scroller.vadjustment().set_value(f64::from(bounds.y()) - 8.0);
+            }
+        });
     }
 
     /// Whether the load order shows its category headers: only in the
@@ -324,50 +382,28 @@ impl Window {
         } else {
             tf!("of {total} enabled", total = h.total)
         };
-        self.health.append(&self.health_card(&h.enabled.to_string(), &first, None, false));
-        if h.outdated > 0 {
-            let this_game = t!("this game");
-            let text = tf!("not updated for {version}", version = short.as_deref().unwrap_or(&this_game));
-            let show: Card = Box::new(|ui: &Rc<Window>| ui.set_view(View::Outdated));
-            let disable: Card = Box::new(|ui: &Rc<Window>| ui.show_outdated_mods(false));
-            self.health.append(&self.health_card_with_actions(&h.outdated.to_string(), &text, vec![(&t!("Show"), show), (&t!("Disable for Now…"), disable)], true));
-        }
-        if h.missing_required > 0 {
-            let text = tn!("required mod missing", "required mods missing", h.missing_required);
-            self.health.append(&self.health_card(&h.missing_required.to_string(), &text, Some((&t!("Show"), Box::new(|ui: &Rc<Window>| ui.set_view(View::Attention)))), true));
-        }
-        if h.misordered > 0 {
-            let text = tn!("loads before a mod it needs", "load before mods they need", h.misordered);
-            self.health.append(&self.health_card(&h.misordered.to_string(), &text, Some((&t!("Sort"), Box::new(|ui: &Rc<Window>| ui.sort_by_dependencies()))), true));
-        }
-        if h.misplaced > 0 {
-            let text = tn!("loads above a mod that replaces most of its files", "load above mods that replace most of their files", h.misplaced);
-            self.health.append(&self.health_card(&h.misplaced.to_string(), &text, Some((&t!("Show"), Box::new(|ui: &Rc<Window>| ui.show_misplaced()))), true));
-        }
-        if h.stale_merges > 0 {
-            let text = tn!("merge out of date", "merges out of date", h.stale_merges);
-            self.health.append(&self.health_card(&h.stale_merges.to_string(), &text, Some((&t!("Review"), Box::new(|ui: &Rc<Window>| ui.stack.set_visible_child_name("conflicts")))), true));
-        }
+        // The overview first: what's enabled, what changed, achievements.
+        let mut cards = vec![self.health_card(&h.enabled.to_string(), &first, None, false)];
         if !h.updated_since.is_empty() {
             let n = h.updated_since.len();
             let text = tn!("mod updated since you last played", "mods updated since you last played", n);
             let card = self.health_card(&n.to_string(), &text, Some((&t!("Show"), Box::new(|ui: &Rc<Window>| ui.show_session_updates()))), false);
             card.set_tooltip_text(Some(&h.updated_since.join("\n")));
-            self.health.append(&card);
+            cards.push(card);
         }
         if !h.waiting.is_empty() {
             let n = h.waiting.len();
             let text = tn!("mod update Steam hasn't downloaded yet", "mod updates Steam hasn't downloaded yet", n);
             let card = self.health_card(&n.to_string(), &text, Some((&t!("Show"), Box::new(|ui: &Rc<Window>| ui.show_session_updates()))), false);
             card.set_tooltip_text(Some(&h.waiting.join("\n")));
-            self.health.append(&card);
+            cards.push(card);
         }
         if !h.frozen_updates.is_empty() {
             let n = h.frozen_updates.len();
             let text = tn!("frozen mod updated on the Workshop", "frozen mods updated on the Workshop", n);
             let card = self.health_card(&n.to_string(), &text, Some((&t!("Show"), Box::new(|ui: &Rc<Window>| ui.show_frozen_updates()))), false);
             card.set_tooltip_text(Some(&h.frozen_updates.join("\n")));
-            self.health.append(&card);
+            cards.push(card);
         }
         if h.enabled > 0 {
             let card = if h.no_achievements.is_empty() {
@@ -382,7 +418,39 @@ impl Window {
             } else {
                 tf!("Achievements are off because these mods change the files the game checksums:\n{mods}", mods = h.no_achievements.join("\n"))
             }));
-            self.health.append(&card);
+            cards.push(card);
+        }
+        // Then the problems, most serious first, on a row of their own.
+        let mut problems = Vec::new();
+        if h.missing_required > 0 {
+            let text = tn!("required mod missing", "required mods missing", h.missing_required);
+            problems.push(self.health_card(&h.missing_required.to_string(), &text, Some((&t!("Show"), Box::new(|ui: &Rc<Window>| ui.set_view(View::Attention)))), true));
+        }
+        if h.misordered > 0 {
+            let text = tn!("loads before a mod it needs", "load before mods they need", h.misordered);
+            problems.push(self.health_card(&h.misordered.to_string(), &text, Some((&t!("Sort"), Box::new(|ui: &Rc<Window>| ui.sort_by_dependencies()))), true));
+        }
+        if h.misplaced > 0 {
+            let text = tn!("loads above a mod that replaces most of its files", "load above mods that replace most of their files", h.misplaced);
+            problems.push(self.health_card(&h.misplaced.to_string(), &text, Some((&t!("Show"), Box::new(|ui: &Rc<Window>| ui.show_misplaced()))), true));
+        }
+        if h.stale_merges > 0 {
+            let text = tn!("merge out of date", "merges out of date", h.stale_merges);
+            problems.push(self.health_card(&h.stale_merges.to_string(), &text, Some((&t!("Review"), Box::new(|ui: &Rc<Window>| ui.stack.set_visible_child_name("conflicts")))), true));
+        }
+        if h.outdated > 0 {
+            let this_game = t!("this game");
+            let text = tf!("not updated for {version}", version = short.as_deref().unwrap_or(&this_game));
+            let show: Card = Box::new(|ui: &Rc<Window>| ui.set_view(View::Outdated));
+            let disable: Card = Box::new(|ui: &Rc<Window>| ui.show_outdated_mods(false));
+            problems.push(self.health_card_with_actions(&h.outdated.to_string(), &text, vec![(&t!("Show"), show), (&t!("Disable for Now…"), disable)], true));
+        }
+        let mut row = 0;
+        for group in [cards, problems] {
+            for (i, card) in group.iter().enumerate() {
+                self.health.attach(card, (i % 3) as i32, row + (i / 3) as i32, 1, 1);
+            }
+            row += group.len().div_ceil(3) as i32;
         }
 
         let mut info = Vec::new();

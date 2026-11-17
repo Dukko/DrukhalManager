@@ -431,7 +431,7 @@ impl ObjectView {
             header.actions.append(&over);
         }
         if !done && sources.len() > 1 {
-            let merge = gtk::Button::builder().label(t!("Merge with AI")).css_classes(["suggested-action"]).sensitive(!busy).build();
+            let merge = gtk::Button::builder().child(&adw::ButtonContent::builder().icon_name(super::AI_ICON).label(t!("Merge with AI")).build()).css_classes(["suggested-action"]).sensitive(!busy).build();
             merge.set_tooltip_text(Some(&match (hooks.provider)() {
                 Some(p) => tf!("Ask {model} to combine these two versions", model = p.model_name()),
                 None => t!("Set up an AI provider in Preferences first"),

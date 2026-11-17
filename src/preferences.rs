@@ -564,9 +564,16 @@ fn updates_page(options: &UpdateOptions) -> (adw::PreferencesPage, impl Fn() -> 
     let version = adw::PreferencesGroup::new();
     let version_row = adw::ActionRow::builder()
         .title(t!("DrukhalManager"))
-        .subtitle(tf!("Version {version}{flatpak}", version = update::CURRENT, flatpak = if flatpak { t!(" (Flatpak)") } else { String::new() }))
-        .subtitle_selectable(true)
         .build();
+    // The version links to its release notes on GitHub.
+    let version_text = tf!("Version {version}{flatpak}", version = update::CURRENT, flatpak = if flatpak { t!(" (Flatpak)") } else { String::new() });
+    version_row.set_subtitle(&format!(
+        "<a href=\"{url}/tag/v{version}\">{text}</a>",
+        url = update::RELEASES_URL,
+        version = update::CURRENT,
+        text = gtk::glib::markup_escape_text(&version_text)
+    ));
+    version_row.set_tooltip_text(Some(&t!("Open the release notes on GitHub")));
     version_row.add_prefix(&gtk::Image::builder().icon_name("io.github.dukko.DrukhalManager").pixel_size(32).build());
     version.add(&version_row);
 

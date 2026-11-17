@@ -40,6 +40,8 @@ type Bubble = (gtk::Button, OnClick);
 /// One version, in a card.
 pub struct Card {
     pub widget: gtk::Box,
+    /// The title bar above the code, kept as tall as its neighbours'.
+    header: gtk::Box,
     dot: gtk::Box,
     title: gtk::Label,
     subtitle: gtk::Label,
@@ -64,8 +66,9 @@ impl Card {
     pub fn new(editable: bool) -> Rc<Self> {
         install_css();
         let dot = gtk::Box::builder().css_classes(["mod-dot"]).valign(gtk::Align::Center).visible(false).build();
-        let title = gtk::Label::builder().xalign(0.0).ellipsize(gtk::pango::EllipsizeMode::End).width_chars(12).css_classes(["heading"]).build();
-        let subtitle = gtk::Label::builder().xalign(0.0).ellipsize(gtk::pango::EllipsizeMode::Middle).css_classes(["dim-label", "caption", "monospace"]).build();
+        // Long mod names and paths wrap rather than being cut short.
+        let title = gtk::Label::builder().xalign(0.0).wrap(true).wrap_mode(gtk::pango::WrapMode::WordChar).width_chars(12).css_classes(["heading"]).build();
+        let subtitle = gtk::Label::builder().xalign(0.0).wrap(true).wrap_mode(gtk::pango::WrapMode::Char).css_classes(["dim-label", "caption", "monospace"]).build();
         // Whether the version can be changed here, next to its title.
         let (icon, text, tooltip) = if editable {
             ("document-edit-symbolic", "Editable", "You can change this version: type in it, paste into it or copy from it")
@@ -76,6 +79,8 @@ impl Card {
         mode.append(&gtk::Image::from_icon_name(icon));
         mode.append(&gtk::Label::new(Some(text)));
         let title_row = gtk::Box::builder().spacing(8).build();
+        title.set_hexpand(true);
+        mode.set_valign(gtk::Align::Start);
         title_row.append(&title);
         title_row.append(&mode);
         let titles = gtk::Box::builder().orientation(gtk::Orientation::Vertical).hexpand(true).valign(gtk::Align::Center).build();
@@ -118,7 +123,7 @@ impl Card {
         widget.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
         widget.append(&body);
 
-        let card = Rc::new(Self { widget, dot, title, subtitle, badge, actions, numbers_scroll, scroll, numbers, code, standalone: Cell::new(true), folds: RefCell::default(), bubbles: RefCell::default() });
+        let card = Rc::new(Self { widget, header, dot, title, subtitle, badge, actions, numbers_scroll, scroll, numbers, code, standalone: Cell::new(true), folds: RefCell::default(), bubbles: RefCell::default() });
         // Fold bubbles follow the text as it's laid out: a long text is
         // measured bit by bit, which shows as its scrolling range changing.
         // The adjustment is replaced when cards link their scrolling.
@@ -492,6 +497,10 @@ impl Pair {
         let widget = gtk::Box::builder().spacing(12).homogeneous(true).vexpand(true).build();
         widget.append(&left.widget);
         widget.append(&right.widget);
+        // Side by side, the headers stay the same height when one wraps.
+        let headers = gtk::SizeGroup::new(gtk::SizeGroupMode::Vertical);
+        headers.add_widget(&left.header);
+        headers.add_widget(&right.header);
         let pair = Rc::new_cyclic(|me| Self {
             me: me.clone(),
             fold: Cell::new(false),

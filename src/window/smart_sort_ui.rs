@@ -55,7 +55,7 @@ impl Window {
         let toolbar = adw::ToolbarView::new();
         toolbar.add_top_bar(&header);
         toolbar.set_content(Some(&stack));
-        let dialog = adw::Dialog::builder().title(t!("Smart Sort")).content_width(720).content_height(760).child(&toolbar).build();
+        let dialog = adw::Dialog::builder().title(t!("Sort Load Order")).content_width(720).content_height(760).child(&toolbar).build();
         cancel.connect_clicked(glib::clone!(
             #[weak]
             dialog,

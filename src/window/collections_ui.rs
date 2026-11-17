@@ -193,7 +193,7 @@ impl Window {
         }
 
         self.collection_button.set_menu_model(Some(&menu));
-        self.collection_button.set_label(&collections.active);
+        self.collection_button.set_tooltip_text(Some(&tf!("Collections: switch between saved load orders. Now using {name}", name = &collections.active)));
         if let Some(action) = self.window.lookup_action("collection") {
             action.change_state(&collections.active.to_variant());
         }
