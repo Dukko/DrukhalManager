@@ -36,6 +36,11 @@
     <control>keyboard</control>
   </supports>
   <releases>
+    <release version="2.0.1" date="2026-11-17">
+      <description>
+        <p>Counts show as numbers again where they read “{count}”: the mods behind each conflict on the Conflicts page, a mod's conflicts in its details, and the number of compatibility patch suggestions.</p>
+      </description>
+    </release>
     <release version="2.0.0" date="2026-11-17">
       <description>
         <p>A new look, in the style of Material 3. The interface uses the Google Sans Flex font, with Fira Code for scripts and Material Symbols icons, all bundled with the app. Buttons are pills, Launch and Sort Load Order are split pills, Load Order and Conflicts switch with a pill toggle, and the cards, panels and switches are rounded. Mods in the load order sit as separate tiles, and the selected one stands out. Colors still follow your desktop's accent and light or dark mode, including palettes from tools like DankMaterialShell and matugen.</p>
