@@ -36,6 +36,12 @@
     <control>keyboard</control>
   </supports>
   <releases>
+    <release version="1.4.5" date="2026-11-17">
+      <description>
+        <p>Interface updates. The header's Collections button now always says Collections and marks the active one in its menu. The cards above the load order sit in rows of three, smaller, with the overview first and problems below. Search folds into an icon until you use it (or press Ctrl+F). Smart Sort is now Sort Load Order. In the sidebar, clicking a category jumps to its section and clicking its count shows only that section.</p>
+        <p>On the Conflicts page, the mod filter says Filter by Mod, the buttons under the list are even and labelled (Rules, Backups, Look Up, Rescan), ignoring a conflict is a labelled Ignore Conflict button, Merge with AI has a sparkle, and long titles, mod names and paths wrap instead of being cut off, with both versions' headers kept the same height. In Preferences, the version links to its release notes.</p>
+      </description>
+    </release>
     <release version="1.4.2" date="2026-11-16">
       <description>
         <p>Game Errors recognises many more harmless lines and sorts them into their own collapsed groups (looks and sounds, missing text, references to other mods, mod descriptors, and more "defined twice"), so the problems list shows what can actually break the game. On a 158-mod log it went from about 18,000 problem lines to about 10,000.</p>
