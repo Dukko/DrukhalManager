@@ -514,14 +514,17 @@ fn fix_targets(
     game_dir: &Path,
 ) -> HashMap<String, error_report_dialog::Target> {
     use crate::merge::source::{self, Source};
-    let mut found = HashMap::new();
+    // Many problems point into the same file, and the base game's objects
+    // are looked up together, one read of each game folder.
+    let files = source::Files::default();
+    let mut targets = Vec::new();
     let mut looked_at = 0;
-    for group in report.groups.iter().filter(|g| !g.is_patch) {
+    'groups: for group in report.groups.iter().filter(|g| !g.is_patch) {
         let Some(id) = &group.mod_id else { continue };
         let Some(root) = roots.get(id) else { continue };
         for entry in group.entries.iter().filter(|e| e.kind == error_log::Kind::Problem) {
             if looked_at >= MAX_FIX_TARGETS {
-                return found;
+                break 'groups;
             }
             looked_at += 1;
             let Some(file) = &entry.file else { continue };
@@ -533,23 +536,31 @@ fn fix_targets(
                 continue;
             }
             let Some(line) = error_log::find_line(&entry.message, file) else { continue };
-            let Ok(bytes) = std::fs::read(root.join(file)) else { continue };
-            let text = String::from_utf8_lossy(&bytes);
-            let Some((key, mod_text)) = source::object_at(&category, text.trim_start_matches('\u{feff}'), line) else { continue };
-            // None for an object the mod defines itself.
-            let game = source::vanilla(game_dir, &category, &key);
-            found.insert(
-                entry.message.clone(),
-                error_report_dialog::Target {
-                    category,
-                    key,
-                    mod_id: id.clone(),
-                    mod_name: group.label.clone(),
-                    mod_copy: Source { label: group.label.clone(), file: file.clone(), text: mod_text },
-                    game,
-                },
-            );
+            let Some((key, mod_text)) = files.object_at(root, file, &category, line) else { continue };
+            targets.push((entry.message.clone(), category, key, id, &group.label, file, mod_text));
         }
+    }
+    let mut wanted: HashMap<&str, Vec<String>> = HashMap::new();
+    for (_, category, key, ..) in &targets {
+        wanted.entry(category.as_str()).or_default().push(key.clone());
+    }
+    let vanilla: HashMap<String, HashMap<String, Source>> =
+        wanted.into_iter().map(|(category, keys)| (category.to_owned(), source::vanilla_many(game_dir, category, &keys))).collect();
+    let mut found = HashMap::new();
+    for (message, category, key, id, label, file, mod_text) in targets {
+        // None for an object the mod defines itself.
+        let game = vanilla.get(&category).and_then(|v| v.get(&key).cloned());
+        found.insert(
+            message,
+            error_report_dialog::Target {
+                category,
+                key,
+                mod_id: id.clone(),
+                mod_name: label.clone(),
+                mod_copy: Source { label: label.clone(), file: file.clone(), text: mod_text },
+                game,
+            },
+        );
     }
     found
 }

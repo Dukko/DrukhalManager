@@ -71,9 +71,13 @@ const MAX_EDITS: usize = 2000;
 pub fn lines(left: &str, right: &str, ignore_whitespace: bool) -> Diff {
     let a: Vec<&str> = left.lines().collect();
     let b: Vec<&str> = right.lines().collect();
-    let norm = |l: &&str| if ignore_whitespace { l.split_whitespace().collect::<Vec<_>>().join(" ") } else { (*l).to_owned() };
-    let (na, nb): (Vec<String>, Vec<String>) = (a.iter().map(norm).collect(), b.iter().map(norm).collect());
-    let ops = edits(&na, &nb, MAX_EDITS);
+    let ops = if ignore_whitespace {
+        let norm = |l: &&str| l.split_whitespace().collect::<Vec<_>>().join(" ");
+        let (na, nb): (Vec<String>, Vec<String>) = (a.iter().map(norm).collect(), b.iter().map(norm).collect());
+        edits(&na, &nb, MAX_EDITS)
+    } else {
+        edits(&a, &b, MAX_EDITS)
+    };
     align(&ops, a.len(), b.len())
 }
 
