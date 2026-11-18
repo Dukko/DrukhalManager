@@ -36,6 +36,11 @@
     <control>keyboard</control>
   </supports>
   <releases>
+    <release version="2.0.2" date="2026-11-18">
+      <description>
+        <p>Faster conflict scans: files the scan hasn't seen before are read on several threads, and each file is read once instead of once per object. The mod list, the error log's fixes and Look Up Objects also skip repeated work, so they respond faster with large mod lists.</p>
+      </description>
+    </release>
     <release version="2.0.1" date="2026-11-17">
       <description>
         <p>Counts show as numbers again where they read “{count}”: the mods behind each conflict on the Conflicts page, a mod's conflicts in its details, and the number of compatibility patch suggestions.</p>
