@@ -117,6 +117,9 @@ struct Window {
     /// What the last refresh found, by mod index, for the inspector.
     last_issues: RefCell<std::collections::HashMap<usize, Vec<checks::Issue>>>,
     last_conflicts: RefCell<std::collections::HashMap<usize, usize>>,
+    /// Conflicts per scanned mod after ignores, kept between refreshes
+    /// while the scan and the ignore settings stay the same.
+    conflict_counts: RefCell<Option<(list::CountsKey, Rc<[usize]>)>>,
     search: gtk::SearchEntry,
     /// What the search can match each listed mod on, by mod index.
     search_facts: SearchFacts,
@@ -561,6 +564,7 @@ pub fn build(
         selected: Cell::new(None),
         last_issues: RefCell::default(),
         last_conflicts: RefCell::default(),
+        conflict_counts: RefCell::default(),
         search: search.clone(),
         search_facts,
         requirements: RefCell::new(crate::mods::requirements::Cache::load(&crate::mods::requirements::Cache::path())),

@@ -9,17 +9,14 @@
 //! the patches Irony Mod Manager writes
 //! (MIT, © 2020 Mario, https://github.com/bcssov/IronyModManager).
 
-use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::io::{self, Write};
-use std::ops::Range;
 use std::path::{Path, PathBuf};
-use std::rc::Rc;
 
 use serde::{Deserialize, Serialize};
 
 use super::conflicts;
-use crate::paradox::script::{self, Entry};
+use super::source::Files as Sources;
 
 /// The folder of the one patch older versions shared between every
 /// collection; it becomes the active collection's.
@@ -741,54 +738,6 @@ fn picked_update(kept: &str, prints: &[Print], roots: &HashMap<String, PathBuf>,
 
 fn read_text(root: &Path, file: &str) -> Option<String> {
     std::fs::read(root.join(file)).ok().map(|b| String::from_utf8_lossy(&b).into_owned())
-}
-
-/// A file's top-level entries with their byte ranges.
-type Parsed = Vec<(Entry, Range<usize>)>;
-
-/// Source files read during one freshness check, each read and parsed at
-/// most once, since many merges cite the same game and mod files.
-#[derive(Default)]
-struct Sources {
-    texts: RefCell<HashMap<PathBuf, Option<Rc<String>>>>,
-    parsed: RefCell<HashMap<PathBuf, Option<Rc<Parsed>>>>,
-}
-
-impl Sources {
-    /// The file's text, as [`read_text`] gives it.
-    fn text(&self, root: &Path, file: &str) -> Option<Rc<String>> {
-        let path = root.join(file);
-        if let Some(text) = self.texts.borrow().get(&path) {
-            return text.clone();
-        }
-        let text = read_text(root, file).map(Rc::new);
-        self.texts.borrow_mut().insert(path, text.clone());
-        text
-    }
-
-    /// The object's definition in the file, as [`super::source::extract`]
-    /// finds it, but parsing each file only once.
-    fn object(&self, root: &Path, file: &str, category: &str, key: &str) -> Option<String> {
-        let text = self.text(root, file)?;
-        if category == "localisation" {
-            return super::source::extract_parsed(category, key, &text, &[]);
-        }
-        // As `extract` does: files that can't define it aren't parsed.
-        if !text.contains(key.rsplit(':').next().unwrap_or(key)) {
-            return None;
-        }
-        let path = root.join(file);
-        let cached = self.parsed.borrow().get(&path).cloned();
-        let entries = match cached {
-            Some(entries) => entries,
-            None => {
-                let entries = script::parse_with_spans(&text).ok().map(Rc::new);
-                self.parsed.borrow_mut().insert(path, entries.clone());
-                entries
-            }
-        }?;
-        super::source::extract_parsed(category, key, &text, &entries)
-    }
 }
 
 /// A descriptor's `supported_version` for the installed game: `v4.5.3`

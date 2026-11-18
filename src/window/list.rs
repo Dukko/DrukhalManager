@@ -39,21 +39,8 @@ impl Window {
             .filter(|a| a.revision.get() == state.revision)
             .map(|a| {
                 let mut by_position = vec![0; state.enabled.len()];
-                let settings = self.settings.borrow();
-                let ignored = |k: &str| settings.ignored.contains(k);
-                let rules = crate::merge::ignore_rules::Rules::parse(&settings.ignore_rules);
-                let ignored = conflicts_view::Ignores {
-                    keys: &ignored,
-                    rules: &rules,
-                    names: &a.names,
-                    dependencies: (!settings.show_dependency_conflicts).then_some(&a.depends_on[..]),
-                };
-                let counts = a.report.counts_by_mod_where(
-                    a.names.len(),
-                    |c| !conflicts_view::file_ignored(&ignored, c),
-                    |c| !conflicts_view::object_ignored(&ignored, c),
-                );
-                for (scanned, n) in counts.into_iter().enumerate() {
+                let counts = self.conflict_counts(a);
+                for (scanned, &n) in counts.iter().enumerate() {
                     if let Some(slot) = by_position.get_mut(a.load_positions[scanned]) {
                         *slot = n;
                     }
@@ -1017,6 +1004,59 @@ fn place(list: &gtk::ListBox, rows: &[adw::ActionRow]) {
 pub(super) fn by_hand_indexes(mods: &[Mod], placed_below: &std::collections::BTreeMap<String, String>) -> HashMap<usize, usize> {
     let index = |id: &str| mods.iter().position(|m| m.id == id);
     placed_below.iter().filter_map(|(id, above)| Some((index(id)?, index(above)?))).collect()
+}
+
+/// What the conflict counts on the mod list depend on: the scan and the
+/// settings that hide conflicts.
+pub(super) struct CountsKey {
+    analysis: std::rc::Weak<conflicts_view::Analysis>,
+    ignored: std::collections::BTreeSet<String>,
+    ignore_rules: String,
+    show_dependency_conflicts: bool,
+}
+
+impl CountsKey {
+    fn matches(&self, analysis: &Rc<conflicts_view::Analysis>, settings: &crate::settings::Settings) -> bool {
+        // A `Weak` keeps its allocation, so a new scan never reuses the address.
+        std::ptr::eq(self.analysis.as_ptr(), Rc::as_ptr(analysis))
+            && self.show_dependency_conflicts == settings.show_dependency_conflicts
+            && self.ignore_rules == settings.ignore_rules
+            && self.ignored == settings.ignored
+    }
+}
+
+impl Window {
+    /// How many conflicts each scanned mod takes part in, leaving out the
+    /// ignored ones. Worked out again only when the scan or the ignore
+    /// settings change, since it goes over every conflict.
+    fn conflict_counts(&self, a: &Rc<conflicts_view::Analysis>) -> Rc<[usize]> {
+        let settings = self.settings.borrow();
+        if let Some((kept, counts)) = &*self.conflict_counts.borrow()
+            && kept.matches(a, &settings)
+        {
+            return counts.clone();
+        }
+        let ignored = |k: &str| settings.ignored.contains(k);
+        let rules = crate::merge::ignore_rules::Rules::parse(&settings.ignore_rules);
+        let ignores = conflicts_view::Ignores {
+            keys: &ignored,
+            rules: &rules,
+            names: &a.names,
+            dependencies: (!settings.show_dependency_conflicts).then_some(&a.depends_on[..]),
+        };
+        let counts: Rc<[usize]> = a
+            .report
+            .counts_by_mod_where(a.names.len(), |c| !conflicts_view::file_ignored(&ignores, c), |c| !conflicts_view::object_ignored(&ignores, c))
+            .into();
+        let key = CountsKey {
+            analysis: Rc::downgrade(a),
+            ignored: settings.ignored.clone(),
+            ignore_rules: settings.ignore_rules.clone(),
+            show_dependency_conflicts: settings.show_dependency_conflicts,
+        };
+        self.conflict_counts.replace(Some((key, counts.clone())));
+        counts
+    }
 }
 
 #[cfg(test)]

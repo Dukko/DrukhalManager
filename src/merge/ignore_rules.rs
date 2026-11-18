@@ -79,21 +79,33 @@ impl Rules {
     /// The line of the last rule matching the file override, and whether
     /// it hides it (rather than showing it again).
     pub fn deciding_file(&self, c: &FileConflict, names: &[String]) -> Option<(usize, bool)> {
-        self.decide(&[c.path.as_str()], &[], &mods_of(c.mods.iter().copied(), names))
+        if self.rules.is_empty() {
+            return None;
+        }
+        self.decide(&[c.path.as_str()], &[], || mods_of(c.mods.iter().copied(), names))
     }
 
     pub fn deciding_object(&self, c: &ObjectConflict, names: &[String]) -> Option<(usize, bool)> {
+        if self.rules.is_empty() {
+            return None;
+        }
         let name = format!("{}/{}", c.category, c.key);
         let files: Vec<&str> = c.definitions.iter().map(|d| d.file.as_str()).collect();
-        self.decide(&[name.as_str()], &files, &mods_of(c.definitions.iter().map(|d| d.mod_position), names))
+        self.decide(&[name.as_str()], &files, || mods_of(c.definitions.iter().map(|d| d.mod_position), names))
     }
 
     /// The last rule matching `names` (any of them) or `files` (all of
-    /// them): its line, and whether it hides.
-    fn decide(&self, names: &[&str], files: &[&str], mods: &BTreeSet<String>) -> Option<(usize, bool)> {
+    /// them): its line, and whether it hides. `mods` is only worked out
+    /// if a rule names mods.
+    fn decide(&self, names: &[&str], files: &[&str], mods: impl FnOnce() -> BTreeSet<String>) -> Option<(usize, bool)> {
+        // Lowercased once, not once per rule: this runs for every conflict
+        // whenever the mod list's counts are worked out.
+        let names: Vec<String> = names.iter().map(|n| n.to_lowercase()).collect();
+        let files: Vec<String> = files.iter().map(|f| f.to_lowercase()).collect();
+        let mods = if self.rules.iter().any(|r| !r.mods.is_empty()) { mods() } else { BTreeSet::new() };
         let last = self.rules.iter().rev().find(|r| {
-            (r.mods.is_empty() || r.mods == *mods)
-                && (names.iter().any(|n| matches(&r.pattern, &n.to_lowercase())) || (!files.is_empty() && files.iter().all(|f| matches(&r.pattern, &f.to_lowercase()))))
+            (r.mods.is_empty() || r.mods == mods)
+                && (names.iter().any(|n| matches(&r.pattern, n)) || (!files.is_empty() && files.iter().all(|f| matches(&r.pattern, f))))
         })?;
         Some((last.line, !last.negated))
     }

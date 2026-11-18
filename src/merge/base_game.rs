@@ -210,6 +210,7 @@ pub fn behind(previous: &Snapshot, current: &Snapshot, defined: &BTreeMap<(Strin
 pub fn behind_counting(previous: &Snapshot, current: &Snapshot, defined: &BTreeMap<(String, String), Vec<Definition>>, roots: &[Option<PathBuf>]) -> (Vec<Behind>, usize) {
     let mut found = Vec::new();
     let mut unreadable = 0;
+    let files = source::Files::default();
     for ((category, key), definitions) in defined {
         if category == "localisation" {
             continue;
@@ -234,11 +235,8 @@ pub fn behind_counting(previous: &Snapshot, current: &Snapshot, defined: &BTreeM
             continue;
         }
         let position = winner.mod_position - 1;
-        let mod_text = roots
-            .get(position)
-            .and_then(Option::as_ref)
-            .and_then(|root| std::fs::read(root.join(&winner.file)).ok())
-            .and_then(|bytes| source::extract(category, key, String::from_utf8_lossy(&bytes).trim_start_matches('\u{feff}')));
+        // Many objects come from the same file: each is read and parsed once.
+        let mod_text = roots.get(position).and_then(Option::as_ref).and_then(|root| files.object(root, &winner.file, category, key));
         let Some(mod_text) = mod_text else {
             unreadable += 1;
             continue;

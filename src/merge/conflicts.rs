@@ -42,6 +42,11 @@ pub struct Report {
     /// How many files the scan read from each mod, by scanned position;
     /// 0 for skipped mods.
     pub shipped: Vec<usize>,
+    /// Each key of `defined`, in its order, lowercased whole and without a
+    /// localisation key's language, made on the first look-up. Left to
+    /// `look_up`; `pub(crate)` only so tests can build a `Report` with
+    /// `..Default::default()`.
+    pub(crate) lowered: std::sync::OnceLock<Vec<(String, String)>>,
 }
 
 impl Report {
@@ -53,14 +58,18 @@ impl Report {
             return Vec::new();
         }
         // Localisation keys are stored as `l_english:key`; people type the key.
-        let name = |key: &str| key.split_once(':').map_or(key, |(_, name)| name).to_lowercase();
+        // Lowercased once per scan, not on every keystroke.
+        let lowered = self.lowered.get_or_init(|| {
+            self.defined
+                .keys()
+                .map(|(_, key)| (key.to_lowercase(), key.split_once(':').map_or(key.as_str(), |(_, name)| name).to_lowercase()))
+                .collect()
+        });
         let mut found: Vec<(bool, &(String, String))> = self
             .defined
             .keys()
-            .filter_map(|id| {
-                let (whole, part) = (id.1.to_lowercase(), name(&id.1));
-                (whole.contains(&query) || part.contains(&query)).then_some((whole == query || part == query, id))
-            })
+            .zip(lowered)
+            .filter_map(|(id, (whole, part))| (whole.contains(&query) || part.contains(&query)).then_some((*whole == query || *part == query, id)))
             .collect();
         // Stable sort keeps the map's (category, key) order within each group.
         found.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1 .1.cmp(&b.1 .1)));
@@ -156,10 +165,10 @@ impl ObjectConflict {
     /// they come from; same-named files are read in load order.
     pub fn winner(&self) -> Option<(usize, Reason)> {
         let fios = is_fios(&self.category);
-        let stem = |d: &Definition| {
+        fn stem(d: &Definition) -> &str {
             let name = d.file.rsplit('/').next().unwrap_or(&d.file);
-            name.rsplit_once('.').map_or(name, |(stem, _)| stem).to_owned()
-        };
+            name.rsplit_once('.').map_or(name, |(stem, _)| stem)
+        }
         let mut candidates: Vec<usize> = (0..self.definitions.len()).collect();
         let mut replaced = false;
         if self.category == "localisation" {
@@ -353,7 +362,9 @@ pub fn analyze_cached(mods: &[ModInput], languages: Option<&BTreeSet<String>>, c
         }
         // A later `replace_path` makes the game ignore earlier mods' files in
         // that folder, so they cannot conflict.
-        files.retain(|path, _| !m.replace_path.iter().any(|r| is_under(path, r)));
+        if !m.replace_path.is_empty() {
+            files.retain(|path, _| !m.replace_path.iter().any(|r| is_under(path, r)));
+        }
         for path in found.into_iter().filter(|p| reads(p, languages)) {
             report.shipped[position] += 1;
             files.entry(path.to_lowercase()).or_default().push((position, path));
@@ -361,16 +372,22 @@ pub fn analyze_cached(mods: &[ModInput], languages: Option<&BTreeSet<String>>, c
     }
 
     // Objects come only from the copy of each file that actually loads.
-    let mut objects: BTreeMap<(String, String), Vec<Definition>> = BTreeMap::new();
+    // The files to read are gathered first, so the uncached ones can be
+    // parsed in parallel.
+    let mut to_read: Vec<(usize, &String, String)> = Vec::new();
     for shipped in files.values() {
         let (winner, path) = shipped.last().unwrap();
-        let winner = *winner;
         if shipped.len() > 1 {
             report.files.push(FileConflict { path: path.clone(), mods: shipped.iter().map(|(m, _)| *m).collect() });
         }
-        let Some(category) = object_category(path) else { continue };
-        let full = mods[winner].root.as_ref().unwrap().join(path);
-        let keys = cache.keys(&full, &category, |src| object_keys(&category, src));
+        if let Some(category) = object_category(path) {
+            to_read.push((*winner, path, category));
+        }
+    }
+    let full: Vec<(PathBuf, String)> = to_read.iter().map(|(winner, path, category)| (mods[*winner].root.as_ref().unwrap().join(path), category.clone())).collect();
+    let all_keys = cache.keys_many(&full, object_keys);
+    let mut objects: BTreeMap<(String, String), Vec<Definition>> = BTreeMap::new();
+    for ((winner, path, category), keys) in to_read.into_iter().zip(all_keys) {
         let keys = match keys {
             Ok(keys) => keys,
             Err(e) => {

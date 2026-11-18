@@ -1,8 +1,11 @@
 //! Cutting a single object's definition out of a mod's (or the game's) files,
 //! with its original comments and formatting.
 
+use std::cell::RefCell;
 use std::collections::HashMap;
-use std::path::Path;
+use std::ops::Range;
+use std::path::{Path, PathBuf};
+use std::rc::Rc;
 
 use crate::paradox::script::{self, Entries, Entry};
 
@@ -62,6 +65,14 @@ pub fn object_at(category: &str, src: &str, line: usize) -> Option<(String, Stri
         return None;
     }
     let entries = script::parse_with_spans(src).ok()?;
+    object_at_parsed(category, src, &entries, line)
+}
+
+/// As [`object_at`], from `src` already parsed into `entries`.
+fn object_at_parsed(category: &str, src: &str, entries: &[(Entry, Range<usize>)], line: usize) -> Option<(String, String)> {
+    if category == "localisation" || line == 0 {
+        return None;
+    }
     let start = if line == 1 { 0 } else { src.match_indices('\n').nth(line - 2)?.0 + 1 };
     let end = src[start..].find('\n').map_or(src.len(), |i| start + i);
     let (entry, _) = entries.iter().find(|(_, range)| range.start <= end && range.end > start)?;
@@ -70,7 +81,7 @@ pub fn object_at(category: &str, src: &str, line: usize) -> Option<(String, Stri
         return None;
     }
     let key = if category == "events" { value.as_block().and_then(|b| b.scalar("id"))?.to_owned() } else { key.clone() };
-    let text = extract_parsed(category, &key, src, &entries)?;
+    let text = extract_parsed(category, &key, src, entries)?;
     Some((key, text))
 }
 
@@ -195,6 +206,73 @@ pub fn vanilla_files(game_dir: &Path, category: &str) -> Vec<std::path::PathBuf>
     collect(&dir, recursive, extension, &mut files);
     files.sort();
     files
+}
+
+/// A file's top-level entries with their byte ranges.
+type Parsed = Vec<(Entry, Range<usize>)>;
+
+/// Source files read during one pass (a freshness check, a scan step),
+/// each read and parsed at most once, since many objects come from the
+/// same game and mod files.
+#[derive(Default)]
+pub struct Files {
+    texts: RefCell<HashMap<PathBuf, Option<Rc<String>>>>,
+    parsed: RefCell<HashMap<PathBuf, Option<Rc<Parsed>>>>,
+}
+
+impl Files {
+    /// The file's text, read as UTF-8 with bad bytes replaced; `None` if
+    /// it can't be read.
+    pub fn text(&self, root: &Path, file: &str) -> Option<Rc<String>> {
+        let path = root.join(file);
+        if let Some(text) = self.texts.borrow().get(&path) {
+            return text.clone();
+        }
+        let text = std::fs::read(&path).ok().map(|b| Rc::new(String::from_utf8_lossy(&b).into_owned()));
+        self.texts.borrow_mut().insert(path, text.clone());
+        text
+    }
+
+    /// The file's text and its top-level entries, parsed once; `None` if
+    /// it can't be read or doesn't parse.
+    fn parsed(&self, root: &Path, file: &str) -> Option<(Rc<String>, Rc<Parsed>)> {
+        let text = self.text(root, file)?;
+        let path = root.join(file);
+        let cached = self.parsed.borrow().get(&path).cloned();
+        let entries = match cached {
+            Some(entries) => entries,
+            None => {
+                let entries = script::parse_with_spans(&text).ok().map(Rc::new);
+                self.parsed.borrow_mut().insert(path, entries.clone());
+                entries
+            }
+        }?;
+        Some((text, entries))
+    }
+
+    /// The object's definition in the file, as [`extract`] finds it, but
+    /// parsing each file only once.
+    pub fn object(&self, root: &Path, file: &str, category: &str, key: &str) -> Option<String> {
+        if category == "localisation" {
+            return extract_parsed(category, key, &self.text(root, file)?, &[]);
+        }
+        // As `extract` does: files that can't define it aren't parsed.
+        if !self.text(root, file)?.contains(key.rsplit(':').next().unwrap_or(key)) {
+            return None;
+        }
+        let (text, entries) = self.parsed(root, file)?;
+        extract_parsed(category, key, &text, &entries)
+    }
+
+    /// The object covering `line` in the file, as [`object_at`] finds it,
+    /// but parsing each file only once.
+    pub fn object_at(&self, root: &Path, file: &str, category: &str, line: usize) -> Option<(String, String)> {
+        if category == "localisation" || line == 0 {
+            return None;
+        }
+        let (text, entries) = self.parsed(root, file)?;
+        object_at_parsed(category, &text, &entries, line)
+    }
 }
 
 /// The base game's definition of the object, if it has one.

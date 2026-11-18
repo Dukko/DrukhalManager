@@ -54,6 +54,9 @@ impl From<std::io::Error> for ScanError {
     }
 }
 
+/// A file's object keys, or why it couldn't be read or parsed.
+pub type Keys = Result<Vec<String>, ScanError>;
+
 /// The objects a file defines, as of its size and modification time.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct FileKeys {
@@ -124,22 +127,60 @@ impl ScanCache {
         Ok(())
     }
 
-    /// The object keys of the file at `path`, read as `category`: from the
-    /// cache while the file is unchanged, else read and given to `parse`.
-    /// A file that can't be read isn't kept, so it's tried again next time.
-    pub fn keys(&mut self, path: &Path, category: &str, parse: impl FnOnce(&str) -> Result<Vec<String>, ScanError>) -> Result<Vec<String>, ScanError> {
-        let read = || std::fs::read(path).map(|b| String::from_utf8_lossy(&b).into_owned()).map_err(ScanError::from);
-        let Some((size, modified)) = stamp(path) else { return parse(&read()?) };
-        if let Some(f) = self.files.get(path)
-            && (f.size, f.modified) == (size, modified)
-            && f.category == category
-        {
-            return f.keys.clone();
+    /// The object keys of each file, given as `(path, category)` for the
+    /// folder it's read as: from the cache while the file is unchanged, else
+    /// read and given to `parse(category, text)`, several files at once on
+    /// separate threads. A file that can't be read isn't kept, so it's tried
+    /// again next time. Results are in the order of `files`.
+    pub fn keys_many(&mut self, files: &[(PathBuf, String)], parse: impl Fn(&str, &str) -> Keys + Sync) -> Vec<Keys> {
+        let stamps: Vec<Option<(u64, u128)>> = files.iter().map(|(path, _)| stamp(path)).collect();
+        let mut results: Vec<Option<Keys>> = files
+            .iter()
+            .zip(&stamps)
+            .map(|((path, category), stamp)| {
+                let f = self.files.get(path)?;
+                (Some((f.size, f.modified)) == *stamp && f.category == *category).then(|| f.keys.clone())
+            })
+            .collect();
+        let missing: Vec<usize> = (0..files.len()).filter(|&i| results[i].is_none()).collect();
+        let threads = std::thread::available_parallelism().map_or(1, |n| n.get()).min(missing.len()).max(1);
+        // Read failures come back as `Err` from the read, not the parse, and
+        // aren't kept, so they're tried again next time.
+        let parsed: Vec<(usize, Result<Keys, ScanError>)> = std::thread::scope(|scope| {
+            let parse = &parse;
+            let workers: Vec<_> = missing
+                .chunks(missing.len().div_ceil(threads).max(1))
+                .map(|chunk| {
+                    scope.spawn(move || {
+                        chunk
+                            .iter()
+                            .map(|&i| {
+                                let (path, category) = &files[i];
+                                let read = std::fs::read(path).map(|b| String::from_utf8_lossy(&b).into_owned()).map_err(ScanError::from);
+                                (i, read.map(|src| parse(category, &src)))
+                            })
+                            .collect::<Vec<_>>()
+                    })
+                })
+                .collect();
+            // A panicking parser is a bug; pass it on as the serial scan would.
+            workers.into_iter().flat_map(|w| w.join().unwrap_or_else(|e| std::panic::resume_unwind(e))).collect()
+        });
+        for (i, outcome) in parsed {
+            let keys = match outcome {
+                Ok(keys) => {
+                    if let Some((size, modified)) = stamps[i] {
+                        let (path, category) = &files[i];
+                        self.files.insert(path.clone(), FileKeys { size, modified, category: category.clone(), keys: keys.clone() });
+                        self.changed = true;
+                    }
+                    keys
+                }
+                Err(e) => Err(e),
+            };
+            results[i] = Some(keys);
         }
-        let keys = parse(&read()?);
-        self.files.insert(path.to_owned(), FileKeys { size, modified, category: category.to_owned(), keys: keys.clone() });
-        self.changed = true;
-        keys
+        results.into_iter().map(|r| r.expect("every file is looked up or parsed")).collect()
     }
 
     /// A fingerprint of a conflict for its verdict: its object, the base
@@ -180,6 +221,11 @@ impl ScanCache {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    fn keys(cache: &mut ScanCache, path: &Path, category: &str, parse: impl Fn(&str) -> Keys + Sync) -> Keys {
+        cache.keys_many(&[(path.to_owned(), category.to_owned())], |_, src| parse(src)).remove(0)
+    }
 
     #[test]
     fn rereads_only_changed_files() {
@@ -189,23 +235,23 @@ mod tests {
         let file = root.join("a.txt");
         std::fs::write(&file, "x = {}").unwrap();
         let mut cache = ScanCache::default();
-        let reads = std::cell::Cell::new(0);
+        let reads = AtomicUsize::new(0);
         let read = |_: &str| {
-            reads.set(reads.get() + 1);
+            reads.fetch_add(1, Ordering::Relaxed);
             Ok(vec!["x".to_owned()])
         };
-        assert_eq!(cache.keys(&file, "common/a", read), Ok(vec!["x".to_owned()]));
-        assert_eq!(cache.keys(&file, "common/a", read), Ok(vec!["x".to_owned()]));
-        assert_eq!(reads.get(), 1, "unchanged, so read once");
-        cache.keys(&file, "localisation", read).unwrap();
-        assert_eq!(reads.get(), 2, "read as another folder");
+        assert_eq!(keys(&mut cache, &file, "common/a", read), Ok(vec!["x".to_owned()]));
+        assert_eq!(keys(&mut cache, &file, "common/a", read), Ok(vec!["x".to_owned()]));
+        assert_eq!(reads.load(Ordering::Relaxed), 1, "unchanged, so read once");
+        keys(&mut cache, &file, "localisation", read).unwrap();
+        assert_eq!(reads.load(Ordering::Relaxed), 2, "read as another folder");
 
         // Saved and loaded back, it still knows the file.
         let path = root.join("cache.json");
         cache.save(&path).unwrap();
         let mut cache = ScanCache::load(&path);
-        cache.keys(&file, "localisation", read).unwrap();
-        assert_eq!(reads.get(), 2);
+        keys(&mut cache, &file, "localisation", read).unwrap();
+        assert_eq!(reads.load(Ordering::Relaxed), 2);
 
         let print = |cache: &ScanCache, label: &str| cache.conflict_print("common/a", "x", "4.0.1", &[(label, "common/a/a.txt", &file)]);
         let before = print(&cache, "A").unwrap();
@@ -215,10 +261,42 @@ mod tests {
 
         // A changed file is read again, and its conflicts get a new print.
         std::fs::write(&file, "x = { y = 1 }").unwrap();
-        cache.keys(&file, "localisation", read).unwrap();
-        assert_eq!(reads.get(), 3);
+        keys(&mut cache, &file, "localisation", read).unwrap();
+        assert_eq!(reads.load(Ordering::Relaxed), 3);
         assert_ne!(print(&cache, "A").unwrap(), before);
         assert_eq!(cache.conflict_print("c", "x", "4.0.1", &[("A", "f", &root.join("never-read.txt"))]), None);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn reads_many_files_in_order() {
+        let root = std::env::temp_dir().join(format!("drukhal-scan-many-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let mut files: Vec<(PathBuf, String)> = (0..40)
+            .map(|i| {
+                let path = root.join(format!("{i}.txt"));
+                std::fs::write(&path, format!("k{i}")).unwrap();
+                (path, "common/a".to_owned())
+            })
+            .collect();
+        files.insert(7, (root.join("missing.txt"), "common/a".to_owned()));
+        let parses = AtomicUsize::new(0);
+        let parse = |_: &str, src: &str| {
+            parses.fetch_add(1, Ordering::Relaxed);
+            Ok(vec![src.to_owned()])
+        };
+        let mut cache = ScanCache::default();
+        let found = cache.keys_many(&files, parse);
+        assert_eq!(found.len(), 41);
+        assert!(found[7].as_ref().is_err_and(|e| e.line.is_none()), "a read failure");
+        let names: Vec<String> = found.iter().filter_map(|k| k.as_ref().ok()).map(|k| k[0].clone()).collect();
+        assert_eq!(names, (0..40).map(|i| format!("k{i}")).collect::<Vec<_>>());
+        assert_eq!(parses.load(Ordering::Relaxed), 40);
+        // Known now, except the file that couldn't be read.
+        cache.keys_many(&files, parse);
+        assert_eq!(parses.load(Ordering::Relaxed), 40);
+        assert_eq!(cache.files.len(), 40);
         std::fs::remove_dir_all(root).unwrap();
     }
 
@@ -230,7 +308,7 @@ mod tests {
         let file = root.join("a.txt");
         std::fs::write(&file, "x = {}").unwrap();
         let mut cache = ScanCache::default();
-        cache.keys(&file, "common/a", |_| Ok(vec!["x".to_owned()])).unwrap();
+        keys(&mut cache, &file, "common/a", |_| Ok(vec!["x".to_owned()])).unwrap();
         cache.set_verdict("print".into(), None);
         cache.version = VERSION;
         cache.app = "0.0.0".into();
@@ -238,7 +316,7 @@ mod tests {
         std::fs::write(&path, serde_json::to_vec(&cache).unwrap()).unwrap();
 
         let mut cache = ScanCache::load(&path);
-        assert_eq!(cache.keys(&file, "common/a", |_| panic!("parsed again")), Ok(vec!["x".to_owned()]));
+        assert_eq!(keys(&mut cache, &file, "common/a", |_| panic!("parsed again")), Ok(vec!["x".to_owned()]));
         assert_eq!(cache.verdict("print"), None);
         assert!(cache.changed);
         std::fs::remove_dir_all(root).unwrap();
@@ -252,7 +330,7 @@ mod tests {
         let file = root.join("a.txt");
         std::fs::write(&file, "x = {}").unwrap();
         let mut cache = ScanCache::default();
-        cache.keys(&file, "common/a", |_| Ok(vec!["x".to_owned()])).unwrap();
+        keys(&mut cache, &file, "common/a", |_| Ok(vec!["x".to_owned()])).unwrap();
         cache.version = VERSION - 1;
         cache.app = APP.to_owned();
         let path = root.join("cache.json");

@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: DrukhalManager 2.0.1\n"
 "Report-Msgid-Bugs-To: https://github.com/Dukko/DrukhalManager/issues\n"
-"POT-Creation-Date: 2026-11-17 22:26+0000\n"
+"POT-Creation-Date: 2026-11-18 20:18+0000\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -616,7 +616,7 @@ msgstr ""
 msgid "Look Up Objects…"
 msgstr ""
 
-#: src/conflicts_view.rs:518 src/window/overview.rs:752 src/window/shortcuts.rs:32 src/window/shortcuts.rs:82 src/window.rs:486 src/window.rs:1081
+#: src/conflicts_view.rs:518 src/window/overview.rs:752 src/window/shortcuts.rs:32 src/window/shortcuts.rs:82 src/window.rs:489 src/window.rs:1085
 msgid "Conflicts"
 msgstr ""
 
@@ -1661,16 +1661,16 @@ msgstr ""
 msgid "The model's reply did not contain the merged result."
 msgstr ""
 
-#: src/merge/conflicts.rs:341 src/mods/mod.rs:105
+#: src/merge/conflicts.rs:350 src/mods/mod.rs:105
 msgid "Mod files not found"
 msgstr ""
 
 #. Zips are unpacked before scanning; this one couldn't be.
-#: src/merge/conflicts.rs:346
+#: src/merge/conflicts.rs:355
 msgid "Could not unpack this zipped mod"
 msgstr ""
 
-#: src/merge/conflicts.rs:351
+#: src/merge/conflicts.rs:360
 msgid "Could not read mod files: {error}"
 msgstr ""
 
@@ -1698,51 +1698,51 @@ msgid_plural "Closed {count} blocks left open at the end of the file"
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/merge/patch.rs:425
+#: src/merge/patch.rs:422
 msgid "The base game changed it in {version}"
 msgstr ""
 
-#: src/merge/patch.rs:426
+#: src/merge/patch.rs:423
 msgid "The base game changed it in an update"
 msgstr ""
 
-#: src/merge/patch.rs:457
+#: src/merge/patch.rs:454
 msgid "no longer defines it"
 msgstr ""
 
-#: src/merge/patch.rs:478
+#: src/merge/patch.rs:475
 msgid "The base game no longer defines it"
 msgstr ""
 
-#: src/merge/patch.rs:484
+#: src/merge/patch.rs:481
 msgid "The base game added it in {version}"
 msgstr ""
 
-#: src/merge/patch.rs:500
+#: src/merge/patch.rs:497
 msgid "no longer ships this file"
 msgstr ""
 
-#: src/merge/patch.rs:505
+#: src/merge/patch.rs:502
 msgid "The base game no longer ships this file"
 msgstr ""
 
-#: src/merge/patch.rs:515
+#: src/merge/patch.rs:512
 msgid "The base game added this file in {version}"
 msgstr ""
 
-#: src/merge/patch.rs:546
+#: src/merge/patch.rs:543
 msgid "It is no longer in the patch"
 msgstr ""
 
-#: src/merge/patch.rs:684
+#: src/merge/patch.rs:681
 msgid "{name} isn't enabled any more"
 msgstr ""
 
-#: src/merge/patch.rs:688
+#: src/merge/patch.rs:685
 msgid "{name} {missing}"
 msgstr ""
 
-#: src/merge/patch.rs:689
+#: src/merge/patch.rs:686
 msgid "{name} changed it"
 msgstr ""
 
@@ -1820,7 +1820,7 @@ msgstr ""
 msgid "Could not read the extra mod folder {folder}: {error}"
 msgstr ""
 
-#: src/mods/filter.rs:52 src/window/order_check_ui.rs:94 src/window/shortcuts.rs:21 src/window/shortcuts.rs:32 src/window.rs:398 src/window.rs:478
+#: src/mods/filter.rs:52 src/window/order_check_ui.rs:94 src/window/shortcuts.rs:21 src/window/shortcuts.rs:32 src/window.rs:401 src/window.rs:481
 msgid "Load Order"
 msgstr ""
 
@@ -1828,7 +1828,7 @@ msgstr ""
 msgid "Not Updated for This Game"
 msgstr ""
 
-#: src/mods/filter.rs:55 src/window.rs:1081
+#: src/mods/filter.rs:55 src/window.rs:1085
 msgid "Has Conflicts"
 msgstr ""
 
@@ -1836,7 +1836,7 @@ msgstr ""
 msgid "Turns Off Achievements"
 msgstr ""
 
-#: src/mods/filter.rs:57 src/window/overview.rs:611 src/window.rs:416
+#: src/mods/filter.rs:57 src/window/overview.rs:611 src/window.rs:419
 msgid "Disabled"
 msgstr ""
 
@@ -2408,7 +2408,7 @@ msgstr ""
 msgid "Steam Web API Key"
 msgstr ""
 
-#: src/preferences.rs:119 src/window/requirements_ui.rs:112 src/window.rs:1004
+#: src/preferences.rs:119 src/window/requirements_ui.rs:112 src/window.rs:1008
 msgid "The keyring call failed"
 msgstr ""
 
@@ -2480,7 +2480,7 @@ msgstr ""
 msgid "Extra Mod Folder"
 msgstr ""
 
-#: src/preferences.rs:249 src/window/overview.rs:748 src/window.rs:1081
+#: src/preferences.rs:249 src/window/overview.rs:748 src/window.rs:1085
 msgid "None"
 msgstr ""
 
@@ -2914,7 +2914,7 @@ msgstr ""
 msgid "The merged patch goes back to {contents} from {when}. Its current merges are backed up first, so you can undo this from this list."
 msgstr ""
 
-#: src/window/backups_ui.rs:74 src/window/collections_ui.rs:263 src/window/collections_ui.rs:292 src/window/collections_ui.rs:360 src/window/collections_ui.rs:411 src/window/collections_ui.rs:638 src/window/collections_ui.rs:722 src/window/collections_ui.rs:794 src/window/crash_hunt_ui.rs:59 src/window/ignore_rules_ui.rs:88 src/window/launch.rs:454 src/window/list.rs:456 src/window/repair_ui.rs:89 src/window/saves_ui.rs:86 src/window/freeze_ui.rs:40 src/window/freeze_ui.rs:103
+#: src/window/backups_ui.rs:74 src/window/collections_ui.rs:263 src/window/collections_ui.rs:292 src/window/collections_ui.rs:360 src/window/collections_ui.rs:411 src/window/collections_ui.rs:638 src/window/collections_ui.rs:722 src/window/collections_ui.rs:794 src/window/crash_hunt_ui.rs:59 src/window/ignore_rules_ui.rs:88 src/window/launch.rs:454 src/window/list.rs:443 src/window/repair_ui.rs:89 src/window/saves_ui.rs:86 src/window/freeze_ui.rs:40 src/window/freeze_ui.rs:103
 msgid "_Cancel"
 msgstr ""
 
@@ -2999,7 +2999,7 @@ msgstr ""
 msgid "Moved {name} to {place}"
 msgstr ""
 
-#: src/window/collections_ui.rs:156 src/window.rs:287
+#: src/window/collections_ui.rs:156 src/window.rs:290
 msgid "Collections"
 msgstr ""
 
@@ -3011,7 +3011,7 @@ msgstr ""
 msgid "_Duplicate…"
 msgstr ""
 
-#: src/window/collections_ui.rs:160 src/window/list.rs:770
+#: src/window/collections_ui.rs:160 src/window/list.rs:757
 msgid "_Rename…"
 msgstr ""
 
@@ -3105,11 +3105,11 @@ msgstr ""
 msgid "_Discard"
 msgstr ""
 
-#: src/window/collections_ui.rs:263 src/window/ignore_rules_ui.rs:89 src/window/launch.rs:456 src/window/list.rs:461
+#: src/window/collections_ui.rs:263 src/window/ignore_rules_ui.rs:89 src/window/launch.rs:456 src/window/list.rs:448
 msgid "_Save"
 msgstr ""
 
-#: src/window/collections_ui.rs:282 src/window/list.rs:419 src/window.rs:410
+#: src/window/collections_ui.rs:282 src/window/list.rs:406 src/window.rs:413
 msgid "Name"
 msgstr ""
 
@@ -3137,7 +3137,7 @@ msgstr ""
 msgid "Rename Collection"
 msgstr ""
 
-#: src/window/collections_ui.rs:334 src/window/list.rs:419
+#: src/window/collections_ui.rs:334 src/window/list.rs:406
 msgid "_Rename"
 msgstr ""
 
@@ -4050,11 +4050,11 @@ msgstr ""
 msgid "Click a mod to see what's wrong with it, what it needs and what it overrides."
 msgstr ""
 
-#: src/window/overview.rs:614 src/window/list.rs:963 src/window.rs:1079
+#: src/window/overview.rs:614 src/window/list.rs:950 src/window.rs:1083
 msgid "Workshop"
 msgstr ""
 
-#: src/window/overview.rs:615 src/window/list.rs:964 src/window.rs:1079
+#: src/window/overview.rs:615 src/window/list.rs:951 src/window.rs:1083
 msgid "Local"
 msgstr ""
 
@@ -4066,7 +4066,7 @@ msgstr ""
 msgid "updated {when}"
 msgstr ""
 
-#: src/window/overview.rs:644 src/window/list.rs:452
+#: src/window/overview.rs:644 src/window/list.rs:439
 msgid "Note"
 msgstr ""
 
@@ -4090,7 +4090,7 @@ msgstr ""
 msgid "Turns them off"
 msgstr ""
 
-#: src/window/overview.rs:755 src/window.rs:1080
+#: src/window/overview.rs:755 src/window.rs:1084
 msgid "Achievements"
 msgstr ""
 
@@ -4110,7 +4110,7 @@ msgstr ""
 msgid "disabled"
 msgstr ""
 
-#: src/window/overview.rs:808 src/window.rs:1078
+#: src/window/overview.rs:808 src/window.rs:1082
 msgid "Enabled"
 msgstr ""
 
@@ -4118,7 +4118,7 @@ msgstr ""
 msgid "Open in Steam"
 msgstr ""
 
-#: src/window/overview.rs:824 src/window/list.rs:778
+#: src/window/overview.rs:824 src/window/list.rs:765
 msgid "Open Folder"
 msgstr ""
 
@@ -4318,169 +4318,169 @@ msgstr ""
 msgid "Needs {list}, {status}"
 msgstr ""
 
-#: src/window/list.rs:305
+#: src/window/list.rs:292
 msgid "Enabled {count} mod"
 msgid_plural "Enabled {count} mods"
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/window/list.rs:307
+#: src/window/list.rs:294
 msgid "Disabled {count} mod"
 msgid_plural "Disabled {count} mods"
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/window/list.rs:317
+#: src/window/list.rs:304
 msgid "Sorted mods after their dependencies"
 msgstr ""
 
-#: src/window/list.rs:322
+#: src/window/list.rs:309
 msgid "Already in alphabetical order"
 msgstr ""
 
-#: src/window/list.rs:325
+#: src/window/list.rs:312
 msgid "Sorted mods alphabetically, after their dependencies"
 msgstr ""
 
-#: src/window/list.rs:335 src/window/shortcuts.rs:26
+#: src/window/list.rs:322 src/window/shortcuts.rs:26
 msgid "Undo"
 msgstr ""
 
-#: src/window/list.rs:385
+#: src/window/list.rs:372
 msgid "Loads after {name} once it's installed"
 msgstr ""
 
-#: src/window/list.rs:386
+#: src/window/list.rs:373
 msgid "Loads first once it's installed"
 msgstr ""
 
-#: src/window/list.rs:389
+#: src/window/list.rs:376
 msgid "Not installed, so it's left out of the game's load order"
 msgstr ""
 
-#: src/window/list.rs:391
+#: src/window/list.rs:378
 msgid "Open on the Steam Workshop to subscribe"
 msgstr ""
 
-#: src/window/list.rs:398
+#: src/window/list.rs:385
 msgid "Remove from Collection"
 msgstr ""
 
-#: src/window/list.rs:419
+#: src/window/list.rs:406
 msgid "Rename Mod"
 msgstr ""
 
-#: src/window/list.rs:454
+#: src/window/list.rs:441
 msgid "Edit Note"
 msgstr ""
 
-#: src/window/list.rs:454
+#: src/window/list.rs:441
 msgid "Add Note"
 msgstr ""
 
-#: src/window/list.rs:458 src/window/repair_ui.rs:103
+#: src/window/list.rs:445 src/window/repair_ui.rs:103
 msgid "_Remove"
 msgstr ""
 
-#: src/window/list.rs:606
+#: src/window/list.rs:593
 msgid "Doesn't say it supports this game version"
 msgstr ""
 
-#: src/window/list.rs:606
+#: src/window/list.rs:593
 msgid "The game version it supports"
 msgstr ""
 
-#: src/window/list.rs:615
+#: src/window/list.rs:602
 msgid "{count} conflict; see the Conflicts page (Alt+2)"
 msgid_plural "{count} conflicts; see the Conflicts page (Alt+2)"
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/window/list.rs:626
+#: src/window/list.rs:613
 msgid "Turns off achievements: it changes files the game checksums"
 msgstr ""
 
-#: src/window/list.rs:679
+#: src/window/list.rs:666
 msgid "Always loads last, so its merges and fixes win"
 msgstr ""
 
-#: src/window/list.rs:727
+#: src/window/list.rs:714
 msgid "{count} merge saved by an older version needs checking; see the Conflicts page"
 msgid_plural "{count} merges saved by an older version need checking; see the Conflicts page"
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/window/list.rs:738
+#: src/window/list.rs:725
 msgid "{count} merge or fix is out of date because mods changed; see the Conflicts page"
 msgid_plural "{count} merges or fixes are out of date because mods changed; see the Conflicts page"
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/window/list.rs:756
+#: src/window/list.rs:743
 msgid "Move to _Top"
 msgstr ""
 
-#: src/window/list.rs:757
+#: src/window/list.rs:744
 msgid "Move to _Bottom"
 msgstr ""
 
-#: src/window/list.rs:766
+#: src/window/list.rs:753
 msgid "_Get Required Mods"
 msgstr ""
 
-#: src/window/list.rs:774
+#: src/window/list.rs:761
 msgid "Edit _Note…"
 msgstr ""
 
-#: src/window/list.rs:774
+#: src/window/list.rs:761
 msgid "Add _Note…"
 msgstr ""
 
-#: src/window/list.rs:783
+#: src/window/list.rs:770
 msgid "Show _Conflicts"
 msgstr ""
 
-#: src/window/list.rs:790
+#: src/window/list.rs:777
 msgid "Open in _Steam"
 msgstr ""
 
-#: src/window/list.rs:791
+#: src/window/list.rs:778
 msgid "Open Workshop Page in _Browser"
 msgstr ""
 
-#: src/window/list.rs:792
+#: src/window/list.rs:779
 msgid "Copy _Workshop Link"
 msgstr ""
 
-#: src/window/list.rs:793
+#: src/window/list.rs:780
 msgid "_Unsubscribe in Steam…"
 msgstr ""
 
-#: src/window/list.rs:832
+#: src/window/list.rs:819
 msgid "Load position: type a number to move this mod there"
 msgstr ""
 
-#: src/window/list.rs:911
+#: src/window/list.rs:898
 msgid "Update pending"
 msgstr ""
 
-#: src/window/list.rs:912
+#: src/window/list.rs:899
 msgid "Steam has a newer version it hasn't finished downloading. Let it finish before playing, or the game may load a half-updated mod."
 msgstr ""
 
-#: src/window/list.rs:915
+#: src/window/list.rs:902
 msgid "Downloading"
 msgstr ""
 
-#: src/window/list.rs:915
+#: src/window/list.rs:902
 msgid "Steam hasn't finished downloading this mod"
 msgstr ""
 
-#: src/window/list.rs:917
+#: src/window/list.rs:904
 msgid "Unsubscribed"
 msgstr ""
 
-#: src/window/list.rs:918
+#: src/window/list.rs:905
 msgid "You're no longer subscribed to this mod in Steam. Once Steam removes its files, Repair in the banner above the list can remove it from the list."
 msgstr ""
 
@@ -5248,208 +5248,208 @@ msgstr ""
 msgid "Could not update: {error}"
 msgstr ""
 
-#: src/window.rs:221
+#: src/window.rs:224
 msgid "Could Not Read Mods"
 msgstr ""
 
-#: src/window.rs:222
+#: src/window.rs:225
 msgid "{path}: {error}"
 msgstr ""
 
-#: src/window.rs:235
+#: src/window.rs:238
 msgid "_Saves…"
 msgstr ""
 
-#: src/window.rs:236
+#: src/window.rs:239
 msgid "_Multiplayer Check…"
 msgstr ""
 
-#: src/window.rs:237
+#: src/window.rs:240
 msgid "_DLC…"
 msgstr ""
 
-#: src/window.rs:240
+#: src/window.rs:243
 msgid "_Find the Crashing Mod…"
 msgstr ""
 
-#: src/window.rs:244
+#: src/window.rs:247
 msgid "More Ways to Launch"
 msgstr ""
 
-#: src/window.rs:248 src/window.rs:357
+#: src/window.rs:251 src/window.rs:360
 msgid "Launch"
 msgstr ""
 
-#: src/window.rs:255
+#: src/window.rs:258
 msgid "Save"
 msgstr ""
 
-#: src/window.rs:257
+#: src/window.rs:260
 msgid "Save the load order for the game and the Paradox Launcher (Ctrl+S)"
 msgstr ""
 
-#: src/window.rs:264
+#: src/window.rs:267
 msgid "_Preferences"
 msgstr ""
 
-#: src/window.rs:265
+#: src/window.rs:268
 msgid "_Keyboard Shortcuts"
 msgstr ""
 
-#: src/window.rs:269
+#: src/window.rs:272
 msgid "_Copy Diagnostics"
 msgstr ""
 
-#: src/window.rs:270
+#: src/window.rs:273
 msgid "Open _Log Folder"
 msgstr ""
 
-#: src/window.rs:271
+#: src/window.rs:274
 msgid "_Troubleshooting"
 msgstr ""
 
-#: src/window.rs:272
+#: src/window.rs:275
 msgid "_About DrukhalManager"
 msgstr ""
 
-#: src/window.rs:277
+#: src/window.rs:280
 msgid "Main Menu"
 msgstr ""
 
-#: src/window.rs:289
+#: src/window.rs:292
 msgid "Collections: switch between saved load orders"
 msgstr ""
 
-#: src/window.rs:300
+#: src/window.rs:303
 msgid "Stellaris was not found in any Steam library"
 msgstr ""
 
-#: src/window.rs:303 src/window.rs:304
+#: src/window.rs:306 src/window.rs:307
 msgid "No mods match"
 msgstr ""
 
-#: src/window.rs:312
+#: src/window.rs:315
 msgid "Not Installed"
 msgstr ""
 
-#: src/window.rs:315
+#: src/window.rs:318
 msgid "Enable All"
 msgstr ""
 
-#: src/window.rs:316
+#: src/window.rs:319
 msgid "Enable or disable every mod"
 msgstr ""
 
-#: src/window.rs:320
+#: src/window.rs:323
 msgid "Sort A–Z, Dependencies First"
 msgstr ""
 
-#: src/window.rs:321
+#: src/window.rs:324
 msgid "Show _Category Headers"
 msgstr ""
 
-#: src/window.rs:323
+#: src/window.rs:326
 msgid "Sort Load Order…"
 msgstr ""
 
-#: src/window.rs:324
+#: src/window.rs:327
 msgid "Sort into sections by what each mod changes, keeping sub-mods below their mods and every mod after its dependencies"
 msgstr ""
 
-#: src/window.rs:325
+#: src/window.rs:328
 msgid "More ways to sort"
 msgstr ""
 
-#: src/window.rs:333
+#: src/window.rs:336
 msgid "Search mods (Ctrl+F), or try source:local or enabled:no"
 msgstr ""
 
-#: src/window.rs:347
+#: src/window.rs:350
 msgid "Repair…"
 msgstr ""
 
-#: src/window.rs:352
+#: src/window.rs:355
 msgid "Restore"
 msgstr ""
 
 #. While a view, category or search narrows the list.
-#: src/window.rs:402
+#: src/window.rs:405
 msgid "Select All Shown"
 msgstr ""
 
 #. While a view, category or search narrows the list.
-#: src/window.rs:402
+#: src/window.rs:405
 msgid "Select every mod listed, to change them all at once"
 msgstr ""
 
-#: src/window.rs:410
+#: src/window.rs:413
 msgid "Recently Updated"
 msgstr ""
 
-#: src/window.rs:411
+#: src/window.rs:414
 msgid "Order of the disabled mods"
 msgstr ""
 
-#: src/window.rs:419
+#: src/window.rs:422
 msgid "Sort by"
 msgstr ""
 
-#: src/window.rs:465
+#: src/window.rs:468
 msgid "Show Views"
 msgstr ""
 
-#: src/window.rs:667
+#: src/window.rs:671
 msgid "the Disabled list's order"
 msgstr ""
 
-#: src/window.rs:960
+#: src/window.rs:964
 msgid "Open Conflicts once to scan your mods first"
 msgstr ""
 
-#: src/window.rs:968
+#: src/window.rs:972
 msgid "Could not save {what}: {e}"
 msgstr ""
 
-#: src/window.rs:1011
+#: src/window.rs:1015
 msgid "{error}. The API key is saved in settings.json, readable only by you."
 msgstr ""
 
-#: src/window.rs:1040
+#: src/window.rs:1044
 msgid "Search Mods (Ctrl+F)"
 msgstr ""
 
-#: src/window.rs:1078
+#: src/window.rs:1082
 msgid "Yes"
 msgstr ""
 
-#: src/window.rs:1078
+#: src/window.rs:1082
 msgid "No"
 msgstr ""
 
-#: src/window.rs:1079
+#: src/window.rs:1083
 msgid "Source"
 msgstr ""
 
-#: src/window.rs:1080
+#: src/window.rs:1084
 msgid "Keeps Them On"
 msgstr ""
 
-#: src/window.rs:1080
+#: src/window.rs:1084
 msgid "Turns Them Off"
 msgstr ""
 
-#: src/window.rs:1090
+#: src/window.rs:1094
 msgid "Any"
 msgstr ""
 
-#: src/window.rs:1111
+#: src/window.rs:1115
 msgid "Or type them: version:3.12, -- to leave out (source:--local), || for either"
 msgstr ""
 
-#: src/window.rs:1134
+#: src/window.rs:1138
 msgid "Filters"
 msgstr ""
 
-#: src/window.rs:1135
+#: src/window.rs:1139
 msgid "Filter the mods by state"
 msgstr ""
