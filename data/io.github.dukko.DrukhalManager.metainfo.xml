@@ -36,6 +36,11 @@
     <control>keyboard</control>
   </supports>
   <releases>
+    <release version="2.3.0" date="2026-11-19">
+      <description>
+        <p>Script Check finds events that mods fire but nothing defines: an event call, an on_action events list or a random_events entry naming an event that neither the game nor an enabled mod has. A missing event in a namespace that exists is listed as a problem, and Fix with AI is told which events that namespace has. One whose namespace nothing installed has is listed under “Probably from another mod”.</p>
+      </description>
+    </release>
     <release version="2.2.0" date="2026-11-18">
       <description>
         <p>Safer shared patches: a merged patch, or a patch bundle being imported, is refused if it names a file or folder outside the patch's own folder, so a malformed or malicious patch can no longer move or delete other files. Localisation merges only accept real language headers such as l_english, and a mod with a malformed header can no longer put a merged file outside the patch.</p>
