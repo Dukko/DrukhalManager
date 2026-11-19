@@ -36,6 +36,11 @@
     <control>keyboard</control>
   </supports>
   <releases>
+    <release version="2.5.0" date="2026-11-19">
+      <description>
+        <p>AI requests now carry Model Instructions you can edit in Preferences → AI Merging. The default baseline tells the model to work from the text it was given, apply a rename or capitalisation fix directly, leave alone a problem that doesn't appear in the object, and decide once instead of restating the task or weighing options it can't check. It keeps the model's reasoning short, especially when a script problem refers to a name the shown definition doesn't contain. Reset to Default restores the baseline.</p>
+      </description>
+    </release>
     <release version="2.4.0" date="2026-11-19">
       <description>
         <p>Safer settings and collections: a settings.json that can't be read is kept aside instead of being replaced by defaults, and the keyring migration no longer saves a stale copy over newer settings. Merged collections whose names make the same folder name now get a folder of their own instead of deleting each other, and replacing a merged folder can no longer leave neither the old nor the new one.</p>
