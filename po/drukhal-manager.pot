@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: DrukhalManager 2.2.0\n"
 "Report-Msgid-Bugs-To: https://github.com/Dukko/DrukhalManager/issues\n"
-"POT-Creation-Date: 2026-11-19 03:28+0000\n"
+"POT-Creation-Date: 2026-11-19 21:17+0000\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -65,7 +65,7 @@ msgstr ""
 msgid "Not found in Stellaris {version} or the mod's copy: {keys}. Check these before saving."
 msgstr ""
 
-#: src/behind_dialog.rs:262 src/conflicts_view/object.rs:825 src/error_report_dialog.rs:528 src/script_check_dialog.rs:340
+#: src/behind_dialog.rs:262 src/conflicts_view/object.rs:825 src/error_report_dialog.rs:528 src/script_check_dialog.rs:364
 msgid "The model's result still has a problem after a correction: {problem}. Fix it by hand, or undo and try again."
 msgstr ""
 
@@ -81,7 +81,7 @@ msgstr ""
 msgid "Update with AI"
 msgstr ""
 
-#: src/behind_dialog.rs:343 src/behind_dialog.rs:434 src/conflicts_view/object.rs:437 src/conflicts_view/object.rs:803 src/script_check_dialog.rs:271
+#: src/behind_dialog.rs:343 src/behind_dialog.rs:434 src/conflicts_view/object.rs:437 src/conflicts_view/object.rs:803 src/script_check_dialog.rs:277
 msgid "Set up an AI provider in Preferences first"
 msgstr ""
 
@@ -89,11 +89,11 @@ msgstr ""
 msgid "The merge failed unexpectedly"
 msgstr ""
 
-#: src/behind_dialog.rs:365 src/error_report_dialog.rs:532 src/script_check_dialog.rs:343
+#: src/behind_dialog.rs:365 src/error_report_dialog.rs:532 src/script_check_dialog.rs:367
 msgid "Discard"
 msgstr ""
 
-#: src/behind_dialog.rs:366 src/behind_dialog.rs:663 src/error_report_dialog.rs:533 src/script_check_dialog.rs:344
+#: src/behind_dialog.rs:366 src/behind_dialog.rs:663 src/error_report_dialog.rs:533 src/script_check_dialog.rs:368
 msgid "Save to Merged Patch"
 msgstr ""
 
@@ -1151,7 +1151,7 @@ msgstr ""
 msgid "Fixed in the merged patch"
 msgstr ""
 
-#: src/error_report_dialog.rs:189 src/fix_dialog.rs:42 src/script_check_dialog.rs:256
+#: src/error_report_dialog.rs:189 src/fix_dialog.rs:42 src/script_check_dialog.rs:262
 msgid "Fix with AI"
 msgstr ""
 
@@ -1219,7 +1219,7 @@ msgstr ""
 msgid "The request failed unexpectedly"
 msgstr ""
 
-#: src/error_report_dialog.rs:507 src/script_check_dialog.rs:330
+#: src/error_report_dialog.rs:507 src/script_check_dialog.rs:354
 msgid "Fixed Copy"
 msgstr ""
 
@@ -2777,7 +2777,7 @@ msgid "Drag to resize"
 msgstr ""
 
 #: src/script_check_dialog.rs:35
-msgid "These scripts use effects, triggers or scopes this version of Stellaris doesn't have. The game skips them without saying so, so the features they belong to quietly stop working."
+msgid "These scripts use effects, triggers or scopes this version of Stellaris doesn't have, or fire events nothing defines. The game skips them without saying so, so the features they belong to quietly stop working."
 msgstr ""
 
 #: src/script_check_dialog.rs:38
@@ -2850,15 +2850,19 @@ msgstr ""
 msgid "Line {line}: {name} has the wrong capitalisation"
 msgstr ""
 
-#: src/script_check_dialog.rs:244
+#: src/script_check_dialog.rs:145
+msgid "Line {line}: fires the event {name}, which neither the game nor an enabled mod has, so nothing happens"
+msgstr ""
+
+#: src/script_check_dialog.rs:250
 msgid "The mod's copy couldn't be read, so it can't be fixed here."
 msgstr ""
 
-#: src/script_check_dialog.rs:315
+#: src/script_check_dialog.rs:339
 msgid "The fix failed unexpectedly"
 msgstr ""
 
-#: src/script_check_dialog.rs:385
+#: src/script_check_dialog.rs:409
 msgid "Saved the fixed {key} to the merged patch"
 msgstr ""
 
