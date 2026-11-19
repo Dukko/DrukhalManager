@@ -239,6 +239,35 @@ struct Manifest {
     files: Vec<FileMerge>,
 }
 
+impl Manifest {
+    /// Refuses a manifest whose paths could leave the patch folder: they are
+    /// joined onto it to move and delete files.
+    fn parse(src: &str) -> io::Result<Self> {
+        let manifest: Self = serde_json::from_str(src).map_err(io::Error::other)?;
+        let unsafe_path = manifest.merges.iter().flat_map(|m| [&m.file, &m.category]).chain(manifest.files.iter().map(|f| &f.path)).find(|p| !is_inside(p));
+        match unsafe_path {
+            Some(path) => Err(io::Error::new(io::ErrorKind::InvalidData, format!("the patch lists \"{path}\", which is outside its folder"))),
+            None => Ok(manifest),
+        }
+    }
+}
+
+/// Whether `path` is relative and stays inside the folder it is joined to,
+/// whichever separator it uses.
+fn is_inside(path: &str) -> bool {
+    path.split(['/', '\\']).all(|part| !part.is_empty() && part != "." && part != ".." && !part.contains(':'))
+}
+
+/// Checks the manifest of the patch in `root`, if it has one, as
+/// [`Patch::open`] does.
+pub fn check_manifest(root: &Path) -> io::Result<()> {
+    match std::fs::read_to_string(root.join(MANIFEST)) {
+        Ok(src) => Manifest::parse(&src).map(drop),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(e),
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Patch {
     root: PathBuf,
@@ -251,7 +280,7 @@ impl Patch {
     pub fn open(user_dir: &Path, target: &Target) -> io::Result<Self> {
         let root = target.root(user_dir);
         let manifest = match std::fs::read_to_string(root.join(MANIFEST)) {
-            Ok(src) => serde_json::from_str(&src).map_err(io::Error::other)?,
+            Ok(src) => Manifest::parse(&src)?,
             Err(e) if e.kind() == io::ErrorKind::NotFound => Manifest::default(),
             Err(e) => return Err(e),
         };
@@ -1269,5 +1298,35 @@ mod tests {
         std::fs::remove_file(dir.join("a.txt")).unwrap();
         assert_eq!(sources.text(&dir, "a.txt").as_deref().map(String::as_str), Some("x = {}"), "served from the cache");
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn refuses_a_manifest_whose_paths_leave_the_patch() {
+        let user = std::env::temp_dir().join(format!("drukhal-patch-escape-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&user);
+        let victim = user.join("victim.txt");
+        let absolute = victim.to_string_lossy().replace('\\', "\\\\");
+        let merge = |category: &str, file: &str| format!(r#"{{"merges":[{{"category":"{category}","key":"lab","script":"","sources":[],"file":"{file}"}}]}}"#);
+        let manifests = [
+            merge("common/buildings", &absolute),
+            merge("common/buildings", "../../victim.txt"),
+            merge("../..", "common/buildings/a.txt"),
+            merge("", "common/buildings/a.txt"),
+            format!(r#"{{"merges":[],"files":[{{"path":"{absolute}","sources":[]}}]}}"#),
+            r#"{"merges":[],"files":[{"path":"common/../../victim.txt","sources":[]}]}"#.to_owned(),
+        ];
+        for manifest in manifests {
+            let root = test_target().root(&user);
+            std::fs::create_dir_all(&root).unwrap();
+            std::fs::write(&victim, "keep").unwrap();
+            std::fs::write(root.join(MANIFEST), &manifest).unwrap();
+
+            let error = Patch::open(&user, &test_target()).unwrap_err();
+
+            assert_eq!(error.kind(), io::ErrorKind::InvalidData, "{manifest}");
+            assert_eq!(std::fs::read_to_string(&victim).unwrap(), "keep", "{manifest}");
+            assert_eq!(std::fs::read_to_string(root.join(MANIFEST)).unwrap(), manifest, "left as it was");
+        }
+        std::fs::remove_dir_all(&user).unwrap();
     }
 }
