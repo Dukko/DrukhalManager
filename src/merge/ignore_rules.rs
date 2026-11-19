@@ -8,6 +8,7 @@
 //! localisation/*                  every localisation key
 //! common/defines                  a folder, and everything below it
 //! interface/*.gui | Mod A | Mod B only when exactly these mods conflict
+//! common/traditions | won by Mod  only while Mod's version is the one used
 //! !gfx/portraits/**               shows these again
 //! ```
 //!
@@ -36,6 +37,32 @@ struct Rule {
     pattern: String,
     /// The exact set of mods it applies to, lowercased; empty for any.
     mods: BTreeSet<String>,
+    /// The mod that has to win, lowercased.
+    winner: Option<String>,
+    /// The rule as written, for showing it.
+    shown: Shown,
+}
+
+/// A rule's parts as written, for showing it in words.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Shown {
+    /// The line it's on, from 0.
+    pub line: usize,
+    /// Whether it hides conflicts, rather than showing them again.
+    pub hides: bool,
+    pub pattern: String,
+    /// The exact set of mods it applies to; empty for any.
+    pub mods: Vec<String>,
+    /// The mod whose version has to be the one used.
+    pub winner: Option<String>,
+}
+
+/// What a rule's part after `|` starts with to name the winning mod.
+const WON_BY: &str = "won by ";
+
+/// The rule hiding the conflicts under `folder` that `mod_name` wins.
+pub fn won_by(folder: &str, mod_name: &str) -> String {
+    format!("{} | {WON_BY}{}", folder.trim_matches('/'), mod_name.trim())
 }
 
 impl Rules {
@@ -53,9 +80,19 @@ impl Rules {
                     None => (false, raw),
                 };
                 let mut parts = raw.split('|').map(str::trim);
-                let pattern = parts.next()?.trim_matches('/').replace('\\', "/").to_lowercase();
-                let mods = parts.filter(|m| !m.is_empty()).map(str::to_lowercase).collect();
-                (!pattern.is_empty()).then_some(Rule { line, negated, pattern, mods })
+                let shown_pattern = parts.next()?.trim_matches('/').replace('\\', "/");
+                let (mut shown_mods, mut shown_winner) = (Vec::new(), None);
+                for part in parts.filter(|m| !m.is_empty()) {
+                    match part.get(..WON_BY.len()).filter(|p| p.eq_ignore_ascii_case(WON_BY)) {
+                        Some(_) => shown_winner = Some(part[WON_BY.len()..].trim().to_owned()),
+                        None => shown_mods.push(part.to_owned()),
+                    }
+                }
+                let pattern = shown_pattern.to_lowercase();
+                let mods = shown_mods.iter().map(|m| m.to_lowercase()).collect();
+                let winner = shown_winner.as_deref().map(str::to_lowercase);
+                let shown = Shown { line, hides: !negated, pattern: shown_pattern, mods: shown_mods, winner: shown_winner };
+                (!pattern.is_empty()).then_some(Rule { line, negated, pattern, mods, winner, shown })
             })
             .collect();
         Self { rules }
@@ -82,7 +119,8 @@ impl Rules {
         if self.rules.is_empty() {
             return None;
         }
-        self.decide(&[c.path.as_str()], &[], || mods_of(c.mods.iter().copied(), names))
+        let winner = || c.mods.last().and_then(|&p| names.get(p)).map(|n| n.to_lowercase());
+        self.decide(&[c.path.as_str()], &[], || mods_of(c.mods.iter().copied(), names), winner)
     }
 
     pub fn deciding_object(&self, c: &ObjectConflict, names: &[String]) -> Option<(usize, bool)> {
@@ -91,29 +129,31 @@ impl Rules {
         }
         let name = format!("{}/{}", c.category, c.key);
         let files: Vec<&str> = c.definitions.iter().map(|d| d.file.as_str()).collect();
-        self.decide(&[name.as_str()], &files, || mods_of(c.definitions.iter().map(|d| d.mod_position), names))
+        let winner = || c.winner().and_then(|(i, _)| names.get(c.definitions[i].mod_position)).map(|n| n.to_lowercase());
+        self.decide(&[name.as_str()], &files, || mods_of(c.definitions.iter().map(|d| d.mod_position), names), winner)
     }
 
     /// The last rule matching `names` (any of them) or `files` (all of
-    /// them): its line, and whether it hides. `mods` is only worked out
-    /// if a rule names mods.
-    fn decide(&self, names: &[&str], files: &[&str], mods: impl FnOnce() -> BTreeSet<String>) -> Option<(usize, bool)> {
+    /// them): its line, and whether it hides. `mods` and `winner` are only
+    /// worked out if a rule needs them.
+    fn decide(&self, names: &[&str], files: &[&str], mods: impl FnOnce() -> BTreeSet<String>, winner: impl FnOnce() -> Option<String>) -> Option<(usize, bool)> {
         // Lowercased once, not once per rule: this runs for every conflict
         // whenever the mod list's counts are worked out.
         let names: Vec<String> = names.iter().map(|n| n.to_lowercase()).collect();
         let files: Vec<String> = files.iter().map(|f| f.to_lowercase()).collect();
         let mods = if self.rules.iter().any(|r| !r.mods.is_empty()) { mods() } else { BTreeSet::new() };
+        let winner = if self.rules.iter().any(|r| r.winner.is_some()) { winner() } else { None };
         let last = self.rules.iter().rev().find(|r| {
             (r.mods.is_empty() || r.mods == mods)
+                && (r.winner.is_none() || r.winner == winner)
                 && (names.iter().any(|n| matches(&r.pattern, n)) || (!files.is_empty() && files.iter().all(|f| matches(&r.pattern, f))))
         })?;
         Some((last.line, !last.negated))
     }
 
-    /// The lines that hold rules, and whether each hides (rather than
-    /// shows again).
-    pub fn lines(&self) -> impl Iterator<Item = (usize, bool)> + '_ {
-        self.rules.iter().map(|r| (r.line, !r.negated))
+    /// Each rule as written, in order.
+    pub fn shown(&self) -> impl Iterator<Item = &Shown> + '_ {
+        self.rules.iter().map(|r| &r.shown)
     }
 }
 
@@ -186,5 +226,30 @@ mod tests {
         let one = object("common/buildings", "farm", &["common/buildings/zz_compat_a.txt", "common/buildings/b.txt"]);
         assert_eq!(rules.hiding_object(&one, &names), None, "only one does");
         assert!(Rules::parse("# nothing\n\n  ").is_empty());
+    }
+
+    #[test]
+    fn won_by_rules_need_the_mod_to_win() {
+        let names: Vec<String> = ["More AP", "Sartek Merger"].map(String::from).into();
+        let line = won_by("common/ascension_perks/", "Sartek Merger");
+        assert_eq!(line, "common/ascension_perks | won by Sartek Merger");
+        let rules = Rules::parse(&format!("# x\n{}", line.replace("won by", "Won By").replace("Sartek", "sartek")));
+        let shown: Vec<_> = rules.shown().collect();
+        assert_eq!((shown[0].line, shown[0].pattern.as_str(), shown[0].winner.as_deref()), (1, "common/ascension_perks", Some("sartek Merger")));
+        assert!(shown[0].mods.is_empty() && shown[0].hides);
+
+        // Objects in a LIOS folder: the later file name wins.
+        let object = |files: [&str; 2]| ObjectConflict {
+            category: "common/ascension_perks".into(),
+            key: "ap_x".into(),
+            definitions: files.iter().enumerate().map(|(i, f)| Definition { mod_position: i, file: (*f).into() }).collect(),
+        };
+        assert_eq!(rules.hiding_object(&object(["common/ascension_perks/a.txt", "common/ascension_perks/z.txt"]), &names), Some(1));
+        assert_eq!(rules.hiding_object(&object(["common/ascension_perks/z.txt", "common/ascension_perks/a.txt"]), &names), None, "More AP wins");
+        // Files: the last mod in load order wins.
+        let file = |mods: Vec<usize>| FileConflict { path: "common/ascension_perks/00_perks.txt".into(), mods };
+        assert_eq!(rules.hiding_file(&file(vec![0, 1]), &names), Some(1));
+        assert_eq!(rules.hiding_file(&file(vec![1, 0]), &names), None);
+        assert_eq!(rules.hiding_file(&FileConflict { path: "common/traditions/x.txt".into(), mods: vec![0, 1] }, &names), None, "another folder");
     }
 }

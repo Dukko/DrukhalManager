@@ -136,6 +136,9 @@ pub struct MergeHooks {
     pub hide_dependencies: bool,
     /// Opens the ignore rules editor.
     pub edit_rules: Box<dyn Fn()>,
+    /// Opens the rule builder, starting from a folder and the mod at a
+    /// scanned position.
+    pub add_rule: Box<dyn Fn(Option<&str>, Option<usize>)>,
     /// Whether ignored conflicts are shown (dimmed) instead of hidden.
     pub show_ignored: bool,
     pub toggle_show_ignored: Box<dyn Fn()>,
@@ -297,6 +300,8 @@ struct Group {
     title: String,
     /// The key that ignores the whole folder.
     folder_key: Option<String>,
+    /// The folder, for an ignore rule; `None` for the root.
+    folder: Option<String>,
     /// Whether "Merge All with AI" is offered for it.
     merge_all: bool,
     items: Vec<Item>,
@@ -398,14 +403,14 @@ pub fn build(analysis: &Rc<Analysis>, rescan: gtk::Button, hooks: Rc<MergeHooks>
         attention.push(Item::Problems);
     }
     if !attention.is_empty() {
-        groups.push(Group { title: t!("Needs Attention"), folder_key: None, merge_all: false, items: attention });
+        groups.push(Group { title: t!("Needs Attention"), folder_key: None, folder: None, merge_all: false, items: attention });
     }
     let mut by_category: BTreeMap<&str, Vec<Item>> = BTreeMap::new();
     for &i in &objects {
         by_category.entry(&report.objects[i].category).or_default().push(Item::Object(i));
     }
     for (category, items) in by_category {
-        groups.push(Group { title: category.to_owned(), folder_key: Some(objects_folder_key(category)), merge_all: true, items });
+        groups.push(Group { title: category.to_owned(), folder_key: Some(objects_folder_key(category)), folder: Some(category.to_owned()), merge_all: true, items });
     }
     let mut by_folder: BTreeMap<&str, Vec<Item>> = BTreeMap::new();
     for &i in &files {
@@ -414,7 +419,7 @@ pub fn build(analysis: &Rc<Analysis>, rescan: gtk::Button, hooks: Rc<MergeHooks>
     for (folder, items) in by_folder {
         let title = if folder.is_empty() { t!("Overridden Files") } else { tf!("Overridden Files · {folder}", folder = folder) };
         let merge_all = items.iter().any(|i| matches!(i, Item::File(f) if file_merge::mergeable(&report.files[*f].path)));
-        groups.push(Group { title, folder_key: Some(files_folder_key(folder)), merge_all, items });
+        groups.push(Group { title, folder_key: Some(files_folder_key(folder)), folder: (!folder.is_empty()).then(|| folder.to_owned()), merge_all, items });
     }
 
     // The sidebar.
@@ -968,6 +973,22 @@ impl Page {
                 }
             });
             actions.add_action(&action);
+            if let Some(folder) = &group.folder {
+                // Starts from the filtered mod, if one is.
+                let label = match self.hooks.filter {
+                    Some(p) => tf!("Ignore Where {mod_name} Wins…", mod_name = self.analysis.name(p)),
+                    None => t!("Ignore Where a Mod Wins…"),
+                };
+                menu.append(Some(&label), Some("folder.ignore-won"));
+                let action = gio::SimpleAction::new("ignore-won", None);
+                let (weak, folder) = (Rc::downgrade(self), folder.clone());
+                action.connect_activate(move |_, _| {
+                    if let Some(page) = weak.upgrade() {
+                        (page.hooks.add_rule)(Some(&folder), page.hooks.filter);
+                    }
+                });
+                actions.add_action(&action);
+            }
             let button = gtk::MenuButton::builder().icon_name("view-more-symbolic").menu_model(&menu).tooltip_text(t!("Folder actions")).css_classes(["flat", "circular"]).valign(gtk::Align::Center).build();
             button.insert_action_group("folder", Some(&actions));
             heading.append(&button);
@@ -1225,8 +1246,9 @@ impl Page {
         DetailHeader { widget, chips, actions }
     }
 
-    /// The button that ignores `item`, or stops ignoring it.
-    pub fn ignore_button(self: &Rc<Self>, item: Item) -> gtk::Button {
+    /// The button that ignores `item`, or stops ignoring it, with a menu
+    /// that makes a rule for every conflict in its folder its winner wins.
+    pub fn ignore_button(self: &Rc<Self>, item: Item) -> gtk::Widget {
         let ignored = self.is_ignored(item);
         let tooltip = match self.hidden_by_rule(item) {
             Some(line) => tf!("Ignored by rule {line}; click to edit the ignore rules", line = line + 1),
@@ -1234,24 +1256,54 @@ impl Page {
             None if ignored => t!("Stop ignoring this conflict"),
             None => t!("Ignore this conflict, so it no longer shows or counts"),
         };
-        let button = gtk::Button::builder()
-            .child(
-                &adw::ButtonContent::builder()
-                    .icon_name(if ignored { "view-reveal-symbolic" } else { "view-conceal-symbolic" })
-                    .label(if ignored { t!("Stop Ignoring") } else { t!("Ignore Conflict") })
-                    .build(),
-            )
-            .tooltip_text(tooltip)
-            .valign(gtk::Align::Center)
-            .css_classes(["flat"])
+        let content = adw::ButtonContent::builder()
+            .icon_name(if ignored { "view-reveal-symbolic" } else { "view-conceal-symbolic" })
+            .label(if ignored { t!("Stop Ignoring") } else { t!("Ignore Conflict") })
             .build();
         let weak = Rc::downgrade(self);
-        button.connect_clicked(move |_| {
+        let toggle = move || {
             if let Some(page) = weak.upgrade() {
                 page.toggle_ignored(item);
             }
+        };
+        let Some((folder, winner)) = self.folder_and_winner(item) else {
+            let button = gtk::Button::builder().child(&content).tooltip_text(tooltip).valign(gtk::Align::Center).build();
+            button.connect_clicked(move |_| toggle());
+            return button.upcast();
+        };
+        let menu = gio::Menu::new();
+        menu.append(Some(&tf!("Ignore All in {folder} Where {mod_name} Wins…", folder = &folder, mod_name = self.analysis.name(winner))), Some("ignore.like-this"));
+        let actions = gio::SimpleActionGroup::new();
+        let action = gio::SimpleAction::new("like-this", None);
+        let weak = Rc::downgrade(self);
+        action.connect_activate(move |_, _| {
+            if let Some(page) = weak.upgrade() {
+                (page.hooks.add_rule)(Some(&folder), Some(winner));
+            }
         });
-        button
+        actions.add_action(&action);
+        let button = adw::SplitButton::builder().child(&content).menu_model(&menu).tooltip_text(tooltip).dropdown_tooltip(t!("More ways to ignore")).valign(gtk::Align::Center).build();
+        button.insert_action_group("ignore", Some(&actions));
+        button.connect_clicked(move |_| toggle());
+        button.upcast()
+    }
+
+    /// The folder `item` is in and the scanned position of the mod whose
+    /// version the game uses, for a "won by" rule.
+    fn folder_and_winner(&self, item: Item) -> Option<(String, usize)> {
+        let report = &self.analysis.report;
+        match item {
+            Item::Object(i) => {
+                let c = &report.objects[i];
+                Some((c.category.clone(), c.definitions[c.winner()?.0].mod_position))
+            }
+            Item::File(i) => {
+                let c = &report.files[i];
+                let folder = file_folder(&c.path);
+                if folder.is_empty() { None } else { Some((folder.to_owned(), *c.mods.last()?)) }
+            }
+            _ => None,
+        }
     }
 
     fn problems_view(self: &Rc<Self>) -> gtk::Widget {
