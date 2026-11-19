@@ -486,6 +486,12 @@ impl Window {
                 ui.edit_ignore_rules(&rules_analysis);
             }
         });
+        let (weak, builder_analysis) = (Rc::downgrade(self), analysis.clone());
+        let add_rule = Box::new(move |folder: Option<&str>, position: Option<usize>| {
+            if let Some(ui) = weak.upgrade() {
+                ui.add_ignore_rule(&builder_analysis, folder, position);
+            }
+        });
         let weak = Rc::downgrade(self);
         let toggle_show_ignored = Box::new(move || {
             if let Some(ui) = weak.upgrade() {
@@ -568,6 +574,7 @@ impl Window {
             rules: crate::merge::ignore_rules::Rules::parse(&self.settings.borrow().ignore_rules),
             hide_dependencies: !self.settings.borrow().show_dependency_conflicts,
             edit_rules,
+            add_rule,
             show_ignored: self.show_ignored.get(),
             toggle_show_ignored,
             filter,
