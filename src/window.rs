@@ -523,6 +523,8 @@ pub fn build(
     app.set_accels_for_action("win.undo", &["<Control>z"]);
     app.set_accels_for_action("win.redo", &["<Control><Shift>z", "<Control>y"]);
 
+    let (loaded_settings, settings_problem) = Settings::load_checked(&settings::path());
+
     let ui = Rc::new(Window {
         window: window.clone(),
         paths,
@@ -583,7 +585,7 @@ pub fn build(
         show_ignored: Cell::new(false),
         conflict_filter: RefCell::new(None),
         stale: RefCell::new(Vec::new()),
-        settings: RefCell::new(Settings::load(&settings::path())),
+        settings: RefCell::new(loaded_settings),
         patch: RefCell::new(None),
         enabled_list,
         disabled_list,
@@ -599,6 +601,9 @@ pub fn build(
         thumbnails: RefCell::default(),
     });
     ui.load_api_key();
+    if let Some(problem) = settings_problem {
+        ui.add_toast(adw::Toast::builder().title(problem).timeout(0).build());
+    }
     ui.add_update_actions();
     ui.add_shortcuts_action(app);
     ui.add_reload_action(app);
@@ -977,20 +982,33 @@ impl Window {
     }
 
     /// Fills in the API key from the keyring (moving one still in the
-    /// settings file there), off the main thread since it may prompt.
+    /// settings file there), off the main thread since it may prompt. The
+    /// result is applied to the live settings and saved here, so a save the
+    /// user made while the keyring was busy isn't overwritten.
     fn load_api_key(self: &Rc<Self>) {
         let weak = Rc::downgrade(self);
         glib::spawn_future_local(async move {
             let path = settings::path();
-            let Ok(loaded) = gio::spawn_blocking(move || settings::Settings::load(&path.clone()).with_keyring(&path)).await else { return };
+            let Ok(found) = gio::spawn_blocking(move || settings::Settings::load(&path).with_keyring()).await else { return };
             let Some(ui) = weak.upgrade() else { return };
-            let mut current = ui.settings.borrow_mut();
-            // Empty once the keyring took a Steam key the file was holding.
-            current.steam_key = loaded.steam_key.clone();
-            // Unless Preferences changed the provider meanwhile.
-            if secrets::kind(&current.provider) == secrets::kind(&loaded.provider) && settings::api_key_mut(&mut current.provider).is_empty() {
-                current.provider = loaded.provider;
-                current.key_in_keyring = loaded.key_in_keyring;
+            {
+                let mut current = ui.settings.borrow_mut();
+                // Clear it only if Preferences didn't change it meanwhile.
+                if let Some(moved) = &found.moved_steam_key
+                    && current.steam_key == *moved
+                {
+                    current.steam_key.clear();
+                }
+                // Unless Preferences changed the provider meanwhile.
+                if found.settings.key_in_keyring && secrets::kind(&current.provider) == secrets::kind(&found.settings.provider) {
+                    current.key_in_keyring = true;
+                    if settings::api_key_mut(&mut current.provider).is_empty() {
+                        current.provider = found.settings.provider;
+                    }
+                }
+            }
+            if found.moved {
+                ui.save_settings("preferences");
             }
         });
     }

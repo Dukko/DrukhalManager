@@ -27,20 +27,27 @@ pub struct Request {
 }
 
 impl Request {
-    /// Reads everything; call off the main thread.
-    fn report(&self, all_game_files: bool, progress: &Progress) -> Report {
-        let mods: Vec<ModInput> = self
-            .mods
-            .iter()
-            .map(|(name, steam_id, content)| ModInput { name: name.clone(), steam_id: *steam_id, root: content.as_deref().and_then(|c| archive::files(c).ok()) })
-            .collect();
+    /// Reads everything; call off the main thread. A mod whose zip can't be
+    /// unpacked is an error, not a mod with no files: otherwise it would
+    /// show as a mismatch with every other player.
+    fn report(&self, all_game_files: bool, progress: &Progress) -> Result<Report, String> {
+        let mut mods = Vec::with_capacity(self.mods.len());
+        for (name, steam_id, content) in &self.mods {
+            let root = match content {
+                Some(content) => Some(archive::files(content).map_err(|e| {
+                    tf!("Could not unpack the files of “{name}”: {error}", name = name, error = e)
+                })?),
+                None => None,
+            };
+            mods.push(ModInput { name: name.clone(), steam_id: *steam_id, root });
+        }
         let path = HashCache::path();
         let mut cache = HashCache::load(&path);
         let mut report = multiplayer::report(self.game_dir.as_deref(), self.game_version.as_deref(), all_game_files, &mods, progress, &mut cache);
         report.build = self.build;
         // Only a speed-up, so failing to keep it doesn't matter.
         let _ = cache.save(&path);
-        report
+        Ok(report)
     }
 }
 
@@ -152,14 +159,18 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
                 let Some(path) = file.ok().and_then(|f| f.path()) else { return };
                 let (progress, done) = busy.start(&t!("Reading"));
                 glib::spawn_future_local(async move {
-                    let written = gio::spawn_blocking(move || std::fs::write(&path, request.report(all_game_files, &progress).to_json()).map(|()| path)).await;
+                    let written = gio::spawn_blocking(move || {
+                        let report = request.report(all_game_files, &progress)?;
+                        std::fs::write(&path, report.to_json()).map(|()| path).map_err(|e| tf!("Could not save the report: {error}", error = e))
+                    })
+                    .await;
                     done();
                     let message = match written {
                         Ok(Ok(path)) => tf!("Saved {name}; send it to the other players", name = path.file_name().unwrap_or_default().to_string_lossy()),
-                        Ok(Err(e)) => tf!("Could not save the report: {error}", error = e),
+                        Ok(Err(message)) => message,
                         Err(_) => t!("Could not save the report"),
                     };
-                    toasts.add_toast(adw::Toast::builder().title(message).use_markup(false).build());
+                    toasts.add_toast(adw::Toast::builder().title(message).use_markup(false).timeout(0).build());
                 });
             });
         }
@@ -192,7 +203,7 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
                         // Check theirs first, so a wrong file fails at once.
                         let theirs = Report::from_json(&src)?;
                         // Mine covers what theirs does, so nothing goes unchecked.
-                        Ok::<_, String>(multiplayer::compare(&request.report(theirs.all_game_files, &progress), &theirs))
+                        Ok::<_, String>(multiplayer::compare(&request.report(theirs.all_game_files, &progress)?, &theirs))
                     })
                     .await
                     .unwrap_or_else(|_| Err(t!("The comparison failed")));

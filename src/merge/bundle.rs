@@ -80,9 +80,11 @@ pub fn read(path: &Path) -> io::Result<Bundle> {
 /// up what `target` held to `backup_dir`.
 pub fn install_patch(bundle: &Bundle, user_dir: &Path, target: &Target, backup_dir: &Path) -> io::Result<()> {
     let mut zip = zip::ZipArchive::new(std::fs::File::open(&bundle.path)?).map_err(io::Error::other)?;
+    crate::mods::archive::check_entries(zip.len())?;
     let staging = backup_dir.join(format!("imported-patch-{}.drukhal-tmp", std::process::id()));
     let _ = std::fs::remove_dir_all(&staging);
     let result = (|| {
+        let mut total = 0;
         for i in 0..zip.len() {
             let mut entry = zip.by_index(i).map_err(io::Error::other)?;
             // Entries with `..` or absolute paths would land outside it.
@@ -93,7 +95,7 @@ pub fn install_patch(bundle: &Bundle, user_dir: &Path, target: &Target, backup_d
             }
             let target = staging.join(relative);
             std::fs::create_dir_all(target.parent().unwrap())?;
-            io::copy(&mut entry, &mut std::fs::File::create(&target)?)?;
+            crate::mods::archive::copy_bounded(&mut entry, &mut std::fs::File::create(&target)?, &mut total)?;
         }
         if !staging.join("descriptor.mod").is_file() {
             return Err(io::Error::new(io::ErrorKind::InvalidData, "the shared patch has no descriptor"));

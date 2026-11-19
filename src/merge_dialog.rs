@@ -58,7 +58,13 @@ pub fn validate(category: &str, key: &str, text: &str) -> Result<String, String>
             _ => Err(tf!("A localisation merge must be a single line starting with `{name}:`", name = name)),
         };
     }
-    script::parse(text).map_err(|e| tf!("The merged script has a syntax error at {error}", error = e))?;
+    let entries = script::parse(text).map_err(|e| tf!("The merged script has a syntax error at {error}", error = e))?;
+    // Like an AI's object merge, exactly one object may come back: an extra
+    // one would be written into the patch's highest-priority file.
+    let objects = entries.iter().filter(|entry| matches!(entry, script::Entry::Assign { key, .. } if !key.starts_with('@'))).count();
+    if objects != 1 {
+        return Err(tf!("The merged script must define `{key}` and nothing else", key = key));
+    }
     if source::extract(category, key, text).is_none() {
         return Err(tf!("The merged script must define `{key}`", key = key));
     }
@@ -74,6 +80,8 @@ mod tests {
         assert!(validate("common/buildings", "building_lab", "@c = 1\nbuilding_lab = { cost = @c }").is_ok());
         assert!(validate("common/buildings", "building_lab", "building_lab = {").unwrap_err().contains("syntax error"));
         assert!(validate("common/buildings", "building_lab", "building_other = {}").unwrap_err().contains("must define"));
+        assert!(validate("common/buildings", "building_lab", "building_lab = {}\nbuilding_extra = {}").unwrap_err().contains("nothing else"));
+        assert!(validate("events", "ns.1", "country_event = { id = ns.1 }\ncountry_event = { id = ns.2 }").is_err());
         assert!(validate("events", "ns.1", "country_event = { id = ns.1 }").is_ok());
         assert_eq!(validate("localisation", "l_english:lab", "# merged: kept B\n lab:0 \"Lab\" \n").unwrap(), "lab:0 \"Lab\"");
         assert!(validate("localisation", "l_english:lab", "lab:0 \"A\"\nlab:0 \"B\"").is_err());

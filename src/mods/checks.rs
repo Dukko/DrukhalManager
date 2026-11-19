@@ -68,11 +68,38 @@ pub fn dependencies_of(mods: &[Mod], i: usize) -> Vec<usize> {
 
 /// Installed mods by Workshop id.
 fn by_steam_id(mods: &[Mod]) -> HashMap<u64, usize> {
-    mods.iter().enumerate().filter_map(|(i, m)| Some((m.descriptor.remote_file_id?, i))).collect()
+    let mut found = HashMap::new();
+    for (i, m) in mods.iter().enumerate() {
+        if let Some(id) = m.descriptor.remote_file_id {
+            prefer_enabled(&mut found, id, i, mods);
+        }
+    }
+    found
 }
 
+/// Installed mods by name. A frozen copy keeps the original's name, so when
+/// a disabled twin exists, the enabled copy is the one dependencies point
+/// at.
 fn by_name(mods: &[Mod]) -> HashMap<String, usize> {
-    mods.iter().enumerate().map(|(i, m)| (m.descriptor.name.trim().to_lowercase(), i)).collect()
+    let mut found = HashMap::new();
+    for (i, m) in mods.iter().enumerate() {
+        prefer_enabled(&mut found, m.descriptor.name.trim().to_lowercase(), i, mods);
+    }
+    found
+}
+
+/// Adds `i` under `key`, keeping the enabled copy when two mods share it.
+fn prefer_enabled<K: std::hash::Hash + Eq>(found: &mut HashMap<K, usize>, key: K, i: usize, mods: &[Mod]) {
+    match found.entry(key) {
+        std::collections::hash_map::Entry::Vacant(slot) => {
+            slot.insert(i);
+        }
+        std::collections::hash_map::Entry::Occupied(mut slot) => {
+            if mods[i].load_position.is_some() && mods[*slot.get()].load_position.is_none() {
+                slot.insert(i);
+            }
+        }
+    }
 }
 
 /// Issues per mod index.
@@ -240,6 +267,19 @@ mod tests {
         let sorted = sort_by_dependencies(&mods, &enabled);
         assert_eq!(sorted, [1, 2, 0, 4]);
         assert!(!check(&mods, &sorted, None).contains_key(&0), "sorting fixes the order issues");
+    }
+
+    #[test]
+    fn follows_a_frozen_duplicates_enabled_copy() {
+        // A frozen copy keeps the original's name, and is disabled.
+        let mut mods = vec![m("Base", &[], ""), m("Frozen Base", &[], ""), m("Needs Base", &["Base"], "")];
+        mods[0].load_position = Some(0);
+        mods[1].descriptor.name = "Base".into();
+        mods[2].load_position = Some(1);
+
+        assert_eq!(dependencies_of(&mods, 2), [0], "the enabled copy, not the frozen twin");
+        let issues = check(&mods, &[0, 2], None);
+        assert!(issues.get(&2).is_none_or(Vec::is_empty), "the dependency isn't reported as disabled: {:?}", issues.get(&2));
     }
 
     #[test]

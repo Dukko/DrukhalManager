@@ -24,7 +24,9 @@ The right-hand version is editable.
 
 ## Ignoring noise
 
-Ignore a single conflict, a folder, or a pattern like `gfx/**`. **Rules…**, at the bottom of the conflicts list, edits the patterns and says how many conflicts each one hides. **Show Ignored** brings them back into view.
+Ignore a single conflict, a folder, or a pattern like `gfx/**`. **Rules…**, at the bottom of the conflicts list, edits the rules and says how many conflicts each one hides. **Show Ignored** brings them back into view.
+
+A rule can also match one object (`common/buildings/building_lab`), apply only between exactly the mods you name (`| Mod A | Mod B`), or apply only while one mod's version is the one the game loads (`| won by Mod A`). **Add Rule…** in the rules dialog, and **Ignore Where … Wins…** in a conflict's or folder's menu, open a rule builder that shows what a rule hides before you add it. The [Script Check](Script-Check) page lists the rule syntax in full.
 
 ## Merging with AI
 

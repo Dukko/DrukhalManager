@@ -124,10 +124,10 @@ impl Window {
         remove: &[mods::repair::Orphan],
     ) {
         match mods::repair::apply(&self.paths.user_dir, &self.paths.backup_dir, stale, remove) {
-            Ok(backup) => {
+            Ok(applied) => {
                 {
                     let mut state = self.state.borrow_mut();
-                    for s in stale {
+                    for s in stale.iter().filter(|s| !applied.skipped.iter().any(|skipped| skipped.id == s.id)) {
                         if let Some(m) = state.mods.iter_mut().find(|m| m.id == s.id) {
                             m.descriptor.path = Some(s.new.to_string_lossy().into_owned());
                         }
@@ -137,20 +137,27 @@ impl Window {
                         state.remove_mods(&ids);
                     }
                 }
+                for skipped in &applied.skipped {
+                    crate::diagnostics::log!("mods", "Left {} alone: {error}", skipped.id, error = skipped.error);
+                }
                 self.refresh();
                 self.update_repair_banner();
                 let mut done = Vec::new();
-                if !stale.is_empty() {
-                    done.push(tnf!("fixed {count} path", "fixed {count} paths", count = stale.len()));
+                let fixed = stale.len() - applied.skipped.len();
+                if fixed > 0 {
+                    done.push(tnf!("fixed {count} path", "fixed {count} paths", count = fixed));
                 }
                 if !remove.is_empty() {
                     done.push(tnf!("removed {count} descriptor", "removed {count} descriptors", count = remove.len()));
+                }
+                if !applied.skipped.is_empty() {
+                    done.push(tnf!("left {count} unreadable descriptor alone", "left {count} unreadable descriptors alone", count = applied.skipped.len()));
                 }
                 let toast = adw::Toast::builder()
                     .title(tf!(
                         "Repaired descriptors: {done}. Backup in {backup}",
                         done = done.join(&t!(", ")),
-                        backup = backup.display()
+                        backup = applied.backup.display()
                     ))
                     .timeout(8)
                     .build();

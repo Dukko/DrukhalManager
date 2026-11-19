@@ -69,17 +69,43 @@ fn rewrite_path(src: &str, new: &Path) -> Option<String> {
     Some(format!("{}{key}=\"{value}\"{}", &src[..range.start], &src[range.end..]))
 }
 
+/// A descriptor [`apply`] couldn't repair, and why.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Skipped {
+    pub id: String,
+    pub error: String,
+}
+
+/// What [`apply`] did.
+#[derive(Debug)]
+pub struct Applied {
+    /// The folder holding copies of what changed, for restoring it.
+    pub backup: PathBuf,
+    /// Descriptors left alone because they couldn't be read.
+    pub skipped: Vec<Skipped>,
+}
+
 /// Applies the repairs and removals, backing every touched descriptor up to
-/// a new folder in `backup_dir`, which is returned.
-pub fn apply(user_dir: &Path, backup_dir: &Path, stale: &[StalePath], remove: &[Orphan]) -> io::Result<PathBuf> {
+/// a new folder in `backup_dir`. A descriptor that can't be read is skipped
+/// and reported rather than stopping the rest.
+pub fn apply(user_dir: &Path, backup_dir: &Path, stale: &[StalePath], remove: &[Orphan]) -> io::Result<Applied> {
     let stamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis();
     let backup = backup_dir.join(format!("descriptors-{stamp}"));
     std::fs::create_dir_all(&backup)?;
     let backup_of = |id: &str| backup.join(Path::new(id).file_name().unwrap());
 
+    let mut skipped = Vec::new();
     for s in stale {
         let file = user_dir.join(&s.id);
-        let src = std::fs::read_to_string(&file)?;
+        // `discover` reads descriptors lossily, so a non-UTF-8 one can be
+        // listed here; leave it for the user instead of failing the rest.
+        let src = match std::fs::read_to_string(&file) {
+            Ok(src) => src,
+            Err(e) => {
+                skipped.push(Skipped { id: s.id.clone(), error: e.to_string() });
+                continue;
+            }
+        };
         let Some(fixed) = rewrite_path(&src, &s.new) else { continue };
         std::fs::write(backup_of(&s.id), &src)?;
         let tmp = file.with_extension("mod.drukhal-tmp");
@@ -94,12 +120,32 @@ pub fn apply(user_dir: &Path, backup_dir: &Path, stale: &[StalePath], remove: &[
             std::fs::remove_file(&file)?;
         }
     }
-    Ok(backup)
+    Ok(Applied { backup, skipped })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn skips_a_descriptor_that_isnt_utf8_and_repairs_the_rest() {
+        let root = std::env::temp_dir().join(format!("drukhal-repair-utf8-{}", std::process::id()));
+        let (user, workshop) = (root.join("user"), root.join("workshop"));
+        std::fs::create_dir_all(user.join("mod")).unwrap();
+        std::fs::create_dir_all(workshop.join("42")).unwrap();
+        let bad = [b"name=\"Bad ".as_slice(), &[0xff], b"\"\nremote_file_id=\"42\"\npath=\"/old/library/42\"\n".as_slice()].concat();
+        std::fs::write(user.join("mod/ugc_42.mod"), &bad).unwrap();
+
+        let mods = crate::mods::discover(&user, std::slice::from_ref(&workshop)).unwrap();
+        let findings = find(&user, &mods);
+        assert_eq!(findings.stale.len(), 1, "discovery reads it lossily, so it's found");
+        let applied = apply(&user, &root.join("backups"), &findings.stale, &[]).unwrap();
+        assert_eq!(applied.skipped.len(), 1);
+        assert_eq!(applied.skipped[0].id, "mod/ugc_42.mod");
+        assert!(!applied.skipped[0].error.is_empty(), "the reason is kept");
+        assert_eq!(std::fs::read(user.join("mod/ugc_42.mod")).unwrap(), bad, "left untouched");
+        std::fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn finds_and_repairs_descriptors() {
@@ -117,7 +163,7 @@ mod tests {
         assert_eq!(findings.stale, [StalePath { id: "mod/ugc_42.mod".into(), old: "/old/library/42".into(), new: workshop.join("42") }]);
         assert_eq!(findings.orphans, [Orphan { id: "mod/gone.mod".into(), name: "Gone".into() }]);
 
-        let backup = apply(&user, &root.join("backups"), &findings.stale, &findings.orphans).unwrap();
+        let backup = apply(&user, &root.join("backups"), &findings.stale, &findings.orphans).unwrap().backup;
         let fixed = std::fs::read_to_string(user.join("mod/ugc_42.mod")).unwrap();
         assert_eq!(fixed, format!("version=\"1\"\nname=\"Moved\"\npath=\"{}\"\nremote_file_id=\"42\"\n", crate::platform::descriptor_path(&workshop.join("42"))));
         assert!(!user.join("mod/gone.mod").exists());

@@ -10,8 +10,9 @@ trap 'rm -f "$tmp"' EXIT
 
 po/update-pot.sh "$tmp"
 
-# The creation date changes on every run, so leave it out of the comparison.
-filter() { grep -v '^"POT-Creation-Date:' "$1"; }
+# The creation date changes on every run, and the version line on a
+# release, so leave both out of the comparison.
+filter() { grep -v -e '^"POT-Creation-Date:' -e '^"Project-Id-Version:' "$1"; }
 if ! diff -u <(filter po/drukhal-manager.pot) <(filter "$tmp"); then
     echo "po/drukhal-manager.pot is out of date: run po/update-pot.sh and commit the result" >&2
     exit 1

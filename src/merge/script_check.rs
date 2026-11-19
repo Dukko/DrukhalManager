@@ -923,7 +923,7 @@ mod tests {
     }
 
     fn docs() -> Docs {
-        let map = |names: &[&str]| names.iter().map(|n| ((*n).to_owned(), DocEntry { text: format!("{n} - doc"), scopes: None })).collect();
+        let map = |names: &[&str]| names.iter().map(|n| ((*n).to_owned(), DocEntry { text: format!("{n} - doc") })).collect();
         Docs {
             effects: map(&["every_owned_planet", "random_owned_planet", "add_modifier", "set_flag", "add_resource", "create_message", "country_event", "random_list", "switch", "custom_tooltip"]),
             triggers: map(&["any_owned_planet", "is_capital", "has_technology", "has_flag", "has_job_type", "is_nomadic", "has_trait", "switch"]),

@@ -54,13 +54,19 @@ pub(super) fn add_css() {
     }
 }
 
+/// The largest side [`load`] scales an image to. A 100000×1 image would
+/// otherwise ask for gigabytes.
+const MAX_SIDE: i32 = STORED * 64;
+
 /// Where a mod's thumbnail is: the picture its descriptor names, or else
 /// `thumbnail.png`, which Steam and the launcher show when it names none.
 /// Zipped mods use their unpacked copy.
 fn picture_path(m: &Mod) -> Option<PathBuf> {
     let content = m.content.as_deref()?;
     let dir = archive::cached(content)?;
-    let named = m.descriptor.picture.as_deref().map(str::trim).filter(|p| !p.is_empty());
+    // A descriptor is untrusted input: `../…` and absolute paths mustn't
+    // reach pictures outside the mod.
+    let named = m.descriptor.picture.as_deref().map(str::trim).filter(|p| !p.is_empty() && crate::paradox::error_log::is_inside(p));
     named.into_iter().chain(["thumbnail.png", "thumbnail.jpg", "thumbnail.jpeg"]).find_map(|name| find(&dir, name))
 }
 
@@ -229,15 +235,22 @@ impl Window {
 fn load(path: &std::path::Path) -> Option<gdk::Texture> {
     use gtk::gdk_pixbuf::Pixbuf;
     let (_, width, height) = Pixbuf::file_info(path)?;
-    let short = width.min(height).max(1);
-    let scale = |n: i32| (i64::from(n) * i64::from(STORED) / i64::from(short)).max(i64::from(STORED)) as i32;
-    let (w, h) = (scale(width), scale(height));
+    let (w, h) = scaled_size(width, height);
     let pixbuf = Pixbuf::from_file_at_scale(path, w, h, false).ok()?;
     // A copy, so its rows are its own rather than a window on the original.
     let square = pixbuf.new_subpixbuf((w - STORED) / 2, (h - STORED) / 2, STORED, STORED).copy()?;
     let format = if square.has_alpha() { gdk::MemoryFormat::R8g8b8a8 } else { gdk::MemoryFormat::R8g8b8 };
     let bytes = square.read_pixel_bytes();
     Some(gdk::MemoryTexture::new(STORED, STORED, format, &bytes, square.rowstride() as usize).upcast())
+}
+
+/// The size to scale `width`×`height` to: `STORED` on the short side, so
+/// the centred square is exactly that large, but never more than
+/// [`MAX_SIDE`] on the long one.
+fn scaled_size(width: i32, height: i32) -> (i32, i32) {
+    let short = width.min(height).max(1);
+    let scale = |n: i32| (i64::from(n) * i64::from(STORED) / i64::from(short)).clamp(i64::from(STORED), i64::from(MAX_SIDE)) as i32;
+    (scale(width), scale(height))
 }
 
 fn show(picture: &gtk::Image, texture: Option<&gdk::Texture>) {
@@ -279,6 +292,14 @@ mod tests {
         assert!(found("gfx/cover.png", "gfx/Cover.png"));
         assert_eq!(find(&dir, "missing.png"), None);
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn caps_the_scaled_size_of_extreme_images() {
+        assert_eq!(scaled_size(300, 120), (200, 80));
+        assert_eq!(scaled_size(120, 300), (80, 200));
+        assert_eq!(scaled_size(100_000, 1), (MAX_SIDE, STORED));
+        assert_eq!(scaled_size(100_000, 100_000), (STORED, STORED));
     }
 
     #[test]

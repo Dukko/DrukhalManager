@@ -5,13 +5,37 @@
 
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
-use std::io;
+use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
 /// Records which zip, at which size and time, a cached copy came from.
 /// Hidden, so it is never taken for game content.
 const STAMP: &str = ".drukhal-source";
+
+/// Caps on a zip's contents, so a damaged or hostile archive can't fill the
+/// disk or the file table.
+pub(crate) const MAX_ENTRIES: usize = 100_000;
+pub(crate) const MAX_UNPACKED: u64 = 16 << 30;
+
+/// Refuses an archive with too many entries to unpack.
+pub(crate) fn check_entries(count: usize) -> io::Result<()> {
+    if count > MAX_ENTRIES {
+        return Err(io::Error::new(io::ErrorKind::InvalidData, format!("the archive has {count} entries, more than the {MAX_ENTRIES} allowed")));
+    }
+    Ok(())
+}
+
+/// Copies `entry` into `out`, keeping the whole archive under
+/// [`MAX_UNPACKED`] bytes.
+pub(crate) fn copy_bounded(entry: &mut impl Read, out: &mut impl Write, total: &mut u64) -> io::Result<()> {
+    let written = io::copy(&mut entry.take(MAX_UNPACKED.saturating_sub(*total) + 1), out)?;
+    *total += written;
+    if *total > MAX_UNPACKED {
+        return Err(io::Error::new(io::ErrorKind::InvalidData, format!("the archive holds more than {} bytes of files", MAX_UNPACKED)));
+    }
+    Ok(())
+}
 
 /// Where the files of the mod at `content` (its folder or its zip) can be
 /// read. Extracts a zip on first use, or when it changed since.
@@ -64,8 +88,9 @@ pub(crate) fn files_in(content: &Path, cache: &Path) -> io::Result<PathBuf> {
     }
 
     // Extract beside the final folder, then swap it in, so an interrupted
-    // extraction is never mistaken for a complete one.
-    let tmp = cache.join(format!(".{}.tmp-{}", dir.file_name().unwrap().to_string_lossy(), std::process::id()));
+    // extraction is never mistaken for a complete one. The unique suffix
+    // keeps two jobs unpacking the same changed zip apart.
+    let tmp = cache.join(format!(".{}.tmp-{}-{}", dir.file_name().unwrap().to_string_lossy(), std::process::id(), uuid::Uuid::new_v4()));
     let _ = std::fs::remove_dir_all(&tmp);
     std::fs::create_dir_all(&tmp)?;
     let result = extract(content, &tmp).and_then(|()| std::fs::write(tmp.join(STAMP), &stamp));
@@ -80,6 +105,8 @@ pub(crate) fn files_in(content: &Path, cache: &Path) -> io::Result<PathBuf> {
 
 fn extract(zip: &Path, to: &Path) -> io::Result<()> {
     let mut archive = zip::ZipArchive::new(std::fs::File::open(zip)?).map_err(io::Error::other)?;
+    check_entries(archive.len())?;
+    let mut total = 0;
     for i in 0..archive.len() {
         let mut entry = archive.by_index(i).map_err(io::Error::other)?;
         // Entries with `..` or absolute paths would land outside the folder.
@@ -92,7 +119,7 @@ fn extract(zip: &Path, to: &Path) -> io::Result<()> {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        io::copy(&mut entry, &mut std::fs::File::create(&path)?)?;
+        copy_bounded(&mut entry, &mut std::fs::File::create(&path)?, &mut total)?;
     }
     Ok(())
 }
@@ -151,6 +178,18 @@ mod tests {
         assert_eq!(std::fs::read_dir(&cache).unwrap().filter_map(|e| e.ok()).filter(|e| e.file_name().to_string_lossy().contains(".tmp-")).count(), 0);
 
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn caps_what_an_archive_can_unpack() {
+        assert!(check_entries(MAX_ENTRIES).is_ok());
+        assert_eq!(check_entries(MAX_ENTRIES + 1).unwrap_err().kind(), io::ErrorKind::InvalidData);
+
+        let mut out = Vec::new();
+        let mut total = MAX_UNPACKED - 1;
+        let error = copy_bounded(&mut std::io::Cursor::new(b"ab"), &mut out, &mut total).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+        assert_eq!(out, b"ab", "writes only the bytes that show the cap is passed");
     }
 
     #[test]

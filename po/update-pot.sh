@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Regenerates the translation template from the `t!`, `tf!`, `tn!`, `tnf!`,
-# `tc!` and `tnc!` calls in the sources.
+# Regenerates the translation template from the `t!`, `tf!`, `tn!` and
+# `tnf!` calls in the sources.
 #
 #     cargo install xtr --version 0.1.11 --locked
 #     po/update-pot.sh [OUTPUT.pot]
@@ -21,18 +21,19 @@ output=${1:-po/drukhal-manager.pot}
 
 # The keywords mirror the macros in src/i18n.rs. Nothing else is extracted,
 # so a string only becomes translatable by being wrapped in one of them.
+# Line numbers shift with every edit, so `--add-location file` leaves them
+# out: the template then survives changes that don't touch a string.
 xtr src/main.rs \
     --output "$output" \
     --package-name DrukhalManager \
     --package-version "$version" \
     --msgid-bugs-address "https://github.com/Dukko/DrukhalManager/issues" \
     --copyright-holder Dukko \
+    --add-location file \
     -k t \
     -k tf \
     -k 'tn:1,2' \
-    -k 'tnf:1,2' \
-    -k 'tc:1c,2' \
-    -k 'tnc:1c,2,3'
+    -k 'tnf:1,2'
 
 # On Windows xtr writes the source references with backslashes. Keep the
 # template the same whichever platform regenerates it, so the checked-in

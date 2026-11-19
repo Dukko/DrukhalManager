@@ -7,10 +7,8 @@
 //!
 //! Strings with values use `{name}` placeholders instead of `format!`'s
 //! positional `{}`, so translators can move the values around: `tf!("{count}
-//! mods", count = n)`. Plurals go through `tn!`/`tnf!`, and `tc!` adds a
-//! context for words that translate differently depending on where they
-//! appear. The translation template is extracted from these calls by
-//! `xtr` (see `po/README.md`).
+//! mods", count = n)`. Plurals go through `tn!`/`tnf!`. The translation
+//! template is extracted from these calls by `xtr` (see `po/README.md`).
 
 use std::path::{Path, PathBuf};
 
@@ -57,22 +55,10 @@ pub fn text(msgid: &'static str) -> String {
     gettextrs::gettext(msgid)
 }
 
-/// Translates a message with a context. Use `tc!` instead.
-#[allow(dead_code)] // Only used by `tc!`, which no UI string needs yet.
-pub fn text_in(context: &'static str, msgid: &'static str) -> String {
-    gettextrs::pgettext(context, msgid)
-}
-
 /// Picks the singular or plural message for `count` and translates it.
 /// Use `tn!` instead.
 pub fn plural(singular: &'static str, plural: &'static str, count: u32) -> String {
     gettextrs::ngettext(singular, plural, count)
-}
-
-/// Picks and translates a plural message with a context. Use `tnc!` instead.
-#[allow(dead_code)] // Only used by `tnc!`, which no UI string needs yet.
-pub fn plural_in(context: &'static str, singular: &'static str, plural: &'static str, count: u32) -> String {
-    gettextrs::npgettext(context, singular, plural, count)
 }
 
 /// Fills a translated template's `{name}` placeholders.
@@ -102,15 +88,6 @@ pub fn fill(template: &str, english: &str, format: impl Fn(&str) -> Result<Strin
 macro_rules! t {
     ($msgid:literal) => {
         $crate::i18n::text($msgid)
-    };
-}
-
-/// Translates a string in a context, for words whose translation depends
-/// on where they appear ("_Open" as a verb and as an adjective).
-#[macro_export]
-macro_rules! tc {
-    ($context:literal, $msgid:literal) => {
-        $crate::i18n::text_in($context, $msgid)
     };
 }
 
@@ -160,15 +137,6 @@ macro_rules! tn {
         $crate::i18n::plural($singular, $plural, $count as u32)
     };
 }
-
-/// Like `tn!`, in a context.
-#[macro_export]
-macro_rules! tnc {
-    ($context:literal, $singular:literal, $plural:literal, $count:expr) => {
-        $crate::i18n::plural_in($context, $singular, $plural, $count as u32)
-    };
-}
-
 
 #[cfg(test)]
 mod tests {

@@ -91,7 +91,11 @@ fn backup(dir: &Path, contents: &str) -> io::Result<PathBuf> {
     // Millisecond stamps of equal length sort lexically.
     backups.sort();
     for old in backups.iter().rev().skip(BACKUPS_KEPT) {
-        std::fs::remove_file(old)?;
+        // An old backup that can't be deleted (a Windows file lock, say)
+        // mustn't fail the save.
+        if let Err(e) = std::fs::remove_file(old) {
+            crate::diagnostics::log!("load-order", "Could not delete the old backup {}: {e}", old.display());
+        }
     }
     Ok(path)
 }

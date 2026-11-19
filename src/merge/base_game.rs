@@ -23,11 +23,33 @@ use crate::paradox::script;
 /// How many versions are kept on disk; older ones are deleted.
 const KEEP: usize = 3;
 
+/// The format of the saved file. Bump it when the parser or what a snapshot
+/// holds changes, so old copies are retaken instead of staying in use.
+const VERSION: u32 = 1;
+
 /// The base game's script objects in one version.
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct Snapshot {
     pub version: String,
     /// By "category\tkey": where it's defined and its text.
+    objects: BTreeMap<String, Saved>,
+}
+
+/// The file as saved, with its format version.
+#[derive(Serialize)]
+struct StoredRef<'a> {
+    format: u32,
+    version: &'a str,
+    objects: &'a BTreeMap<String, Saved>,
+}
+
+/// The file as read; `format` is 0 for files from before it was written.
+#[derive(Deserialize)]
+struct Stored {
+    #[serde(default)]
+    format: u32,
+    version: String,
+    #[serde(default)]
     objects: BTreeMap<String, Saved>,
 }
 
@@ -62,8 +84,9 @@ impl Snapshot {
         std::fs::create_dir_all(dir)?;
         let path = path(dir, &self.version);
         let tmp = path.with_extension("tmp");
+        let stored = StoredRef { format: VERSION, version: &self.version, objects: &self.objects };
         let mut encoder = GzEncoder::new(std::fs::File::create(&tmp)?, Compression::default());
-        encoder.write_all(&serde_json::to_vec(self).map_err(io::Error::other)?)?;
+        encoder.write_all(&serde_json::to_vec(&stored).map_err(io::Error::other)?)?;
         encoder.finish()?;
         crate::platform::rename(tmp, path)
     }
@@ -71,17 +94,32 @@ impl Snapshot {
 
 /// Reads the script objects of the game in `game_dir`. Localisation, and
 /// the folders the game merges instead of overriding, are left out.
+#[cfg(test)]
 pub fn take(game_dir: &Path, version: &str) -> Snapshot {
-    take_counting(game_dir, version).0
+    collect(game_dir, version).snapshot
 }
 
 /// As [`take`], also giving how many files were read.
+#[cfg(test)]
 pub fn take_counting(game_dir: &Path, version: &str) -> (Snapshot, usize) {
+    let taken = collect(game_dir, version);
+    (taken.snapshot, taken.files)
+}
+
+/// A snapshot being taken, and how much of the game couldn't be read.
+struct Taken {
+    snapshot: Snapshot,
+    files: usize,
+    unreadable: usize,
+}
+
+fn collect(game_dir: &Path, version: &str) -> Taken {
     let mut files = Vec::new();
+    let mut unreadable = 0;
     for folder in ["common", "events"] {
         let dir = game_dir.join(folder);
-        if dir.is_dir() {
-            let _ = conflicts::walk(game_dir, &dir, &mut files);
+        if dir.is_dir() && conflicts::walk(game_dir, &dir, &mut files).is_err() {
+            unreadable += 1;
         }
     }
     // The game reads a folder's files in name order; which definition of a
@@ -106,7 +144,10 @@ pub fn take_counting(game_dir: &Path, version: &str) -> (Snapshot, usize) {
         }
         // The files are now in priority order: the first definition seen wins.
         for file in files {
-            let Ok(bytes) = std::fs::read(game_dir.join(&file)) else { continue };
+            let Ok(bytes) = std::fs::read(game_dir.join(&file)) else {
+                unreadable += 1;
+                continue;
+            };
             read += 1;
             let text = String::from_utf8_lossy(&bytes);
             let src = text.trim_start_matches('\u{feff}');
@@ -115,7 +156,7 @@ pub fn take_counting(game_dir: &Path, version: &str) -> (Snapshot, usize) {
             }
         }
     }
-    (Snapshot { version: version.to_owned(), objects }, read)
+    Taken { snapshot: Snapshot { version: version.to_owned(), objects }, files: read, unreadable }
 }
 
 pub fn dir() -> PathBuf {
@@ -130,7 +171,10 @@ fn path(dir: &Path, version: &str) -> PathBuf {
 fn read(path: &Path) -> Option<Snapshot> {
     let mut json = Vec::new();
     GzDecoder::new(std::fs::File::open(path).ok()?).read_to_end(&mut json).ok()?;
-    serde_json::from_slice(&json).ok()
+    let stored: Stored = serde_json::from_slice(&json).ok()?;
+    // A file from an older parser isn't used: its objects may be incomplete
+    // or mean something else now, so it would need retaking anyway.
+    (stored.format == VERSION).then_some(Snapshot { version: stored.version, objects: stored.objects })
 }
 
 /// The saved snapshot of `version`; `None` if there isn't one or it can't
@@ -157,15 +201,26 @@ fn prune(dir: &Path) {
     }
 }
 
-/// The snapshot of `version`, taken and saved first if there isn't one.
+/// The snapshot of `version`, taken and saved first if there isn't one. A
+/// walk with unreadable files isn't saved: it would stay in use for this
+/// version forever.
 pub fn ensure(dir: &Path, game_dir: &Path, version: &str) -> io::Result<Snapshot> {
     if let Some(found) = load(dir, version) {
         return Ok(found);
     }
-    let taken = take(game_dir, version);
-    taken.save(dir)?;
+    let taken = collect(game_dir, version);
+    if taken.unreadable > 0 {
+        crate::diagnostics::log!(
+            "scan",
+            "Not saving the base game snapshot for {version}: {count} files couldn't be read",
+            count = taken.unreadable
+        );
+        return Ok(taken.snapshot);
+    }
+    taken.snapshot.save(dir)?;
+    crate::diagnostics::log!("scan", "Saved the base game snapshot for {version} ({files} files read)", files = taken.files);
     prune(dir);
-    Ok(taken)
+    Ok(taken.snapshot)
 }
 
 /// The most recently saved snapshot of a different version.
@@ -312,6 +367,45 @@ mod tests {
         let bytes = std::fs::read(path(&cache, "v1.2")).unwrap();
         assert_eq!(&bytes[..2], &[0x1f, 0x8b]);
         assert!(load(&cache, "v9").is_none());
+        let _ = std::fs::remove_dir_all(&game);
+        let _ = std::fs::remove_dir_all(&cache);
+    }
+
+    #[test]
+    fn rejects_snapshots_from_an_older_format() {
+        let cache = temp("format-cache");
+        let snap = snapshot("v1", &[("common/technology", "tech_a", "common/technology/00_tech.txt", "tech_a = { cost = 1 }")]);
+        snap.save(&cache).unwrap();
+        assert!(load(&cache, "v1").is_some());
+
+        // As written before the format was recorded.
+        let legacy = serde_json::json!({ "version": "v1", "objects": {} });
+        let mut encoder = GzEncoder::new(std::fs::File::create(path(&cache, "v1")).unwrap(), Compression::default());
+        encoder.write_all(legacy.to_string().as_bytes()).unwrap();
+        encoder.finish().unwrap();
+        assert!(load(&cache, "v1").is_none(), "retaken rather than trusted");
+        let _ = std::fs::remove_dir_all(&cache);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn doesnt_save_a_snapshot_after_a_read_failure() {
+        use std::os::unix::fs::PermissionsExt;
+        let game = temp("unreadable-game");
+        let cache = temp("unreadable-cache");
+        write(&game, &[("common/technology/00_tech.txt", "tech_a = { cost = 1 }\n")]);
+        let file = game.join("common/technology/00_tech.txt");
+        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o000)).unwrap();
+        if std::fs::read(&file).is_ok() {
+            // Running as root, where permissions don't stop reads.
+            let _ = std::fs::remove_dir_all(&game);
+            let _ = std::fs::remove_dir_all(&cache);
+            return;
+        }
+        let snapshot = ensure(&cache, &game, "v1").unwrap();
+        assert_eq!(snapshot.len(), 0);
+        assert!(saved_files(&cache).is_empty(), "an incomplete walk mustn't stay in use");
+        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o644)).unwrap();
         let _ = std::fs::remove_dir_all(&game);
         let _ = std::fs::remove_dir_all(&cache);
     }

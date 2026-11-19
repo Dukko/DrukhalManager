@@ -10,7 +10,6 @@ catalogs at run time. English is the message id, so `t!("Save")` translates
 | `tf!("Saved {name}", name = collection)` | A string with `{name}` placeholders. Translators can reorder them. |
 | `tn!("{count} mod", "{count} mods", n)` | A singular/plural choice. |
 | `tnf!("{count} mod", "{count} mods", count = n)` | Plural, with placeholders filled in. |
-| `tc!("Open", "verb")`, `tnc!(...)` | Words whose translation depends on the context. |
 
 Use `tf!`/`tnf!` instead of `format!` for anything a translator sees, and
 build the sentence in one string rather than gluing translated fragments

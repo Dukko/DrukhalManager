@@ -152,21 +152,6 @@ impl Window {
     fn start_game(self: &Rc<Self>, resume: bool) {
         let Some(game) = &self.game else { return };
         let options = self.settings.borrow().game.clone();
-        let extra = if options.launch_args.is_empty() {
-            Vec::new()
-        } else {
-            match glib::shell_parse_argv(&options.launch_args) {
-                Ok(args) => args.into_iter().map(|a| a.to_string_lossy().into_owned()).collect(),
-                Err(e) => {
-                    return self.add_toast(
-                        adw::Toast::builder()
-                            .title(tf!("Check the game launch options in Preferences: {error}", error = e.message()))
-                            .timeout(0)
-                            .build(),
-                    );
-                }
-            }
-        };
         if options.refresh_descriptors {
             let stale = crate::mods::repair::find(&self.paths.user_dir, &self.state.borrow().mods).stale;
             if !stale.is_empty() {
@@ -204,8 +189,25 @@ impl Window {
             }
             return;
         }
+        // Parsed only when the arguments are used: in the Flatpak they
+        // aren't, so a quote in them can't block the launch.
+        let parsed = if options.launch_args.is_empty() {
+            Vec::new()
+        } else {
+            match parse_launch_args(&options.launch_args) {
+                Ok(args) => args,
+                Err(error) => {
+                    return self.add_toast(
+                        adw::Toast::builder()
+                            .title(tf!("Check the game launch options in Preferences: {error}", error = error))
+                            .timeout(0)
+                            .build(),
+                    );
+                }
+            }
+        };
         let started = std::time::SystemTime::now();
-        let mut extra = extra;
+        let mut extra = parsed;
         if resume {
             extra.push(CONTINUE.to_owned());
         }
@@ -569,6 +571,79 @@ fn workshop_url(id: u64) -> String {
     format!("https://steamcommunity.com/sharedfiles/filedetails/?id={id}")
 }
 
+/// Splits the user's extra launch arguments. On Linux they follow shell
+/// quoting. On Windows backslashes are path separators, not escapes, so
+/// `C:\dir` must stay `C:\dir`.
+fn parse_launch_args(text: &str) -> Result<Vec<String>, String> {
+    #[cfg(not(windows))]
+    {
+        glib::shell_parse_argv(text).map(|args| args.into_iter().map(|a| a.to_string_lossy().into_owned()).collect()).map_err(|e| e.message().to_owned())
+    }
+    #[cfg(windows)]
+    {
+        Ok(windows_args(text))
+    }
+}
+
+/// Splits `text` the way Windows hands a command line to a program
+/// (`CommandLineToArgvW`): whitespace separates arguments, quotes group
+/// them, and backslashes are literal except before a quote.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn windows_args(text: &str) -> Vec<String> {
+    let mut args = Vec::new();
+    let mut current = String::new();
+    let mut quoted = false;
+    let mut started = false;
+    let mut chars = text.chars().peekable();
+    while let Some(c) = chars.next() {
+        match c {
+            '\\' => {
+                let mut count = 1;
+                while chars.peek() == Some(&'\\') {
+                    chars.next();
+                    count += 1;
+                }
+                if chars.peek() == Some(&'"') {
+                    // 2n backslashes leave n and let the quote group;
+                    // 2n+1 leave n and make a literal quote.
+                    current.extend(std::iter::repeat_n('\\', count / 2));
+                    if count % 2 == 1 {
+                        current.push('"');
+                        chars.next();
+                    }
+                } else {
+                    current.extend(std::iter::repeat_n('\\', count));
+                }
+                started = true;
+            }
+            '"' => {
+                started = true;
+                if quoted && chars.peek() == Some(&'"') {
+                    // Two quotes inside a quoted argument mean one.
+                    current.push('"');
+                    chars.next();
+                } else {
+                    quoted = !quoted;
+                }
+            }
+            c if c.is_whitespace() && !quoted => {
+                if started {
+                    args.push(std::mem::take(&mut current));
+                    started = false;
+                }
+            }
+            c => {
+                current.push(c);
+                started = true;
+            }
+        }
+    }
+    if started {
+        args.push(current);
+    }
+    args
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -582,6 +657,13 @@ mod tests {
 
     fn problem(file: &str, line: usize) -> error_log::Entry {
         error_log::Entry { message: format!("Script error in {file}:{line}"), count: 1, file: Some(file.to_owned()), kind: error_log::Kind::Problem, reason: None }
+    }
+
+    #[test]
+    fn keeps_windows_paths_whole() {
+        assert_eq!(windows_args(r"C:\dir\file -debug"), ["C:\\dir\\file", "-debug"]);
+        assert_eq!(windows_args(r#""C:\Program Files\Steam" -x"#), [r"C:\Program Files\Steam", "-x"]);
+        assert_eq!(windows_args(r#"pa\"th "" "a""b""#), ["pa\"th", "", "a\"b"]);
     }
 
     #[test]

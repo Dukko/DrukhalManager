@@ -16,6 +16,7 @@
 
 **Conflicts**
 * [[Conflicts and AI Merging]]
+* [[Script Check]]
 
 **Help**
 * [[Troubleshooting]]

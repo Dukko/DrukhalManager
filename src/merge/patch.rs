@@ -377,7 +377,7 @@ impl Patch {
     /// The "Use This Version" choices whose mod has changed the version
     /// they kept, while nothing else in the conflict changed: those can
     /// take the mod's new version without asking again. `roots` is as for
-    /// [`Patch::recheck`].
+    /// [`Patch::check`].
     pub fn picks_to_update(&self, roots: &HashMap<String, PathBuf>) -> Vec<Pick> {
         self.picks_with(roots, &Sources::default())
     }
@@ -431,12 +431,12 @@ impl Patch {
     /// against, so that after an update it also notices definitions the base
     /// game added, and follows base-game definitions that moved to another
     /// file. That bookkeeping is saved if it changed.
-    #[cfg_attr(not(test), allow(dead_code))]
+    #[cfg(test)]
     pub fn recheck(&mut self, roots: &HashMap<String, PathBuf>, game_version: Option<&str>) -> Vec<Stale> {
         self.recheck_with(roots, game_version, &Sources::default())
     }
 
-    /// [`Patch::recheck`], with each entry's pick marked as
+    /// [`Patch::check`], with each entry's pick marked as
     /// [`Patch::mark_picks`] does, reading each source file once for both.
     pub fn check(&mut self, roots: &HashMap<String, PathBuf>, game_version: Option<&str>) -> Vec<Stale> {
         // Sharing one reader is safe: `recheck_with` writes only the patch's
@@ -447,7 +447,7 @@ impl Patch {
         stale
     }
 
-    /// [`Patch::recheck`], reading source files through `sources`.
+    /// [`Patch::check`], reading source files through `sources`.
     fn recheck_with(&mut self, roots: &HashMap<String, PathBuf>, game_version: Option<&str>, sources: &Sources) -> Vec<Stale> {
         let game_dir = roots.get(VANILLA).map(PathBuf::as_path);
         let updated = |checked: Option<&str>| matches!((checked, game_version), (Some(was), Some(now)) if was != now);
@@ -692,7 +692,7 @@ pub fn summary(dir: &Path) -> Option<(usize, usize)> {
     Some((manifest.merges.len(), manifest.files.len()))
 }
 
-/// What [`Patch::recheck`] found about one merge's sources.
+/// What [`Patch::check`] found about one merge's sources.
 #[derive(Default)]
 struct Check {
     reasons: Vec<String>,
@@ -740,7 +740,7 @@ impl Check {
 /// of, if that mod changed it since while every other source is as it was:
 /// its new version and the updated prints. `read` gives a source's
 /// version from its folder and file; the base game is only checked when
-/// `game_dir` is known, as [`Patch::recheck`] does.
+/// `game_dir` is known, as [`Patch::check`] does.
 fn picked_update(kept: &str, prints: &[Print], roots: &HashMap<String, PathBuf>, game_dir: Option<&Path>, read: &dyn Fn(&Path, &str) -> Option<String>) -> Option<(usize, String, Vec<Print>)> {
     let kept = fingerprint(kept);
     let picked = prints.iter().position(|p| p.mod_id != VANILLA && p.hash == kept)?;

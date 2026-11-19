@@ -242,7 +242,9 @@ const EXTENSIONS: &[&str] = &[".txt", ".yml", ".gui", ".gfx", ".asset", ".mod", 
 /// The first game-relative path in `line`. Paths may contain spaces and any
 /// characters, so they're found by their top-level folder and extension.
 pub fn find_path(line: &str) -> Option<String> {
-    let lower = line.to_lowercase();
+    // ASCII case folding keeps byte offsets identical; `to_lowercase` can
+    // change their length (İ, Kelvin sign, Ω…), slicing mid-character.
+    let lower = line.to_ascii_lowercase();
     let mut best: Option<(usize, usize)> = None;
     for root in ROOTS {
         let mut from = 0;
@@ -465,6 +467,19 @@ mod tests {
         ];
         for (line, want) in cases {
             assert_eq!(find_path(line).as_deref(), want, "{line}");
+        }
+    }
+
+    #[test]
+    fn finds_paths_next_to_characters_that_lowercase_differently() {
+        // These change byte length when lowercased; the old code sliced the
+        // original line with offsets from the lowercase copy and panicked.
+        for before in ["İ", "Ω", "Å", "\u{212a}"] {
+            let line = format!("{before} in file: common/technology/x.txt line: 3");
+            assert_eq!(find_path(&line).as_deref(), Some("common/technology/x.txt"), "{line}");
+            let path = format!("common/technology/{before}x.txt");
+            let line = format!("Error in {path} near line: 3");
+            assert_eq!(find_path(&line).as_deref(), Some(path.as_str()), "{line}");
         }
     }
 

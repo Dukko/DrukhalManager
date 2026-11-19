@@ -4,6 +4,7 @@
 
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 
@@ -218,6 +219,21 @@ impl Settings {
         std::fs::read_to_string(path).ok().and_then(|src| serde_json::from_str(&src).ok()).unwrap_or_default()
     }
 
+    /// Like [`Settings::load`], but keeps a file that can't be read instead
+    /// of letting the next save replace it with defaults. Returns the
+    /// problem to show the user, if any.
+    pub fn load_checked(path: &Path) -> (Self, Option<String>) {
+        let src = match std::fs::read_to_string(path) {
+            Ok(src) => src,
+            Err(e) if e.kind() == io::ErrorKind::NotFound => return (Self::default(), None),
+            Err(e) => return (Self::default(), Some(keep_unreadable(path, &e.to_string()))),
+        };
+        match serde_json::from_str(&src) {
+            Ok(settings) => (settings, None),
+            Err(e) => (Self::default(), Some(keep_unreadable(path, &e.to_string()))),
+        }
+    }
+
     pub fn save(&self, path: &Path) -> io::Result<()> {
         std::fs::create_dir_all(path.parent().unwrap())?;
         let tmp = path.with_extension("json.tmp");
@@ -238,13 +254,19 @@ impl Settings {
     /// Brings in the keyring: a key still in the file (from before the
     /// keyring was used, or saved while there was none) moves there, and an
     /// empty one is filled in from it. Blocks; call off the main thread.
-    pub fn with_keyring(mut self, path: &Path) -> Self {
+    ///
+    /// Nothing is saved here: the caller applies the result to the live
+    /// settings and saves from the main thread, so a copy loaded before a
+    /// keyring prompt can't overwrite newer settings.
+    pub fn with_keyring(mut self) -> Keyring {
+        let mut moved = false;
+        let mut moved_steam_key = None;
         let kind = crate::secrets::kind(&self.provider);
         let key = api_key_mut(&mut self.provider);
         if !key.is_empty() {
             if crate::secrets::set(kind, key).is_ok() {
                 self.key_in_keyring = true;
-                let _ = self.save(path);
+                moved = true;
             }
         } else if let Ok(found) = crate::secrets::get(kind) {
             // Reachable: keys saved from now on go there.
@@ -255,10 +277,10 @@ impl Settings {
         }
         // A Steam key saved while there was no keyring moves there too.
         if !self.steam_key.is_empty() && crate::secrets::set(crate::secrets::STEAM, &self.steam_key).is_ok() {
-            self.steam_key.clear();
-            let _ = self.save(path);
+            moved_steam_key = Some(std::mem::take(&mut self.steam_key));
+            moved = true;
         }
-        self
+        Keyring { settings: self, moved, moved_steam_key }
     }
 
     /// The provider to use, with an empty Anthropic key filled in from
@@ -276,6 +298,32 @@ impl Settings {
             Provider::OpenAiCompatible { base_url, model, .. } if base_url.trim().is_empty() || model.trim().is_empty() => None,
             p => Some(p.clone()),
         }
+    }
+}
+
+/// What [`Settings::with_keyring`] did, for the caller to apply and save.
+pub struct Keyring {
+    pub settings: Settings,
+    /// Keys moved from the file into the keyring, so the settings need
+    /// saving again without them.
+    pub moved: bool,
+    /// The Steam key that moved, to clear from the live copy only if it is
+    /// still the same.
+    pub moved_steam_key: Option<String>,
+}
+
+/// Moves an unreadable settings file aside, for the user to inspect, and
+/// gives the message to show.
+fn keep_unreadable(path: &Path, error: &str) -> String {
+    let stamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
+    let kept = path.with_extension(format!("json.unreadable-{stamp}"));
+    match crate::platform::rename(path, &kept) {
+        Ok(()) => tf!(
+            "Settings could not be read ({error}) and were reset; the old file was kept as {file}",
+            error = error,
+            file = kept.file_name().unwrap_or_default().to_string_lossy()
+        ),
+        Err(_) => tf!("Settings could not be read ({error}) and were reset", error = error),
     }
 }
 
@@ -332,6 +380,23 @@ mod tests {
         let s: Settings = serde_json::from_str(old).unwrap();
         assert_eq!(s.game, GameOptions::default());
         assert_eq!(s.updates, UpdateOptions::default());
+    }
+
+    #[test]
+    fn keeps_an_unreadable_settings_file() {
+        let dir = std::env::temp_dir().join(format!("drukhal-settings-unreadable-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("settings.json");
+        assert_eq!(Settings::load_checked(&path), (Settings::default(), None), "no file: no problem");
+        std::fs::write(&path, r#"{"provider":"a newer build's value"#).unwrap();
+        let (settings, problem) = Settings::load_checked(&path);
+        assert_eq!(settings, Settings::default());
+        let problem = problem.expect("the problem is reported");
+        assert!(problem.contains("unreadable-"), "{problem}");
+        assert!(!path.exists(), "the broken file is moved aside, never overwritten");
+        assert!(std::fs::read_dir(&dir).unwrap().flatten().any(|e| e.file_name().to_string_lossy().starts_with("settings.json.unreadable-")));
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]

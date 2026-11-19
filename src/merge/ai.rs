@@ -1306,7 +1306,7 @@ mod tests {
     #[ignore]
     fn live_merge_with_saved_provider() {
         let path = crate::settings::path();
-        let provider = crate::settings::Settings::load(&path).with_keyring(&path).ready_provider().expect("no AI provider set up");
+        let provider = crate::settings::Settings::load(&path).with_keyring().settings.ready_provider().expect("no AI provider set up");
         println!("model: {}", provider.model_name());
         println!("price: {:?}", price(&provider));
         let v = Source { label: "Vanilla".into(), file: "common/buildings/00_buildings.txt".into(), text: "building_lab = {\n\tcost = { minerals = 100 }\n\tupkeep = { energy = 2 }\n}".into() };

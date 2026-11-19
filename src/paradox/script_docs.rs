@@ -19,10 +19,6 @@ pub struct Docs {
 pub struct Entry {
     /// The entry's lines, joined.
     pub text: String,
-    /// The scopes it can be used in, lowercase, if the entry lists them. The
-    /// text has them too; this is for code that needs them apart.
-    #[allow(dead_code)]
-    pub scopes: Option<Vec<String>>,
 }
 
 /// Where the game writes its documentation.
@@ -74,8 +70,7 @@ fn parse_entries(text: &str) -> HashMap<String, Entry> {
         while lines.last().is_some_and(|l| l.trim().is_empty()) {
             lines.pop();
         }
-        let scopes = lines.iter().find_map(|l| l.trim().strip_prefix("Supported Scopes:")).map(|rest| rest.split_whitespace().map(str::to_lowercase).collect());
-        entries.entry(name.to_owned()).or_insert(Entry { text: lines.join("\n"), scopes });
+        entries.entry(name.to_owned()).or_insert(Entry { text: lines.join("\n") });
     };
     for line in text.lines() {
         let line = line.trim_end_matches('\r');
@@ -157,7 +152,7 @@ mod tests {
     const EFFECTS: &str = "[12:00:00][F][effects.cpp:1]: Script documentation\n== EFFECTS DOCUMENTATION ==\n\nset_planetary_ascension_tier - Sets the tier.\nset_planetary_ascension_tier = <value>\nSupported Scopes: planet Ship colony\n\nadd_modifier - Adds a modifier\nto the scope.\n\nadd_modifier = { modifier = <name> }\nSupported Scopes: all\n";
 
     fn docs() -> Docs {
-        let entry = |text: &str| Entry { text: text.to_owned(), scopes: None };
+        let entry = |text: &str| Entry { text: text.to_owned() };
         Docs {
             effects: HashMap::new(),
             triggers: [("has_job_type", "has_job_type - a job"), ("has_job_category", "has_job_category - a category"), ("has_ethic", "has_ethic - an ethic")].into_iter().map(|(k, t)| (k.to_owned(), entry(t))).collect(),
@@ -167,12 +162,11 @@ mod tests {
     }
 
     #[test]
-    fn parses_entries_with_text_and_scopes() {
+    fn parses_entries_with_their_text() {
         let entries = parse_entries(EFFECTS);
         assert_eq!(entries.len(), 2);
         let tier = &entries["set_planetary_ascension_tier"];
         assert_eq!(tier.text, "set_planetary_ascension_tier - Sets the tier.\nset_planetary_ascension_tier = <value>\nSupported Scopes: planet Ship colony");
-        assert_eq!(tier.scopes.as_deref(), Some(&["planet".to_owned(), "ship".to_owned(), "colony".to_owned()][..]));
         let modifier = &entries["add_modifier"];
         assert!(modifier.text.contains("to the scope."));
         assert!(modifier.text.contains("add_modifier = { modifier = <name> }"));

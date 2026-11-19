@@ -61,6 +61,7 @@ fn run_in(dir: &Path, command: &str, left: Side, right: Side, base: Option<&str>
     let before = std::fs::metadata(&output_path).and_then(|m| m.modified()).ok();
 
     let args = arguments(command, &left_path, &right_path, &base_path, &output_path)?;
+    let started = std::time::Instant::now();
     let mut process = if crate::platform::is_flatpak() {
         let mut p = std::process::Command::new("flatpak-spawn");
         p.arg("--host").args(&args);
@@ -71,6 +72,7 @@ fn run_in(dir: &Path, command: &str, left: Side, right: Side, base: Option<&str>
         p
     };
     let output = process.stdin(std::process::Stdio::null()).output().map_err(|e| format!("Could not start {}: {e}", args[0]))?;
+    let elapsed = started.elapsed();
     let stderr = String::from_utf8_lossy(&output.stderr);
     if crate::platform::is_flatpak() && !output.status.success() && (stderr.contains("org.freedesktop.Flatpak") || stderr.contains("ServiceUnknown") || stderr.contains("AccessDenied")) {
         return Err(format!("The Flatpak isn't allowed to start programs outside it. To use a merge tool, run this once, then restart DrukhalManager: {FLATPAK_OVERRIDE}"));
@@ -78,10 +80,21 @@ fn run_in(dir: &Path, command: &str, left: Side, right: Side, base: Option<&str>
     // Exit codes say little: Meld always succeeds, KDiff3 fails when not
     // saved. Whether the output changed says what happened.
     let after = std::fs::metadata(&output_path).and_then(|m| m.modified()).ok();
-    let merged = std::fs::read_to_string(&output_path).map_err(|e| format!("Could not read the merged version: {e}"))?;
+    // A tool may save in its own encoding (UTF-16, Latin-1): keep the text
+    // it wrote rather than lose the merge.
+    let merged = std::fs::read(&output_path).map(|bytes| String::from_utf8_lossy(&bytes).into_owned()).map_err(|e| format!("Could not read the merged version: {e}"))?;
     if after == before && merged == left.text {
         if !output.status.success() && !stderr.trim().is_empty() {
             return Err(format!("{} failed: {}", args[0], stderr.trim()));
+        }
+        // A tool that returns at once (like `code` without `--wait`) may
+        // have opened the files in another window, and the merge would be
+        // lost silently.
+        if elapsed < std::time::Duration::from_secs(1) {
+            return Err(format!(
+                "{} closed at once without saving; if it opened the files in another window, check its command in Preferences (some programs need a flag such as `--wait`)",
+                args[0]
+            ));
         }
         return Ok(None);
     }
@@ -136,8 +149,13 @@ mod tests {
         // A "tool" that writes both versions into the output.
         let merged = run_in(&dir.join("a"), "sh -c 'cat \"$1\" \"$2\" > \"$3\"' sh {left} {right} {output}", side("A", "a\n"), side("B/x", "b\n"), None).unwrap();
         assert_eq!(merged.as_deref(), Some("a\nb\n"));
-        // Closed without saving.
-        assert_eq!(run_in(&dir.join("b"), "true {output}", side("A", "a\n"), side("B", "b\n"), Some("base")).unwrap(), None);
+        // Closed without saving, after being open long enough to be used.
+        assert_eq!(run_in(&dir.join("b"), "sh -c 'sleep 1.1' {output}", side("A", "a\n"), side("B", "b\n"), Some("base")).unwrap(), None);
+        // Returns at once: likely opened the files elsewhere (`code` without `--wait`).
+        assert!(run_in(&dir.join("d"), "true {output}", side("A", "a\n"), side("B", "b\n"), None).unwrap_err().contains("closed at once"));
+        // A tool that saves in another encoding keeps its merge.
+        let merged = run_in(&dir.join("e"), "sh -c 'printf \"\\377\" > \"$1\"' sh {output}", side("A", "a\n"), side("B", "b\n"), None).unwrap();
+        assert_eq!(merged.as_deref(), Some("\u{fffd}"));
         assert!(run_in(&dir.join("c"), "drukhal-no-such-tool {output}", side("A", "a"), side("B", "b"), None).unwrap_err().contains("Could not start"));
         std::fs::remove_dir_all(&dir).unwrap();
     }

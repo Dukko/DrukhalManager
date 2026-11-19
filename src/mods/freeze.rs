@@ -146,7 +146,8 @@ pub fn swap(mods: &mut [String], map: &HashMap<&str, &str>) {
 /// A descriptor for a copy of `d`: everything but where it is and its
 /// Workshop id.
 fn render(d: &Descriptor) -> String {
-    let q = |s: &str| s.replace('"', "\\\"");
+    // Backslashes first, or they'd escape the quotes added after them.
+    let q = |s: &str| s.replace('\\', "\\\\").replace('"', "\\\"");
     let list = |key: &str, items: &[String]| if items.is_empty() { String::new() } else { format!("{key}={{\n{}}}\n", items.iter().map(|i| format!("\t\"{}\"\n", q(i))).collect::<String>()) };
     let mut out = format!("name=\"{}\"\n", q(&d.name));
     if !d.version.is_empty() {
@@ -215,6 +216,14 @@ mod tests {
         assert!(!user.join(id).exists() && !folder.exists());
         assert!(workshop.join("common/traits/t.txt").is_file(), "the Workshop copy is untouched");
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn escapes_backslashes_in_frozen_descriptors() {
+        let d = Descriptor { name: "Ends \\".into(), version: "1\\2".into(), ..Default::default() };
+        let parsed = Descriptor::parse(&render(&d)).unwrap();
+        assert_eq!(parsed.name, "Ends \\");
+        assert_eq!(parsed.version, "1\\2");
     }
 
     #[test]

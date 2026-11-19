@@ -36,6 +36,13 @@
     <control>keyboard</control>
   </supports>
   <releases>
+    <release version="2.4.0" date="2026-11-19">
+      <description>
+        <p>Safer settings and collections: a settings.json that can't be read is kept aside instead of being replaced by defaults, and the keyring migration no longer saves a stale copy over newer settings. Merged collections whose names make the same folder name now get a folder of their own instead of deleting each other, and replacing a merged folder can no longer leave neither the old nor the new one.</p>
+        <p>Hardening: zip extraction is capped in size and entry count and uses a unique temporary folder, so concurrent jobs can't share one; mod thumbnails can't point outside the mod or request huge images; Windows launch arguments keep their backslashes; a multiplayer report says which mod couldn't be unpacked instead of showing a false mismatch; and the external merge tool keeps non-UTF-8 output and warns when it exits at once without saving.</p>
+        <p>Smaller fixes: descriptor repair skips an unreadable descriptor instead of stopping, an old load-order backup that can't be deleted no longer blocks the save, crash-log paths with characters like Ω or İ no longer panic, frozen descriptors escape backslashes, AI object merges must define one object, and base-game snapshots have a format version and aren't saved after a read failure. The wiki now documents Script Check, “won by” ignore rules and the rule builder.</p>
+      </description>
+    </release>
     <release version="2.3.0" date="2026-11-19">
       <description>
         <p>Script Check finds events that mods fire but nothing defines: an event call, an on_action events list or a random_events entry naming an event that neither the game nor an enabled mod has. A missing event in a namespace that exists is listed as a problem, and Fix with AI is told which events that namespace has. One whose namespace nothing installed has is listed under “Probably from another mod”.</p>

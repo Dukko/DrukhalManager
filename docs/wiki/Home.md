@@ -18,4 +18,5 @@ These pages explain how to do things in the app, one task at a time. To install 
 * [[Finding the Crashing Mod]]
 * [[Multiplayer Check]]
 * [[Conflicts and AI Merging]]
+* [[Script Check]]
 * [[Troubleshooting]]

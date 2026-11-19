@@ -11,7 +11,7 @@
 //! is copied, so `flags` and `prescripted_countries` aren't lost.
 
 use std::collections::BTreeMap;
-use std::io;
+use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 
 use super::conflicts::{is_under, walk};
@@ -50,17 +50,48 @@ pub fn is_template(template: &str) -> bool {
     template.contains("{Name}")
 }
 
-/// The merged mod's folder and descriptor name, e.g.
-/// `drukhal_merged_my_game` for "My Game".
+/// The merged mod's folder and descriptor name from a collection's slug,
+/// e.g. `drukhal_merged_my_game` for "My Game".
 fn folder(collection: &str) -> String {
     let slug: String = collection.trim().to_lowercase().chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '_' }).collect();
     let slug = slug.trim_matches('_');
     format!("drukhal_merged_{}", if slug.is_empty() { "collection" } else { slug })
 }
 
-/// The descriptor id the merged mod gets.
-pub fn id(collection: &str) -> String {
-    format!("mod/{}.mod", folder(collection))
+/// A short hash of the collection's name, to tell names that make the same
+/// slug apart ("A B" and "a-b" both make `a_b`).
+fn name_hash(collection: &str) -> String {
+    use sha2::{Digest, Sha256};
+    let digest = Sha256::digest(collection.trim().as_bytes());
+    digest.iter().take(4).map(|b| format!("{b:02x}")).collect()
+}
+
+/// The folder to merge `collection` into: its usual one unless another
+/// collection's merge already holds that name, then one with a hash of the
+/// name. Never picks another collection's folder.
+fn folder_for(collection: &str, dir: &Path) -> String {
+    let base = folder(collection);
+    if !other_merges(dir, &base, collection) {
+        return base;
+    }
+    let hash = name_hash(collection);
+    let mut candidate = format!("{base}_{hash}");
+    let mut n = 2;
+    while other_merges(dir, &candidate, collection) {
+        candidate = format!("{base}_{hash}_{n}");
+        n += 1;
+    }
+    candidate
+}
+
+/// Whether the folder or zip `name` in `dir` is a merge of a collection
+/// other than `collection`, which must not be replaced.
+fn other_merges(dir: &Path, name: &str, collection: &str) -> bool {
+    let marker = dir.join(name).join(MARKER);
+    if marker.is_file() && !std::fs::read_to_string(&marker).is_ok_and(|s| s.trim() == collection.trim()) {
+        return true;
+    }
+    merged_zip_name(&dir.join(format!("{name}.zip"))).is_some_and(|s| s.trim() != collection.trim())
 }
 
 /// Lowercased path -> (path as spelled by the winning mod, source file).
@@ -101,12 +132,13 @@ pub enum Output {
 /// goes in `<user_dir>/mod`. Blocks; call off the main thread.
 pub fn write(user_dir: &Path, out_dir: &Path, collection: &str, name: &str, supported_version: &str, mods: &[Input], output: Output) -> io::Result<Merged> {
     let mod_dir = out_dir.to_path_buf();
-    let target = mod_dir.join(folder(collection));
-    let zip = mod_dir.join(format!("{}.zip", folder(collection)));
+    let folder = folder_for(collection, &mod_dir);
+    let target = mod_dir.join(&folder);
+    let zip = mod_dir.join(format!("{folder}.zip"));
     if target.exists() && !target.join(MARKER).exists() {
         return Err(io::Error::new(io::ErrorKind::AlreadyExists, format!("{} already exists and isn't a merged collection", target.display())));
     }
-    if zip.exists() && !is_merged_zip(&zip) {
+    if zip.exists() && merged_zip_name(&zip).is_none() {
         return Err(io::Error::new(io::ErrorKind::AlreadyExists, format!("{} already exists and isn't a merged collection", zip.display())));
     }
     let (files, replace_paths) = plan(mods)?;
@@ -129,11 +161,11 @@ pub fn write(user_dir: &Path, out_dir: &Path, collection: &str, name: &str, supp
     // leaves the previous one intact.
     let location = match output {
         Output::Folder => {
-            write_folder(&mod_dir, collection, &files, &inner)?;
+            write_folder(&mod_dir, &folder, collection, &files, &inner)?;
             format!("path=\"{}\"", crate::platform::descriptor_path(&target))
         }
         Output::Zip => {
-            write_zip(&mod_dir, collection, &files, &inner)?;
+            write_zip(&mod_dir, &folder, collection, &files, &inner)?;
             format!("archive=\"{}\"", crate::platform::descriptor_path(&zip))
         }
     };
@@ -146,25 +178,53 @@ pub fn write(user_dir: &Path, out_dir: &Path, collection: &str, name: &str, supp
             }
         }
     }
-    // As would an earlier merge written to another folder.
-    let descriptor = user_dir.join(id(collection));
-    if let Some(old) = std::fs::read_to_string(&descriptor).ok().and_then(|s| crate::mods::Descriptor::parse(&s).ok()).and_then(|d| d.path).map(PathBuf::from)
-        && old != target
-        && old != zip
-    {
-        if old.join(MARKER).is_file() {
-            let _ = std::fs::remove_dir_all(&old);
-        } else if old.is_file() && is_merged_zip(&old) {
-            let _ = std::fs::remove_file(&old);
-        }
-    }
+    // An earlier merge of the same collection may be in another folder: a
+    // name that used to map here, or one written before another collection
+    // took this name. Remove it and its descriptor, so the mod list doesn't
+    // keep a broken copy.
+    remove_earlier_merges(user_dir, collection, &target, &zip);
+    let descriptor = user_dir.join(format!("mod/{folder}.mod"));
     std::fs::write(&descriptor, format!("{inner}{location}\n"))?;
-    Ok(Merged { id: id(collection), files: files.len() })
+    Ok(Merged { id: format!("mod/{folder}.mod"), files: files.len() })
 }
 
-fn write_folder(mod_dir: &Path, collection: &str, files: &Files, descriptor: &str) -> io::Result<()> {
-    let target = mod_dir.join(folder(collection));
-    let building = mod_dir.join(format!("{}.drukhal-tmp", folder(collection)));
+/// Removes every merge of `collection` in `user_dir` except `target` and
+/// `zip`, with its descriptor.
+fn remove_earlier_merges(user_dir: &Path, collection: &str, target: &Path, zip: &Path) {
+    let Ok(entries) = std::fs::read_dir(user_dir.join("mod")) else { return };
+    for entry in entries.flatten() {
+        let descriptor = entry.path();
+        if descriptor.extension().is_none_or(|e| !e.eq_ignore_ascii_case("mod")) || !descriptor.is_file() {
+            continue;
+        }
+        let Ok(src) = std::fs::read_to_string(&descriptor) else { continue };
+        let Ok(d) = crate::mods::Descriptor::parse(&src) else { continue };
+        let Some(path) = d.path.as_deref().map(PathBuf::from) else { continue };
+        if path == target || path == zip {
+            continue;
+        }
+        let of_collection = if path.is_dir() {
+            std::fs::read_to_string(path.join(MARKER)).is_ok_and(|s| s.trim() == collection.trim())
+        } else if path.is_file() {
+            merged_zip_name(&path).is_some_and(|s| s.trim() == collection.trim())
+        } else {
+            false
+        };
+        if !of_collection {
+            continue;
+        }
+        if path.is_dir() {
+            let _ = std::fs::remove_dir_all(&path);
+        } else {
+            let _ = std::fs::remove_file(&path);
+        }
+        let _ = std::fs::remove_file(&descriptor);
+    }
+}
+
+fn write_folder(mod_dir: &Path, folder: &str, collection: &str, files: &Files, descriptor: &str) -> io::Result<()> {
+    let target = mod_dir.join(folder);
+    let building = mod_dir.join(format!("{folder}.drukhal-tmp"));
     if building.exists() {
         std::fs::remove_dir_all(&building)?;
     }
@@ -177,10 +237,29 @@ fn write_folder(mod_dir: &Path, collection: &str, files: &Files, descriptor: &st
             std::fs::copy(source, &dest)?;
         }
         std::fs::write(building.join("descriptor.mod"), descriptor)?;
-        if target.exists() {
-            std::fs::remove_dir_all(&target)?;
+        // Rename the old merge aside first, then put the new one in place,
+        // so a failure never leaves neither. The old folder is deleted once
+        // the new one is safely in position.
+        let old = mod_dir.join(format!("{folder}.drukhal-old"));
+        let _ = std::fs::remove_dir_all(&old);
+        let had_old = target.exists();
+        if had_old {
+            crate::platform::rename(&target, &old)?;
         }
-        crate::platform::rename(&building, &target)
+        match crate::platform::rename(&building, &target) {
+            Ok(()) => {
+                if had_old {
+                    let _ = std::fs::remove_dir_all(&old);
+                }
+                Ok(())
+            }
+            Err(e) => {
+                if had_old {
+                    let _ = crate::platform::rename(&old, &target);
+                }
+                Err(e)
+            }
+        }
     })();
     if result.is_err() {
         let _ = std::fs::remove_dir_all(&building);
@@ -188,10 +267,10 @@ fn write_folder(mod_dir: &Path, collection: &str, files: &Files, descriptor: &st
     result
 }
 
-fn write_zip(mod_dir: &Path, collection: &str, files: &Files, descriptor: &str) -> io::Result<()> {
+fn write_zip(mod_dir: &Path, folder: &str, collection: &str, files: &Files, descriptor: &str) -> io::Result<()> {
     use zip::write::SimpleFileOptions;
-    let target = mod_dir.join(format!("{}.zip", folder(collection)));
-    let building = mod_dir.join(format!("{}.zip.drukhal-tmp", folder(collection)));
+    let target = mod_dir.join(format!("{folder}.zip"));
+    let building = mod_dir.join(format!("{folder}.zip.drukhal-tmp"));
     let result = (|| {
         std::fs::create_dir_all(mod_dir)?;
         let mut zip = zip::ZipWriter::new(std::fs::File::create(&building)?);
@@ -213,9 +292,13 @@ fn write_zip(mod_dir: &Path, collection: &str, files: &Files, descriptor: &str) 
     result
 }
 
-/// Whether the zip at `path` is a merged collection's.
-fn is_merged_zip(path: &Path) -> bool {
-    std::fs::File::open(path).ok().and_then(|f| zip::ZipArchive::new(f).ok()).is_some_and(|mut z| z.by_name(MARKER).is_ok())
+/// The collection a zip at `path` is a merge of, if it is one.
+fn merged_zip_name(path: &Path) -> Option<String> {
+    let mut zip = zip::ZipArchive::new(std::fs::File::open(path).ok()?).ok()?;
+    let mut marker = zip.by_name(MARKER).ok()?;
+    let mut name = String::new();
+    marker.read_to_string(&mut name).ok()?;
+    Some(name)
 }
 
 fn remove_if_present(path: &Path) -> io::Result<()> {
@@ -266,6 +349,33 @@ mod tests {
 
     fn input(root: &Path, replace_path: &[&str]) -> Input {
         Input { root: root.to_path_buf(), replace_path: replace_path.iter().map(|s| s.to_string()).collect() }
+    }
+
+    #[test]
+    fn keeps_merges_of_names_with_the_same_slug_apart() {
+        let root = std::env::temp_dir().join(format!("drukhal-collection-slug-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let (a, user) = (root.join("a"), root.join("user"));
+        put(&a, &[("descriptor.mod", "name=\"A\""), ("common/buildings/x.txt", "a")]);
+        std::fs::create_dir_all(user.join("mod")).unwrap();
+        let mods = [input(&a, &[])];
+        let folder = |m: &Merged| m.id.strip_prefix("mod/").unwrap().strip_suffix(".mod").unwrap().to_owned();
+
+        let first = write(&user, &user.join("mod"), "A B", "A B", "*", &mods, Output::Folder).unwrap();
+        // "a-b" makes the same slug as "A B".
+        let second = write(&user, &user.join("mod"), "a-b", "a-b", "*", &mods, Output::Folder).unwrap();
+        assert_ne!(first.id, second.id, "the second merge gets a folder of its own");
+        let (first_dir, second_dir) = (user.join("mod").join(folder(&first)), user.join("mod").join(folder(&second)));
+        assert!(first_dir.join("descriptor.mod").is_file(), "the first merge isn't deleted");
+        assert!(second_dir.join("descriptor.mod").is_file());
+        assert_eq!(std::fs::read_to_string(second_dir.join(MARKER)).unwrap(), "a-b");
+
+        // Merging "a-b" again replaces its own folder, and leaves the other.
+        let again = write(&user, &user.join("mod"), "a-b", "a-b", "*", &mods, Output::Folder).unwrap();
+        assert_eq!(again.id, second.id);
+        assert!(first_dir.join("descriptor.mod").is_file());
+        assert!(!user.join("mod").join(format!("{}.drukhal-old", folder(&second))).exists());
+        std::fs::remove_dir_all(&root).unwrap();
     }
 
     #[test]

@@ -49,6 +49,34 @@ jobs:
             exit 1
           fi
 
+  packaging:
+    name: packaging files are current
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      # flatpak.yml runs this only on tags, so a stale file would get green
+      # PRs and fail after the release tag was pushed.
+      - name: Check cargo-sources.json matches Cargo.lock
+        run: |
+          python3 flatpak/generate-cargo-sources.py Cargo.lock "$RUNNER_TEMP/cargo-sources.json"
+          diff -q flatpak/cargo-sources.json "$RUNNER_TEMP/cargo-sources.json" || {
+            echo "::error::flatpak/cargo-sources.json is stale; regenerate it (see flatpak/generate-cargo-sources.py)"
+            exit 1
+          }
+
+  audit:
+    name: dependency advisories
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      checks: write
+      issues: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: rustsec/audit-check@v2.0.0
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
   windows:
     name: build, test, clippy (Windows)
     runs-on: windows-latest
