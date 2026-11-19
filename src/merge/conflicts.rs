@@ -500,6 +500,12 @@ fn object_keys(category: &str, src: &str) -> Result<Vec<String>, ScanError> {
     Ok(keys)
 }
 
+/// Whether `header` is a language header (`l_english`, `l_simp_chinese`).
+/// It ends up in a file name, so nothing else is accepted.
+pub fn is_language_header(header: &str) -> bool {
+    header.strip_prefix("l_").is_some_and(|l| !l.is_empty() && l.bytes().all(|b| b.is_ascii_lowercase() || b == b'_'))
+}
+
 /// Keys of a Paradox YAML-ish localisation file, prefixed by language so
 /// `l_english` and `l_german` entries don't collide.
 fn localisation_keys(src: &str) -> Vec<String> {
@@ -513,10 +519,10 @@ fn localisation_keys(src: &str) -> Vec<String> {
         }
         let Some((key, rest)) = trimmed.split_once(':') else { continue };
         if !line.starts_with([' ', '\t']) && rest.trim().is_empty() {
-            language = key.to_owned();
+            language = if is_language_header(key) { key.to_owned() } else { String::new() };
             continue;
         }
-        if !key.is_empty() && !key.contains([' ', '"']) {
+        if !language.is_empty() && !key.is_empty() && !key.contains([' ', '"']) {
             keys.push(format!("{language}:{key}"));
         }
     }
@@ -1071,5 +1077,12 @@ mod tests {
         assert!(!is_under("需要/x.txt", "common/a"));
         assert_eq!(object_category("common/需要的/x.txt").as_deref(), Some("common/需要的"));
         assert_eq!(object_category("common/İtems/x.txt").as_deref(), Some("common/İtems"));
+    }
+
+    #[test]
+    fn localisation_headers_that_are_not_languages_yield_no_keys() {
+        let src = "l_english:\n a:0 \"x\"\n../../evil:\n b:0 \"y\"\nl_simp_chinese:\n c:0 \"z\"\nl_braz_por:\n d:0 \"w\"\n";
+
+        assert_eq!(localisation_keys(src), ["l_english:a", "l_simp_chinese:c", "l_braz_por:d"]);
     }
 }
