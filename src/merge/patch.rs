@@ -239,6 +239,39 @@ struct Manifest {
     files: Vec<FileMerge>,
 }
 
+impl Manifest {
+    /// Refuses a manifest whose paths could leave the patch folder: they are
+    /// joined onto it to move and delete files.
+    fn parse(src: &str) -> io::Result<Self> {
+        let manifest: Self = serde_json::from_str(src).map_err(io::Error::other)?;
+        let unsafe_path = manifest.merges.iter().flat_map(|m| [&m.file, &m.category]).chain(manifest.files.iter().map(|f| &f.path)).find(|p| !is_inside(p));
+        if let Some(path) = unsafe_path {
+            return Err(io::Error::new(io::ErrorKind::InvalidData, format!("the patch lists \"{path}\", which is outside its folder")));
+        }
+        let bad_language = manifest.merges.iter().filter(|m| m.category == "localisation").filter_map(|m| m.key.split_once(':')).find(|(language, _)| !conflicts::is_language_header(language));
+        match bad_language {
+            Some((language, _)) => Err(io::Error::new(io::ErrorKind::InvalidData, format!("the patch lists the language \"{language}\", which is not one"))),
+            None => Ok(manifest),
+        }
+    }
+}
+
+/// Whether `path` is relative and stays inside the folder it is joined to,
+/// whichever separator it uses.
+fn is_inside(path: &str) -> bool {
+    path.split(['/', '\\']).all(|part| !part.is_empty() && part != "." && part != ".." && !part.contains(':'))
+}
+
+/// Checks the manifest of the patch in `root`, if it has one, as
+/// [`Patch::open`] does.
+pub fn check_manifest(root: &Path) -> io::Result<()> {
+    match std::fs::read_to_string(root.join(MANIFEST)) {
+        Ok(src) => Manifest::parse(&src).map(drop),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(e),
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Patch {
     root: PathBuf,
@@ -251,7 +284,7 @@ impl Patch {
     pub fn open(user_dir: &Path, target: &Target) -> io::Result<Self> {
         let root = target.root(user_dir);
         let manifest = match std::fs::read_to_string(root.join(MANIFEST)) {
-            Ok(src) => serde_json::from_str(&src).map_err(io::Error::other)?,
+            Ok(src) => Manifest::parse(&src)?,
             Err(e) if e.kind() == io::ErrorKind::NotFound => Manifest::default(),
             Err(e) => return Err(e),
         };
@@ -753,7 +786,8 @@ fn file_for(category: &str, key: &str) -> String {
         // the game requires the language suffix in the file name.
         let (language, name) = key.split_once(':').unwrap_or(("l_english", key));
         let name: String = name.chars().map(|c| if c.is_ascii_alphanumeric() || c == '_' { c } else { '_' }).collect();
-        let folder = language.strip_prefix("l_").unwrap_or(language);
+        let language: String = language.chars().map(|c| if c.is_ascii_lowercase() || c == '_' { c } else { '_' }).collect();
+        let folder = language.strip_prefix("l_").unwrap_or(&language);
         return format!("localisation/replace/{folder}/drukhal_{name}_{language}.yml");
     }
     let prefix = if conflicts::is_fios(category) { SORT_FIRST } else { SORT_LAST };
@@ -1051,6 +1085,8 @@ mod tests {
         assert_eq!(file_for("events", "ns.12"), "events/!!!!!!_drukhal_ns.12.txt");
         assert_eq!(file_for("common/component_templates", "c"), "common/component_templates/!!!!!!_drukhal_c.txt");
         assert_eq!(file_for("localisation", "l_german:lab"), "localisation/replace/german/drukhal_lab_l_german.yml");
+        assert_eq!(file_for("localisation", "l_braz_por:lab"), "localisation/replace/braz_por/drukhal_lab_l_braz_por.yml");
+        assert_eq!(file_for("localisation", "../../x:lab"), "localisation/replace/______x/drukhal_lab_______x.yml", "a crafted language stays in the folder");
         assert!(SORT_LAST > "zzzz_" && SORT_LAST > "~ste" && SORT_LAST > "伞伞zzz_");
         assert!(SORT_FIRST < "!_pd" && SORT_FIRST < "00_");
     }
@@ -1269,5 +1305,38 @@ mod tests {
         std::fs::remove_file(dir.join("a.txt")).unwrap();
         assert_eq!(sources.text(&dir, "a.txt").as_deref().map(String::as_str), Some("x = {}"), "served from the cache");
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn refuses_a_manifest_whose_paths_leave_the_patch() {
+        let user = std::env::temp_dir().join(format!("drukhal-patch-escape-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&user);
+        let victim = user.join("victim.txt");
+        let absolute = victim.to_string_lossy().replace('\\', "\\\\");
+        let merge_keyed = |category: &str, key: &str, file: &str| format!(r#"{{"merges":[{{"category":"{category}","key":"{key}","script":"","sources":[],"file":"{file}"}}]}}"#);
+        let merge = |category: &str, file: &str| merge_keyed(category, "lab", file);
+        let manifests = [
+            merge("common/buildings", &absolute),
+            merge("common/buildings", "../../victim.txt"),
+            merge("../..", "common/buildings/a.txt"),
+            merge("", "common/buildings/a.txt"),
+            format!(r#"{{"merges":[],"files":[{{"path":"{absolute}","sources":[]}}]}}"#),
+            r#"{"merges":[],"files":[{"path":"common/../../victim.txt","sources":[]}]}"#.to_owned(),
+            merge_keyed("localisation", "../../x:lab", "localisation/replace/english/a.yml"),
+            merge_keyed("localisation", "l_english/..:lab", "localisation/replace/english/a.yml"),
+        ];
+        for manifest in manifests {
+            let root = test_target().root(&user);
+            std::fs::create_dir_all(&root).unwrap();
+            std::fs::write(&victim, "keep").unwrap();
+            std::fs::write(root.join(MANIFEST), &manifest).unwrap();
+
+            let error = Patch::open(&user, &test_target()).unwrap_err();
+
+            assert_eq!(error.kind(), io::ErrorKind::InvalidData, "{manifest}");
+            assert_eq!(std::fs::read_to_string(&victim).unwrap(), "keep", "{manifest}");
+            assert_eq!(std::fs::read_to_string(root.join(MANIFEST)).unwrap(), manifest, "left as it was");
+        }
+        std::fs::remove_dir_all(&user).unwrap();
     }
 }

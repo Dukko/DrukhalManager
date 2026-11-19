@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: DrukhalManager 2.1.0\n"
 "Report-Msgid-Bugs-To: https://github.com/Dukko/DrukhalManager/issues\n"
-"POT-Creation-Date: 2026-11-19 02:48+0000\n"
+"POT-Creation-Date: 2026-11-19 03:16+0000\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -1714,51 +1714,51 @@ msgid_plural "Closed {count} blocks left open at the end of the file"
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/merge/patch.rs:422
+#: src/merge/patch.rs:455
 msgid "The base game changed it in {version}"
 msgstr ""
 
-#: src/merge/patch.rs:423
+#: src/merge/patch.rs:456
 msgid "The base game changed it in an update"
 msgstr ""
 
-#: src/merge/patch.rs:454
+#: src/merge/patch.rs:487
 msgid "no longer defines it"
 msgstr ""
 
-#: src/merge/patch.rs:475
+#: src/merge/patch.rs:508
 msgid "The base game no longer defines it"
 msgstr ""
 
-#: src/merge/patch.rs:481
+#: src/merge/patch.rs:514
 msgid "The base game added it in {version}"
 msgstr ""
 
-#: src/merge/patch.rs:497
+#: src/merge/patch.rs:530
 msgid "no longer ships this file"
 msgstr ""
 
-#: src/merge/patch.rs:502
+#: src/merge/patch.rs:535
 msgid "The base game no longer ships this file"
 msgstr ""
 
-#: src/merge/patch.rs:512
+#: src/merge/patch.rs:545
 msgid "The base game added this file in {version}"
 msgstr ""
 
-#: src/merge/patch.rs:543
+#: src/merge/patch.rs:576
 msgid "It is no longer in the patch"
 msgstr ""
 
-#: src/merge/patch.rs:681
+#: src/merge/patch.rs:714
 msgid "{name} isn't enabled any more"
 msgstr ""
 
-#: src/merge/patch.rs:685
+#: src/merge/patch.rs:718
 msgid "{name} {missing}"
 msgstr ""
 
-#: src/merge/patch.rs:686
+#: src/merge/patch.rs:719
 msgid "{name} changed it"
 msgstr ""
 

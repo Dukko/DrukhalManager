@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 
 use zip::write::SimpleFileOptions;
 
-use super::patch::Target;
+use super::patch::{self, Target};
 use super::snapshot;
 use crate::mods::collections::Shared;
 
@@ -98,6 +98,7 @@ pub fn install_patch(bundle: &Bundle, user_dir: &Path, target: &Target, backup_d
         if !staging.join("descriptor.mod").is_file() {
             return Err(io::Error::new(io::ErrorKind::InvalidData, "the shared patch has no descriptor"));
         }
+        patch::check_manifest(&staging)?;
         snapshot::take(user_dir, target, backup_dir, snapshot::BEFORE_IMPORTING)?;
         snapshot::replace_patch(user_dir, target, &staging)
     })();
@@ -139,6 +140,33 @@ mod tests {
 
         std::fs::write(root.join("plain.zip"), b"PK").unwrap();
         assert!(read(&root.join("plain.zip")).is_err());
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn refuses_a_bundle_whose_patch_manifest_leaves_its_folder() {
+        let root = std::env::temp_dir().join(format!("drukhal-bundle-escape-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let user = root.join("user");
+        let theirs_patch = patch::test_target().root(&user);
+        std::fs::create_dir_all(&theirs_patch).unwrap();
+        std::fs::write(theirs_patch.join("descriptor.mod"), "name=\"old\"\n").unwrap();
+        let path = root.join("Bad.zip");
+        let mut zip = zip::ZipWriter::new(std::fs::File::create(&path).unwrap());
+        let options = SimpleFileOptions::default();
+        zip.start_file(COLLECTION, options).unwrap();
+        zip.write_all(br#"{"format":1,"name":"Main","mods":[]}"#).unwrap();
+        zip.start_file(format!("{PATCH}descriptor.mod"), options).unwrap();
+        zip.write_all(b"name=\"evil\"\n").unwrap();
+        zip.start_file(format!("{PATCH}drukhal_merges.json"), options).unwrap();
+        zip.write_all(br#"{"merges":[{"category":"events","key":"k","script":"","sources":[],"file":"../../x.txt"}]}"#).unwrap();
+        zip.finish().unwrap();
+
+        let bundle = read(&path).unwrap();
+        let error = install_patch(&bundle, &user, &patch::test_target(), &root.join("backups")).unwrap_err();
+
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+        assert_eq!(std::fs::read_to_string(theirs_patch.join("descriptor.mod")).unwrap(), "name=\"old\"\n", "their patch is untouched");
         std::fs::remove_dir_all(&root).unwrap();
     }
 }
