@@ -42,8 +42,12 @@ pub enum Problem {
     /// other block, so it may be fine.
     Unsure,
     /// Unknown, and every use looks like a call of another mod's scripted
-    /// trigger or effect that no installed mod defines.
+    /// trigger or effect that no installed mod defines; or an event from a
+    /// namespace nothing installed has.
     Elsewhere,
+    /// Fires an event that neither the game nor an enabled mod defines,
+    /// though its namespace exists, so it does nothing.
+    NoEvent,
 }
 
 /// What vanilla teaches: which blocks hold effects or triggers, and which
@@ -62,6 +66,13 @@ pub struct Context {
     /// files use (see [`collect_used`]).
     #[serde(default)]
     used: HashSet<String>,
+    /// The events the game defines, as [`event_id`] gives them.
+    #[serde(default)]
+    events: HashSet<String>,
+    /// The game's inline scripts that define an event, by script path,
+    /// with the parameters that hold its id.
+    #[serde(default)]
+    event_templates: HashMap<String, Vec<String>>,
 }
 
 impl Context {
@@ -100,6 +111,9 @@ pub struct Finding {
     /// The use is shaped like a call of a scripted effect or trigger: `yes`,
     /// `no`, or a block of UPPERCASE parameters.
     pub call: bool,
+    /// For [`Problem::NoEvent`], the events its namespace does define, as a
+    /// hint to which was meant.
+    pub siblings: Vec<String>,
 }
 
 const LOGIC: [&str; 5] = ["and", "or", "not", "nor", "nand"];
@@ -457,6 +471,7 @@ pub fn learn(game_dir: &Path, docs: &Docs, version: &str) -> Context {
         (tallies, allowed)
     };
     let (seen, used) = vanilla_keys(game_dir, &known);
+    let (events, event_templates) = vanilla_events(game_dir);
     // The traversal depends on the anchors, so they're learned in two passes.
     let (first, _) = pass(&HashMap::new(), false);
     let first = learn_anchors(&first);
@@ -468,15 +483,15 @@ pub fn learn(game_dir: &Path, docs: &Docs, version: &str) -> Context {
         anchors.entry(anchor).or_insert(ctx);
     }
     if anchors == first {
-        return Context { version: version.to_owned(), anchors, allowed, seen, used }.indexed();
+        return Context { version: version.to_owned(), anchors, allowed, seen, used, events, event_templates }.indexed();
     }
     let (_, allowed) = pass(&anchors, true);
-    Context { version: version.to_owned(), anchors, allowed, seen, used }.indexed()
+    Context { version: version.to_owned(), anchors, allowed, seen, used, events, event_templates }.indexed()
 }
 
 /// Part of the saved context's name. Bump whenever learn() or the Context
 /// layout changes, so a context learned by older rules isn't used.
-const CONTEXT_RULES: u32 = 2;
+const CONTEXT_RULES: u32 = 3;
 
 fn context_path(cache_dir: &Path, version: &str) -> PathBuf {
     let safe: String = version.chars().map(|c| if c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-') { c } else { '_' }).collect();
@@ -609,6 +624,187 @@ fn check_shaped(context: &Context, known: &Known, rel_path: &str, nodes: &[Node]
 /// Checks every enabled mod's files. A file another mod loading later ships
 /// at the same path is skipped, and so are objects another mod's definition
 /// replaces, since the game never reads those.
+/// An event id as written, the way the game compares them: lowercase, and
+/// the number without leading zeros. `None` for parameters, variables and
+/// anything without a namespace.
+fn event_id(raw: &str) -> Option<String> {
+    let raw = raw.trim();
+    if raw.contains(['$', '@']) {
+        return None;
+    }
+    let (namespace, number) = raw.rsplit_once('.')?;
+    if namespace.is_empty() || number.is_empty() {
+        return None;
+    }
+    let number = match number.parse::<u64>() {
+        Ok(n) => n.to_string(),
+        Err(_) => number.to_owned(),
+    };
+    Some(format!("{}.{}", namespace.to_lowercase(), number.to_lowercase()))
+}
+
+fn namespace(id: &str) -> &str {
+    id.rsplit_once('.').map_or(id, |(n, _)| n)
+}
+
+fn is_events_file(rel: &str) -> bool {
+    rel.to_lowercase().starts_with("events/")
+}
+
+/// An inline script's path as `script = …` names it, from its file under
+/// `common/inline_scripts/`.
+fn inline_script_name(rel: &str) -> Option<String> {
+    let lower = rel.replace('\\', "/").to_lowercase();
+    let rest = lower.strip_prefix("common/inline_scripts/")?;
+    Some(rest.strip_suffix(".txt").unwrap_or(rest).to_owned())
+}
+
+/// The parameters an inline script uses as an event's `id`, as in
+/// `id = $EVENT_ID$`.
+fn id_parameters(nodes: &[Node], out: &mut Vec<String>) {
+    for node in nodes {
+        if node.key.as_deref().is_some_and(|k| k.eq_ignore_ascii_case("id"))
+            && let Some(param) = node.value.as_deref().and_then(|v| v.strip_prefix('$')?.strip_suffix('$'))
+            && !out.iter().any(|p| p.eq_ignore_ascii_case(param))
+        {
+            out.push(param.to_owned());
+        }
+        if let Some(kids) = &node.kids {
+            id_parameters(kids, out);
+        }
+    }
+}
+
+/// An inline script used at the top of an events file: its path and the
+/// parameters it's given, keys lowercased.
+type InlineUse = (String, HashMap<String, String>);
+
+/// The events an events file defines: each top-level block's `id`. Top-level
+/// inline scripts may define events too; they're returned for resolving
+/// once every template is known.
+fn event_definitions(rel: &str, nodes: &[Node], ids: &mut HashSet<String>, inline: &mut Vec<InlineUse>) {
+    if !is_events_file(rel) {
+        return;
+    }
+    for node in nodes {
+        let (Some(key), Some(kids)) = (node.key.as_deref(), &node.kids) else { continue };
+        if key.eq_ignore_ascii_case("inline_script") {
+            let mut script = None;
+            let mut params = HashMap::new();
+            for kid in kids {
+                let (Some(k), Some(v)) = (kid.key.as_deref(), kid.value.as_deref()) else { continue };
+                if k.eq_ignore_ascii_case("script") {
+                    script = Some(v.replace('\\', "/").to_lowercase());
+                } else {
+                    params.insert(k.to_lowercase(), v.to_owned());
+                }
+            }
+            if let Some(script) = script {
+                inline.push((script, params));
+            }
+            continue;
+        }
+        let id = kids.iter().find(|k| k.key.as_deref().is_some_and(|k| k.eq_ignore_ascii_case("id"))).and_then(|k| k.value.as_deref());
+        if let Some(id) = id.and_then(event_id) {
+            ids.insert(id);
+        }
+    }
+}
+
+/// The ids the inline scripts in `inline` define, given each template's id
+/// parameters.
+fn resolve_inline(inline: &[InlineUse], templates: &HashMap<String, Vec<String>>, ids: &mut HashSet<String>) {
+    for (script, params) in inline {
+        for param in templates.get(script).into_iter().flatten() {
+            if let Some(id) = params.get(&param.to_lowercase()).and_then(|v| event_id(v)) {
+                ids.insert(id);
+            }
+        }
+    }
+}
+
+/// The events a file fires, with their lines: `*_event = { id = … }`
+/// blocks, and the `events` and `random_events` lists of on_actions. The
+/// top-level blocks of an events file define events rather than fire them.
+fn event_references(rel: &str, nodes: &[Node], out: &mut Vec<(usize, String)>) {
+    fn walk(nodes: &[Node], top: bool, out: &mut Vec<(usize, String)>) {
+        for node in nodes {
+            let Some(kids) = &node.kids else { continue };
+            let key = node.key.as_deref().unwrap_or("").to_lowercase();
+            if key == "events" {
+                out.extend(kids.iter().filter(|k| k.key.is_none()).filter_map(|k| Some((k.line, event_id(k.value.as_deref()?)?))));
+            } else if key == "random_events" {
+                out.extend(kids.iter().filter_map(|k| Some((k.line, event_id(k.value.as_deref()?)?))));
+            } else if key.ends_with("event") && !top {
+                let id = kids.iter().find(|k| k.key.as_deref().is_some_and(|k| k.eq_ignore_ascii_case("id")));
+                if let Some((line, id)) = id.and_then(|k| Some((k.line, event_id(k.value.as_deref()?)?))) {
+                    out.push((line, id));
+                }
+            }
+            walk(kids, false, out);
+        }
+    }
+    walk(nodes, is_events_file(rel), out);
+}
+
+/// The events `text` fires, as the check compares them.
+pub fn fired_events(rel: &str, text: &str) -> Vec<String> {
+    let Ok(nodes) = script::parse_lines(text) else { return Vec::new() };
+    let mut out = Vec::new();
+    event_references(rel, &nodes, &mut out);
+    out.into_iter().map(|(_, id)| id).collect()
+}
+
+/// The events the base game defines, and its inline scripts that define
+/// events with the parameters holding their ids.
+fn vanilla_events(game_dir: &Path) -> (HashSet<String>, HashMap<String, Vec<String>>) {
+    let mut ids = HashSet::new();
+    let mut inline = Vec::new();
+    let mut templates = HashMap::new();
+    for file in &all_files(game_dir) {
+        let Some(text) = read_text(&game_dir.join(file)) else { continue };
+        let Ok(nodes) = script::parse_lines(&text) else { continue };
+        event_definitions(file, &nodes, &mut ids, &mut inline);
+        if let Some(name) = inline_script_name(file) {
+            let mut params = Vec::new();
+            id_parameters(&nodes, &mut params);
+            if !params.is_empty() {
+                templates.insert(name, params);
+            }
+        }
+    }
+    resolve_inline(&inline, &templates, &mut ids);
+    (ids, templates)
+}
+
+/// The objects found at lines of one file, as (category, key).
+type Objects = HashMap<usize, Option<(String, String)>>;
+
+/// The object at `line` of a mod's file, if found, or `None` when another
+/// mod's copy of that object is the one the game uses. `objects` caches
+/// the lookups of one file by line.
+fn used_object(report: &Report, position: usize, file: &str, text: &str, line: usize, objects: &mut Objects) -> Option<Option<(String, String)>> {
+    let object = objects
+        .entry(line)
+        .or_insert_with(|| {
+            let category = file_merge::category(file);
+            source::object_at(&category, text, line).map(|(key, _)| (category, key))
+        })
+        .clone();
+    if let Some((category, key)) = &object
+        && let Some(definitions) = report.defined.get(&(category.clone(), key.clone()))
+        && definitions.len() > 1
+    {
+        let conflict = ObjectConflict { category: category.clone(), key: key.clone(), definitions: definitions.clone() };
+        if let Some((winner, _)) = conflict.winner()
+            && conflict.definitions[winner].mod_position != position
+        {
+            return None;
+        }
+    }
+    Some(object)
+}
+
 pub fn check_mods(context: &Context, known: &Known, roots: &[Option<PathBuf>], report: &Report) -> Vec<Finding> {
     let files: Vec<Vec<String>> = roots.iter().map(|root| root.as_deref().map(all_files).unwrap_or_default()).collect();
     let mut last: HashMap<String, usize> = HashMap::new();
@@ -620,6 +816,12 @@ pub fn check_mods(context: &Context, known: &Known, roots: &[Option<PathBuf>], r
     let mut found = Vec::new();
     // Each file is parsed once, for the check and for what it calls.
     let mut used = context.used.clone();
+    let mut events = context.events.clone();
+    let mut inline = Vec::new();
+    let mut templates = context.event_templates.clone();
+    // The events each file fires: (position, file, line, id). Most exist,
+    // so the object each is in is only looked up for those that don't.
+    let mut fired: Vec<(usize, String, usize, String)> = Vec::new();
     for (position, (root, files)) in roots.iter().zip(&files).enumerate() {
         let Some(root) = root else { continue };
         for file in files {
@@ -629,26 +831,24 @@ pub fn check_mods(context: &Context, known: &Known, roots: &[Option<PathBuf>], r
             let Some(text) = read_text(&root.join(file)) else { continue };
             let Ok(nodes) = script::parse_lines(&text) else { continue };
             collect_used(known, file, &nodes, &mut used);
+            event_definitions(file, &nodes, &mut events, &mut inline);
+            if let Some(name) = inline_script_name(file) {
+                let mut params = Vec::new();
+                id_parameters(&nodes, &mut params);
+                // A mod's copy replaces the game's, even without an event.
+                templates.insert(name, params);
+            }
+            let mut fires = Vec::new();
+            event_references(file, &nodes, &mut fires);
+            fired.extend(fires.into_iter().map(|(line, id)| (position, file.clone(), line, id)));
             let problems = check_shaped(context, known, file, &nodes);
             if problems.is_empty() {
                 continue;
             }
-            let category = file_merge::category(file);
-            let mut objects: HashMap<usize, Option<(String, String)>> = HashMap::new();
+            let mut objects = HashMap::new();
             for (line, name, ctx, problem, call) in problems {
-                let object = objects.entry(line).or_insert_with(|| source::object_at(&category, &text, line).map(|(key, _)| (category.clone(), key))).clone();
-                if let Some((category, key)) = &object
-                    && let Some(definitions) = report.defined.get(&(category.clone(), key.clone()))
-                    && definitions.len() > 1
-                {
-                    let conflict = ObjectConflict { category: category.clone(), key: key.clone(), definitions: definitions.clone() };
-                    if let Some((winner, _)) = conflict.winner()
-                        && conflict.definitions[winner].mod_position != position
-                    {
-                        continue;
-                    }
-                }
-                found.push(Finding { mod_position: position, file: file.clone(), line, name, ctx, problem, object, unused: false, call });
+                let Some(object) = used_object(report, position, file, &text, line, &mut objects) else { continue };
+                found.push(Finding { mod_position: position, file: file.clone(), line, name, ctx, problem, object, unused: false, call, siblings: Vec::new() });
             }
         }
     }
@@ -663,6 +863,31 @@ pub fn check_mods(context: &Context, known: &Known, roots: &[Option<PathBuf>], r
         if finding.problem == Problem::Unknown && calls[&finding.name] {
             finding.problem = Problem::Elsewhere;
         }
+    }
+    // Events nothing defines. A namespace nothing has belongs to a mod
+    // that isn't installed, often on purpose for compatibility.
+    resolve_inline(&inline, &templates, &mut events);
+    let mut by_namespace: HashMap<&str, Vec<&str>> = HashMap::new();
+    for id in &events {
+        by_namespace.entry(namespace(id)).or_default().push(id);
+    }
+    let mut texts: HashMap<(usize, String), (String, Objects)> = HashMap::new();
+    for (position, file, line, id) in fired {
+        if events.contains(&id) {
+            continue;
+        }
+        let Some(root) = &roots[position] else { continue };
+        let (text, objects) = texts.entry((position, file.clone())).or_insert_with(|| (read_text(&root.join(&file)).unwrap_or_default(), HashMap::new()));
+        let Some(object) = used_object(report, position, &file, text, line, objects) else { continue };
+        let (problem, siblings) = match by_namespace.get(namespace(&id)) {
+            Some(ids) => {
+                let mut ids: Vec<&str> = ids.clone();
+                ids.sort_by_key(|i| (i.rsplit_once('.').and_then(|(_, n)| n.parse::<u64>().ok()), *i));
+                (Problem::NoEvent, ids.into_iter().map(str::to_owned).collect())
+            }
+            None => (Problem::Elsewhere, Vec::new()),
+        };
+        found.push(Finding { mod_position: position, file, line, name: id, ctx: Ctx::Effect, problem, object, unused: false, call: false, siblings });
     }
     for finding in &mut found {
         finding.unused = finding.object.as_ref().is_some_and(|(category, key)| {
@@ -845,6 +1070,67 @@ mod tests {
         let found = check_text(&context, &known, "events/m.txt", &event("random_list = { 50 = { modifier = { factor = 0 } } }"));
         assert_eq!(found, vec![]);
         let _ = std::fs::remove_dir_all(game);
+    }
+
+    #[test]
+    fn event_ids_compare_like_the_game() {
+        assert_eq!(event_id("Borigins.01").as_deref(), Some("borigins.1"));
+        assert_eq!(event_id("\tmy_mod.10 ").as_deref(), Some("my_mod.10"));
+        assert_eq!(event_id("$EVENT$"), None);
+        assert_eq!(event_id("@ev"), None);
+        assert_eq!(event_id("no_namespace"), None);
+    }
+
+    #[test]
+    fn finds_events_fired_and_defined() {
+        let events = "namespace = a\ncarrier_event = { id = a.1 immediate = { country_event = { id = a.2 days = 5 } planet_event = { id = $P$ } } }\ncountry_event = { id = \"a.03\" }\ninline_script = { script = events/maker EVENT_ID = a.7 OTHER = x }";
+        let nodes = script::parse_lines(events).unwrap();
+        let (mut ids, mut inline) = (HashSet::new(), Vec::new());
+        event_definitions("events/a.txt", &nodes, &mut ids, &mut inline);
+        let mut sorted: Vec<_> = ids.iter().cloned().collect();
+        sorted.sort();
+        assert_eq!(sorted, ["a.1", "a.3"]);
+        let template = script::parse_lines("country_event = { id = $EVENT_ID$ trigger = { has_flag = $OTHER$ } }").unwrap();
+        let mut params = Vec::new();
+        id_parameters(&template, &mut params);
+        assert_eq!(params, ["EVENT_ID"]);
+        resolve_inline(&inline, &HashMap::from([("events/maker".to_owned(), params)]), &mut ids);
+        assert!(ids.contains("a.7"));
+        assert_eq!(inline_script_name("common/inline_scripts/Events/Maker.txt").as_deref(), Some("events/maker"));
+
+        let mut fired = Vec::new();
+        event_references("events/a.txt", &nodes, &mut fired);
+        assert_eq!(fired, [(2, "a.2".to_owned())], "the top-level blocks define events");
+        let on_actions = "on_monthly_pulse = {\n events = {\n a.1\n A.02\n }\n random_events = { 10 = a.5 0 = 0 }\n}\nmy_project = { on_success = { code = \"country_event = { id = c.1 }\" fleet_event = { id = b.4 } } }";
+        let mut fired = Vec::new();
+        event_references("common/on_actions/x.txt", &script::parse_lines(on_actions).unwrap(), &mut fired);
+        let ids: Vec<&str> = fired.iter().map(|(_, id)| id.as_str()).collect();
+        assert_eq!(ids, ["a.1", "a.2", "a.5", "b.4"], "quoted code isn't read");
+    }
+
+    #[test]
+    fn missing_events_are_findings() {
+        let game = game("events");
+        write(&game, &[("events/g.txt", "namespace = g\ncountry_event = { id = g.1 }\ncountry_event = { id = g.2 }")]);
+        let docs = docs();
+        let context = learn(&game, &docs, "test");
+        assert!(context.events.contains("g.1"));
+        let mod_root = temp("events-mod");
+        write(
+            &mod_root,
+            &[
+                ("events/m.txt", "namespace = m\ncountry_event = { id = m.1 immediate = { country_event = { id = g.3 } country_event = { id = g.02 } country_event = { id = m.1 } country_event = { id = other_mod.5 } } }"),
+            ],
+        );
+        let known = known(&docs, &[&game, &mod_root]);
+        let found = check_mods(&context, &known, &[Some(mod_root.clone())], &Report::default());
+        let events: Vec<(&str, Problem)> = found.iter().filter(|f| matches!(f.problem, Problem::NoEvent | Problem::Elsewhere)).map(|f| (f.name.as_str(), f.problem)).collect();
+        assert_eq!(events, [("g.3", Problem::NoEvent), ("other_mod.5", Problem::Elsewhere)]);
+        assert_eq!(found.iter().find(|f| f.name == "g.3").unwrap().siblings, ["g.1", "g.2"]);
+        assert_eq!(found[0].object, Some(("events".to_owned(), "m.1".to_owned())));
+        assert_eq!(fired_events("events/m.txt", "country_event = { id = m.9 immediate = { ship_event = { id = g.1 } } }"), ["g.1"]);
+        let _ = std::fs::remove_dir_all(game);
+        let _ = std::fs::remove_dir_all(mod_root);
     }
 
     #[test]
@@ -1085,7 +1371,17 @@ mod tests {
             return;
         };
         let mut mods = Vec::new();
-        for entry in DlcLoad::read(&user).unwrap().enabled_mods {
+        // Every mod in a folder, such as the Workshop's, instead of the enabled ones.
+        if let Some(dir) = std::env::var_os("DRUKHAL_MODS_DIR") {
+            let mut dirs: Vec<PathBuf> = std::fs::read_dir(dir).unwrap().flatten().map(|e| e.path()).filter(|p| p.is_dir()).collect();
+            dirs.sort();
+            for root in dirs {
+                let name = std::fs::read_to_string(root.join("descriptor.mod")).ok().and_then(|s| Descriptor::parse(&s).ok()).map_or_else(|| root.display().to_string(), |d| d.name);
+                mods.push((name, root));
+            }
+        }
+        let enabled = if mods.is_empty() { DlcLoad::read(&user).unwrap().enabled_mods } else { Vec::new() };
+        for entry in enabled {
             if entry.contains("drukhal_merged_patch") {
                 continue;
             }
@@ -1114,6 +1410,12 @@ mod tests {
             vanilla += found.len();
         }
         assert_eq!(vanilla, 0, "vanilla must have no findings");
+        let mut dead = Vec::new();
+        for file in all_files(&game) {
+            let Some(text) = read_text(&game.join(&file)) else { continue };
+            dead.extend(fired_events(&file, &text).into_iter().filter(|id| !context.events.contains(id)).map(|id| format!("{file}: {id}")));
+        }
+        println!("{} game events, {} game inline scripts define events; the game fires {} it doesn't define: {dead:?}", context.events.len(), context.event_templates.len(), dead.len());
 
         let mut common: BTreeMap<(String, String), (usize, String)> = BTreeMap::new();
         let mut total = 0;
@@ -1160,6 +1462,10 @@ mod tests {
         }
         for (name, uses) in &elsewhere {
             println!("ELSEWHERE {uses:5} {name}");
+        }
+        for f in found.iter().filter(|f| f.problem == Problem::NoEvent) {
+            let shown: Vec<&str> = f.siblings.iter().take(8).map(String::as_str).collect();
+            println!("NO EVENT {}{} {}:{} {} (namespace has {}: {shown:?})", mods[f.mod_position].0, if f.unused { " [unused]" } else { "" }, f.file, f.line, f.name, f.siblings.len());
         }
     }
 }

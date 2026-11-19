@@ -1,5 +1,5 @@
 //! Effects, triggers and scopes that enabled mods use but the game doesn't
-//! have. The game skips them without saying so, so the features they belong
+//! have, and events they fire that nothing defines. The game skips them without saying so, so the features they belong
 //! to quietly stop working. Each object can be fixed with AI and saved to
 //! the merged patch.
 
@@ -32,7 +32,7 @@ pub fn present(parent: &impl IsA<gtk::Widget>, analysis: Rc<Analysis>, hooks: Rc
     let Some(script) = &analysis.script else { return };
     let navigation = adw::NavigationView::new();
 
-    let mut intro = t!("These scripts use effects, triggers or scopes this version of Stellaris doesn't have. The game skips them without saying so, so the features they belong to quietly stop working.");
+    let mut intro = t!("These scripts use effects, triggers or scopes this version of Stellaris doesn't have, or fire events nothing defines. The game skips them without saying so, so the features they belong to quietly stop working.");
     if script.docs_outdated {
         intro.push_str("\n\n");
         intro.push_str(&t!("The game's script documentation is from before its last update. Start Stellaris once to refresh it, then rescan."));
@@ -142,6 +142,7 @@ fn describe(f: &Finding) -> String {
         (Problem::Elsewhere, _) => tf!("Line {line}: {name} looks like it comes from another mod, and no installed mod defines it", line = f.line, name = &f.name),
         (Problem::Unsure, _) => tf!("Line {line}: {name} isn't a setting this kind of block takes in the base game", line = f.line, name = &f.name),
         (Problem::Capitalisation, _) => tf!("Line {line}: {name} has the wrong capitalisation", line = f.line, name = &f.name),
+        (Problem::NoEvent, _) => tf!("Line {line}: fires the event {name}, which neither the game nor an enabled mod has, so nothing happens", line = f.line, name = &f.name),
     }
 }
 
@@ -169,6 +170,11 @@ fn problems_for_model(findings: &[Finding]) -> Vec<String> {
                 Problem::Elsewhere => format!("`{}` may come from another mod; leave it", f.name),
                 Problem::Unsure => format!("`{}` isn't a setting this kind of block takes in the base game (it may be fine)", f.name),
                 Problem::Capitalisation => format!("`{}` has the wrong capitalisation; the game's names are lowercase", f.name),
+                Problem::NoEvent => format!(
+                    "it fires the event `{}`, which neither the game nor any enabled mod defines, so nothing happens. Its namespace defines: {}. Fire the event that was meant if one clearly fits, otherwise remove the call",
+                    f.name,
+                    f.siblings.join(", ")
+                ),
             };
             if n > 1 { format!("{what} (used {n} times)") } else { what }
         })
@@ -279,6 +285,14 @@ impl Fix {
         let problems = problems_for_model(&self.object.findings);
         // Names that may come from a mod that isn't installed, which the model leaves.
         let leave: std::collections::HashSet<String> = script.findings.iter().filter(|f| f.problem == Problem::Elsewhere).map(|f| f.name.clone()).collect();
+        // For missing events: each namespace's events that do exist.
+        let namespaces: std::collections::HashMap<String, Vec<String>> = self
+            .object
+            .findings
+            .iter()
+            .filter(|f| f.problem == Problem::NoEvent)
+            .filter_map(|f| Some((f.name.rsplit_once('.')?.0.to_owned(), f.siblings.clone())))
+            .collect();
         let mut names: Vec<String> = self.object.findings.iter().map(|f| f.name.clone()).collect();
         names.sort();
         names.dedup();
@@ -297,6 +311,16 @@ impl Fix {
                     let script = merge_dialog::validate(&category, &key, text)?;
                     // Uncertain names don't make a fix fail.
                     let remaining: Vec<_> = script_check::check_text(&context, &known, &file, &script).into_iter().filter(|(_, name, _, problem)| *problem != Problem::Unsure && !leave.contains(name)).collect();
+                    // Events the namespace doesn't have, kept or newly made up.
+                    let mut events: Vec<String> = script_check::fired_events(&file, &script)
+                        .into_iter()
+                        .filter(|id| id.rsplit_once('.').and_then(|(ns, _)| namespaces.get(ns)).is_some_and(|ids| !ids.contains(id)))
+                        .collect();
+                    events.sort();
+                    events.dedup();
+                    if !events.is_empty() {
+                        return Err(format!("it still fires events that don't exist: {}", events.join(", ")));
+                    }
                     if remaining.is_empty() {
                         return Ok(script);
                     }
