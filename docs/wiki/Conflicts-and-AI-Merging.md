@@ -37,6 +37,8 @@ Pick a model in **Main Menu → Preferences → AI Merging**: Claude, OpenRouter
 
 Each merge is a paid API call (or a local model you run), so read what comes back before saving it.
 
+**Model Instructions** in the same page is added to every request. The default tells the model to work from the text it was given, apply a rename directly and keep its reasoning short; edit it if a provider needs a different style.
+
 ## The merged patch
 
 Merges are saved into a merged patch mod that loads last, one per collection. Your mods are never changed. When a mod or the game updates, the merges that depended on it are flagged as outdated.

@@ -475,6 +475,35 @@ Output rules:
 - `notes` is a short plain-text summary for the player, for example \"Replaced every_system_colony with the planet and ship loops; removed one has_job check that has no replacement.\" No markdown.
 - Reply with a JSON object with exactly the string fields `script` and `notes`.";
 
+/// How the model is asked to work, unless the user changes it in
+/// Preferences. It's kept short on purpose: models that reason spend a lot
+/// of their thinking hunting for text they weren't given, or restating the
+/// task, and a nudge to decide once cuts that down.
+pub const DEFAULT_INSTRUCTIONS: &str = "Work directly from the text you were given.
+- Don't speculate about files, lines or blocks you can't see, and don't go looking for something that isn't in the text.
+- If a listed problem names something that isn't there, don't infer a similar name or guess where it might be: say so, and leave that part unchanged.
+- Apply a rename or capitalisation fix directly; there's no need to review everything else first.
+- If the text already does what is asked, return it unchanged.
+- Decide once, then write the answer. Don't restate the task, quote the input back, or weigh options you can't check. Keep your reasoning short.";
+
+/// The user's instructions, set when the window opens and when Preferences
+/// changes them. Read by every request, so a change applies to the next one.
+static INSTRUCTIONS: std::sync::RwLock<String> = std::sync::RwLock::new(String::new());
+
+/// Sets the working-style instructions added to every system prompt. Empty
+/// sends none.
+pub fn set_instructions(text: &str) {
+    if let Ok(mut current) = INSTRUCTIONS.write() {
+        *current = text.to_owned();
+    }
+}
+
+/// `system` followed by the working-style instructions, if there are any.
+pub(crate) fn with_instructions(system: &str, instructions: &str) -> String {
+    let instructions = instructions.trim();
+    if instructions.is_empty() { system.to_owned() } else { format!("{system}\n\nHow to work:\n{instructions}") }
+}
+
 /// Whether the shipped notes already mention `keyword` as a changed name.
 pub fn has_note(keyword: &str) -> bool {
     notes().iter().any(|n| n.old == keyword)
@@ -554,6 +583,8 @@ pub fn explain(provider: &Provider, question: &ErrorQuestion, on: &mut dyn FnMut
 }
 
 fn complete(provider: &Provider, system: &str, prompt: &str, on: &mut dyn FnMut(Progress)) -> Result<Merged, String> {
+    let current = INSTRUCTIONS.read().map(|s| s.clone()).unwrap_or_default();
+    let system = with_instructions(system, &current);
     // Who was asked and what it cost; never the prompt or the key.
     let who = match provider {
         Provider::Anthropic { model, .. } => format!("Claude {model}"),
@@ -561,8 +592,8 @@ fn complete(provider: &Provider, system: &str, prompt: &str, on: &mut dyn FnMut(
     };
     let started = std::time::Instant::now();
     let result = match provider {
-        Provider::Anthropic { api_key, model } => merge_anthropic(api_key, model, system, prompt, on),
-        Provider::OpenAiCompatible { base_url, model, api_key } => merge_openai(base_url, model, api_key, system, prompt, on),
+        Provider::Anthropic { api_key, model } => merge_anthropic(api_key, model, &system, prompt, on),
+        Provider::OpenAiCompatible { base_url, model, api_key } => merge_openai(base_url, model, api_key, &system, prompt, on),
     };
     let took = started.elapsed().as_secs_f32();
     match &result {
@@ -1025,6 +1056,27 @@ mod tests {
         assert_eq!(backoff(0, Some(30)).as_secs(), 30);
         assert_eq!(backoff(0, Some(9999)).as_secs(), 120, "capped");
         assert!(correction("x = {", "syntax error at line 1").contains("<previous_answer>\nx = {\n</previous_answer>"));
+    }
+
+    #[test]
+    fn appends_the_working_instructions() {
+        assert_eq!(with_instructions("Base.", "   "), "Base.");
+        assert_eq!(with_instructions("Base.", " Be brief. "), "Base.\n\nHow to work:\nBe brief.");
+        assert!(DEFAULT_INSTRUCTIONS.contains("Keep your reasoning short"));
+    }
+
+    #[test]
+    fn sends_the_working_instructions_in_every_request() {
+        let (url, requests) = fake_server(vec![(200, json!({"script": "lab = { cost = 3 }", "notes": "n"}).to_string())]);
+        let provider = Provider::OpenAiCompatible { base_url: url, model: "m".into(), api_key: String::new() };
+        let a = Source { label: "A".into(), file: "a.txt".into(), text: "lab = { cost = 1 }".into() };
+        let check = |text: &str| crate::merge_dialog::validate("common/buildings", "lab", text);
+        set_instructions("TEST-INSTRUCTION");
+        let result = merge_checked(&provider, "common/buildings", "lab", None, &[a.clone(), a], &check, &mut |_| {});
+        set_instructions("");
+        assert!(result.is_ok());
+        let request = requests.recv().unwrap();
+        assert!(request.contains("How to work:") && request.contains("TEST-INSTRUCTION"), "the system prompt carries the instructions");
     }
 
     #[test]

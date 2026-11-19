@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: DrukhalManager 2.4.0\n"
 "Report-Msgid-Bugs-To: https://github.com/Dukko/DrukhalManager/issues\n"
-"POT-Creation-Date: 2026-11-19 22:37+0000\n"
+"POT-Creation-Date: 2026-11-19 23:07+0000\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -2686,6 +2686,22 @@ msgstr ""
 
 #: src/preferences.rs
 msgid "How many objects Merge All sends to the provider at the same time. Lower it if the provider rate-limits you."
+msgstr ""
+
+#: src/preferences.rs src/preferences.rs
+msgid "Model Instructions"
+msgstr ""
+
+#: src/preferences.rs
+msgid "_Reset to Default"
+msgstr ""
+
+#: src/preferences.rs
+msgid "Sent with every AI request. The default asks the model to work from the text it was given and keep its reasoning short."
+msgstr ""
+
+#: src/preferences.rs
+msgid "How the model works"
 msgstr ""
 
 #: src/preferences.rs

@@ -524,6 +524,7 @@ pub fn build(
     app.set_accels_for_action("win.redo", &["<Control><Shift>z", "<Control>y"]);
 
     let (loaded_settings, settings_problem) = Settings::load_checked(&settings::path());
+    crate::merge::ai::set_instructions(&loaded_settings.ai_instructions);
 
     let ui = Rc::new(Window {
         window: window.clone(),
@@ -923,6 +924,7 @@ impl Window {
                     ui.store_steam_key(key);
                 }
                 ui.settings.replace(settings);
+                crate::merge::ai::set_instructions(&ui.settings.borrow().ai_instructions);
                 if extra_changed {
                     // Lists the new folder's mods, and drops the old one's.
                     ui.reload(|ui| ui.rebuild_collection_menu());

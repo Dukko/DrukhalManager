@@ -140,6 +140,8 @@ Results go into a merged patch mod, one per collection, that loads last. If one 
 
 API keys go in your system keyring. Without a keyring they're stored in a settings file only your user can read.
 
+**Model Instructions** in the same page is added to every AI request. The default asks the model to work from the text it was given and keep its reasoning short, which avoids long deliberations about things that aren't in the object; edit it, or reset it with one click.
+
 ## Launching
 
 **Launch** starts the game with your load order. Its dropdown holds the other ways in:

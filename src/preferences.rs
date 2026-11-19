@@ -26,11 +26,11 @@ pub fn present(parent: &impl IsA<gtk::Widget>, settings: Settings, page: Option<
     // and would otherwise size itself to an empty page.
     let dialog = adw::PreferencesDialog::builder().content_width(640).content_height(720).build();
     let (game_page, merging_page, read_game) = game_page(&settings.game);
-    let (ai_page, read_provider, read_parallel, ai_keyring) = ai_page(&settings.provider, settings.parallel_merges);
+    let AiPage { page: ai_page, provider: read_provider, parallel: read_parallel, instructions: read_instructions, keyring: ai_keyring } = ai_page(&settings.provider, settings.parallel_merges, &settings.ai_instructions);
     let (updates_page, read_updates) = updates_page(&settings.updates);
     let (tool_group, read_tool) = merge_tool_group(&settings.merge_tool);
     merging_page.add(&tool_group);
-    let (steam_group, read_steam_key) = steam_key_group(settings.steam_key.clone(), Box::new(ai_keyring));
+    let (steam_group, read_steam_key) = steam_key_group(settings.steam_key.clone(), ai_keyring);
     let steam_page = self::page("Steam", "steam", "network-server-symbolic");
     steam_page.add(&steam_group);
     // Several light pages rather than a few long ones: the dialog animates
@@ -51,7 +51,7 @@ pub fn present(parent: &impl IsA<gtk::Widget>, settings: Settings, page: Option<
         if let Some(f) = on_close.borrow_mut().take() {
             let provider = read_provider();
             let parallel_merges = read_parallel(&provider);
-            f(Settings { provider, parallel_merges, game: read_game(), updates: read_updates(), merge_tool: read_tool(), new_steam_key: read_steam_key(), ..base.clone() });
+            f(Settings { provider, parallel_merges, ai_instructions: read_instructions(), game: read_game(), updates: read_updates(), merge_tool: read_tool(), new_steam_key: read_steam_key(), ..base.clone() });
         }
     });
     // Sections appear once the dialog has opened: animating it in with
@@ -475,7 +475,19 @@ fn claude_model_row(current: &str, api_key: &str) -> (adw::ComboRow, impl Fn() -
     (row, chosen)
 }
 
-fn ai_page(current: &Provider, parallel: Option<u32>) -> (adw::PreferencesPage, impl Fn() -> Provider + use<>, impl Fn(&Provider) -> Option<u32> + use<>, impl Fn(bool) + use<>) {
+/// What the AI page's rows read back when the dialog closes.
+struct AiPage {
+    page: adw::PreferencesPage,
+    provider: Box<dyn Fn() -> Provider>,
+    parallel: ParallelReader,
+    instructions: Box<dyn Fn() -> String>,
+    keyring: Box<dyn Fn(bool)>,
+}
+
+/// Reads the "Merges at Once" row, as a setting for the chosen provider.
+type ParallelReader = Box<dyn Fn(&Provider) -> Option<u32>>;
+
+fn ai_page(current: &Provider, parallel: Option<u32>, instructions: &str) -> AiPage {
     // Remember both providers' fields while the user switches between them.
     let (mut anthropic_key, mut claude_model, mut openai) = (String::new(), ai::CLAUDE_MODEL.to_owned(), settings::openrouter());
     match current {
@@ -530,11 +542,55 @@ fn ai_page(current: &Provider, parallel: Option<u32>) -> (adw::PreferencesPage, 
     parallel_row.set_value(f64::from(parallel.unwrap_or_else(|| settings::default_parallel(current))));
     merge_all.add(&parallel_row);
 
+    // The prompt baseline keeps the model from deliberating about text it
+    // wasn't given; it's editable so a user can tune it per provider.
+    let instruction_text = gtk::TextBuffer::new(None);
+    instruction_text.set_text(instructions);
+    let instructions_group = {
+        let view = gtk::TextView::builder()
+            .buffer(&instruction_text)
+            .wrap_mode(gtk::WrapMode::WordChar)
+            .accepts_tab(false)
+            .top_margin(8)
+            .bottom_margin(8)
+            .left_margin(10)
+            .right_margin(10)
+            .build();
+        view.update_property(&[gtk::accessible::Property::Label(&t!("Model Instructions"))]);
+        let scroll = gtk::ScrolledWindow::builder()
+            .child(&view)
+            .min_content_height(150)
+            .max_content_height(240)
+            .hexpand(true)
+            .hscrollbar_policy(gtk::PolicyType::Never)
+            .build();
+        let reset = gtk::Button::builder()
+            .label(t!("_Reset to Default"))
+            .use_underline(true)
+            .halign(gtk::Align::Start)
+            .css_classes(["flat"])
+            .build();
+        {
+            let buffer = instruction_text.clone();
+            reset.connect_clicked(move |_| buffer.set_text(ai::DEFAULT_INSTRUCTIONS));
+        }
+        let body = gtk::Box::new(gtk::Orientation::Vertical, 6);
+        body.append(&scroll);
+        body.append(&reset);
+        let group = adw::PreferencesGroup::builder()
+            .title(t!("Model Instructions"))
+            .description(t!("Sent with every AI request. The default asks the model to work from the text it was given and keep its reasoning short."))
+            .build();
+        group.add(&adw::ActionRow::builder().title(t!("How the model works")).child(&body).build());
+        group
+    };
+
     let page = page(&t!("AI Merging"), AI_PAGE, "applications-science-symbolic");
     page.add(&choice);
     page.add(&anthropic);
     page.add(&compatible);
     page.add(&merge_all);
+    page.add(&instructions_group);
     let read = move || {
         if provider.selected() == 0 {
             Provider::Anthropic { api_key: anthropic_key_row.text().trim().to_owned(), model: read_claude_model() }
@@ -549,13 +605,20 @@ fn ai_page(current: &Provider, parallel: Option<u32>) -> (adw::PreferencesPage, 
     };
     // Only remembered when it differs from the provider's default.
     let read_parallel = move |provider: &Provider| Some(parallel_row.value() as u32).filter(|&n| n != settings::default_parallel(provider));
+    let read_instructions = move || instruction_text.text(&instruction_text.start_iter(), &instruction_text.end_iter(), false).trim().to_owned();
     // Says where the keys really are, once it's known whether there's a
     // keyring.
     let keyring = move |available: bool| {
         anthropic.set_description(Some(&tf!("{storage} {note}", storage = key_storage(available), note = claude_description())));
         compatible.set_description(Some(&tf!("{note} {storage}", note = compatible_description(), storage = key_storage(available))));
     };
-    (page, read, read_parallel, keyring)
+    AiPage {
+        page,
+        provider: Box::new(read),
+        parallel: Box::new(read_parallel),
+        instructions: Box::new(read_instructions),
+        keyring: Box::new(keyring),
+    }
 }
 
 fn updates_page(options: &UpdateOptions) -> (adw::PreferencesPage, impl Fn() -> UpdateOptions + use<>) {

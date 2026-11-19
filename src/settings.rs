@@ -81,6 +81,10 @@ pub struct Settings {
     /// `{base}` and `{output}`; empty for none.
     #[serde(default)]
     pub merge_tool: String,
+    /// How the AI is asked to work, added to every request. Starts as
+    /// [`crate::merge::ai::DEFAULT_INSTRUCTIONS`]; empty sends none.
+    #[serde(default = "default_ai_instructions")]
+    pub ai_instructions: String,
     /// Hides the Smart Sort category headers in the load order.
     #[serde(default)]
     pub hide_category_headers: bool,
@@ -191,13 +195,17 @@ fn default_patch_weeks() -> u32 {
     52
 }
 
+fn default_ai_instructions() -> String {
+    crate::merge::ai::DEFAULT_INSTRUCTIONS.to_owned()
+}
+
 fn default_provider() -> Provider {
     Provider::claude("")
 }
 
 impl Default for Settings {
     fn default() -> Self {
-        Self { provider: default_provider(), ignored: Default::default(), ignore_rules: String::new(), parallel_merges: None, show_dependency_conflicts: false, game: Default::default(), updates: Default::default(), sort_categories: Default::default(), placed_below: Default::default(), aliases: Default::default(), notes: Default::default(), disabled_order: Default::default(), key_in_keyring: false, new_steam_key: None, steam_key: String::new(), ignored_requirements: Default::default(), dismissed_patches: Default::default(), patch_weeks: default_patch_weeks(), last_game_version: None, merge_tool: String::new(), hide_category_headers: false }
+        Self { provider: default_provider(), ignored: Default::default(), ignore_rules: String::new(), parallel_merges: None, show_dependency_conflicts: false, game: Default::default(), updates: Default::default(), sort_categories: Default::default(), placed_below: Default::default(), aliases: Default::default(), notes: Default::default(), disabled_order: Default::default(), key_in_keyring: false, new_steam_key: None, steam_key: String::new(), ignored_requirements: Default::default(), dismissed_patches: Default::default(), patch_weeks: default_patch_weeks(), last_game_version: None, merge_tool: String::new(), ai_instructions: default_ai_instructions(), hide_category_headers: false }
     }
 }
 
@@ -346,7 +354,7 @@ mod tests {
     fn saves_privately_and_loads() {
         let path = std::env::temp_dir().join(format!("drukhal-settings-{}/settings.json", std::process::id()));
         assert_eq!(Settings::load(&path), Settings::default());
-        let s = Settings { provider: Provider::OpenAiCompatible { base_url: "http://localhost:11434/v1".into(), model: "qwen".into(), api_key: String::new() }, ignored: ["file:x".to_owned()].into(), ignore_rules: "gfx/**".into(), parallel_merges: Some(3), show_dependency_conflicts: true, game: GameOptions { launch_args: "-debug".into(), close_after_launch: true, ..Default::default() }, updates: UpdateOptions { check_at_startup: true, skipped_version: Some("0.2.0".into()), prereleases: true }, sort_categories: [("mod/ugc_1.mod".to_owned(), "ui".to_owned())].into(), placed_below: [("mod/ugc_3.mod".to_owned(), "mod/ugc_1.mod".to_owned())].into(), aliases: [("mod/ugc_2.mod".to_owned(), "UIOD".to_owned())].into(), notes: [("mod/ugc_2.mod".to_owned(), "Keep below Giga".to_owned())].into(), disabled_order: DisabledOrder::RecentlyUpdated, key_in_keyring: false, new_steam_key: None, steam_key: String::new(), ignored_requirements: Default::default(), dismissed_patches: Default::default(), patch_weeks: default_patch_weeks(), last_game_version: None, merge_tool: "meld {left} {right}".into(), hide_category_headers: true };
+        let s = Settings { provider: Provider::OpenAiCompatible { base_url: "http://localhost:11434/v1".into(), model: "qwen".into(), api_key: String::new() }, ignored: ["file:x".to_owned()].into(), ignore_rules: "gfx/**".into(), parallel_merges: Some(3), show_dependency_conflicts: true, game: GameOptions { launch_args: "-debug".into(), close_after_launch: true, ..Default::default() }, updates: UpdateOptions { check_at_startup: true, skipped_version: Some("0.2.0".into()), prereleases: true }, sort_categories: [("mod/ugc_1.mod".to_owned(), "ui".to_owned())].into(), placed_below: [("mod/ugc_3.mod".to_owned(), "mod/ugc_1.mod".to_owned())].into(), aliases: [("mod/ugc_2.mod".to_owned(), "UIOD".to_owned())].into(), notes: [("mod/ugc_2.mod".to_owned(), "Keep below Giga".to_owned())].into(), disabled_order: DisabledOrder::RecentlyUpdated, key_in_keyring: false, new_steam_key: None, steam_key: String::new(), ignored_requirements: Default::default(), dismissed_patches: Default::default(), patch_weeks: default_patch_weeks(), last_game_version: None, merge_tool: "meld {left} {right}".into(), ai_instructions: "Answer briefly.".into(), hide_category_headers: true };
         s.save(&path).unwrap();
         assert_eq!(Settings::load(&path), s);
         assert!(s.ready_provider().is_some());
@@ -380,6 +388,7 @@ mod tests {
         let s: Settings = serde_json::from_str(old).unwrap();
         assert_eq!(s.game, GameOptions::default());
         assert_eq!(s.updates, UpdateOptions::default());
+        assert_eq!(s.ai_instructions, crate::merge::ai::DEFAULT_INSTRUCTIONS, "old settings get the prompt baseline");
     }
 
     #[test]
