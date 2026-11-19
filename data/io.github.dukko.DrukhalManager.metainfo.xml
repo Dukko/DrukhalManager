@@ -36,6 +36,11 @@
     <control>keyboard</control>
   </supports>
   <releases>
+    <release version="2.1.0" date="2026-11-18">
+      <description>
+        <p>Ignore rules can be made by clicking. A new “won by” rule hides the conflicts in a folder while one mod's version is the one the game uses, such as a merger meant to override them, and shows them again if another mod overrides it. Add one from a folder's menu in the conflict list, from the menu beside Ignore Conflict, or with Add Rule. Each rule shows which conflicts it hides and which stay shown. The Ignore Rules dialog lists rules in words with a delete button, with the text editor behind Edit as Text.</p>
+      </description>
+    </release>
     <release version="2.0.2" date="2026-11-18">
       <description>
         <p>Faster conflict scans: files the scan hasn't seen before are read on several threads, and each file is read once instead of once per object. The mod list, the error log's fixes and Look Up Objects also skip repeated work, so they respond faster with large mod lists.</p>
