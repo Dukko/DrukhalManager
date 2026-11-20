@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: DrukhalManager 2.5.0\n"
 "Report-Msgid-Bugs-To: https://github.com/Dukko/DrukhalManager/issues\n"
-"POT-Creation-Date: 2026-11-20 00:42+0000\n"
+"POT-Creation-Date: 2026-11-20 00:47+0000\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -1159,6 +1159,14 @@ msgstr ""
 msgid "Write a corrected copy of this mod's object into the merged patch"
 msgstr ""
 
+#: src/error_report_dialog.rs src/script_check_dialog.rs
+msgid "Edit by Hand"
+msgstr ""
+
+#: src/error_report_dialog.rs
+msgid "Write a corrected copy of this mod's object into the merged patch yourself"
+msgstr ""
+
 #: src/error_report_dialog.rs
 msgid "Open this file"
 msgstr ""
@@ -1207,7 +1215,7 @@ msgstr ""
 msgid "{name} defines {key} itself, so the game has no version to compare it with. The fix changes only what the error is about."
 msgstr ""
 
-#: src/error_report_dialog.rs
+#: src/error_report_dialog.rs src/error_report_dialog.rs
 msgid "Fix This Error"
 msgstr ""
 
@@ -1217,6 +1225,10 @@ msgstr ""
 
 #: src/error_report_dialog.rs
 msgid "The request failed unexpectedly"
+msgstr ""
+
+#: src/error_report_dialog.rs src/script_check_dialog.rs
+msgid "Change the right-hand copy, then save it to the merged patch. Rescan to see what's left."
 msgstr ""
 
 #: src/error_report_dialog.rs src/script_check_dialog.rs
@@ -2883,15 +2895,7 @@ msgid "The mod's copy couldn't be read, so it can't be fixed here."
 msgstr ""
 
 #: src/script_check_dialog.rs
-msgid "Edit by Hand"
-msgstr ""
-
-#: src/script_check_dialog.rs
 msgid "The fix failed unexpectedly"
-msgstr ""
-
-#: src/script_check_dialog.rs
-msgid "Change the right-hand copy, then save it to the merged patch. Rescan to see what's left."
 msgstr ""
 
 #: src/script_check_dialog.rs

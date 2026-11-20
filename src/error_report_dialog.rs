@@ -204,7 +204,17 @@ fn group_row(g: &Group, shown: &[&Entry], root: Option<PathBuf>, ctx: Option<&Rc
                     })
                 };
                 let (ctx, message, target) = (ctx.clone(), e.message.clone(), target.clone());
-                fix_button.connect_clicked(move |b| fix(b, &ctx, message.clone(), target.clone(), on_saved.clone()));
+                let edit_button = gtk::Button::builder()
+                    .label(t!("Edit by Hand"))
+                    .tooltip_text(t!("Write a corrected copy of this mod's object into the merged patch yourself"))
+                    .valign(gtk::Align::Center)
+                    .css_classes(["flat"])
+                    .build();
+                let (edit_ctx, edit_target, edit_saved) = (ctx.clone(), target.clone(), on_saved.clone());
+                edit_button.connect_clicked(move |b| fix_by_hand(b, &edit_ctx, edit_target.clone(), edit_saved.clone()));
+                let (fix_ctx, fix_target, fix_saved) = (ctx.clone(), target.clone(), on_saved.clone());
+                fix_button.connect_clicked(move |b| fix(b, &fix_ctx, message.clone(), fix_target.clone(), fix_saved.clone()));
+                entry.add_suffix(&edit_button);
                 entry.add_suffix(&fix_button);
                 entry.add_suffix(&done);
             }
@@ -465,6 +475,19 @@ fn fix(button: &gtk::Button, ctx: &Rc<Context>, message: String, target: Target,
     });
 }
 
+/// Opens the same review starting from the mod's copy, without a provider.
+fn fix_by_hand(button: &gtk::Button, ctx: &Rc<Context>, target: Target, on_saved: Rc<dyn Fn()>) {
+    let Some(version) = ctx.explain.fixer.as_ref().map(|fixer| fixer.game_version.clone()) else { return };
+    let stack = gtk::Stack::new();
+    let toolbar = adw::ToolbarView::new();
+    toolbar.add_top_bar(&adw::HeaderBar::new());
+    toolbar.set_content(Some(&stack));
+    let dialog = adw::Dialog::builder().title(t!("Fix This Error")).content_width(900).content_height(720).child(&toolbar).build();
+    let page = review_manual(ctx, &dialog, &target, &version, on_saved);
+    stack.add_named(&page, Some("review"));
+    dialog.present(Some(button));
+}
+
 /// What checks a fix of a mod's own object: the game's documentation and the
 /// names it and the enabled mods define.
 struct OwnCheck {
@@ -501,6 +524,20 @@ fn review(ctx: &Rc<Context>, dialog: &adw::Dialog, target: &Target, checked: ai:
         // Kept even when still rejected, to fix by hand.
         Err(problem) => (checked.merged.script, Some(problem)),
     };
+    show_review(ctx, dialog, target, script, &checked.merged.notes, problem, warnings, version, on_saved)
+}
+
+/// The mod's own copy next to itself, to correct by hand and save.
+fn review_manual(ctx: &Rc<Context>, dialog: &adw::Dialog, target: &Target, version: &str, on_saved: Rc<dyn Fn()>) -> gtk::Box {
+    let hint = t!("Change the right-hand copy, then save it to the merged patch. Rescan to see what's left.");
+    show_review(ctx, dialog, target, target.mod_copy.text.clone(), &hint, None, &[], version, on_saved)
+}
+
+/// `script` next to the mod's copy, to edit and save. `notes` is what the
+/// model said, or how to start; `problem` is why a model's result was still
+/// rejected.
+#[allow(clippy::too_many_arguments)]
+fn show_review(ctx: &Rc<Context>, dialog: &adw::Dialog, target: &Target, script: String, notes: &str, problem: Option<String>, warnings: &[String], version: &str, on_saved: Rc<dyn Fn()>) -> gtk::Box {
     let pair = Pair::new(true);
     pair.show(&target.mod_copy.text, &script, &Compare::Each, false);
     pair.left.set_header(&Header { title: target.mod_name.clone(), subtitle: target.mod_copy.file.clone(), color: None, badge: None });
@@ -516,8 +553,8 @@ fn review(ctx: &Rc<Context>, dialog: &adw::Dialog, target: &Target, checked: ai:
         margins(&l);
         l
     };
-    if !checked.merged.notes.trim().is_empty() {
-        body.append(&label(checked.merged.notes.clone(), &["dim-label"]));
+    if !notes.trim().is_empty() {
+        body.append(&label(notes.to_owned(), &["dim-label"]));
     }
     if !warnings.is_empty() {
         body.append(&label(tf!("Not found in Stellaris {version} or the mod's copy: {keys}. Check these before saving.", version = version, keys = warnings.join(", ")), &["warning"]));
