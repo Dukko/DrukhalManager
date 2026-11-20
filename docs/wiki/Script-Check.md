@@ -27,9 +27,9 @@ Findings it isn't sure about are kept apart, so they don't hide the real problem
 
 ## Fixing an object
 
-Pick an object to see each mod's version beside the base game's, with the problems listed. **Merge with AI** asks your model to rewrite the object using only effects, triggers and scopes the game has, and shows the result to review before it's saved.
+Pick an object to see each mod's version beside the base game's, with the problems listed. **Fix with AI** asks your model to rewrite the object using only effects, triggers and scopes the game has. **Edit by Hand** opens the same left/right editor starting from the mod's copy, so you can correct it yourself without a provider. Either way, review the result and **Save to Merged Patch**.
 
-A saved fix goes into the merged patch, like any other merge, and the row then says **Fixed in the merged patch**. Nothing in your mods is changed.
+A saved fix goes into the merged patch, like any other merge, and the row then says **Fixed in the merged patch**. Nothing in your mods is changed; rescan to see anything still left.
 
 ## Ignore rules
 

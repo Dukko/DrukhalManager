@@ -154,7 +154,7 @@ API keys go in your system keyring. Without a keyring they're stored in a settin
 
 ## When something goes wrong
 
-If the last game logged errors, the bottom of the sidebar says how many; click it to see them grouped by the mod they came from. The bell in the header keeps every notification, so you can go back to one you missed. If you hit a bug, **Main Menu → Troubleshooting** copies a short report you can paste into an issue. It comes from a small log of scans, merges, AI calls and game launches, and never includes API keys, prompts or file contents.
+If the last game logged errors, the bottom of the sidebar says how many; click it to see them grouped by the mod they came from. A fixable error can be corrected with **Fix with AI** or **Edit by Hand**, and either result goes into the merged patch. The bell in the header keeps every notification, so you can go back to one you missed. If you hit a bug, **Main Menu → Troubleshooting** copies a short report you can paste into an issue. It comes from a small log of scans, merges, AI calls and game launches, and never includes API keys, prompts or file contents.
 
 There's a longer how-to for each of these in the [wiki](https://github.com/Dukko/DrukhalManager/wiki).
 

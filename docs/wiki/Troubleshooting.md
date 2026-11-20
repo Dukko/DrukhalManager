@@ -2,7 +2,7 @@
 
 ## The game logged errors
 
-When the last game wrote errors to its `error.log`, the bottom of the Load Order sidebar says **Last game logged N errors**. Click it to see them grouped by the mod they came from, with your merges and fixes at the top.
+When the last game wrote errors to its `error.log`, the bottom of the Load Order sidebar says **Last game logged N errors**. Click it to see them grouped by the mod they came from, with your merges and fixes at the top. An error that names a fixable object has **Fix with AI** and **Edit by Hand**; both write the corrected object into the merged patch, and the row then says it's fixed.
 
 ## A notification went away before I read it
 
