@@ -259,15 +259,21 @@ fn detail(analysis: &Rc<Analysis>, hooks: &Rc<MergeHooks>, navigation: &adw::Nav
     let error = error_label();
     error.set_margin_top(6);
     let thinking = ThinkingView::new();
-    let button = gtk::Button::builder().label(t!("Fix with AI")).css_classes(["suggested-action"]).halign(gtk::Align::End).margin_top(12).margin_start(12).margin_end(12).margin_bottom(12).build();
+    let buttons = gtk::Box::builder().spacing(6).halign(gtk::Align::End).margin_top(12).margin_start(12).margin_end(12).margin_bottom(12).build();
+    let edit = gtk::Button::builder().label(t!("Edit by Hand")).build();
+    let fix_button = gtk::Button::builder().label(t!("Fix with AI")).css_classes(["suggested-action"]).build();
+    buttons.append(&edit);
+    buttons.append(&fix_button);
     body.append(&error);
-    body.append(&button);
+    body.append(&buttons);
     let thinking_box = gtk::Box::builder().margin_start(12).margin_end(12).margin_bottom(12).build();
     thinking_box.append(&thinking.widget);
     thinking.widget.set_hexpand(true);
     body.append(&thinking_box);
-    let button_ref = button.clone();
-    button.connect_clicked(move |_| fix.start(&button_ref, &error, &thinking));
+    let edit_ref = fix.clone();
+    edit.connect_clicked(move |_| edit_ref.edit());
+    let button_ref = fix_button.clone();
+    fix_button.connect_clicked(move |_| fix.start(&button_ref, &error, &thinking));
     wrap(&object.key, Some(analysis.name(object.position)), &stack)
 }
 
@@ -348,6 +354,19 @@ impl Fix {
             // Kept even when still rejected, to fix by hand.
             Err(problem) => (checked.merged.script, Some(problem)),
         };
+        self.show_review(script, Some(checked.merged.notes), problem, game);
+    }
+
+    /// Edits the mod's copy by hand, without asking the model.
+    fn edit(self: &Rc<Self>) {
+        let game = self.analysis.script.as_ref().and_then(|script| source::vanilla(&script.game_dir, &self.object.category, &self.object.key));
+        self.show_review(self.mod_text.clone(), Some(t!("Change the right-hand copy, then save it to the merged patch. Rescan to see what's left.")), None, game);
+    }
+
+    /// `script` next to the mod's copy, to edit and save. `notes` is what
+    /// the model said, or how to start by hand; `problem` is why a model's
+    /// result was still rejected.
+    fn show_review(self: &Rc<Self>, script: String, notes: Option<String>, problem: Option<String>, game: Option<Source>) {
         let pair = Pair::new(true);
         pair.show(&self.mod_text, &script, &Compare::Each, false);
         pair.left.set_header(&Header { title: self.analysis.name(self.object.position).to_owned(), subtitle: self.object.file.clone(), color: None, badge: None });
@@ -356,8 +375,8 @@ impl Fix {
 
         let body = gtk::Box::new(gtk::Orientation::Vertical, 0);
         body.append(&pair.widget);
-        if !checked.merged.notes.trim().is_empty() {
-            body.append(&dim(checked.merged.notes.clone()));
+        if let Some(notes) = notes.filter(|notes| !notes.trim().is_empty()) {
+            body.append(&dim(notes));
         }
         let error = error_label();
         if let Some(problem) = problem {
