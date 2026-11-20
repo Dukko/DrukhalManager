@@ -36,6 +36,11 @@
     <control>keyboard</control>
   </supports>
   <releases>
+    <release version="2.6.0" date="2026-11-19">
+      <description>
+        <p>Fix problems by hand: Script Check's object pages and the Game Errors list now offer Edit by Hand next to Fix with AI. It opens the same side-by-side review starting from the mod's copy, so the problems can be corrected without an AI provider and saved to the merged patch. Saving still checks that the script parses and defines the object, and the row then says it's fixed in the patch.</p>
+      </description>
+    </release>
     <release version="2.5.0" date="2026-11-19">
       <description>
         <p>AI requests now carry Model Instructions you can edit in Preferences → AI Merging. The default baseline tells the model to work from the text it was given, apply a rename or capitalisation fix directly, leave alone a problem that doesn't appear in the object, and decide once instead of restating the task or weighing options it can't check. It keeps the model's reasoning short, especially when a script problem refers to a name the shown definition doesn't contain. Reset to Default restores the baseline.</p>
