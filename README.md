@@ -191,7 +191,7 @@ LANG=de_DE.UTF-8 cargo run
 2. If the release adds a permission to `flatpak/io.github.dukko.DrukhalManager.yml`, say so in the release notes: Flatpak won't let the app update itself into it, so users update with `flatpak update` or their software centre instead.
 3. If dependencies changed, regenerate `flatpak/cargo-sources.json` (see `flatpak/generate-cargo-sources.py`); the build fails if it is stale.
 4. If UI strings changed, run `po/update-pot.sh` and commit the template; CI fails when it is out of date.
-5. Merge it into `master` through a pull request. The *Tag release* workflow tags `vX.Y.Z`, builds the Flatpak, publishes the signed repository to GitHub Pages and attaches `DrukhalManager.flatpak` to the release. The *Windows bundle* workflow attaches the installer `DrukhalManager-setup-x64.exe` and `DrukhalManager-windows-x64.zip` once the release exists.
+5. Merge it into `master` through a pull request. The *Tag release* workflow tags `vX.Y.Z`, builds the Flatpak, publishes the signed repository to GitHub Pages and attaches `DrukhalManager.flatpak` to the release. The *Windows bundle* workflow attaches the installer `DrukhalManager-setup-x64.exe` and `DrukhalManager-windows-x64.zip` once the release exists. For a stable version it then opens the PR that adds the version to winget, using the `WINGET_TOKEN` secret (a classic token with `public_repo` scope; replace it when it expires). It skips until the package's first PR has been accepted.
 
 </details>
 
