@@ -980,23 +980,61 @@ pub(super) struct CachedRow {
     number: Option<PositionWidget>,
 }
 
-/// Makes `list` hold exactly `rows`, in order, moving only rows that are
-/// out of place instead of emptying it.
+/// Makes `list` hold exactly `rows`, in order, moving as few rows as it
+/// can: the longest run of rows already in the right relative order stays
+/// where it is, so moving one mod moves one row rather than every row
+/// between its old and new spot.
 fn place(list: &gtk::ListBox, rows: &[adw::ActionRow]) {
-    for (i, row) in rows.iter().enumerate() {
-        if list.row_at_index(i as i32).as_ref() == Some(row.upcast_ref::<gtk::ListBoxRow>()) {
-            continue;
+    let wanted: HashMap<gtk::ListBoxRow, usize> = rows.iter().enumerate().map(|(i, r)| (r.clone().upcast(), i)).collect();
+    let current: Vec<gtk::ListBoxRow> = (0..).map_while(|i| list.row_at_index(i)).collect();
+    let positions: Vec<usize> = current.iter().filter_map(|r| wanted.get(r).copied()).collect();
+    let mut kept = vec![false; rows.len()];
+    for i in longest_increasing(&positions) {
+        kept[i] = true;
+    }
+    for row in &current {
+        if !wanted.get(row).is_some_and(|&i| kept[i]) {
+            list.remove(row);
         }
-        // It may be further down this list, or in the other one.
+    }
+    // The rows left are in order, so inserting the others front to back
+    // puts each at its final index.
+    for (i, row) in rows.iter().enumerate().filter(|&(i, _)| !kept[i]) {
+        // It may be in the other list.
         if let Some(parent) = row.parent().and_then(|p| p.downcast::<gtk::ListBox>().ok()) {
             parent.remove(row);
         }
         list.insert(row, i as i32);
     }
-    while let Some(extra) = list.row_at_index(rows.len() as i32) {
-        list.remove(&extra);
-    }
     debug_assert!(rows.iter().enumerate().all(|(i, r)| list.row_at_index(i as i32).as_ref() == Some(r.upcast_ref::<gtk::ListBoxRow>())));
+    debug_assert!(list.row_at_index(rows.len() as i32).is_none());
+}
+
+/// The values of a longest strictly increasing subsequence of `values`.
+fn longest_increasing(values: &[usize]) -> Vec<usize> {
+    // `tails[k]`: index of the smallest last value of an increasing run of
+    // length k + 1; `previous[i]`: index of the value before `values[i]`.
+    let mut tails: Vec<usize> = Vec::new();
+    let mut previous = vec![usize::MAX; values.len()];
+    for (i, &v) in values.iter().enumerate() {
+        let k = tails.partition_point(|&t| values[t] < v);
+        if k > 0 {
+            previous[i] = tails[k - 1];
+        }
+        if k == tails.len() {
+            tails.push(i);
+        } else {
+            tails[k] = i;
+        }
+    }
+    let mut found = Vec::with_capacity(tails.len());
+    let mut at = tails.last().copied().unwrap_or(usize::MAX);
+    while at != usize::MAX {
+        found.push(values[at]);
+        at = previous[at];
+    }
+    found.reverse();
+    found
 }
 
 /// `placed_below` (ids) as indexes into `mods`, skipping pairs where either
@@ -1084,6 +1122,66 @@ mod tests {
             problems: vec![(checks::Severity::Warning, "Broken".into(), false)],
             has_requirement: false,
         }
+    }
+
+    #[test]
+    fn finds_a_longest_increasing_run() {
+        assert_eq!(longest_increasing(&[]), Vec::<usize>::new());
+        assert_eq!(longest_increasing(&[1, 2, 3, 4, 0]), [1, 2, 3, 4]);
+        assert_eq!(longest_increasing(&[4, 0, 1, 2, 3]), [0, 1, 2, 3]);
+        let down = [3, 2, 1];
+        let run = longest_increasing(&down);
+        assert_eq!(run.len(), 1);
+        assert!(is_subsequence(&run, &down));
+        let mixed = [5, 1, 6, 2, 7, 3, 8];
+        let run = longest_increasing(&mixed);
+        assert_eq!(run.len(), 4);
+        assert!(run.windows(2).all(|w| w[0] < w[1]));
+        assert!(is_subsequence(&run, &mixed));
+    }
+
+    fn is_subsequence(run: &[usize], input: &[usize]) -> bool {
+        let mut rest = input.iter();
+        run.iter().all(|r| rest.any(|i| i == r))
+    }
+
+    /// Places rows in GTK lists and checks every order comes out right;
+    /// prints how long each reorder takes.
+    /// `cargo test place_reorders_rows -- --ignored --test-threads=1 --nocapture`
+    #[test]
+    #[ignore]
+    fn place_reorders_rows() {
+        gtk::init().unwrap();
+        let (list, other) = (gtk::ListBox::new(), gtk::ListBox::new());
+        let window = gtk::Window::new();
+        let both = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        both.append(&list);
+        both.append(&other);
+        window.set_child(Some(&both));
+        let rows: Vec<adw::ActionRow> = (0..300).map(|i| adw::ActionRow::builder().title(i.to_string()).build()).collect();
+        place(&list, &rows);
+        let check = |list: &gtk::ListBox, want: &[adw::ActionRow]| {
+            let got: Vec<gtk::ListBoxRow> = (0..).map_while(|i| list.row_at_index(i)).collect();
+            assert!(got.len() == want.len() && got.iter().zip(want).all(|(g, w)| g == w.upcast_ref::<gtk::ListBoxRow>()));
+        };
+        let mut order = rows.clone();
+        let first = order.remove(0);
+        order.push(first);
+        let mut shuffled = rows.clone();
+        shuffled.reverse();
+        let mut interleaved: Vec<_> = rows.iter().step_by(2).chain(rows.iter().skip(1).step_by(2)).cloned().collect();
+        interleaved.truncate(250);
+        for (name, want) in [("move one", &order), ("reverse", &shuffled), ("interleave and drop", &interleaved), ("back", &rows)] {
+            let started = std::time::Instant::now();
+            place(&list, want);
+            println!("{name}: {:?}", started.elapsed());
+            check(&list, want);
+        }
+        // Rows taken from the other list.
+        place(&other, &rows[..10]);
+        place(&list, &rows[10..]);
+        check(&other, &rows[..10]);
+        check(&list, &rows[10..]);
     }
 
     #[test]
