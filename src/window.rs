@@ -18,6 +18,7 @@ mod reload;
 mod repair_ui;
 mod requirements_ui;
 mod saves_ui;
+mod unused_ui;
 mod session_updates_ui;
 mod selection_ui;
 mod shortcuts;

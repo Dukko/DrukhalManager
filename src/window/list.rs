@@ -144,6 +144,7 @@ impl Window {
             .as_ref()
             .filter(|a| a.revision.get() == state.revision)
             .map_or(0, |a| a.order.iter().filter(|r| r.misplaced()).map(|r| r.patch).collect::<std::collections::BTreeSet<_>>().len());
+        let unused = self.analysis.borrow().as_ref().filter(|a| a.revision.get() == state.revision).map_or(0, |a| a.unused.len());
         let health = super::overview::Health {
             enabled: state.enabled.len(),
             total: state.mods.len(),
@@ -153,6 +154,7 @@ impl Window {
             missing_required: missing_required.len(),
             misordered,
             misplaced,
+            unused,
             no_achievements,
             stale_merges: self.stale.borrow().len(),
             frozen_updates,

@@ -42,6 +42,14 @@ pub struct Report {
     /// How many files the scan read from each mod, by scanned position;
     /// 0 for skipped mods.
     pub shipped: Vec<usize>,
+    /// For each scanned mod, by scanned position, how many of its files each
+    /// later mod replaces (replacer position -> file count): a later mod ships
+    /// the same path, or a `replace_path` covers it. A mod's files counted here
+    /// never reach the game.
+    pub replaced_by: Vec<BTreeMap<usize, usize>>,
+    /// Whether each scanned mod, by scanned position, declares a `replace_path`.
+    /// Such a mod hides base-game files even if all it ships is replaced.
+    pub has_replace_path: Vec<bool>,
     /// Each key of `defined`, in its order, lowercased whole and without a
     /// localisation key's language, made on the first look-up. Left to
     /// `look_up`; `pub(crate)` only so tests can build a `Report` with
@@ -340,7 +348,7 @@ pub fn analyze(mods: &[ModInput], languages: Option<&BTreeSet<String>>) -> Repor
 
 /// Like `analyze`, parsing only the files `cache` doesn't know as they are.
 pub fn analyze_cached(mods: &[ModInput], languages: Option<&BTreeSet<String>>, cache: &mut ScanCache) -> Report {
-    let mut report = Report { shipped: vec![0; mods.len()], ..Report::default() };
+    let mut report = Report { shipped: vec![0; mods.len()], replaced_by: vec![BTreeMap::new(); mods.len()], has_replace_path: mods.iter().map(|m| !m.replace_path.is_empty()).collect(), ..Report::default() };
 
     // Lowercased relative path -> (load position, path as spelled in that
     // mod) for every mod shipping it.
@@ -363,7 +371,15 @@ pub fn analyze_cached(mods: &[ModInput], languages: Option<&BTreeSet<String>>, c
         // A later `replace_path` makes the game ignore earlier mods' files in
         // that folder, so they cannot conflict.
         if !m.replace_path.is_empty() {
-            files.retain(|path, _| !m.replace_path.iter().any(|r| is_under(path, r)));
+            files.retain(|path, shippers| {
+                let dropped = m.replace_path.iter().any(|r| is_under(path, r));
+                if dropped {
+                    for (earlier, _) in shippers.iter() {
+                        *report.replaced_by[*earlier].entry(position).or_default() += 1;
+                    }
+                }
+                !dropped
+            });
         }
         for path in found.into_iter().filter(|p| reads(p, languages)) {
             report.shipped[position] += 1;
@@ -377,6 +393,9 @@ pub fn analyze_cached(mods: &[ModInput], languages: Option<&BTreeSet<String>>, c
     let mut to_read: Vec<(usize, &String, String)> = Vec::new();
     for shipped in files.values() {
         let (winner, path) = shipped.last().unwrap();
+        for (m, _) in shipped.iter().filter(|(m, _)| m != winner) {
+            *report.replaced_by[*m].entry(*winner).or_default() += 1;
+        }
         if shipped.len() > 1 {
             report.files.push(FileConflict { path: path.clone(), mods: shipped.iter().map(|(m, _)| *m).collect() });
         }

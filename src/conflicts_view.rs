@@ -67,6 +67,8 @@ pub struct Analysis {
     pub behind_versions: Option<(String, String)>,
     /// Mods most of whose files a bigger mod replaces, from this scan.
     pub order: Vec<crate::merge::order_check::Relation>,
+    /// Mods whose every file a later mod replaces, from this scan.
+    pub unused: Vec<crate::merge::unused::Unused>,
     /// Effects, triggers and scopes mods use that the game doesn't have;
     /// `None` when the game hasn't written its script documentation.
     pub script: Option<ScriptCheck>,

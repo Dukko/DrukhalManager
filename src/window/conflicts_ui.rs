@@ -164,9 +164,10 @@ impl Window {
             ui.scanning.set(false);
             match result {
                 Ok((report, roots, simple, [unpacking, reading, checking, base, order_time, script_time], behind, behind_versions, order, script)) => {
+                    let unused = crate::merge::unused::unused(&report, &depends_on, &order);
                     crate::diagnostics::log!(
                         "scan",
-                        "Scan done in {:.1}s (unpacking {:.1}s, reading files {:.1}s, merge checks {:.1}s, base game {:.1}s, order check {:.1}s, script check {:.1}s): {} file and {} object conflicts, {} files with errors, {} mods skipped, {} objects left behind by a game update, {} mods load above a mod that replaces most of their files",
+                        "Scan done in {:.1}s (unpacking {:.1}s, reading files {:.1}s, merge checks {:.1}s, base game {:.1}s, order check {:.1}s, script check {:.1}s): {} file and {} object conflicts, {} files with errors, {} mods skipped, {} objects left behind by a game update, {} mods load above a mod that replaces most of their files, {} mods change nothing in game",
                         started.elapsed().as_secs_f32(),
                         unpacking.as_secs_f32(),
                         reading.as_secs_f32(),
@@ -179,7 +180,8 @@ impl Window {
                         report.errors.len(),
                         report.skipped.len(),
                         behind.len(),
-                        order.iter().filter(|r| r.misplaced()).map(|r| r.patch).collect::<std::collections::BTreeSet<_>>().len()
+                        order.iter().filter(|r| r.misplaced()).map(|r| r.patch).collect::<std::collections::BTreeSet<_>>().len(),
+                        unused.len()
                     );
                     for (position, reason) in &report.skipped {
                         crate::diagnostics::log!("scan", "Skipped {}: {reason}", names.get(*position).map_or("a mod", String::as_str));
@@ -198,6 +200,7 @@ impl Window {
                         behind,
                         behind_versions,
                         order,
+                        unused,
                         script,
                     })));
                     ui.render_conflicts();

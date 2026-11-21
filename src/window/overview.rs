@@ -196,6 +196,8 @@ pub(super) struct Health {
     pub misordered: usize,
     /// Mods that load above a mod that replaces most of their files.
     pub misplaced: usize,
+    /// Mods every file of which a later mod replaces.
+    pub unused: usize,
     pub no_achievements: Vec<String>,
     pub stale_merges: usize,
     /// Frozen mods Steam has updated since, by name.
@@ -446,6 +448,10 @@ impl Window {
         if h.misplaced > 0 {
             let text = tn!("loads above a mod that replaces most of its files", "load above mods that replace most of their files", h.misplaced);
             problems.push(self.health_card(&h.misplaced.to_string(), &text, Some((&t!("Show"), Box::new(|ui: &Rc<Window>| ui.show_misplaced()))), true));
+        }
+        if h.unused > 0 {
+            let text = tn!("mod changes nothing in game", "mods change nothing in game", h.unused);
+            problems.push(self.health_card(&h.unused.to_string(), &text, Some((&t!("Show"), Box::new(|ui: &Rc<Window>| ui.show_unused()))), true));
         }
         if h.stale_merges > 0 {
             let text = tn!("merge out of date", "merges out of date", h.stale_merges);

@@ -16,5 +16,6 @@ pub mod source;
 pub mod scan_cache;
 pub mod script_check;
 pub mod trivial;
+pub mod unused;
 pub mod update_all;
 pub mod vocabulary;

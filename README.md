@@ -96,6 +96,7 @@ The search box takes filters as well as names. `enabled:yes conflicts:yes` lists
 Also on this page:
 
 * **Collections** are named load orders, each synced to its own Paradox Launcher playset. You can import a playset, a Workshop collection link, or a load order a friend pasted, and **Copy Load Order** gives you a numbered list with Workshop links to paste back.
+* **Mods that change nothing in game** get a card in the strip above the list. When two mods ship the same file the game uses the one that loads last, so a mod whose files are all replaced by mods below it does nothing, and the card lists which mods replace it and lets you turn it off. It skips mods that another mod needs.
 * **Notes** on a mod, for things like "keep this below UIOD or the outliner breaks". Search finds them.
 * **Freeze This Collection…** copies its Workshop mods into local ones, so you can finish a campaign on the versions you started with.
 * **Extra Mod Folder** (Preferences → Game) loads mods kept elsewhere, such as on another drive, and a collection's merged patch can be moved there too.

@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: DrukhalManager 2.6.0\n"
 "Report-Msgid-Bugs-To: https://github.com/Dukko/DrukhalManager/issues\n"
-"POT-Creation-Date: 2026-11-20 00:48+0000\n"
+"POT-Creation-Date: 2026-11-21 02:15+0000\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -3711,7 +3711,7 @@ msgstr ""
 msgid "_Turn It Off"
 msgstr ""
 
-#: src/window/crash_hunt_ui.rs
+#: src/window/crash_hunt_ui.rs src/window/unused_ui.rs
 msgid "Turned off {name}"
 msgstr ""
 
@@ -4013,7 +4013,7 @@ msgid_plural ", {count} from the merged patch"
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/window/launch.rs src/window/overview.rs src/window/overview.rs src/window/overview.rs src/window/overview.rs src/window/overview.rs src/window/overview.rs src/window/overview.rs src/window/persist.rs
+#: src/window/launch.rs src/window/overview.rs src/window/overview.rs src/window/overview.rs src/window/overview.rs src/window/overview.rs src/window/overview.rs src/window/overview.rs src/window/overview.rs src/window/persist.rs
 msgid "Show"
 msgstr ""
 
@@ -4163,6 +4163,12 @@ msgstr ""
 #: src/window/overview.rs
 msgid "loads above a mod that replaces most of its files"
 msgid_plural "load above mods that replace most of their files"
+msgstr[0] ""
+msgstr[1] ""
+
+#: src/window/overview.rs
+msgid "mod changes nothing in game"
+msgid_plural "mods change nothing in game"
 msgstr[0] ""
 msgstr[1] ""
 
@@ -4983,6 +4989,42 @@ msgstr ""
 msgid "The mods each campaign was last played with from DrukhalManager."
 msgstr ""
 
+#: src/window/unused_ui.rs src/window/unused_ui.rs
+msgid "Mods That Change Nothing"
+msgstr ""
+
+#: src/window/unused_ui.rs
+msgid "When two mods ship the same file, the game uses the copy from the one that loads last. Every file of these mods is replaced by mods loading after them, so turning them off changes nothing in game."
+msgstr ""
+
+#: src/window/unused_ui.rs
+msgid "{mods} and {count} more"
+msgid_plural "{mods} and {count} more"
+msgstr[0] ""
+msgstr[1] ""
+
+#: src/window/unused_ui.rs
+msgid "Every file it ships is replaced by {mods}"
+msgstr ""
+
+#: src/window/unused_ui.rs src/window/selection_ui.rs
+msgid "Disable"
+msgstr ""
+
+#: src/window/unused_ui.rs
+msgid "Turn off {name}"
+msgstr ""
+
+#: src/window/unused_ui.rs
+msgid "Disable All"
+msgstr ""
+
+#: src/window/unused_ui.rs
+msgid "Turned off {count} mod"
+msgid_plural "Turned off {count} mods"
+msgstr[0] ""
+msgstr[1] ""
+
 #: src/window/session_updates_ui.rs
 msgid "Change Notes"
 msgstr ""
@@ -5045,10 +5087,6 @@ msgstr ""
 
 #: src/window/selection_ui.rs
 msgid "Enable"
-msgstr ""
-
-#: src/window/selection_ui.rs
-msgid "Disable"
 msgstr ""
 
 #: src/window/selection_ui.rs
