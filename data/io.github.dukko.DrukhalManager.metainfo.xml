@@ -36,6 +36,11 @@
     <control>keyboard</control>
   </supports>
   <releases>
+    <release version="2.7.0" date="2026-11-20">
+      <description>
+        <p>Mods that change nothing: a new card in the health strip lists enabled mods whose every file is replaced by a mod loading later, with the mods that replace them, and turns them off with one click (undoable). In the conflict view, Ctrl+C on the view-only side still copies and now also takes every highlighted change the selection touches into the editable side, as one undo step. Big conflicts open faster with Changed Lines Only on, comparing again no longer recolours unchanged text, and scrolling no longer leaves seconds of work behind. Moving a mod in the load order now moves only its own row.</p>
+      </description>
+    </release>
     <release version="2.6.0" date="2026-11-19">
       <description>
         <p>Fix problems by hand: Script Check's object pages and the Game Errors list now offer Edit by Hand next to Fix with AI. It opens the same side-by-side review starting from the mod's copy, so the problems can be corrected without an AI provider and saved to the merged patch. Saving still checks that the script parses and defines the object, and the row then says it's fixed in the patch.</p>
