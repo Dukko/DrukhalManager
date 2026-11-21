@@ -226,8 +226,12 @@ impl Card {
     /// clears the old marks.
     fn fill(&self, text: &str, keep_text: bool) {
         let buffer = self.code.buffer();
+        // The syntax colours stay with the text, so they're only made again
+        // for text that's new or was edited.
+        let mut recolour = keep_text;
         if !keep_text && set_if_changed(&buffer, &text.lines().collect::<Vec<_>>().join("\n")) {
             buffer.place_cursor(&buffer.start_iter());
+            recolour = true;
         }
         let lines = text.lines().count().max(buffer.line_count() as usize).max(1);
         let numbers = numbers_text(lines);
@@ -239,7 +243,7 @@ impl Card {
         for (fold, ..) in self.folds.take() {
             fold.set_visible(false);
         }
-        if lines <= COLOUR_LIMIT {
+        if recolour && lines <= COLOUR_LIMIT {
             colour_lines(&buffer, 0, lines);
         }
     }
@@ -383,7 +387,6 @@ impl Card {
         bubble.set_visible(true);
         on_click.replace(Some(Rc::new(expand)));
         self.folds.borrow_mut().push((bubble, line, above, FOLD_ROOM / 2));
-        self.place_folds();
     }
 
     /// Puts each fold bubble in its room, going by where the text view
@@ -709,6 +712,10 @@ impl Pair {
                 });
             }
         }
+        // Placing a bubble measures the text above it, so it's done once for
+        // all of them, not after each.
+        self.left.place_folds();
+        self.right.place_folds();
         // Once more when the cards have been laid out.
         let (left, right) = (Rc::downgrade(&self.left), Rc::downgrade(&self.right));
         glib::idle_add_local_once(move || {
@@ -1000,5 +1007,91 @@ mod tests {
     #[test]
     fn numbers_lines() {
         assert_eq!(numbers_text(3), "1\n2\n3");
+    }
+
+    fn scattered(lines: usize, step: usize) -> (String, String) {
+        let left = (0..lines).map(|i| format!("\tkey_{i} = {{ cost = {i} }}\n")).collect();
+        let right = (0..lines).filter(|i| i % step != 1).map(|i| format!("\tkey_{i} = {{ cost = {} }}\n", if i % step == 0 { i + 1 } else { i })).collect();
+        (left, right)
+    }
+
+    #[test]
+    #[ignore]
+    fn comparing_again_keeps_the_syntax_colours() {
+        gtk::init().unwrap();
+        adw::init().unwrap();
+        let (left, right) = scattered(50, 10);
+        let pair = Pair::new(true);
+        pair.show(&left, &right, &Compare::Each, false);
+        pair.update(true);
+        let buffer = pair.left.code.buffer();
+        let key = buffer.tag_table().lookup("key").unwrap();
+        assert!(buffer.iter_at_line_index(3, 2).unwrap().has_tag(&key), "`key_3` is a key");
+    }
+
+    #[test]
+    #[ignore]
+    fn replaced_text_is_coloured_again() {
+        gtk::init().unwrap();
+        adw::init().unwrap();
+        let pair = Pair::new(true);
+        let right = "a = 1\nb = 2\n";
+        pair.show("key = 100 # c\nx = \"s\"\n", right, &Compare::Each, false);
+        pair.show("# cc = 100 key\n\"s\" = x\n", right, &Compare::Each, false);
+        let buffer = pair.left.code.buffer();
+        let [key, comment, string] = ["key", "comment", "string"].map(|name| buffer.tag_table().lookup(name).unwrap());
+        assert!(buffer.iter_at_line_index(0, 2).unwrap().has_tag(&comment), "line 1 is now a comment");
+        assert!(!buffer.iter_at_line_index(0, 2).unwrap().has_tag(&key), "its old key colour is gone");
+        assert!(buffer.iter_at_line_index(1, 1).unwrap().has_tag(&string), "line 2 now starts with a string");
+        assert!(!buffer.iter_at_line_index(1, 6).unwrap().has_tag(&string), "and no longer ends with one");
+    }
+
+    /// Times showing, re-comparing, typing in and scrolling a conflict of
+    /// many lines, in plain and in "Changed Lines Only" mode. Needs a
+    /// display; a headless one works: `gtk4-broadwayd :7`, then
+    /// `GDK_BACKEND=broadway BROADWAY_DISPLAY=:7 LINES=20000 cargo test --release conflict_of_many_lines -- --ignored --test-threads=1 --nocapture`
+    #[test]
+    #[ignore]
+    fn conflict_of_many_lines() {
+        gtk::init().unwrap();
+        adw::init().unwrap();
+        install_css();
+        let lines: usize = std::env::var("LINES").ok().and_then(|v| v.parse().ok()).unwrap_or(5000);
+        let (left, right) = scattered(lines, std::env::var("STEP").ok().and_then(|v| v.parse().ok()).unwrap_or(40));
+        let context = glib::MainContext::default();
+        let timed = |what: &str, f: &mut dyn FnMut()| {
+            let start = std::time::Instant::now();
+            f();
+            let called = start.elapsed();
+            let mut quiet = std::time::Instant::now();
+            while quiet.elapsed() < std::time::Duration::from_millis(400) {
+                if context.iteration(false) {
+                    quiet = std::time::Instant::now();
+                }
+            }
+            println!("{what}: call {called:?}, until idle {:?}", start.elapsed() - std::time::Duration::from_millis(400));
+        };
+        for fold in [false, true] {
+            let pair = Pair::new(true);
+            pair.set_fold(fold);
+            let window = gtk::Window::new();
+            window.set_child(Some(&pair.widget));
+            window.set_default_size(1400, 900);
+            window.present();
+            timed(&format!("fold={fold} show {lines} lines"), &mut || pair.show(&left, &right, &Compare::Each, false));
+            timed(&format!("fold={fold} compare again"), &mut || pair.update(true));
+            timed(&format!("fold={fold} one keystroke"), &mut || {
+                let buffer = pair.right.code.buffer();
+                let mut at = buffer.iter_at_line(lines as i32 / 2).unwrap();
+                buffer.insert(&mut at, "x");
+            });
+            timed(&format!("fold={fold} scroll 20 pages"), &mut || {
+                let adjustment = pair.right.scroll.vadjustment();
+                for page in 0..20 {
+                    adjustment.set_value(f64::from(page) * 600.0);
+                    while context.iteration(false) {}
+                }
+            });
+        }
     }
 }

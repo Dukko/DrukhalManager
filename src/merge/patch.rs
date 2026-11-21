@@ -862,6 +862,46 @@ mod tests {
         std::fs::remove_dir_all(user).unwrap();
     }
 
+    /// Times checking a patch of many merges after each save, as every
+    /// resolved conflict does. `cargo test checks_many_merges -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn checks_many_merges() {
+        let merges: usize = std::env::var("MERGES").ok().and_then(|v| v.parse().ok()).unwrap_or(200);
+        let per_file: usize = std::env::var("OBJECTS").ok().and_then(|v| v.parse().ok()).unwrap_or(500);
+        let root = std::env::temp_dir().join(format!("drukhal-bench-{}", std::process::id()));
+        struct Cleanup(PathBuf);
+        impl Drop for Cleanup {
+            fn drop(&mut self) {
+                let _ = std::fs::remove_dir_all(&self.0);
+            }
+        }
+        let _cleanup = Cleanup(root.clone());
+        let (user, a, game) = (root.join("user"), root.join("a"), root.join("game"));
+        let file_text = |m: usize, cost: usize| (0..per_file).map(|i| format!("obj_{m}_{i} = {{\n\tcost = {cost}\n\tupkeep = 2\n}}\n")).collect::<String>();
+        for dir in [&a, &game] {
+            std::fs::create_dir_all(dir.join("common/buildings")).unwrap();
+        }
+        std::fs::create_dir_all(user.join("mod")).unwrap();
+        let mut patch = Patch::open(&user, &test_target()).unwrap();
+        for m in 0..merges {
+            std::fs::write(a.join(format!("common/buildings/a{m}.txt")), file_text(m, 1)).unwrap();
+            std::fs::write(game.join(format!("common/buildings/g{m}.txt")), file_text(m, 0)).unwrap();
+            let prints = vec![
+                Print::new(VANILLA, "Vanilla", &format!("common/buildings/g{m}.txt"), &file_text(m, 0)),
+                Print::new("mod/a.mod", "A", &format!("common/buildings/a{m}.txt"), &file_text(m, 1)),
+            ];
+            patch.save(&user, None, "common/buildings", &format!("obj_{m}_0"), "obj = {}", prints).unwrap();
+        }
+        let roots: std::collections::HashMap<String, PathBuf> = [("mod/a.mod".to_owned(), a), (VANILLA.to_owned(), game)].into();
+        let start = std::time::Instant::now();
+        let stale = patch.check(&roots, Some("v4.5.3"));
+        println!("check of {merges} merges of {} line files: {:?} ({} stale)", per_file * 4, start.elapsed(), stale.len());
+        let start = std::time::Instant::now();
+        patch.save(&user, None, "common/buildings", "obj_0_0", "obj = {}", patch.manifest.merges[0].prints.clone()).unwrap();
+        println!("one more save: {:?}", start.elapsed());
+    }
+
     #[test]
     fn notices_when_sources_change() {
         let root = std::env::temp_dir().join(format!("drukhal-stale-{}", std::process::id()));
