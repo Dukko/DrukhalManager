@@ -119,6 +119,7 @@ Most of the noise in a big mod list is graphics and localisation files I usually
 | Alt+Left / Alt+Right | Use the left / right version |
 | Alt+M | Merge with AI |
 | Alt+I | Ignore the conflict |
+| Ctrl+C on the read-only side | Copy the selection and take the changes it touches |
 
 ## Merging with AI
 

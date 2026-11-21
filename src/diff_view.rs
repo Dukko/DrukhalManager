@@ -548,6 +548,7 @@ impl Pair {
                 pair.refresh.replace(Some(id));
             });
             pair.add_put_in_menu();
+            pair.add_copy_puts_in();
         }
         pair
     }
@@ -581,11 +582,7 @@ impl Pair {
         click.connect_pressed(move |_, _, x, y| {
             let Some(pair) = weak.upgrade() else { return };
             // The differences must match what's in the editor right now.
-            if let Some(id) = pair.refresh.take() {
-                id.remove();
-                pair.texts.borrow_mut().1 = pair.right.text();
-                pair.update(true);
-            }
+            pair.catch_up();
             let code = &pair.left.code;
             let (_, by) = code.window_to_buffer_coords(gtk::TextWindowType::Widget, x as i32, y as i32);
             let (iter, _) = code.line_at_y(by);
@@ -600,25 +597,27 @@ impl Pair {
     /// Replaces the editable card's side of difference `index` with the
     /// view-only card's lines, as one edit that can be undone.
     fn put_in(&self, index: usize) {
-        let Some(hunk) = self.diff.borrow().hunks.get(index).cloned() else { return };
+        self.put_in_all(&[index]);
+    }
+
+    /// Puts in each difference of `indices`, last first so the earlier ones
+    /// keep their lines, as one edit that can be undone.
+    fn put_in_all(&self, indices: &[usize]) {
+        let hunks: Vec<Hunk> = {
+            let diff = self.diff.borrow();
+            indices.iter().rev().filter_map(|&i| diff.hunks.get(i).cloned()).collect()
+        };
+        if hunks.is_empty() {
+            return;
+        }
         let left = self.texts.borrow().0.clone();
         let lines: Vec<&str> = left.lines().collect();
-        let Some(theirs) = lines.get(hunk.left.clone()) else { return };
-        let text = theirs.join("\n");
         let buffer = self.right.code.buffer();
         buffer.begin_user_action();
-        if hunk.right.is_empty() {
-            // Lines only the left has go in before the line that follows.
-            match buffer.iter_at_line(hunk.right.start as i32).filter(|_| hunk.right.start < buffer.line_count() as usize) {
-                Some(mut at) => buffer.insert(&mut at, &format!("{text}\n")),
-                None => buffer.insert(&mut buffer.end_iter(), &format!("\n{text}")),
+        for hunk in &hunks {
+            if let Some(theirs) = lines.get(hunk.left.clone()) {
+                replace_lines(&buffer, hunk, &theirs.join("\n"));
             }
-        } else if let (Some(mut start), Some(mut end)) = (buffer.iter_at_line(hunk.right.start as i32), buffer.iter_at_line(hunk.right.end as i32 - 1)) {
-            if !end.ends_line() {
-                end.forward_to_line_end();
-            }
-            buffer.delete(&mut start, &mut end);
-            buffer.insert(&mut start, &text);
         }
         buffer.end_user_action();
         // Compare again now, not after the typing pause.
@@ -627,6 +626,35 @@ impl Pair {
         }
         self.texts.borrow_mut().1 = self.right.text();
         self.update(true);
+    }
+
+    /// Compares again now if an edit is waiting for the typing pause, so the
+    /// differences match what's in the editor.
+    fn catch_up(&self) {
+        if let Some(id) = self.refresh.take() {
+            id.remove();
+            self.texts.borrow_mut().1 = self.right.text();
+            self.update(true);
+        }
+    }
+
+    /// Makes Ctrl+C on the view-only card also put in the differences the
+    /// selection touches. The copy itself is left to the text view.
+    fn add_copy_puts_in(self: &Rc<Self>) {
+        let weak = Rc::downgrade(self);
+        self.left.code.connect_copy_clipboard(move |code| {
+            let Some((start, end)) = code.buffer().selection_bounds() else { return };
+            let first = start.line() as usize;
+            let last = if end.line_offset() == 0 && end.line() > start.line() { end.line() as usize } else { end.line() as usize + 1 };
+            // After the copy: putting in redraws the cards.
+            let weak = weak.clone();
+            glib::idle_add_local_once(move || {
+                let Some(pair) = weak.upgrade() else { return };
+                pair.catch_up();
+                let touched = touched_hunks(&pair.diff.borrow().hunks, first..last);
+                pair.put_in_all(&touched);
+            });
+        });
     }
 
     pub fn connect_change(&self, f: impl Fn(usize, Option<usize>, bool) + 'static) {
@@ -777,6 +805,37 @@ impl Pair {
             f(self.count(), self.current.get(), base);
         }
     }
+}
+
+/// Swaps the buffer's side of `hunk` for `text`.
+fn replace_lines(buffer: &gtk::TextBuffer, hunk: &Hunk, text: &str) {
+    if hunk.right.is_empty() {
+        // Lines only the left has go in before the line that follows.
+        match buffer.iter_at_line(hunk.right.start as i32).filter(|_| hunk.right.start < buffer.line_count() as usize) {
+            Some(mut at) => buffer.insert(&mut at, &format!("{text}\n")),
+            None => buffer.insert(&mut buffer.end_iter(), &format!("\n{text}")),
+        }
+    } else if let (Some(mut start), Some(mut end)) = (buffer.iter_at_line(hunk.right.start as i32), buffer.iter_at_line(hunk.right.end as i32 - 1)) {
+        if !end.ends_line() {
+            end.forward_to_line_end();
+        }
+        buffer.delete(&mut start, &mut end);
+        buffer.insert(&mut start, text);
+    }
+}
+
+/// The differences, by place in `hunks`, that the selected left-card lines
+/// `lines` touch. A difference with no left lines is touched when the
+/// selection runs across the spot where the other side has lines.
+fn touched_hunks(hunks: &[Hunk], lines: std::ops::Range<usize>) -> Vec<usize> {
+    let touches = |h: &Hunk| {
+        if h.left.is_empty() {
+            lines.start < h.left.start && h.left.start < lines.end
+        } else {
+            h.left.start < lines.end && lines.start < h.left.end
+        }
+    };
+    hunks.iter().enumerate().filter(|(_, h)| touches(h)).map(|(i, _)| i).collect()
 }
 
 /// The buffer's whole text, folded lines too.
@@ -1007,6 +1066,86 @@ mod tests {
     #[test]
     fn numbers_lines() {
         assert_eq!(numbers_text(3), "1\n2\n3");
+    }
+
+    fn hunk(left: std::ops::Range<usize>, right: std::ops::Range<usize>) -> Hunk {
+        Hunk { rows: 0..0, left, right }
+    }
+
+    #[test]
+    fn selection_inside_one_change_touches_it() {
+        let hunks = [hunk(2..4, 2..3), hunk(8..9, 7..9)];
+        assert_eq!(touched_hunks(&hunks, 3..4), vec![0]);
+    }
+
+    #[test]
+    fn selection_spanning_two_changes_touches_both() {
+        let hunks = [hunk(2..4, 2..3), hunk(8..9, 7..9)];
+        assert_eq!(touched_hunks(&hunks, 3..9), vec![0, 1]);
+    }
+
+    #[test]
+    fn selection_of_matching_lines_touches_nothing() {
+        let hunks = [hunk(2..4, 2..3), hunk(8..9, 7..9)];
+        assert_eq!(touched_hunks(&hunks, 4..8), Vec::<usize>::new());
+    }
+
+    #[test]
+    fn selection_ending_at_or_starting_after_a_change_misses_it() {
+        let hunks = [hunk(2..4, 2..3)];
+        assert_eq!(touched_hunks(&hunks, 0..2), Vec::<usize>::new());
+        assert_eq!(touched_hunks(&hunks, 4..6), Vec::<usize>::new());
+        assert_eq!(touched_hunks(&hunks, 0..3), vec![0]);
+        assert_eq!(touched_hunks(&hunks, 3..6), vec![0]);
+    }
+
+    #[test]
+    fn change_without_left_lines_is_touched_only_when_selected_across() {
+        let hunks = [hunk(5..5, 5..7)];
+        assert_eq!(touched_hunks(&hunks, 4..6), vec![0]);
+        assert_eq!(touched_hunks(&hunks, 5..8), Vec::<usize>::new());
+        assert_eq!(touched_hunks(&hunks, 2..5), Vec::<usize>::new());
+    }
+
+    #[test]
+    fn change_without_right_lines_is_touched_by_its_left_lines() {
+        let hunks = [hunk(3..5, 3..3)];
+        assert_eq!(touched_hunks(&hunks, 4..5), vec![0]);
+    }
+
+    fn pump(context: &glib::MainContext) {
+        while context.iteration(false) {}
+    }
+
+    /// Needs a display: `cargo test --release copying_ -- --ignored --test-threads=1 --nocapture`
+    #[test]
+    #[ignore]
+    fn copying_selected_lines_puts_in_the_changes_they_touch() {
+        gtk::init().unwrap();
+        adw::init().unwrap();
+        let context = glib::MainContext::default();
+        let pair = Pair::new(true);
+        pair.show("a\nb\nc\nd\ne\nf\ng", "a\nB\nc\nd\nE\nf\nG", &Compare::Each, false);
+        let buffer = pair.left.code.buffer();
+
+        buffer.select_range(&buffer.iter_at_line(0).unwrap(), &buffer.iter_at_line(4).unwrap());
+        pair.left.code.emit_by_name::<()>("copy-clipboard", &[]);
+        pump(&context);
+        assert_eq!(pair.right.text(), "a\nb\nc\nd\nE\nf\nG", "only the change at line 2 is put in");
+
+        buffer.select_range(&buffer.iter_at_line(2).unwrap(), &buffer.iter_at_line(3).unwrap());
+        pair.left.code.emit_by_name::<()>("copy-clipboard", &[]);
+        pump(&context);
+        assert_eq!(pair.right.text(), "a\nb\nc\nd\nE\nf\nG", "matching lines change nothing");
+
+        buffer.select_range(&buffer.iter_at_line(4).unwrap(), &buffer.end_iter());
+        pair.left.code.emit_by_name::<()>("copy-clipboard", &[]);
+        pump(&context);
+        assert_eq!(pair.right.text(), "a\nb\nc\nd\ne\nf\ng", "the other two come in together");
+
+        pair.right.code.buffer().undo();
+        pump(&context);
+        assert_eq!(pair.right.text(), "a\nb\nc\nd\nE\nf\nG", "one undo takes back both");
     }
 
     fn scattered(lines: usize, step: usize) -> (String, String) {
