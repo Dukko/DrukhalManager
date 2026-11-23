@@ -6,9 +6,9 @@
 #, fuzzy
 msgid ""
 msgstr ""
-"Project-Id-Version: DrukhalManager 2.7.0\n"
+"Project-Id-Version: DrukhalManager 2.7.1\n"
 "Report-Msgid-Bugs-To: https://github.com/Dukko/DrukhalManager/issues\n"
-"POT-Creation-Date: 2026-11-21 03:40+0000\n"
+"POT-Creation-Date: 2026-11-23 03:57+0000\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -920,7 +920,7 @@ msgstr ""
 msgid "Mods or the base game"
 msgstr ""
 
-#: src/conflicts_view.rs
+#: src/conflicts_view.rs src/script_profile_dialog.rs
 msgid "Mods"
 msgstr ""
 
@@ -944,6 +944,16 @@ msgstr[1] ""
 
 #: src/conflicts_view.rs
 msgid "Replace each picked version with the new one from the same mod. The patch is backed up first"
+msgstr ""
+
+#: src/conflicts_view.rs
+msgid "Remove {count} from Patch"
+msgid_plural "Remove All {count} from Patch"
+msgstr[0] ""
+msgstr[1] ""
+
+#: src/conflicts_view.rs
+msgid "Remove each of these merges from the patch. The patch is backed up first"
 msgstr ""
 
 #: src/conflicts_view.rs
@@ -2902,6 +2912,58 @@ msgstr ""
 msgid "Saved the fixed {key} to the merged patch"
 msgstr ""
 
+#: src/script_profile_dialog.rs
+msgid "No Script Profile Yet"
+msgstr ""
+
+#: src/script_profile_dialog.rs
+msgid "Open the console in Stellaris and type script_profiler. Play for a while, then type it again. The game then writes a profile of how long each script took."
+msgstr ""
+
+#: src/script_profile_dialog.rs
+msgid "Script Performance"
+msgstr ""
+
+#: src/script_profile_dialog.rs
+msgid "How long the game spent in each mod's scripts"
+msgstr ""
+
+#: src/script_profile_dialog.rs
+msgid "{seconds} s profiled, {share}% of it in your mods, recorded {when}"
+msgstr ""
+
+#: src/script_profile_dialog.rs
+msgid "{seconds} s profiled, {share}% of it in your mods"
+msgstr ""
+
+#: src/script_profile_dialog.rs
+msgid "A mod that replaces the game's own scripts is credited with their time too, so a high number isn't always the mod's fault."
+msgstr ""
+
+#: src/script_profile_dialog.rs
+msgid "The base game"
+msgstr ""
+
+#: src/script_profile_dialog.rs src/script_profile_dialog.rs
+msgid "{ms} ms · {share}%"
+msgstr ""
+
+#: src/script_profile_dialog.rs
+msgid "{ms} ms · {hits} · {category}"
+msgstr ""
+
+#: src/script_profile_dialog.rs
+msgid "{count} hit"
+msgid_plural "{count} hits"
+msgstr[0] ""
+msgstr[1] ""
+
+#: src/script_profile_dialog.rs
+msgid "…and {count} more item"
+msgid_plural "…and {count} more items"
+msgstr[0] ""
+msgstr[1] ""
+
 #: src/settings.rs
 msgid "Settings could not be read ({error}) and were reset; the old file was kept as {file}"
 msgstr ""
@@ -3522,7 +3584,7 @@ msgstr[1] ""
 msgid "Updated {what} to the new version"
 msgstr ""
 
-#: src/window/conflicts_ui.rs
+#: src/window/conflicts_ui.rs src/window/conflicts_ui.rs src/window/conflicts_ui.rs
 msgid "Backups…"
 msgstr ""
 
@@ -3531,8 +3593,24 @@ msgid "Could not update {what}: {error}"
 msgstr ""
 
 #: src/window/conflicts_ui.rs
+msgid "Nothing to remove: the merges changed since the last check"
+msgstr ""
+
+#: src/window/conflicts_ui.rs
 msgid "Removed {what} from the patch"
 msgstr ""
+
+#: src/window/conflicts_ui.rs
+msgid "Removed {count} merge from the patch"
+msgid_plural "Removed {count} merges from the patch"
+msgstr[0] ""
+msgstr[1] ""
+
+#: src/window/conflicts_ui.rs
+msgid "Removed {done} of {count}, then could not remove {what}: {error}"
+msgid_plural "Removed {done} of {count}, then could not remove {what}: {error}"
+msgstr[0] ""
+msgstr[1] ""
 
 #: src/window/conflicts_ui.rs
 msgid "The mods {what} was merged from no longer conflict over it. Remove it from the patch, or enable them and rescan."
@@ -4212,6 +4290,10 @@ msgstr ""
 
 #: src/window/overview.rs
 msgid " · played with other mods"
+msgstr ""
+
+#: src/window/overview.rs
+msgid "Script profile from {when}"
 msgstr ""
 
 #: src/window/overview.rs
@@ -5620,7 +5702,7 @@ msgstr ""
 msgid "the Disabled list's order"
 msgstr ""
 
-#: src/window.rs
+#: src/window.rs src/window.rs
 msgid "Open Conflicts once to scan your mods first"
 msgstr ""
 
