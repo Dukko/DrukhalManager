@@ -36,6 +36,11 @@
     <control>keyboard</control>
   </supports>
   <releases>
+    <release version="2.7.6" date="2026-11-23">
+      <description>
+        <p>Fixes conflict solver false conflicts for special projects and any other wrapped definitions using inner key attributes (e.g. special_project = { key = ... }), automatically extracting the inner unique key.</p>
+      </description>
+    </release>
     <release version="2.7.5" date="2026-11-23">
       <description>
         <p>Invalidates the conflict scan cache so all mods are automatically re-indexed with the new inner-key object resolver, removing phantom conflict entries (ambient_object, message_type, ship_design, component_set, etc.) left over from previous cache versions.</p>

@@ -399,5 +399,8 @@ mod tests {
 
         let ship = "ship_design = { name = \"ship_x\" }\n";
         assert_eq!(extract("common/global_ship_designs", "ship_x", ship).as_deref(), Some("ship_design = { name = \"ship_x\" }"));
+
+        let proj = "special_project = { key = \"SYNTHETIC_EVOLUTION_PROJECT\" cost = 100 }\n";
+        assert_eq!(extract("common/special_projects", "SYNTHETIC_EVOLUTION_PROJECT", proj).as_deref(), Some("special_project = { key = \"SYNTHETIC_EVOLUTION_PROJECT\" cost = 100 }"));
     }
 }

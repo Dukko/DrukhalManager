@@ -509,21 +509,6 @@ pub fn object_key_for_entry(category: &str, entry: &Entry) -> Option<String> {
     if category == "events" || key.ends_with("_event") {
         return block.and_then(|b| b.scalar("id")).map(str::to_owned);
     }
-    if category.eq_ignore_ascii_case("common/component_sets") || is_under(category, "common/component_sets") || key.eq_ignore_ascii_case("component_set") {
-        return block.and_then(|b| b.scalar("key")).map(str::to_owned);
-    }
-    if category.eq_ignore_ascii_case("common/component_templates") || is_under(category, "common/component_templates") || key.ends_with("_component_template") {
-        return block.and_then(|b| b.scalar("key")).map(str::to_owned);
-    }
-    if category.eq_ignore_ascii_case("common/section_templates") || is_under(category, "common/section_templates") || key.ends_with("section_template") {
-        return block.and_then(|b| b.scalar("key")).map(str::to_owned);
-    }
-    if category.eq_ignore_ascii_case("common/message_types") || is_under(category, "common/message_types") || key.eq_ignore_ascii_case("message_type") {
-        return block.and_then(|b| b.scalar("key")).map(str::to_owned);
-    }
-    if category.eq_ignore_ascii_case("common/alert_types") || is_under(category, "common/alert_types") || key.eq_ignore_ascii_case("alert_type") {
-        return block.and_then(|b| b.scalar("key")).map(str::to_owned);
-    }
     if category.eq_ignore_ascii_case("common/ambient_objects") || is_under(category, "common/ambient_objects") || key.eq_ignore_ascii_case("ambient_object") {
         return block.and_then(|b| b.scalar("name")).map(str::to_owned);
     }
@@ -532,6 +517,9 @@ pub fn object_key_for_entry(category: &str, entry: &Entry) -> Option<String> {
     }
     if category.eq_ignore_ascii_case("common/global_ship_designs") || is_under(category, "common/global_ship_designs") || key.eq_ignore_ascii_case("ship_design") {
         return block.and_then(|b| b.scalar("name")).map(str::to_owned);
+    }
+    if let Some(inner_key) = block.and_then(|b| b.scalar("key")) {
+        return Some(inner_key.to_owned());
     }
     Some(key.clone())
 }
@@ -1158,6 +1146,11 @@ mod tests {
         assert_eq!(object_keys("common/global_ship_designs", ship_1).unwrap(), vec!["DESIGN_1"]);
         assert_eq!(object_keys("common/global_ship_designs", ship_2).unwrap(), vec!["DESIGN_2"]);
 
+        let proj_1 = "special_project = { key = \"PROJ_1\" days_to_research = 180 }\n";
+        let proj_2 = "special_project = { key = \"PROJ_2\" days_to_research = 180 }\n";
+        assert_eq!(object_keys("common/special_projects", proj_1).unwrap(), vec!["PROJ_1"]);
+        assert_eq!(object_keys("common/special_projects", proj_2).unwrap(), vec!["PROJ_2"]);
+
         let root = std::env::temp_dir().join(format!("dm-inner-keys-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         write(&root.join("mod1"), &[
@@ -1166,6 +1159,7 @@ mod tests {
             ("common/ambient_objects/m1.txt", amb_1),
             ("common/message_types/msg1.txt", msg_1),
             ("common/global_ship_designs/s1.txt", ship_1),
+            ("common/special_projects/p1.txt", proj_1),
         ]);
         write(&root.join("mod2"), &[
             ("common/component_sets/b.txt", set_b),
@@ -1173,6 +1167,7 @@ mod tests {
             ("common/ambient_objects/m2.txt", amb_2),
             ("common/message_types/msg2.txt", msg_2),
             ("common/global_ship_designs/s2.txt", ship_2),
+            ("common/special_projects/p2.txt", proj_2),
         ]);
 
         let report = analyze(&[input(&root, "mod1", &[]), input(&root, "mod2", &[])], None);
@@ -1184,12 +1179,13 @@ mod tests {
             ("common/ambient_objects/m2.txt", amb_1),
             ("common/message_types/msg2.txt", msg_1),
             ("common/global_ship_designs/s2.txt", ship_1),
+            ("common/special_projects/p2.txt", proj_1),
         ]);
         let report_conflict = analyze(&[input(&root, "mod1", &[]), input(&root, "mod2", &[])], None);
-        assert_eq!(report_conflict.objects.len(), 5, "same keys and names do conflict");
+        assert_eq!(report_conflict.objects.len(), 6, "same keys and names do conflict");
         let mut keys: Vec<String> = report_conflict.objects.into_iter().map(|o| o.key).collect();
         keys.sort();
-        assert_eq!(keys, vec!["DESIGN_1", "MSG_1", "SET_A", "UTILITY_1", "amb_1"]);
+        assert_eq!(keys, vec!["DESIGN_1", "MSG_1", "PROJ_1", "SET_A", "UTILITY_1", "amb_1"]);
 
         std::fs::remove_dir_all(root).unwrap();
     }
