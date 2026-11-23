@@ -60,6 +60,7 @@ pub struct Card {
     /// Every bubble made so far, with what clicking it does. A text view
     /// can't give its overlays back, so they're hidden and used again.
     bubbles: RefCell<Vec<Bubble>>,
+    change_bubbles: RefCell<Vec<(gtk::Widget, usize, bool, i32)>>,
 }
 
 impl Card {
@@ -123,7 +124,7 @@ impl Card {
         widget.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
         widget.append(&body);
 
-        let card = Rc::new(Self { widget, header, dot, title, subtitle, badge, actions, numbers_scroll, scroll, numbers, code, standalone: Cell::new(true), folds: RefCell::default(), bubbles: RefCell::default() });
+        let card = Rc::new(Self { widget, header, dot, title, subtitle, badge, actions, numbers_scroll, scroll, numbers, code, standalone: Cell::new(true), folds: RefCell::default(), bubbles: RefCell::default(), change_bubbles: RefCell::default() });
         // Fold bubbles follow the text as it's laid out: a long text is
         // measured bit by bit, which shows as its scrolling range changing.
         // The adjustment is replaced when cards link their scrolling.
@@ -211,6 +212,14 @@ impl Card {
         self.set_numbers(&numbers_text(lines));
         let buffer = self.code.buffer();
         buffer.set_text(text);
+        clear_marks(&buffer);
+        clear_marks(&self.numbers.buffer());
+        for (b, ..) in self.change_bubbles.take() {
+            b.set_visible(false);
+        }
+        for (f, ..) in self.folds.take() {
+            f.set_visible(false);
+        }
         if !self.code.is_editable() {
             colour_lines(&buffer, 0, lines);
         }
@@ -242,6 +251,9 @@ impl Card {
         clear_marks(&self.numbers.buffer());
         for (fold, ..) in self.folds.take() {
             fold.set_visible(false);
+        }
+        for (bubble, ..) in self.change_bubbles.take() {
+            bubble.set_visible(false);
         }
         if recolour && lines <= COLOUR_LIMIT {
             colour_lines(&buffer, 0, lines);
@@ -401,6 +413,13 @@ impl Card {
             let top = if *above { y } else { y + height - room };
             self.code.move_overlay(bubble, 0, top + inset);
         }
+        for (bubble, line, above, inset) in &*self.change_bubbles.borrow() {
+            let Some(iter) = buffer.iter_at_line(*line as i32) else { continue };
+            let (y, height) = self.code.line_yrange(&iter);
+            let room = bubble.height_request() + 2 * inset;
+            let top = if *above { y } else { y + height - room };
+            self.code.move_overlay(bubble, 12, top + inset);
+        }
     }
 
     /// Highlights `lines` as the difference being looked at.
@@ -413,11 +432,98 @@ impl Card {
         }
     }
 
-    fn scroll_to_line(&self, line: usize) {
+    pub fn scroll_to_line(&self, line: usize) {
         let buffer = self.code.buffer();
         if let Some(mut iter) = buffer.iter_at_line(line as i32) {
             self.code.scroll_to_iter(&mut iter, 0.0, true, 0.0, 0.3);
         }
+    }
+
+    /// Shows `text` with diff highlighting and change bubbles comparing against `base`.
+    /// Returns `(hunk_count, change_lines)`.
+    pub fn show_ai_changes(self: &Rc<Self>, text: &str, base: &str, whitespace: bool) -> (usize, Vec<usize>) {
+        self.fill(text, false);
+        let diff = diff::lines(base, text, whitespace);
+        let buffer = self.code.buffer();
+        let base_lines: Vec<&str> = base.lines().collect();
+        let mine: Vec<&str> = text.lines().collect();
+        let mut change_lines = Vec::new();
+
+        for row in &diff.rows {
+            let Some(line) = row.right else { continue };
+            let tag = match row.kind {
+                Kind::Same => continue,
+                Kind::Changed => "changed",
+                _ => "added",
+            };
+            tag_line(&buffer, line, tag);
+            tag_line(&self.numbers.buffer(), line, tag);
+            if let (Kind::Changed, Some(b)) = (row.kind, row.left) {
+                if let (Some(b_line), Some(m_line)) = (base_lines.get(b), mine.get(line)) {
+                    for range in diff::words(b_line, m_line).1 {
+                        if let (Some(start), Some(end)) = (buffer.iter_at_line_index(line as i32, range.start as i32), buffer.iter_at_line_index(line as i32, range.end as i32)) {
+                            buffer.apply_tag_by_name("word", &start, &end);
+                        }
+                    }
+                }
+            }
+        }
+
+        let bubble_height = 20;
+        let bubble_room = 6;
+        for hunk in &diff.hunks {
+            let (line, above, kind_class, label_text, tooltip) = if !hunk.right.is_empty() {
+                let line = hunk.right.start;
+                change_lines.push(line);
+                let len = hunk.right.len();
+                if hunk.left.is_empty() {
+                    let label = if len == 1 { t!("✦ Added line") } else { tf!("✦ Added {count} lines", count = len) };
+                    (line, true, "added", label, None)
+                } else {
+                    let label = if len == 1 { t!("✦ Modified line") } else { tf!("✦ Modified {count} lines", count = len) };
+                    let orig = hunk.left.clone().filter_map(|i| base_lines.get(i).copied()).collect::<Vec<_>>().join("\n");
+                    let tip = if orig.is_empty() { None } else { Some(format!("Base game:\n{orig}")) };
+                    (line, true, "changed", label, tip)
+                }
+            } else {
+                let line = diff.rows[hunk.rows.end..]
+                    .iter()
+                    .find_map(|r| r.right)
+                    .unwrap_or_else(|| mine.len().saturating_sub(1));
+                let above = diff.rows[hunk.rows.end..].iter().any(|r| r.right.is_some());
+                change_lines.push(line);
+                let len = hunk.left.len();
+                let label = if len == 1 { t!("✦ Removed line from base") } else { tf!("✦ Removed {count} lines from base", count = len) };
+                let orig = hunk.left.clone().filter_map(|i| base_lines.get(i).copied()).collect::<Vec<_>>().join("\n");
+                let tip = if orig.is_empty() { None } else { Some(format!("Removed base game lines:\n{orig}")) };
+                (line, above, "removed", label, tip)
+            };
+
+            self.add_gap(line, above, bubble_height + bubble_room);
+
+            let bubble = gtk::Label::builder()
+                .label(&label_text)
+                .css_classes(["change-bubble", kind_class])
+                .cursor(&gtk::gdk::Cursor::from_name("help", None).expect("help cursor exists"))
+                .build();
+            if let Some(tip) = tooltip {
+                bubble.set_tooltip_text(Some(&tip));
+            }
+            bubble.set_height_request(bubble_height);
+            bubble.set_visible(true);
+            self.code.add_overlay(&bubble, 12, 0);
+            self.change_bubbles.borrow_mut().push((bubble.upcast(), line, above, bubble_room / 2));
+        }
+
+        self.place_folds();
+        let weak = Rc::downgrade(self);
+        glib::idle_add_local_once(move || {
+            if let Some(card) = weak.upgrade() {
+                card.place_folds();
+            }
+        });
+
+        (diff.hunks.len(), change_lines)
     }
 
     /// Lets this card scroll on its own again after sharing a pair's
@@ -1012,6 +1118,11 @@ const CSS: &str = r#"
 .line-numbers text { color: alpha(currentColor, 0.45); }
 .fold-bubble { min-height: 0; padding: 0 12px; border-radius: 999px; font-size: smaller; font-weight: normal; background: alpha(currentColor, 0.09); box-shadow: none; }
 .fold-bubble:hover { background: alpha(currentColor, 0.16); }
+.change-bubble { min-height: 0; padding: 1px 10px; border-radius: 999px; font-size: 0.78em; font-weight: 600; background: alpha(currentColor, 0.08); color: currentColor; box-shadow: none; }
+.change-bubble.added { background: alpha(@success_color, 0.22); color: @success_color; }
+.change-bubble.changed { background: alpha(@warning_color, 0.26); color: @warning_color; }
+.change-bubble.removed { background: alpha(@destructive_color, 0.22); color: @destructive_color; }
+.change-badge-box { background: alpha(currentColor, 0.05); border-radius: 999px; padding: 2px 6px; }
 .mod-dot { min-width: 10px; min-height: 10px; border-radius: 99px; }
 .mod-color-0 { background: #3584e4; }
 .mod-color-1 { background: #2ec27e; }

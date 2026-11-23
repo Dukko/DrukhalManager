@@ -36,6 +36,11 @@
     <control>keyboard</control>
   </supports>
   <releases>
+    <release version="2.7.4" date="2026-11-23">
+      <description>
+        <p>Fixes conflict solver false conflicts for component sets, component templates, section templates, and ambient objects where definitions were grouped by block keyword rather than their inner unique key or name. Also introduces visual change indicators and bubbles in the Merged Result editor comparing the AI merge directly against the base game.</p>
+      </description>
+    </release>
     <release version="2.7.3" date="2026-11-23">
       <description>
         <p>A Stop button now allows canceling in-flight AI Fix operations across script repair, game error, and brace fix dialogs immediately. Also resolves a conflict solver regression where ambient object definitions were mistakenly flagged as conflicting objects rather than coexisting file-level definitions.</p>

@@ -9,7 +9,7 @@
 //! are reported as damaged, since only their author's intent (or a careful
 //! reader) can say where inside them the brace really belonged.
 
-use crate::paradox::script::{self, Entries, Entry};
+use crate::paradox::script::{self, Entry};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Repair {
@@ -106,32 +106,26 @@ pub fn repair(category: &str, src: &str) -> Option<Repair> {
     }
     script::parse(&out).ok()?;
 
-    // Events are identified by their id, as everywhere else.
-    if category == "events" {
-        let entries = script::parse(&out).ok()?;
-        damaged = damaged
-            .into_iter()
-            .map(|key| {
-                entries
-                    .iter()
-                    .filter_map(|e| match e {
-                        Entry::Assign { key: k, value, .. } if *k == key => value.as_block()?.scalar("id").map(str::to_owned),
-                        _ => None,
-                    })
-                    .next()
-                    .unwrap_or(key)
-            })
-            .collect();
-    }
+    let entries = script::parse(&out).ok()?;
+    damaged = damaged
+        .into_iter()
+        .map(|key| {
+            entries
+                .iter()
+                .find_map(|e| match e {
+                    Entry::Assign { key: k, .. } if *k == key => crate::merge::conflicts::object_key_for_entry(category, e),
+                    _ => None,
+                })
+                .unwrap_or(key)
+        })
+        .collect();
     Some(Repair { text: out, fixes, damaged })
 }
 
 /// The byte range of the top-level object `key` (an event id for events).
 pub fn object_span(category: &str, key: &str, text: &str) -> Option<std::ops::Range<usize>> {
-    script::parse_with_spans(text).ok()?.into_iter().find_map(|(entry, range)| match &entry {
-        Entry::Assign { key: k, value, .. } if category == "events" => (value.as_block().and_then(|b| b.scalar("id")) == Some(key) && k != "namespace").then_some(range),
-        Entry::Assign { key: k, .. } => (k == key).then_some(range),
-        Entry::Item(_) => None,
+    script::parse_with_spans(text).ok()?.into_iter().find_map(|(entry, range)| {
+        (crate::merge::conflicts::object_key_for_entry(category, &entry).as_deref() == Some(key)).then_some(range)
     })
 }
 

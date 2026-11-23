@@ -722,7 +722,80 @@ impl ObjectView {
                 card.set_header(&result_header);
                 let save = gtk::Button::builder().label(t!("Save to Patch")).css_classes(["suggested-action"]).tooltip_text(t!("Save to the merged patch")).build();
                 card.set_actions(&[save.clone().upcast()]);
-                card.set_text(&text);
+
+                if let Some(vanilla) = &steps.loaded.vanilla {
+                    let whitespace = page.hooks.session.borrow().ignore_whitespace;
+                    let (hunk_count, change_lines) = card.show_ai_changes(&text, &vanilla.text, whitespace);
+                    if hunk_count > 0 {
+                        let change_badge = gtk::Box::builder().spacing(4).css_classes(["change-badge-box"]).valign(gtk::Align::Center).build();
+                        let badge_label = gtk::Label::builder()
+                            .label(&tnf!("{count} change from base game", "{count} changes from base game", count = hunk_count))
+                            .css_classes(["badge", "accent"])
+                            .build();
+                        change_badge.append(&badge_label);
+
+                        let current_idx = Rc::new(Cell::new(0usize));
+                        let prev_btn = gtk::Button::builder().icon_name("go-up-symbolic").tooltip_text(t!("Previous change")).css_classes(["flat"]).build();
+                        let next_btn = gtk::Button::builder().icon_name("go-down-symbolic").tooltip_text(t!("Next change")).css_classes(["flat"]).build();
+                        let nav = gtk::Box::builder().css_classes(["linked"]).build();
+                        nav.append(&prev_btn);
+                        nav.append(&next_btn);
+                        change_badge.append(&nav);
+
+                        let toggle_btn = gtk::ToggleButton::builder()
+                            .icon_name("view-reveal-symbolic")
+                            .active(true)
+                            .tooltip_text(t!("Toggle diff highlighting and change bubbles"))
+                            .css_classes(["flat"])
+                            .build();
+                        change_badge.append(&toggle_btn);
+
+                        {
+                            let card_weak = Rc::downgrade(&card);
+                            let lines = change_lines.clone();
+                            let idx = current_idx.clone();
+                            prev_btn.connect_clicked(move |_| {
+                                if lines.is_empty() { return; }
+                                let i = idx.get();
+                                let prev = if i == 0 { lines.len() - 1 } else { i - 1 };
+                                idx.set(prev);
+                                if let Some(card) = card_weak.upgrade() {
+                                    card.scroll_to_line(lines[prev]);
+                                }
+                            });
+                        }
+                        {
+                            let card_weak = Rc::downgrade(&card);
+                            let lines = change_lines.clone();
+                            let idx = current_idx.clone();
+                            next_btn.connect_clicked(move |_| {
+                                if lines.is_empty() { return; }
+                                let next = (idx.get() + 1) % lines.len();
+                                idx.set(next);
+                                if let Some(card) = card_weak.upgrade() {
+                                    card.scroll_to_line(lines[next]);
+                                }
+                            });
+                        }
+                        {
+                            let card_weak = Rc::downgrade(&card);
+                            let vanilla_text = vanilla.text.clone();
+                            toggle_btn.connect_toggled(move |btn| {
+                                if let Some(card) = card_weak.upgrade() {
+                                    if btn.is_active() {
+                                        card.show_ai_changes(&card.text(), &vanilla_text, whitespace);
+                                    } else {
+                                        card.set_text(&card.text());
+                                    }
+                                }
+                            });
+                        }
+
+                        toolbar.append(&change_badge);
+                    }
+                } else {
+                    card.set_text(&text);
+                }
                 {
                     let weak = Rc::downgrade(self);
                     card.code.buffer().connect_changed(move |buffer| {

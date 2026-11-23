@@ -6,9 +6,9 @@
 #, fuzzy
 msgid ""
 msgstr ""
-"Project-Id-Version: DrukhalManager 2.7.3\n"
+"Project-Id-Version: DrukhalManager 2.7.4\n"
 "Report-Msgid-Bugs-To: https://github.com/Dukko/DrukhalManager/issues\n"
-"POT-Creation-Date: 2026-11-23 20:09+0000\n"
+"POT-Creation-Date: 2026-11-23 20:30+0000\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -514,6 +514,24 @@ msgstr ""
 
 #: src/conflicts_view/object.rs
 msgid "Save to the merged patch"
+msgstr ""
+
+#: src/conflicts_view/object.rs
+msgid "{count} change from base game"
+msgid_plural "{count} changes from base game"
+msgstr[0] ""
+msgstr[1] ""
+
+#: src/conflicts_view/object.rs
+msgid "Previous change"
+msgstr ""
+
+#: src/conflicts_view/object.rs
+msgid "Next change"
+msgstr ""
+
+#: src/conflicts_view/object.rs
+msgid "Toggle diff highlighting and change bubbles"
 msgstr ""
 
 #: src/conflicts_view/object.rs
@@ -1056,6 +1074,30 @@ msgstr ""
 
 #: src/diff_view.rs
 msgid "Show these lines"
+msgstr ""
+
+#: src/diff_view.rs
+msgid "✦ Added line"
+msgstr ""
+
+#: src/diff_view.rs
+msgid "✦ Added {count} lines"
+msgstr ""
+
+#: src/diff_view.rs
+msgid "✦ Modified line"
+msgstr ""
+
+#: src/diff_view.rs
+msgid "✦ Modified {count} lines"
+msgstr ""
+
+#: src/diff_view.rs
+msgid "✦ Removed line from base"
+msgstr ""
+
+#: src/diff_view.rs
+msgid "✦ Removed {count} lines from base"
 msgstr ""
 
 #: src/diff_view.rs

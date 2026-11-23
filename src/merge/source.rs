@@ -7,7 +7,7 @@ use std::ops::Range;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
-use crate::paradox::script::{self, Entries, Entry};
+use crate::paradox::script::{self, Entry};
 
 /// One version of an object, as written in one file.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -38,10 +38,8 @@ pub fn extract_parsed(category: &str, key: &str, src: &str, entries: &[(Entry, s
     if category == "localisation" {
         return localisation_line(key, src);
     }
-    let found = entries.iter().find(|(entry, _)| match entry {
-        Entry::Assign { key: k, value, .. } if category == "events" => k != "namespace" && value.as_block().and_then(|b| b.scalar("id")) == Some(key),
-        Entry::Assign { key: k, .. } => k == key,
-        Entry::Item(_) => false,
+    let found = entries.iter().find(|(entry, _)| {
+        crate::merge::conflicts::object_key_for_entry(category, entry).as_deref() == Some(key)
     })?;
     let text = &src[found.1.clone()];
 
@@ -76,11 +74,7 @@ fn object_at_parsed(category: &str, src: &str, entries: &[(Entry, Range<usize>)]
     let start = if line == 1 { 0 } else { src.match_indices('\n').nth(line - 2)?.0 + 1 };
     let end = src[start..].find('\n').map_or(src.len(), |i| start + i);
     let (entry, _) = entries.iter().find(|(_, range)| range.start <= end && range.end > start)?;
-    let Entry::Assign { key, value, .. } = entry else { return None };
-    if key.starts_with('@') || key == "namespace" {
-        return None;
-    }
-    let key = if category == "events" { value.as_block().and_then(|b| b.scalar("id"))?.to_owned() } else { key.clone() };
+    let key = crate::merge::conflicts::object_key_for_entry(category, entry)?;
     let text = extract_parsed(category, &key, src, entries)?;
     Some((key, text))
 }
@@ -116,20 +110,7 @@ pub fn index(category: &str, src: &str) -> HashMap<String, String> {
         })
         .collect();
     for (entry, range) in &entries {
-        let Entry::Assign { key, value, .. } = entry else { continue };
-        let name = if category == "events" {
-            if key == "namespace" {
-                continue;
-            }
-            match value.as_block().and_then(|b| b.scalar("id")) {
-                Some(id) => id.to_owned(),
-                None => continue,
-            }
-        } else if key.starts_with('@') {
-            continue;
-        } else {
-            key.clone()
-        };
+        let Some(name) = crate::merge::conflicts::object_key_for_entry(category, entry) else { continue };
         if found.contains_key(&name) {
             continue;
         }
@@ -397,5 +378,26 @@ mod tests {
         let src = "\u{feff}l_english:\r\n# Buildings:\r\n building_lab:0 \"Lab\"\r\n building_lab_desc:0 \"A lab\"\nl_german:\n building_lab:0 \"Labor\"\n";
         assert_eq!(extract("localisation", "l_english:building_lab", src).unwrap(), "building_lab:0 \"Lab\"");
         assert_eq!(extract("localisation", "l_german:building_lab", src).unwrap(), "building_lab:0 \"Labor\"");
+    }
+
+    #[test]
+    fn extracts_inner_keyed_objects() {
+        let sets = "component_set = { key = \"SET_1\" icon = \"GFX_1\" }\ncomponent_set = { key = \"SET_2\" icon = \"GFX_2\" }\n";
+        assert_eq!(extract("common/component_sets", "SET_1", sets).as_deref(), Some("component_set = { key = \"SET_1\" icon = \"GFX_1\" }"));
+        assert_eq!(extract("common/component_sets", "SET_2", sets).as_deref(), Some("component_set = { key = \"SET_2\" icon = \"GFX_2\" }"));
+        assert_eq!(object_at("common/component_sets", sets, 2).unwrap().0, "SET_2");
+
+        let tmpls = "@pow = 5\nutility_component_template = { key = \"UTIL_1\" power = @pow }\nweapon_component_template = { key = \"WEAP_1\" }\n";
+        assert_eq!(extract("common/component_templates", "UTIL_1", tmpls).as_deref(), Some("@pow = 5\nutility_component_template = { key = \"UTIL_1\" power = @pow }"));
+        assert_eq!(extract("common/component_templates", "WEAP_1", tmpls).as_deref(), Some("weapon_component_template = { key = \"WEAP_1\" }"));
+
+        let amb = "ambient_object = { name = \"amb_x\" entity = \"ent_x\" }\n";
+        assert_eq!(extract("common/ambient_objects", "amb_x", amb).as_deref(), Some("ambient_object = { name = \"amb_x\" entity = \"ent_x\" }"));
+
+        let msg = "message_type = { key = \"msg_x\" sound = \"s\" }\n";
+        assert_eq!(extract("common/message_types", "msg_x", msg).as_deref(), Some("message_type = { key = \"msg_x\" sound = \"s\" }"));
+
+        let ship = "ship_design = { name = \"ship_x\" }\n";
+        assert_eq!(extract("common/global_ship_designs", "ship_x", ship).as_deref(), Some("ship_design = { name = \"ship_x\" }"));
     }
 }

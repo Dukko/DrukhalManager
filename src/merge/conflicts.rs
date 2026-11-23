@@ -322,7 +322,7 @@ fn reads(path: &str, languages: Option<&BTreeSet<String>>) -> bool {
 }
 
 /// Folders whose objects the game merges rather than overrides.
-const MERGED_FOLDERS: &[&str] = &["common/on_actions", "common/defines", "common/ambient_objects"];
+const MERGED_FOLDERS: &[&str] = &["common/on_actions", "common/defines"];
 
 /// Blocks the game adds to an existing object instead of replacing it,
 /// by folder: an object holding nothing but these blocks is an addition.
@@ -485,37 +485,71 @@ pub(crate) fn object_category(path: &str) -> Option<String> {
     None
 }
 
+/// The unique object identifier for a Paradox script entry, if it defines an object.
+///
+/// Paradox Stellaris scripts define objects in two ways:
+/// 1. Direct top-level name: `building_clinic = { ... }` or `tech_lasers_1 = { ... }`.
+/// 2. Typed wrapper block with an inner identifier:
+///    - `events`: `country_event = { id = "..." }`
+///    - `common/component_sets`: `component_set = { key = "..." }`
+///    - `common/component_templates`: `utility_component_template = { key = "..." }`
+///    - `common/section_templates`: `ship_section_template = { key = "..." }`
+///    - `common/ambient_objects`: `ambient_object = { name = "..." }`
+///    - `common/ship_behaviors`: `ship_behavior = { name = "..." }`
+///    - `common/global_ship_designs`: `ship_design = { name = "..." }`
+pub fn object_key_for_entry(category: &str, entry: &Entry) -> Option<String> {
+    let Entry::Assign { key, value, .. } = entry else { return None };
+    if key.starts_with('@') || key.eq_ignore_ascii_case("namespace") || key.eq_ignore_ascii_case("inline_script") {
+        return None;
+    }
+    let block = value.as_block();
+    if let Some(b) = block && is_addition(category, b) {
+        return None;
+    }
+    if category == "events" || key.ends_with("_event") {
+        return block.and_then(|b| b.scalar("id")).map(str::to_owned);
+    }
+    if category.eq_ignore_ascii_case("common/component_sets") || is_under(category, "common/component_sets") || key.eq_ignore_ascii_case("component_set") {
+        return block.and_then(|b| b.scalar("key")).map(str::to_owned);
+    }
+    if category.eq_ignore_ascii_case("common/component_templates") || is_under(category, "common/component_templates") || key.ends_with("_component_template") {
+        return block.and_then(|b| b.scalar("key")).map(str::to_owned);
+    }
+    if category.eq_ignore_ascii_case("common/section_templates") || is_under(category, "common/section_templates") || key.ends_with("section_template") {
+        return block.and_then(|b| b.scalar("key")).map(str::to_owned);
+    }
+    if category.eq_ignore_ascii_case("common/message_types") || is_under(category, "common/message_types") || key.eq_ignore_ascii_case("message_type") {
+        return block.and_then(|b| b.scalar("key")).map(str::to_owned);
+    }
+    if category.eq_ignore_ascii_case("common/alert_types") || is_under(category, "common/alert_types") || key.eq_ignore_ascii_case("alert_type") {
+        return block.and_then(|b| b.scalar("key")).map(str::to_owned);
+    }
+    if category.eq_ignore_ascii_case("common/ambient_objects") || is_under(category, "common/ambient_objects") || key.eq_ignore_ascii_case("ambient_object") {
+        return block.and_then(|b| b.scalar("name")).map(str::to_owned);
+    }
+    if category.eq_ignore_ascii_case("common/ship_behaviors") || is_under(category, "common/ship_behaviors") || key.eq_ignore_ascii_case("ship_behavior") {
+        return block.and_then(|b| b.scalar("name")).map(str::to_owned);
+    }
+    if category.eq_ignore_ascii_case("common/global_ship_designs") || is_under(category, "common/global_ship_designs") || key.eq_ignore_ascii_case("ship_design") {
+        return block.and_then(|b| b.scalar("name")).map(str::to_owned);
+    }
+    Some(key.clone())
+}
+
 fn object_keys(category: &str, src: &str) -> Result<Vec<String>, ScanError> {
     if category == "localisation" {
         return Ok(localisation_keys(src));
     }
     let entries = script::parse(src).map_err(|e| ScanError { message: e.message, line: Some(e.line) })?;
-    let keys = if category == "events" {
-        // Events are `country_event = { id = ns.1 ... }`; the id is the key.
-        entries
-            .iter()
-            .filter_map(|e| match e {
-                Entry::Assign { key, value, .. } if !key.eq_ignore_ascii_case("namespace") && !key.starts_with('@') => value.as_block()?.scalar("id").map(str::to_owned),
-                _ => None,
-            })
-            .collect()
-    } else {
-        let mut seen = BTreeMap::<&str, usize>::new();
-        for e in &entries {
-            // `@name = value` variables are file-local, and `inline_script`
-            // is a call that pastes another file in, not an object.
-            if let Entry::Assign { key, value, .. } = e
-                && !key.starts_with('@')
-                && !key.eq_ignore_ascii_case("inline_script")
-                && !key.eq_ignore_ascii_case("ambient_object")
-                && !value.as_block().is_some_and(|b| is_addition(category, b))
-            {
-                *seen.entry(key).or_default() += 1;
+    let mut keys = Vec::new();
+    let mut seen = BTreeSet::new();
+    for entry in &entries {
+        if let Some(key) = object_key_for_entry(category, entry) {
+            if seen.insert(key.clone()) {
+                keys.push(key);
             }
         }
-        // A key repeated within one file is a type keyword, not an object's name.
-        seen.into_iter().filter(|&(_, n)| n == 1).map(|(k, _)| k.to_owned()).collect()
-    };
+    }
     Ok(keys)
 }
 
@@ -808,18 +842,9 @@ mod tests {
                     }
                     match script::parse(&text) {
                         Ok(parsed) => {
-                            let (mut keys, n) = top_keys(&parsed);
+                            let (_, n) = top_keys(&parsed);
                             nested += n;
-                            if category == "events" {
-                                // As `object_keys` keys events: by the `id` in each top-level block.
-                                keys = parsed
-                                    .iter()
-                                    .filter_map(|e| match e {
-                                        Entry::Assign { key, value, .. } if !key.eq_ignore_ascii_case("namespace") && !key.starts_with('@') => value.as_block()?.scalar("id").map(str::to_owned),
-                                        _ => None,
-                                    })
-                                    .collect();
-                            }
+                            let keys: Vec<String> = parsed.iter().filter_map(|e| object_key_for_entry(&category, e)).collect();
                             for key in keys {
                                 expanded.entry((category.clone(), key)).or_default().insert(m);
                             }
@@ -1085,7 +1110,7 @@ mod tests {
     fn categorises_paths() {
         assert_eq!(object_category("common/governments/civics/x.txt").as_deref(), Some("common/governments/civics"));
         assert_eq!(object_category("common/on_actions/x.txt"), None);
-        assert_eq!(object_category("common/ambient_objects/x.txt"), None);
+        assert_eq!(object_category("common/ambient_objects/x.txt").as_deref(), Some("common/ambient_objects"));
         assert_eq!(object_category("events/x.txt").as_deref(), Some("events"));
         assert_eq!(object_category("common/inline_scripts/x/y.txt"), None);
         assert_eq!(object_category("localisation/replace/x_l_english.yml").as_deref(), Some("localisation"));
@@ -1104,5 +1129,68 @@ mod tests {
         let src = "l_english:\n a:0 \"x\"\n../../evil:\n b:0 \"y\"\nl_simp_chinese:\n c:0 \"z\"\nl_braz_por:\n d:0 \"w\"\n";
 
         assert_eq!(localisation_keys(src), ["l_english:a", "l_simp_chinese:c", "l_braz_por:d"]);
+    }
+
+    #[test]
+    fn inner_key_categories_use_unique_identifiers_not_wrapper_keywords() {
+        let set_a = "component_set = { key = \"SET_A\" icon = \"GFX_a\" }\n";
+        let set_b = "component_set = { key = \"SET_B\" icon = \"GFX_b\" }\n";
+        assert_eq!(object_keys("common/component_sets", set_a).unwrap(), vec!["SET_A"]);
+        assert_eq!(object_keys("common/component_sets", set_b).unwrap(), vec!["SET_B"]);
+
+        let tmpl_1 = "@p = 10\nutility_component_template = { key = \"UTILITY_1\" size = aux }\n";
+        let tmpl_2 = "utility_component_template = { key = \"UTILITY_2\" size = aux }\n";
+        assert_eq!(object_keys("common/component_templates", tmpl_1).unwrap(), vec!["UTILITY_1"]);
+        assert_eq!(object_keys("common/component_templates", tmpl_2).unwrap(), vec!["UTILITY_2"]);
+
+        let amb_1 = "ambient_object = { name = \"amb_1\" entity = \"ent_1\" }\n";
+        let amb_2 = "ambient_object = { name = \"amb_2\" entity = \"ent_2\" }\n";
+        assert_eq!(object_keys("common/ambient_objects", amb_1).unwrap(), vec!["amb_1"]);
+        assert_eq!(object_keys("common/ambient_objects", amb_2).unwrap(), vec!["amb_2"]);
+
+        let msg_1 = "message_type = { key = \"MSG_1\" icon = \"GFX_1\" }\n";
+        let msg_2 = "message_type = { key = \"MSG_2\" icon = \"GFX_2\" }\n";
+        assert_eq!(object_keys("common/message_types", msg_1).unwrap(), vec!["MSG_1"]);
+        assert_eq!(object_keys("common/message_types", msg_2).unwrap(), vec!["MSG_2"]);
+
+        let ship_1 = "ship_design = { name = \"DESIGN_1\" ship_size = corvette }\n";
+        let ship_2 = "ship_design = { name = \"DESIGN_2\" ship_size = corvette }\n";
+        assert_eq!(object_keys("common/global_ship_designs", ship_1).unwrap(), vec!["DESIGN_1"]);
+        assert_eq!(object_keys("common/global_ship_designs", ship_2).unwrap(), vec!["DESIGN_2"]);
+
+        let root = std::env::temp_dir().join(format!("dm-inner-keys-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        write(&root.join("mod1"), &[
+            ("common/component_sets/a.txt", set_a),
+            ("common/component_templates/t1.txt", tmpl_1),
+            ("common/ambient_objects/m1.txt", amb_1),
+            ("common/message_types/msg1.txt", msg_1),
+            ("common/global_ship_designs/s1.txt", ship_1),
+        ]);
+        write(&root.join("mod2"), &[
+            ("common/component_sets/b.txt", set_b),
+            ("common/component_templates/t2.txt", tmpl_2),
+            ("common/ambient_objects/m2.txt", amb_2),
+            ("common/message_types/msg2.txt", msg_2),
+            ("common/global_ship_designs/s2.txt", ship_2),
+        ]);
+
+        let report = analyze(&[input(&root, "mod1", &[]), input(&root, "mod2", &[])], None);
+        assert!(report.objects.is_empty(), "different keys and names do not conflict: {:?}", report.objects);
+
+        write(&root.join("mod2"), &[
+            ("common/component_sets/b.txt", set_a),
+            ("common/component_templates/t2.txt", tmpl_1),
+            ("common/ambient_objects/m2.txt", amb_1),
+            ("common/message_types/msg2.txt", msg_1),
+            ("common/global_ship_designs/s2.txt", ship_1),
+        ]);
+        let report_conflict = analyze(&[input(&root, "mod1", &[]), input(&root, "mod2", &[])], None);
+        assert_eq!(report_conflict.objects.len(), 5, "same keys and names do conflict");
+        let mut keys: Vec<String> = report_conflict.objects.into_iter().map(|o| o.key).collect();
+        keys.sort();
+        assert_eq!(keys, vec!["DESIGN_1", "MSG_1", "SET_A", "UTILITY_1", "amb_1"]);
+
+        std::fs::remove_dir_all(root).unwrap();
     }
 }
