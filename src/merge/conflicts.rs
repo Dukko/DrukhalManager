@@ -158,7 +158,6 @@ const FIOS_FOLDERS: &[&str] = &[
     "events",
     "common/solar_system_initializers",
     "common/traits",
-    "common/start_screen_messages",
     "common/governments/authorities",
 ];
 
@@ -322,7 +321,12 @@ fn reads(path: &str, languages: Option<&BTreeSet<String>>) -> bool {
 }
 
 /// Folders whose objects the game merges rather than overrides.
-const MERGED_FOLDERS: &[&str] = &["common/on_actions", "common/defines"];
+const MERGED_FOLDERS: &[&str] = &[
+    "common/on_actions",
+    "common/defines",
+    "common/random_names",
+    "common/start_screen_messages",
+];
 
 /// Blocks the game adds to an existing object instead of replacing it,
 /// by folder: an object holding nothing but these blocks is an addition.
@@ -1104,6 +1108,8 @@ mod tests {
     fn categorises_paths() {
         assert_eq!(object_category("common/governments/civics/x.txt").as_deref(), Some("common/governments/civics"));
         assert_eq!(object_category("common/on_actions/x.txt"), None);
+        assert_eq!(object_category("common/random_names/x.txt"), None);
+        assert_eq!(object_category("common/start_screen_messages/x.txt"), None);
         assert_eq!(object_category("common/ambient_objects/x.txt").as_deref(), Some("common/ambient_objects"));
         assert_eq!(object_category("events/x.txt").as_deref(), Some("events"));
         assert_eq!(object_category("common/inline_scripts/x/y.txt"), None);

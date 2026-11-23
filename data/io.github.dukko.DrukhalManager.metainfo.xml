@@ -36,6 +36,11 @@
     <control>keyboard</control>
   </supports>
   <releases>
+    <release version="2.7.9" date="2026-11-23">
+      <description>
+        <p>Treats random_names and start_screen_messages as cumulative merged folders rather than individual conflicting objects, removing false conflicts and self-conflicts across empire name formats and intro screen message parts.</p>
+      </description>
+    </release>
     <release version="2.7.8" date="2026-11-23">
       <description>
         <p>Fixes false conflicts and internal self-conflicts for random_list and terraform_link definitions across planet classes and terraforming scripts by resolving their inner unique names.</p>
