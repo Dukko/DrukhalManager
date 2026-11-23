@@ -412,10 +412,29 @@ fn fix(button: &gtk::Button, ctx: &Rc<Context>, message: String, target: Target,
     let stack = gtk::Stack::new();
     stack.add_named(&scrolled, Some("working"));
     let toolbar = adw::ToolbarView::new();
-    toolbar.add_top_bar(&adw::HeaderBar::new());
+    let header = adw::HeaderBar::new();
+    let stop_button = gtk::Button::builder().label(t!("Stop")).build();
+    header.pack_end(&stop_button);
+    toolbar.add_top_bar(&header);
     toolbar.set_content(Some(&stack));
     let dialog = adw::Dialog::builder().title(t!("Fix This Error")).content_width(900).content_height(720).child(&toolbar).build();
     dialog.present(Some(button));
+
+    stop_button.connect_clicked(glib::clone!(
+        #[strong]
+        thinking,
+        move |btn| {
+            btn.set_sensitive(false);
+            thinking.stop();
+        }
+    ));
+    dialog.connect_closed(glib::clone!(
+        #[strong]
+        thinking,
+        move |_| {
+            thinking.stop();
+        }
+    ));
 
     let ctx = ctx.clone();
     glib::spawn_future_local(async move {
@@ -455,6 +474,7 @@ fn fix(button: &gtk::Button, ctx: &Rc<Context>, message: String, target: Target,
             Ok::<_, String>((checked, warnings))
         })
         .await;
+        stop_button.set_visible(false);
         match result {
             Some(Ok((checked, warnings))) => {
                 ctx.ai_notes.borrow_mut().insert(message.clone(), checked.merged.notes.clone());
@@ -468,7 +488,11 @@ fn fix(button: &gtk::Button, ctx: &Rc<Context>, message: String, target: Target,
                 failure.set_visible(true);
             }
             None => {
-                failure.set_label(&tf!("Couldn't get a fix: {error}", error = t!("The request failed unexpectedly")));
+                if thinking.is_stopped() {
+                    failure.set_label(&t!("Fix stopped"));
+                } else {
+                    failure.set_label(&tf!("Couldn't get a fix: {error}", error = t!("The request failed unexpectedly")));
+                }
                 failure.set_visible(true);
             }
         }

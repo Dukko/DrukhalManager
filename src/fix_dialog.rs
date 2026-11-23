@@ -2,7 +2,7 @@
 //! the AI provider to restore the intended nesting of the damaged objects,
 //! and saves the fixed copy into the merged patch at the same path.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::path::PathBuf;
 use std::rc::Rc;
 
@@ -40,12 +40,14 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
     let state: Rc<RefCell<Option<State>>> = Rc::default();
 
     let ai_button = gtk::Button::builder().label(t!("Fix with AI")).css_classes(["suggested-action"]).visible(false).build();
+    let stop_button = gtk::Button::builder().label(t!("Stop")).visible(false).build();
     let save_button = gtk::Button::builder().label(t!("Save to Patch")).sensitive(false).build();
     let file_name = request.path.rsplit_once('/').map_or(request.path.as_str(), |(_, f)| f);
     let header = adw::HeaderBar::new();
     header.set_title_widget(Some(&adw::WindowTitle::new(&tf!("Fix {file}", file = file_name), &request.mod_name)));
     header.pack_end(&save_button);
     header.pack_end(&ai_button);
+    header.pack_end(&stop_button);
     let banner = adw::Banner::builder().use_markup(false).build();
 
     let problem = adw::PreferencesGroup::builder()
@@ -142,6 +144,29 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
         }
     ));
 
+    let cancelled = Rc::new(Cell::new(false));
+    stop_button.connect_clicked(glib::clone!(
+        #[strong]
+        cancelled,
+        #[strong]
+        thinking,
+        move |btn| {
+            cancelled.set(true);
+            btn.set_sensitive(false);
+            thinking.stop();
+        }
+    ));
+    dialog.connect_closed(glib::clone!(
+        #[strong]
+        cancelled,
+        #[strong]
+        thinking,
+        move |_| {
+            cancelled.set(true);
+            thinking.stop();
+        }
+    ));
+
     ai_button.connect_clicked(glib::clone!(
         #[strong]
         request,
@@ -151,12 +176,16 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
         state,
         #[strong]
         labels,
+        #[strong]
+        cancelled,
         #[weak]
         dialog,
         #[weak]
         editor,
         #[weak]
         save_button,
+        #[weak]
+        stop_button,
         #[weak]
         banner,
         move |button| {
@@ -167,7 +196,10 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
             };
             let Some((category, fixes)) = state.borrow().as_ref().map(|s| (s.category.clone(), s.fixes.clone())) else { return };
             banner.set_revealed(false);
-            button.set_sensitive(false);
+            button.set_visible(false);
+            stop_button.set_visible(true);
+            stop_button.set_sensitive(true);
+            cancelled.set(false);
             save_button.set_sensitive(false);
             editor.set_editable(false);
             let mod_name = request.mod_name.clone();
@@ -176,6 +208,8 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
                 thinking,
                 #[strong]
                 labels,
+                #[strong]
+                cancelled,
                 #[weak]
                 button,
                 #[weak]
@@ -183,11 +217,19 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
                 #[weak]
                 save_button,
                 #[weak]
+                stop_button,
+                #[weak]
                 banner,
                 async move {
                     let mut failures = 0;
                     let pending = labels.borrow().clone();
                     for (key, label) in pending {
+                        if cancelled.get() || thinking.is_stopped() {
+                            break;
+                        }
+                        if label.text() == t!("Fixed") {
+                            continue;
+                        }
                         let buffer = editor.buffer();
                         let text = buffer.text(&buffer.start_iter(), &buffer.end_iter(), false).to_string();
                         let Some(range) = lint::object_span(&category, &key, &text) else {
@@ -199,6 +241,11 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
                         let (provider, c, k, object, fixes, m) = (provider.clone(), category.clone(), key.clone(), text[range].to_owned(), fixes.clone(), mod_name.clone());
                         let heading = key.clone();
                         let result = thinking_view::run(&thinking, Some(&heading), move |on| ai::fix(&provider, &c, &k, &object, &fixes, &m, on)).await;
+                        if cancelled.get() || thinking.is_stopped() {
+                            label.set_label(&t!("Stopped"));
+                            label.set_css_classes(&["dim-label", "caption"]);
+                            break;
+                        }
                         let fixed = match result {
                             Some(Ok(f)) => merge_dialog::validate(&category, &key, &f.script).map(|script| (script, f.notes)),
                             Some(Err(e)) => Err(e),
@@ -221,10 +268,19 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
                     }
                     editor.set_editable(true);
                     save_button.set_sensitive(true);
-                    button.set_sensitive(failures > 0);
-                    button.set_label(&if failures > 0 { t!("Retry") } else { t!("Fixed") });
-                    if failures > 0 {
-                        show(&banner, &tnf!("{count} object couldn't be fixed by AI; hover the row for the reason", "{count} objects couldn't be fixed by AI; hover the row for the reason", count = failures));
+                    stop_button.set_visible(false);
+                    button.set_visible(true);
+                    let stopped = cancelled.get() || thinking.is_stopped();
+                    if stopped {
+                        button.set_sensitive(true);
+                        button.set_label(&t!("Retry"));
+                        show(&banner, &t!("Fix stopped"));
+                    } else {
+                        button.set_sensitive(failures > 0);
+                        button.set_label(&if failures > 0 { t!("Retry") } else { t!("Fixed") });
+                        if failures > 0 {
+                            show(&banner, &tnf!("{count} object couldn't be fixed by AI; hover the row for the reason", "{count} objects couldn't be fixed by AI; hover the row for the reason", count = failures));
+                        }
                     }
                 }
             ));

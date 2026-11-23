@@ -262,8 +262,10 @@ fn detail(analysis: &Rc<Analysis>, hooks: &Rc<MergeHooks>, navigation: &adw::Nav
     let buttons = gtk::Box::builder().spacing(6).halign(gtk::Align::End).margin_top(12).margin_start(12).margin_end(12).margin_bottom(12).build();
     let edit = gtk::Button::builder().label(t!("Edit by Hand")).build();
     let fix_button = gtk::Button::builder().label(t!("Fix with AI")).css_classes(["suggested-action"]).build();
+    let stop_button = gtk::Button::builder().label(t!("Stop")).visible(false).build();
     buttons.append(&edit);
     buttons.append(&fix_button);
+    buttons.append(&stop_button);
     body.append(&error);
     body.append(&buttons);
     let thinking_box = gtk::Box::builder().margin_start(12).margin_end(12).margin_bottom(12).build();
@@ -273,12 +275,22 @@ fn detail(analysis: &Rc<Analysis>, hooks: &Rc<MergeHooks>, navigation: &adw::Nav
     let edit_ref = fix.clone();
     edit.connect_clicked(move |_| edit_ref.edit());
     let button_ref = fix_button.clone();
-    fix_button.connect_clicked(move |_| fix.start(&button_ref, &error, &thinking));
+    let stop_ref = stop_button.clone();
+    let edit_btn = edit.clone();
+    let thinking_stop = thinking.clone();
+    stop_button.connect_clicked(move |_| {
+        thinking_stop.stop();
+    });
+    let thinking_destroy = thinking.clone();
+    body.connect_destroy(move |_| {
+        thinking_destroy.stop();
+    });
+    fix_button.connect_clicked(move |_| fix.start(&button_ref, &stop_ref, &edit_btn, &error, &thinking));
     wrap(&object.key, Some(analysis.name(object.position)), &stack)
 }
 
 impl Fix {
-    fn start(self: &Rc<Self>, button: &gtk::Button, error: &gtk::Label, thinking: &Rc<ThinkingView>) {
+    fn start(self: &Rc<Self>, button: &gtk::Button, stop_button: &gtk::Button, edit: &gtk::Button, error: &gtk::Label, thinking: &Rc<ThinkingView>) {
         let Some(provider) = (self.hooks.provider)() else {
             (self.hooks.toast)(&t!("Set up an AI provider in Preferences first"));
             (self.hooks.open_preferences)();
@@ -302,9 +314,11 @@ impl Fix {
         let mut names: Vec<String> = self.object.findings.iter().map(|f| f.name.clone()).collect();
         names.sort();
         names.dedup();
-        button.set_sensitive(false);
+        button.set_visible(false);
+        stop_button.set_visible(true);
+        edit.set_sensitive(false);
         error.set_visible(false);
-        let (fix, button, error, thinking) = (self.clone(), button.clone(), error.clone(), thinking.clone());
+        let (fix, button, stop_button, edit, error, thinking) = (self.clone(), button.clone(), stop_button.clone(), edit.clone(), error.clone(), thinking.clone());
         glib::spawn_future_local(async move {
             let result = thinking_view::run(&thinking, None, move |on| {
                 // The game's own version of the object, when it defines one.
@@ -338,11 +352,20 @@ impl Fix {
                 ai::fix_script_checked(&provider, &category, &key, &mod_copy, game.as_ref(), &problems, &reference, &check, on).map(|checked| (checked, game))
             })
             .await;
+            stop_button.set_visible(false);
+            button.set_visible(true);
             button.set_sensitive(true);
+            edit.set_sensitive(true);
             match result {
                 Some(Ok((checked, game))) => fix.review(checked, game),
                 Some(Err(message)) => show_error(&error, &message),
-                None => show_error(&error, &t!("The fix failed unexpectedly")),
+                None => {
+                    if thinking.is_stopped() {
+                        show_error(&error, &t!("Fix stopped"));
+                    } else {
+                        show_error(&error, &t!("The fix failed unexpectedly"));
+                    }
+                }
             }
         });
     }

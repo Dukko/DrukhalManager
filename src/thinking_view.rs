@@ -2,7 +2,7 @@
 //! Collapsed, its header shows a spinner and the latest thought; expanded,
 //! the full reasoning, following along as it arrives.
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use adw::prelude::*;
@@ -22,6 +22,8 @@ pub struct ThinkingView {
     output: Cell<usize>,
     /// Whether the current run has sent any reasoning yet.
     reasoned: Cell<bool>,
+    stopped: Cell<bool>,
+    cancel: RefCell<Option<Box<dyn Fn()>>>,
 }
 
 impl ThinkingView {
@@ -48,10 +50,26 @@ impl ThinkingView {
         let scroll = gtk::ScrolledWindow::builder().child(&view).hscrollbar_policy(gtk::PolicyType::Never).min_content_height(80).max_content_height(260).propagate_natural_height(true).css_classes(["card"]).margin_top(6).build();
         let widget = gtk::Expander::builder().label_widget(&header).child(&crate::resize_grip::resizable(&scroll)).visible(false).build();
         widget.set_tooltip_text(Some(&t!("What the model is thinking. Click to expand.")));
-        Rc::new(Self { widget, title, spinner, view, buffer, words: Cell::new(0), output: Cell::new(0), reasoned: Cell::new(false) })
+        Rc::new(Self { widget, title, spinner, view, buffer, words: Cell::new(0), output: Cell::new(0), reasoned: Cell::new(false), stopped: Cell::new(false), cancel: RefCell::new(None) })
+    }
+
+    /// Stops the running job immediately and updates the title.
+    pub fn stop(&self) {
+        self.stopped.set(true);
+        if let Some(cancel) = self.cancel.borrow_mut().take() {
+            cancel();
+        }
+        self.spinner.set_visible(false);
+        self.title.set_label(&t!("Stopped"));
+    }
+
+    /// Whether this view has been stopped.
+    pub fn is_stopped(&self) -> bool {
+        self.stopped.get()
     }
 
     fn begin(&self, heading: Option<&str>) {
+        self.stopped.set(false);
         self.widget.set_visible(true);
         self.spinner.set_visible(true);
         self.title.set_label(&t!("Waiting for the model…"));
@@ -104,13 +122,43 @@ impl ThinkingView {
 /// `heading` labels this run in the reasoning, for dialogs that run several.
 pub async fn run<T: Send + 'static>(view: &Rc<ThinkingView>, heading: Option<&str>, job: impl FnOnce(&mut dyn FnMut(Progress)) -> T + Send + 'static) -> Option<T> {
     let (tx, rx) = async_channel::unbounded();
+    let rx_close = rx.clone();
+    view.cancel.borrow_mut().replace(Box::new(move || {
+        rx_close.close();
+    }));
     view.begin(heading);
     let handle = gio::spawn_blocking(move || job(&mut |p| drop(tx.send_blocking(p))));
-    // The channel closes when the job finishes and drops its sender.
+    // The channel closes when the job finishes and drops its sender,
+    // or when the run is stopped via `view.stop()`.
     while let Ok(progress) = rx.recv().await {
+        if view.is_stopped() {
+            break;
+        }
         view.push(progress);
+    }
+    view.cancel.borrow_mut().take();
+    if view.is_stopped() {
+        return None;
     }
     let result = handle.await.ok();
     view.end();
     result
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn test_async_channel_close_wakes_receiver() {
+        let (_tx, rx) = async_channel::unbounded::<()>();
+        let rx_clone = rx.clone();
+        let handle = std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(50));
+            rx_clone.close();
+        });
+        futures_lite::future::block_on(async {
+            let res = rx.recv().await;
+            assert!(res.is_err());
+        });
+        handle.join().unwrap();
+    }
 }

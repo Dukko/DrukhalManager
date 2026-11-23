@@ -322,7 +322,7 @@ fn reads(path: &str, languages: Option<&BTreeSet<String>>) -> bool {
 }
 
 /// Folders whose objects the game merges rather than overrides.
-const MERGED_FOLDERS: &[&str] = &["common/on_actions", "common/defines"];
+const MERGED_FOLDERS: &[&str] = &["common/on_actions", "common/defines", "common/ambient_objects"];
 
 /// Blocks the game adds to an existing object instead of replacing it,
 /// by folder: an object holding nothing but these blocks is an addition.
@@ -507,13 +507,13 @@ fn object_keys(category: &str, src: &str) -> Result<Vec<String>, ScanError> {
             if let Entry::Assign { key, value, .. } = e
                 && !key.starts_with('@')
                 && !key.eq_ignore_ascii_case("inline_script")
+                && !key.eq_ignore_ascii_case("ambient_object")
                 && !value.as_block().is_some_and(|b| is_addition(category, b))
             {
                 *seen.entry(key).or_default() += 1;
             }
         }
-        // A key repeated within one file is a type keyword (e.g.
-        // `ambient_object = { name = ... }`), not an object's name.
+        // A key repeated within one file is a type keyword, not an object's name.
         seen.into_iter().filter(|&(_, n)| n == 1).map(|(k, _)| k.to_owned()).collect()
     };
     Ok(keys)
@@ -637,7 +637,7 @@ mod tests {
             ("descriptor.mod", "name=a"),
             ("common/buildings/a_buildings.txt", "@cost = 10\nbuilding_lab = { cost = @cost }\nbuilding_a = {}"),
             ("common/buildings/shared.txt", "building_shared = {}"),
-            ("common/ambient_objects/a.txt", "ambient_object = { name = x }\nambient_object = { name = y }"),
+            ("common/ambient_objects/a.txt", "ambient_object = { name = x }"),
             (".git/config", "[core]"),
             ("common/on_actions/a.txt", "on_game_start = { events = { a.1 } }"),
             ("events/a.txt", "namespace = a\ncountry_event = { id = a.1 }\ncountry_event = { id = shared.1 }"),
@@ -647,7 +647,7 @@ mod tests {
             ("descriptor.mod", "name=b"),
             ("common/buildings/b_buildings.txt", "building_lab = { cost = 20 }"),
             ("common/buildings/Shared.txt", "building_shared = { b = yes }"),
-            ("common/ambient_objects/b.txt", "ambient_object = { name = z }\nambient_object = { name = w }"),
+            ("common/ambient_objects/b.txt", "ambient_object = { name = z }"),
             (".git/config", "[core]"),
             ("common/on_actions/b.txt", "on_game_start = { events = { b.1 } }"),
             ("events/b.txt", "namespace = b\nship_event = { id = shared.1 }"),
@@ -1085,6 +1085,7 @@ mod tests {
     fn categorises_paths() {
         assert_eq!(object_category("common/governments/civics/x.txt").as_deref(), Some("common/governments/civics"));
         assert_eq!(object_category("common/on_actions/x.txt"), None);
+        assert_eq!(object_category("common/ambient_objects/x.txt"), None);
         assert_eq!(object_category("events/x.txt").as_deref(), Some("events"));
         assert_eq!(object_category("common/inline_scripts/x/y.txt"), None);
         assert_eq!(object_category("localisation/replace/x_l_english.yml").as_deref(), Some("localisation"));
