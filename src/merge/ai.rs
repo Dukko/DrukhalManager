@@ -1189,10 +1189,16 @@ mod tests {
         let notes = notes();
         let entries = NOTES.lines().filter(|l| l.starts_with("- ")).count();
         assert_eq!(entries, notes.len());
-        assert_eq!(notes.len(), 5);
+        assert_eq!(notes.len(), 8);
         let colony = notes.iter().find(|n| n.old == "every_system_colony").unwrap();
         assert_eq!(colony.new.len(), 2);
         assert!(notes.iter().any(|n| n.old == "ai_update_type" && n.new.is_empty()));
+        let inc = notes.iter().find(|n| n.old == "include").unwrap();
+        assert_eq!(inc.new, ["included_buildings"]);
+        let exc = notes.iter().find(|n| n.old == "exclude").unwrap();
+        assert_eq!(exc.new, ["excluded_buildings"]);
+        let armies = notes.iter().find(|n| n.old == "defense_armies_add").unwrap();
+        assert_eq!(armies.new, ["planet_defense_armies_add"]);
     }
 
     #[test]
