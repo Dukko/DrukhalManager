@@ -36,6 +36,11 @@
     <control>keyboard</control>
   </supports>
   <releases>
+    <release version="2.7.2" date="2026-11-23">
+      <description>
+        <p>Stellaris 4.6 compatibility: updated scripting rules and AI merge knowledge for the 4.6 "Corona Borealis" update, adding support for renamed district specialization keywords (included_buildings and excluded_buildings) and obsolete modifier replacements.</p>
+      </description>
+    </release>
     <release version="2.7.1" date="2026-11-22">
       <description>
         <p>Script Performance: after running script_profiler twice in the game's console, a new sidebar link shows how much script time each enabled mod's objects took, slowest first, with each mod's slowest items. A mod that replaces the game's own scripts is credited with their time too. Outdated Merges and Merges to Check now have a Remove All button when they list more than one item; the patch is backed up first. The url dependency is updated for RUSTSEC-2026-0592.</p>
