@@ -458,12 +458,12 @@ impl Card {
             };
             tag_line(&buffer, line, tag);
             tag_line(&self.numbers.buffer(), line, tag);
-            if let (Kind::Changed, Some(b)) = (row.kind, row.left) {
-                if let (Some(b_line), Some(m_line)) = (base_lines.get(b), mine.get(line)) {
-                    for range in diff::words(b_line, m_line).1 {
-                        if let (Some(start), Some(end)) = (buffer.iter_at_line_index(line as i32, range.start as i32), buffer.iter_at_line_index(line as i32, range.end as i32)) {
-                            buffer.apply_tag_by_name("word", &start, &end);
-                        }
+            if let (Kind::Changed, Some(b)) = (row.kind, row.left)
+                && let (Some(b_line), Some(m_line)) = (base_lines.get(b), mine.get(line))
+            {
+                for range in diff::words(b_line, m_line).1 {
+                    if let (Some(start), Some(end)) = (buffer.iter_at_line_index(line as i32, range.start as i32), buffer.iter_at_line_index(line as i32, range.end as i32)) {
+                        buffer.apply_tag_by_name("word", &start, &end);
                     }
                 }
             }

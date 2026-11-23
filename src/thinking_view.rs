@@ -155,10 +155,8 @@ mod tests {
             std::thread::sleep(std::time::Duration::from_millis(50));
             rx_clone.close();
         });
-        futures_lite::future::block_on(async {
-            let res = rx.recv().await;
-            assert!(res.is_err());
-        });
+        let res = rx.recv_blocking();
+        assert!(res.is_err());
         handle.join().unwrap();
     }
 }

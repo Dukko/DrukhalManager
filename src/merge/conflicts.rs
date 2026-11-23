@@ -532,10 +532,10 @@ fn object_keys(category: &str, src: &str) -> Result<Vec<String>, ScanError> {
     let mut keys = Vec::new();
     let mut seen = BTreeSet::new();
     for entry in &entries {
-        if let Some(key) = object_key_for_entry(category, entry) {
-            if seen.insert(key.clone()) {
-                keys.push(key);
-            }
+        if let Some(key) = object_key_for_entry(category, entry)
+            && seen.insert(key.clone())
+        {
+            keys.push(key);
         }
     }
     Ok(keys)

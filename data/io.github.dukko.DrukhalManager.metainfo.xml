@@ -36,6 +36,11 @@
     <control>keyboard</control>
   </supports>
   <releases>
+    <release version="2.7.7" date="2026-11-23">
+      <description>
+        <p>Fixes CI lint warnings and Windows test build portability.</p>
+      </description>
+    </release>
     <release version="2.7.6" date="2026-11-23">
       <description>
         <p>Fixes conflict solver false conflicts for special projects and any other wrapped definitions using inner key attributes (e.g. special_project = { key = ... }), automatically extracting the inner unique key.</p>
