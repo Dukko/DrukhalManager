@@ -63,6 +63,7 @@ ICONS = {
     "pan-end-symbolic": "chevron_right",
     "pan-start-symbolic": "chevron_left",
     "pan-up-symbolic": "expand_less",
+    "power-profile-performance-symbolic": "speed",
     "preferences-system-notifications-symbolic": "notifications",
     "sidebar-show-symbolic": "left_panel_open",
     "software-update-available-symbolic": "update",

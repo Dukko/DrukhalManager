@@ -27,6 +27,7 @@ mod secrets;
 mod preferences;
 mod resize_grip;
 mod script_check_dialog;
+mod script_profile_dialog;
 mod settings;
 mod theme;
 mod thinking_view;

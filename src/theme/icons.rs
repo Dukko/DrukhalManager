@@ -44,6 +44,7 @@ pub const ICONS: &[(&str, &str)] = &[
     ("pan-end-symbolic", include_str!("../../data/icons/material/pan-end-symbolic.svg")),
     ("pan-start-symbolic", include_str!("../../data/icons/material/pan-start-symbolic.svg")),
     ("pan-up-symbolic", include_str!("../../data/icons/material/pan-up-symbolic.svg")),
+    ("power-profile-performance-symbolic", include_str!("../../data/icons/material/power-profile-performance-symbolic.svg")),
     ("preferences-system-notifications-symbolic", include_str!("../../data/icons/material/preferences-system-notifications-symbolic.svg")),
     ("sidebar-show-symbolic", include_str!("../../data/icons/material/sidebar-show-symbolic.svg")),
     ("software-update-available-symbolic", include_str!("../../data/icons/material/software-update-available-symbolic.svg")),

@@ -45,6 +45,7 @@ use crate::mods::smart_sort::{self, Category};
 use crate::mods::{Mod, checks, filter};
 use crate::mods::collections::Collections;
 use crate::paradox::game::GameInstall;
+use crate::paradox::script_profile;
 use crate::preferences;
 use crate::secrets;
 use crate::settings::{self, Settings};
@@ -92,6 +93,8 @@ struct Window {
     errors_link: gtk::Button,
     /// When the error log counted for `errors_link` was written.
     error_log_seen: Cell<Option<std::time::SystemTime>>,
+    /// "Script profile from today", under `errors_link`, shown when the game wrote one.
+    profile_link: gtk::Button,
     /// The sidebar's Smart Sort categories, the one showing, if any, and
     /// each one's row and count, which shows only that category.
     categories_list: gtk::ListBox,
@@ -440,8 +443,10 @@ pub fn build(
     }
     let errors_link = overview::sidebar_link("", "win.errors");
     errors_link.set_visible(false);
+    let profile_link = overview::sidebar_link("", "win.script-profile");
+    profile_link.set_visible(false);
     let views_split = adw::OverlaySplitView::builder()
-        .sidebar(&overview::sidebar_page(&views_list, &categories_list, &find_patches_link, &game_info, &errors_link))
+        .sidebar(&overview::sidebar_page(&views_list, &categories_list, &find_patches_link, &game_info, &errors_link, &profile_link))
         .css_classes(["load-order-split"])
         .content(&{
             // The bar for several selected mods sits under the list.
@@ -554,6 +559,7 @@ pub fn build(
         select_shown,
         errors_link,
         error_log_seen: Cell::new(None),
+        profile_link,
         categories_list,
         category,
         category_counts,
@@ -775,6 +781,14 @@ pub fn build(
         }
     });
     window.add_action(&errors);
+    let script_profile = gio::SimpleAction::new("script-profile", None);
+    let weak = Rc::downgrade(&ui);
+    script_profile.connect_activate(move |_, _| {
+        if let Some(ui) = weak.upgrade() {
+            ui.show_script_profile();
+        }
+    });
+    window.add_action(&script_profile);
     let crash_hunt = gio::SimpleAction::new("crash-hunt", None);
     let weak = Rc::downgrade(&ui);
     crash_hunt.connect_activate(move |_, _| {
@@ -971,6 +985,17 @@ impl Window {
             Some(analysis) => crate::object_lookup_dialog::present(&self.window, analysis),
             None => self.add_toast(adw::Toast::new(&t!("Open Conflicts once to scan your mods first"))),
         }
+    }
+
+    /// Crediting the profile to mods reads the last conflict scan, so it needs one.
+    fn show_script_profile(&self) {
+        let Some(analysis) = self.analysis.borrow().clone() else {
+            return self.add_toast(adw::Toast::new(&t!("Open Conflicts once to scan your mods first")));
+        };
+        let path = script_profile::summary_path(&self.paths.user_dir);
+        let when = std::fs::metadata(&path).and_then(|m| m.modified()).ok().map(overview::ago);
+        let entries = std::fs::read(&path).map(|bytes| script_profile::parse_summary(&String::from_utf8_lossy(&bytes))).unwrap_or_default();
+        crate::script_profile_dialog::present(&self.window, analysis, &entries, when);
     }
 
     fn save_settings(&self, what: &str) {

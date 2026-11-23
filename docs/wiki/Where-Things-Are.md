@@ -24,6 +24,7 @@ The main menu now holds only what's about the app itself: **Preferences**, **Key
 | Mods Not Updated for This Game… | **Disable for Now…** on the "not updated" card in the health strip |
 | Find Compatibility Patches… | **Find More…** on the Compatibility Patches header in the list, or at the foot of the sidebar's categories while you have no patches |
 | Last Game's Errors… | "Last game logged N errors" at the bottom of the sidebar, shown when there were errors |
+| Script Performance | "Script profile from …" at the bottom of the sidebar, shown when the game has written a script profile |
 | Merged Patch Backups… | The backups button at the bottom of the Conflicts list, beside **Rules…** and **Rescan** |
 
 Keyboard shortcuts haven't changed. Press **?** to see them all.

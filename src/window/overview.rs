@@ -128,7 +128,7 @@ pub(super) fn sidebar_link(label: &str, action: &str) -> gtk::Button {
     button
 }
 
-pub(super) fn sidebar_page(views: &gtk::ListBox, categories: &gtk::ListBox, find_patches: &gtk::Button, info: &gtk::Label, errors: &gtk::Button) -> gtk::Box {
+pub(super) fn sidebar_page(views: &gtk::ListBox, categories: &gtk::ListBox, find_patches: &gtk::Button, info: &gtk::Label, errors: &gtk::Button, profile: &gtk::Button) -> gtk::Box {
     let page = gtk::Box::builder().orientation(gtk::Orientation::Vertical).css_classes(["side-panel"]).overflow(gtk::Overflow::Hidden).build();
     let heading = |text: &str| gtk::Label::builder().label(text).xalign(0.0).margin_start(18).margin_top(12).margin_bottom(4).css_classes(["heading", "dim-label"]).build();
     let lists = gtk::Box::new(gtk::Orientation::Vertical, 0);
@@ -149,6 +149,10 @@ pub(super) fn sidebar_page(views: &gtk::ListBox, categories: &gtk::ListBox, find
     errors.set_margin_end(12);
     errors.set_margin_bottom(8);
     page.append(errors);
+    profile.set_margin_start(12);
+    profile.set_margin_end(12);
+    profile.set_margin_bottom(8);
+    page.append(profile);
     page
 }
 
@@ -496,6 +500,7 @@ impl Window {
         }
         self.game_info.set_label(&info.join("\n"));
         self.refresh_error_count();
+        self.refresh_profile_link();
     }
 
     /// A health strip card: a number, what it counts, and what clicking
@@ -537,6 +542,15 @@ impl Window {
         }
         body.append(&row);
         body.upcast()
+    }
+
+    /// Links to the game's last script profile in the sidebar, when it wrote one.
+    pub(super) fn refresh_profile_link(&self) {
+        let profiled = std::fs::metadata(crate::paradox::script_profile::summary_path(&self.paths.user_dir)).and_then(|m| m.modified()).ok();
+        self.profile_link.set_visible(profiled.is_some());
+        if let Some(when) = profiled {
+            self.profile_link.set_label(&tf!("Script profile from {when}", when = ago(when)));
+        }
     }
 
     /// Shows how many errors the game logged last time, as a link to them

@@ -4,6 +4,10 @@
 
 When the last game wrote errors to its `error.log`, the bottom of the Load Order sidebar says **Last game logged N errors**. Click it to see them grouped by the mod they came from, with your merges and fixes at the top. An error that names a fixable object has **Fix with AI** and **Edit by Hand**; both write the corrected object into the merged patch, and the row then says it's fixed.
 
+## The game is slow
+
+In Stellaris's console, type `script_profiler`, play for a while, then type it again. The game writes a script profile, and the sidebar then says **Script profile from …**. Click it to see how long the game spent in each of your mods' scripts, with each mod's slowest items. A mod that replaces the game's own scripts is credited with their time too, so a high number isn't always the mod's fault. It needs a conflict scan first: open Conflicts once.
+
 ## A notification went away before I read it
 
 The bell at the top right keeps every notification, newest first. A badge counts the ones you haven't seen.

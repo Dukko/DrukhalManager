@@ -277,6 +277,7 @@ impl Window {
     fn report_session(self: &Rc<Self>, started: std::time::SystemTime, crashed: bool) {
         let minutes = started.elapsed().unwrap_or_default().as_secs() / 60;
         crate::diagnostics::log!("game", "Stellaris {} after {minutes} min", if crashed { "crashed" } else { "exited" });
+        self.refresh_profile_link();
         if self.hunting() {
             return self.ask_hunt_result(crashed);
         }
