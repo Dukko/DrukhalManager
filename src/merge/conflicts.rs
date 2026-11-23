@@ -518,6 +518,12 @@ pub fn object_key_for_entry(category: &str, entry: &Entry) -> Option<String> {
     if category.eq_ignore_ascii_case("common/global_ship_designs") || is_under(category, "common/global_ship_designs") || key.eq_ignore_ascii_case("ship_design") {
         return block.and_then(|b| b.scalar("name")).map(str::to_owned);
     }
+    if key.eq_ignore_ascii_case("random_list") {
+        return block.and_then(|b| b.scalar("name")).map(str::to_owned);
+    }
+    if key.eq_ignore_ascii_case("terraform_link") {
+        return block.and_then(|b| Some(format!("{} → {}", b.scalar("from")?, b.scalar("to")?)));
+    }
     if let Some(inner_key) = block.and_then(|b| b.scalar("key")) {
         return Some(inner_key.to_owned());
     }
@@ -1151,6 +1157,16 @@ mod tests {
         assert_eq!(object_keys("common/special_projects", proj_1).unwrap(), vec!["PROJ_1"]);
         assert_eq!(object_keys("common/special_projects", proj_2).unwrap(), vec!["PROJ_2"]);
 
+        let rl_1 = "random_list = {\n\tname = \"rl_habitable_normal\"\n\tplanets = { pc_desert }\n}\n";
+        let rl_2 = "random_list = {\n\tname = rl_mem_forested_planets\n\tplanets = { pc_gaia }\n}\n";
+        assert_eq!(object_keys("common/planet_classes", rl_1).unwrap(), vec!["rl_habitable_normal"]);
+        assert_eq!(object_keys("common/planet_classes", rl_2).unwrap(), vec!["rl_mem_forested_planets"]);
+
+        let tf_1 = "terraform_link = {\n\tfrom = pc_barren\n\tto = pc_desert\n}\n";
+        let tf_2 = "terraform_link = {\n\tfrom = pc_toxic\n\tto = pc_gaia\n}\n";
+        assert_eq!(object_keys("common/terraform", tf_1).unwrap(), vec!["pc_barren → pc_desert"]);
+        assert_eq!(object_keys("common/terraform", tf_2).unwrap(), vec!["pc_toxic → pc_gaia"]);
+
         let root = std::env::temp_dir().join(format!("dm-inner-keys-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         write(&root.join("mod1"), &[
@@ -1160,6 +1176,8 @@ mod tests {
             ("common/message_types/msg1.txt", msg_1),
             ("common/global_ship_designs/s1.txt", ship_1),
             ("common/special_projects/p1.txt", proj_1),
+            ("common/planet_classes/p1.txt", rl_1),
+            ("common/terraform/t1.txt", tf_1),
         ]);
         write(&root.join("mod2"), &[
             ("common/component_sets/b.txt", set_b),
@@ -1168,6 +1186,8 @@ mod tests {
             ("common/message_types/msg2.txt", msg_2),
             ("common/global_ship_designs/s2.txt", ship_2),
             ("common/special_projects/p2.txt", proj_2),
+            ("common/planet_classes/p2.txt", rl_2),
+            ("common/terraform/t2.txt", tf_2),
         ]);
 
         let report = analyze(&[input(&root, "mod1", &[]), input(&root, "mod2", &[])], None);
@@ -1180,12 +1200,14 @@ mod tests {
             ("common/message_types/msg2.txt", msg_1),
             ("common/global_ship_designs/s2.txt", ship_1),
             ("common/special_projects/p2.txt", proj_1),
+            ("common/planet_classes/p2.txt", rl_1),
+            ("common/terraform/t2.txt", tf_1),
         ]);
         let report_conflict = analyze(&[input(&root, "mod1", &[]), input(&root, "mod2", &[])], None);
-        assert_eq!(report_conflict.objects.len(), 6, "same keys and names do conflict");
+        assert_eq!(report_conflict.objects.len(), 8, "same keys and names do conflict");
         let mut keys: Vec<String> = report_conflict.objects.into_iter().map(|o| o.key).collect();
         keys.sort();
-        assert_eq!(keys, vec!["DESIGN_1", "MSG_1", "PROJ_1", "SET_A", "UTILITY_1", "amb_1"]);
+        assert_eq!(keys, vec!["DESIGN_1", "MSG_1", "PROJ_1", "SET_A", "UTILITY_1", "amb_1", "pc_barren → pc_desert", "rl_habitable_normal"]);
 
         std::fs::remove_dir_all(root).unwrap();
     }

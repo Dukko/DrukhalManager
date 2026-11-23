@@ -25,7 +25,9 @@ pub fn extract(category: &str, key: &str, src: &str) -> Option<String> {
     if category == "localisation" {
         return localisation_line(key, src);
     }
-    if !src.contains(key.rsplit(':').next().unwrap_or(key)) {
+    let check = key.rsplit(':').next().unwrap_or(key);
+    let check = check.split_once(" → ").map_or(check, |(from, _)| from);
+    if !src.contains(check) {
         return None;
     }
     let entries = script::parse_with_spans(src).ok()?;
@@ -402,5 +404,11 @@ mod tests {
 
         let proj = "special_project = { key = \"SYNTHETIC_EVOLUTION_PROJECT\" cost = 100 }\n";
         assert_eq!(extract("common/special_projects", "SYNTHETIC_EVOLUTION_PROJECT", proj).as_deref(), Some("special_project = { key = \"SYNTHETIC_EVOLUTION_PROJECT\" cost = 100 }"));
+
+        let rl = "random_list = {\n\tname = \"rl_habitable_normal\"\n\tplanets = { pc_desert }\n}\n";
+        assert_eq!(extract("common/planet_classes", "rl_habitable_normal", rl).as_deref(), Some(rl.trim_end()));
+
+        let tf = "terraform_link = {\n\tfrom = pc_barren\n\tto = pc_desert\n}\n";
+        assert_eq!(extract("common/terraform", "pc_barren → pc_desert", tf).as_deref(), Some(tf.trim_end()));
     }
 }
