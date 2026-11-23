@@ -147,6 +147,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(windows, ignore = "a case-insensitive filesystem holds one file for both names")]
     fn counts_case_variant_paths_of_one_mod_each_when_replaced() {
         let a = vec![("gfx/A.dds", "a1"), ("gfx/a.dds", "a2")];
         let b = vec![("gfx/a.dds", "b")];
