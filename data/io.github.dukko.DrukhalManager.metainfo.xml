@@ -36,6 +36,11 @@
     <control>keyboard</control>
   </supports>
   <releases>
+    <release version="2.7.5" date="2026-11-23">
+      <description>
+        <p>Invalidates the conflict scan cache so all mods are automatically re-indexed with the new inner-key object resolver, removing phantom conflict entries (ambient_object, message_type, ship_design, component_set, etc.) left over from previous cache versions.</p>
+      </description>
+    </release>
     <release version="2.7.4" date="2026-11-23">
       <description>
         <p>Fixes conflict solver false conflicts for component sets, component templates, section templates, and ambient objects where definitions were grouped by block keyword rather than their inner unique key or name. Also introduces visual change indicators and bubbles in the Merged Result editor comparing the AI merge directly against the base game.</p>
