@@ -152,7 +152,7 @@ pub struct MergeHooks {
     /// Checks the patch for out-of-date merges again, after a save.
     pub reload_stale: Box<dyn Fn() -> Vec<Stale>>,
     /// Removes an out-of-date merge or fix from the patch.
-    pub remove_merge: Box<dyn Fn(&Stale)>,
+    pub remove_merge: Box<dyn Fn(&[Stale])>,
     /// Starts tracking an untracked merge from its mods' current files.
     pub keep_merge: Box<dyn Fn(&Stale)>,
     /// Takes the picked mod's new version for a "Use This Version"
@@ -1390,8 +1390,14 @@ impl Page {
             update.connect_clicked(move |_| (hooks.update_picks)(None));
             header.actions.append(&update);
         }
-        let intro = gtk::Label::builder().label(&description).wrap(true).xalign(0.0).css_classes(["dim-label"]).build();
         let stale: Vec<&Stale> = all.iter().filter(|s| s.untracked == untracked).collect();
+        if stale.len() > 1 {
+            let remove = gtk::Button::builder().label(tnf!("Remove {count} from Patch", "Remove All {count} from Patch", count = stale.len())).tooltip_text(t!("Remove each of these merges from the patch. The patch is backed up first")).css_classes(["destructive-action"]).build();
+            let (hooks, listed) = (self.hooks.clone(), stale.iter().map(|s| (*s).clone()).collect::<Vec<_>>());
+            remove.connect_clicked(move |_| (hooks.remove_merge)(&listed));
+            header.actions.append(&remove);
+        }
+        let intro = gtk::Label::builder().label(&description).wrap(true).xalign(0.0).css_classes(["dim-label"]).build();
         scrolled_detail(&[header.widget.upcast(), intro.upcast(), self.stale_list(&stale).upcast()])
     }
 
@@ -1446,7 +1452,7 @@ impl Page {
             let remove = gtk::Button::builder().label(t!("Remove from Patch")).valign(gtk::Align::Center).css_classes(["flat"]).build();
             let (hooks, stale, row_ref) = (hooks.clone(), (*s).clone(), r.downgrade());
             remove.connect_clicked(move |_| {
-                (hooks.remove_merge)(&stale);
+                (hooks.remove_merge)(std::slice::from_ref(&stale));
                 if let Some(r) = row_ref.upgrade() {
                     r.set_visible(false);
                 }

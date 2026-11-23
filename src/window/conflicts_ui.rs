@@ -283,25 +283,44 @@ impl Window {
         }
     }
 
-    pub(super) fn remove_merge(self: &Rc<Self>, stale: &patch::Stale) {
+    pub(super) fn remove_merge(self: &Rc<Self>, merges: &[patch::Stale]) {
+        self.check_stale();
+        let merges: Vec<patch::Stale> = {
+            let current = self.stale.borrow();
+            merges.iter().filter(|m| current.iter().any(|s| s.object == m.object && s.path == m.path)).cloned().collect()
+        };
+        // After the handler returns, since this replaces the page the button is on.
+        let ui = self.clone();
+        glib::idle_add_local_once(move || ui.render_conflicts());
+        if merges.is_empty() {
+            return self.toast_error_message(&t!("Nothing to remove: the merges changed since the last check"));
+        }
         if let Err(e) = self.snapshot_patch(snapshot::BEFORE_REMOVING) {
             return self.toast_error_message(&e);
         }
-        let result = self.with_patch(|p, _, _| match &stale.object {
-            Some((category, key)) => p.remove(category, key),
-            None => p.remove_file(&stale.path),
+        let name = |stale: &patch::Stale| stale.object.as_ref().map_or(stale.path.clone(), |(_, k)| k.clone());
+        let removed = std::cell::Cell::<usize>::new(0);
+        let result = self.with_patch(|p, _, _| {
+            merges.iter().try_for_each(|stale| {
+                match &stale.object {
+                    Some((category, key)) => p.remove(category, key),
+                    None => p.remove_file(&stale.path),
+                }?;
+                removed.set(removed.get() + 1);
+                Ok(())
+            })
         });
+        self.check_stale();
+        self.refresh();
+        let count = merges.len();
         match result {
-            Ok(()) => {
-                self.check_stale();
-                self.refresh();
-                let what = stale
-                    .object
-                    .as_ref()
-                    .map_or(stale.path.as_str(), |(_, k)| k.as_str());
-                self.add_toast(adw::Toast::new(&tf!("Removed {what} from the patch", what = what)));
+            Ok(()) if count == 1 => self.add_toast(adw::Toast::new(&tf!("Removed {what} from the patch", what = name(&merges[0])))),
+            Ok(()) => self.add_toast(adw::Toast::builder().title(tnf!("Removed {count} merge from the patch", "Removed {count} merges from the patch", count = count)).button_label(t!("Backups…")).action_name("win.patch-backups").build()),
+            Err(e) if count == 1 => self.toast_error_message(&e),
+            Err(e) => {
+                let title = tnf!("Removed {done} of {count}, then could not remove {what}: {error}", "Removed {done} of {count}, then could not remove {what}: {error}", count = count, done = removed.get(), what = name(&merges[removed.get()]), error = e);
+                self.add_toast(adw::Toast::builder().title(title).button_label(t!("Backups…")).action_name("win.patch-backups").build());
             }
-            Err(e) => self.toast_error_message(&e),
         }
     }
 
@@ -514,7 +533,7 @@ impl Window {
             }
         });
         let weak = Rc::downgrade(self);
-        let remove_merge = Box::new(move |stale: &patch::Stale| {
+        let remove_merge = Box::new(move |stale: &[patch::Stale]| {
             if let Some(ui) = weak.upgrade() {
                 ui.remove_merge(stale);
             }

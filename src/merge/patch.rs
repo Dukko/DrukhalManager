@@ -354,8 +354,8 @@ impl Patch {
 
     fn remove_unlogged(&mut self, category: &str, key: &str) -> io::Result<()> {
         if let Some(at) = self.manifest.merges.iter().position(|m| m.category == category && m.key == key) {
-            let merge = self.manifest.merges.remove(at);
-            remove_if_present(&self.root.join(&merge.file))?;
+            remove_if_present(&self.root.join(&self.manifest.merges[at].file))?;
+            self.manifest.merges.remove(at);
         }
         self.write_manifest()
     }
@@ -368,8 +368,8 @@ impl Patch {
 
     fn remove_file_unlogged(&mut self, path: &str) -> io::Result<()> {
         if let Some(at) = self.manifest.files.iter().position(|f| f.path.eq_ignore_ascii_case(path)) {
-            let merge = self.manifest.files.remove(at);
-            remove_if_present(&self.root.join(&merge.path))?;
+            remove_if_present(&self.root.join(&self.manifest.files[at].path))?;
+            self.manifest.files.remove(at);
         }
         self.write_manifest()
     }
