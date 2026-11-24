@@ -36,6 +36,16 @@
     <control>keyboard</control>
   </supports>
   <releases>
+    <release version="2.7.19" date="2026-11-24">
+      <description>
+        <p>Updates scripting knowledge base and rules for Stellaris 4.6 (Corona Borealis):</p>
+        <ul>
+          <li>Teaches AI conflict merging and repair prompts new 4.6 renames, removals, and pop group rework patterns (<code>every_owned_pop_group</code>, <code>kill_pop_group</code>)</li>
+          <li>Adds knowledge of colony governor modifier renames, ethic pop-attraction mult updates, starbase waystation changes, and megastructure country scopes</li>
+          <li>Expands reference tables for 4.6 effects, triggers, modifiers, and script rules</li>
+        </ul>
+      </description>
+    </release>
     <release version="2.7.18" date="2026-11-24">
       <description>
         <p>Fixes a false-positive validator error on scripted effect and trigger definitions:</p>

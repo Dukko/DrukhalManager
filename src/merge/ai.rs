@@ -1264,16 +1264,23 @@ mod tests {
         let notes = notes();
         let entries = NOTES.lines().filter(|l| l.starts_with("- ")).count();
         assert_eq!(entries, notes.len());
-        assert_eq!(notes.len(), 8);
+        assert_eq!(notes.len(), 28);
         let colony = notes.iter().find(|n| n.old == "every_system_colony").unwrap();
         assert_eq!(colony.new.len(), 2);
         assert!(notes.iter().any(|n| n.old == "ai_update_type" && n.new.is_empty()));
+        assert!(notes.iter().any(|n| n.old == "LEADER_JOB_BACKGROUND_STRATA_WEIGHTS" && n.new.is_empty()));
         let inc = notes.iter().find(|n| n.old == "include").unwrap();
         assert_eq!(inc.new, ["included_buildings"]);
         let exc = notes.iter().find(|n| n.old == "exclude").unwrap();
         assert_eq!(exc.new, ["excluded_buildings"]);
         let armies = notes.iter().find(|n| n.old == "defense_armies_add").unwrap();
         assert_eq!(armies.new, ["planet_defense_armies_add"]);
+        let gov = notes.iter().find(|n| n.old == "skill_scientist_planet_governor").unwrap();
+        assert_eq!(gov.new, ["skill_scientist_colony_governor"]);
+        let pop = notes.iter().find(|n| n.old == "every_owned_pop").unwrap();
+        assert_eq!(pop.new, ["every_owned_pop_group"]);
+        let kill = notes.iter().find(|n| n.old == "kill_pop").unwrap();
+        assert_eq!(kill.new, ["kill_pop_group"]);
     }
 
     #[test]
@@ -1281,6 +1288,8 @@ mod tests {
         assert!(with_notes(EXPLAIN_SYSTEM).contains("every_system_planet_colony"));
         assert!(with_notes(REPAIR_SYSTEM).contains("every_system_planet_colony"));
         assert!(with_notes(UPDATE_SYSTEM).contains("every_system_planet_colony"));
+        assert!(with_notes(EXPLAIN_SYSTEM).contains("every_owned_pop_group"));
+        assert!(with_notes(EXPLAIN_SYSTEM).contains("skill_scientist_colony_governor"));
     }
 
     /// Checks the shipped notes against an installed game. Set

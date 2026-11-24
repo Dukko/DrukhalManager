@@ -1336,6 +1336,8 @@ mod tests {
         assert_eq!(names(&found), [("every_system_colony", Ctx::Effect, Problem::Unknown)]);
         let found = check_text(&context, &known, "events/m.txt", &event("random_list = { 50 = { modifier = { factor = 0 } } }"));
         assert_eq!(found, vec![]);
+        let found = check_text(&context, &known, "events/m.txt", &event("if = { limit = { is_capital = yes } add_modifier = { modifier = m } }"));
+        assert_eq!(found, vec![]);
         let _ = std::fs::remove_dir_all(game);
     }
 
