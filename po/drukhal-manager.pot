@@ -6,9 +6,9 @@
 #, fuzzy
 msgid ""
 msgstr ""
-"Project-Id-Version: DrukhalManager 2.7.11\n"
+"Project-Id-Version: DrukhalManager 2.7.12\n"
 "Report-Msgid-Bugs-To: https://github.com/Dukko/DrukhalManager/issues\n"
-"POT-Creation-Date: 2026-11-24 00:35+0000\n"
+"POT-Creation-Date: 2026-11-24 01:01+0000\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -53,7 +53,7 @@ msgstr ""
 msgid "Objects your enabled mods replace that changed between Stellaris {old} and {new}"
 msgstr ""
 
-#: src/behind_dialog.rs src/behind_dialog.rs src/behind_dialog.rs src/behind_dialog.rs src/window/overview.rs
+#: src/behind_dialog.rs src/behind_dialog.rs src/behind_dialog.rs src/behind_dialog.rs src/behind_dialog.rs src/window/overview.rs
 msgid "Stellaris {version}"
 msgstr ""
 
@@ -78,6 +78,34 @@ msgid "The mod's copy couldn't be read, so it can't be updated here."
 msgstr ""
 
 #: src/behind_dialog.rs
+msgid "Report for Mod Author"
+msgstr ""
+
+#: src/behind_dialog.rs
+msgid "Copy a formatted report for the mod author to clipboard"
+msgstr ""
+
+#: src/behind_dialog.rs
+msgid "Copied report for mod author to clipboard"
+msgstr ""
+
+#: src/behind_dialog.rs src/behind_dialog.rs src/conflicts_view/file.rs src/conflicts_view/object.rs src/file_merge_dialog.rs
+msgid "Merge Tool…"
+msgstr ""
+
+#: src/behind_dialog.rs src/behind_dialog.rs
+msgid "Open in your external merge tool to resolve differences manually"
+msgstr ""
+
+#: src/behind_dialog.rs
+msgid "Resolve Manually"
+msgstr ""
+
+#: src/behind_dialog.rs
+msgid "Edit and merge this object manually in the editor"
+msgstr ""
+
+#: src/behind_dialog.rs
 msgid "Update with AI"
 msgstr ""
 
@@ -89,12 +117,40 @@ msgstr ""
 msgid "The merge failed unexpectedly"
 msgstr ""
 
+#: src/behind_dialog.rs
+msgid "Use Game's Version"
+msgstr ""
+
+#: src/behind_dialog.rs
+msgid "Reset editor to the new base game version"
+msgstr ""
+
+#: src/behind_dialog.rs
+msgid "Use Mod's Version"
+msgstr ""
+
+#: src/behind_dialog.rs
+msgid "Reset editor to the mod's version"
+msgstr ""
+
 #: src/behind_dialog.rs src/error_report_dialog.rs src/script_check_dialog.rs
 msgid "Discard"
 msgstr ""
 
 #: src/behind_dialog.rs src/behind_dialog.rs src/error_report_dialog.rs src/script_check_dialog.rs
 msgid "Save to Merged Patch"
+msgstr ""
+
+#: src/behind_dialog.rs src/conflicts_view/file.rs src/conflicts_view/object.rs
+msgid "Choose a merge tool in Preferences first"
+msgstr ""
+
+#: src/behind_dialog.rs src/behind_dialog.rs
+msgid "The merge tool's result is in the editor; review and save when ready"
+msgstr ""
+
+#: src/behind_dialog.rs src/conflicts_view/file.rs src/conflicts_view/object.rs
+msgid "{tool} was closed without saving, so nothing changed"
 msgstr ""
 
 #: src/behind_dialog.rs
@@ -231,12 +287,12 @@ msgstr ""
 msgid "Combine the copies object by object, using AI only where they disagree"
 msgstr ""
 
-#: src/conflicts_view/file.rs
-msgid "Merge the copies with AI"
+#: src/conflicts_view/file.rs src/conflicts_view/file.rs
+msgid "Merge this file with AI or edit manually"
 msgstr ""
 
-#: src/conflicts_view/file.rs
-msgid "Merge with AI…"
+#: src/conflicts_view/file.rs src/conflicts_view/file.rs
+msgid "Merge File…"
 msgstr ""
 
 #: src/conflicts_view/file.rs
@@ -324,24 +380,12 @@ msgstr ""
 msgid "These two copies are identical."
 msgstr ""
 
-#: src/conflicts_view/file.rs src/conflicts_view/object.rs src/file_merge_dialog.rs
-msgid "Merge Tool…"
-msgstr ""
-
 #: src/conflicts_view/file.rs
 msgid "Merge these two copies in your merge tool; what you save there goes into the merged patch"
 msgstr ""
 
-#: src/conflicts_view/file.rs src/conflicts_view/object.rs
-msgid "Choose a merge tool in Preferences first"
-msgstr ""
-
 #: src/conflicts_view/file.rs
 msgid "Saved your merge of {name}"
-msgstr ""
-
-#: src/conflicts_view/file.rs src/conflicts_view/object.rs
-msgid "{tool} was closed without saving, so nothing changed"
 msgstr ""
 
 #: src/conflicts_view/file.rs

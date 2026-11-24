@@ -36,6 +36,11 @@
     <control>keyboard</control>
   </supports>
   <releases>
+    <release version="2.7.12" date="2026-11-23">
+      <description>
+        <p>Outdated Game Objects: adds manual conflict resolution, external merge tool launching (3-way merge), quick reset buttons (Use Game's Version and Use Mod's Version), and a copyable "Report for Mod Author" bug report button. Also adds quick Merge File buttons for file and inline script conflicts, and ensures diff cards reset horizontal scroll so text is never shifted out of view.</p>
+      </description>
+    </release>
     <release version="2.7.11" date="2026-11-23">
       <description>
         <p>Fixes CI lint warnings for whole-file AI merging.</p>

@@ -142,11 +142,11 @@ impl FileView {
             let tooltip = if file_merge::can_split(&c.path) {
                 t!("Combine the copies object by object, using AI only where they disagree")
             } else {
-                t!("Merge the copies with AI")
+                t!("Merge this file with AI or edit manually")
             };
             button.set_tooltip_text(Some(&tooltip));
             if !merged && !file_merge::can_split(&c.path) {
-                button.set_child(Some(&adw::ButtonContent::builder().icon_name(super::AI_ICON).label(t!("Merge with AI…")).build()));
+                button.set_child(Some(&adw::ButtonContent::builder().icon_name(super::AI_ICON).label(t!("Merge File…")).build()));
             }
             page.bind_key("merge-ai", &button);
             let weak = Rc::downgrade(self);
@@ -258,6 +258,29 @@ impl FileView {
                 }
             }
         };
+        if file_merge::mergeable(&c.path) {
+            let merge_file = gtk::Button::builder().label(t!("Merge File…")).tooltip_text(t!("Merge this file with AI or edit manually")).css_classes(["flat"]).build();
+            let weak = Rc::downgrade(self);
+            let index = self.index;
+            merge_file.connect_clicked(move |_| {
+                let Some(view) = weak.upgrade() else { return };
+                let Some(page) = view.page.upgrade() else { return };
+                let weak = Rc::downgrade(&view);
+                (page.hooks.open_file)(
+                    index,
+                    Box::new(move || {
+                        if let Some(view) = weak.upgrade()
+                            && let Some(page) = view.page.upgrade()
+                        {
+                            page.hooks.stale.replace((page.hooks.reload_stale)());
+                            page.update_status(view.item);
+                            view.render();
+                        }
+                    }),
+                );
+            });
+            bar.extra.append(&merge_file);
+        }
         bar.extra.append(&self.merge_tool_button(page, left, right, base.and_then(|b| b.text.clone().ok())));
         if has_base {
             bar.extra.append(&option_toggle(&page.hooks, &t!("Base Game"), &t!("Mark what each copy changed from the base game, instead of the differences between the two"), |s| s.compare_base, |s, v| s.compare_base = v, rerender.clone()));

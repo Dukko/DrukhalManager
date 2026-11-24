@@ -316,15 +316,82 @@ fn detail(analysis: &Rc<Analysis>, hooks: &Rc<MergeHooks>, navigation: &adw::Nav
                     old: old.to_owned(),
                     new: new.to_owned(),
                     now: now.clone(),
-                    mod_text,
+                    mod_text: mod_text.clone(),
                     stack: stack.clone(),
                     on_saved,
                 });
                 let error = error_label();
                 let thinking = ThinkingView::new();
-                let button = gtk::Button::builder().label(t!("Update with AI")).css_classes(["suggested-action"]).halign(gtk::Align::End).margin_start(12).margin_end(12).margin_bottom(12).build();
+                let button_box = gtk::Box::builder().spacing(8).halign(gtk::Align::End).margin_start(12).margin_end(12).margin_bottom(12).build();
+
+                let report_btn = gtk::Button::builder()
+                    .label(t!("Report for Mod Author"))
+                    .icon_name("edit-copy-symbolic")
+                    .tooltip_text(t!("Copy a formatted report for the mod author to clipboard"))
+                    .css_classes(["flat"])
+                    .build();
+                {
+                    let (mod_name, category, key, mod_file, base_file, old_ver, new_ver, mod_t, now_t, hooks) = (
+                        analysis.name(b.mod_position).to_owned(),
+                        b.category.clone(),
+                        b.key.clone(),
+                        b.file.clone(),
+                        now.file.clone(),
+                        old.to_owned(),
+                        new.to_owned(),
+                        mod_text.clone(),
+                        now.text.clone(),
+                        hooks.clone(),
+                    );
+                    report_btn.connect_clicked(move |btn| {
+                        let mod_t = mod_t.trim();
+                        let now_t = now_t.trim();
+                        let text = format!(
+                            "Hi! It looks like {mod_name} has an out-of-date override for Stellaris {new_ver}:\n\n\
+                             • Object: `{key}`\n\
+                             • Category: `{category}`\n\
+                             • Mod file: `{mod_file}`\n\
+                             • Base game file: `{base_file}`\n\n\
+                             The mod's copy appears to be based on Stellaris {old_ver} and is missing changes introduced in Stellaris {new_ver}.\n\n\
+                             ```stellaris\n\
+                             # Current copy in {mod_name}\n\
+                             {mod_t}\n\
+                             ```\n\n\
+                             ```stellaris\n\
+                             # Base game version in Stellaris {new_ver}\n\
+                             {now_t}\n\
+                             ```\n"
+                        );
+                        btn.clipboard().set_text(&text);
+                        (hooks.toast)(&t!("Copied report for mod author to clipboard"));
+                    });
+                }
+                button_box.append(&report_btn);
+
+                let merge_tool_btn = gtk::Button::builder().label(t!("Merge Tool…")).tooltip_text(t!("Open in your external merge tool to resolve differences manually")).build();
+                {
+                    let update = update.clone();
+                    merge_tool_btn.connect_clicked(move |btn| {
+                        update.open_merge_tool(btn, None);
+                    });
+                }
+                button_box.append(&merge_tool_btn);
+
+                let manual_btn = gtk::Button::builder().label(t!("Resolve Manually")).tooltip_text(t!("Edit and merge this object manually in the editor")).build();
+                {
+                    let update = update.clone();
+                    manual_btn.connect_clicked(move |_| {
+                        let initial = (update.hooks.existing)(&update.b.category, &update.b.key).map(|o| o.script).unwrap_or_else(|| update.now.text.clone());
+                        update.manual_review(initial);
+                    });
+                }
+                button_box.append(&manual_btn);
+
+                let button = gtk::Button::builder().label(t!("Update with AI")).css_classes(["suggested-action"]).build();
+                button_box.append(&button);
+
                 body.append(&error);
-                body.append(&button);
+                body.append(&button_box);
                 let thinking_box = gtk::Box::builder().margin_start(12).margin_end(12).margin_bottom(12).build();
                 thinking_box.append(&thinking.widget);
                 thinking.widget.set_hexpand(true);
@@ -362,6 +429,36 @@ impl Update {
     /// Shows the result next to the mod's copy, to edit and save.
     fn review(self: &Rc<Self>, checked: Checked, warnings: &[String]) {
         let Review { body, pair, error, buttons } = review_parts(&self.analysis, &self.b, &self.mod_text, &self.new, checked, warnings);
+
+        let use_game = gtk::Button::builder().label(t!("Use Game's Version")).tooltip_text(t!("Reset editor to the new base game version")).css_classes(["flat"]).build();
+        {
+            let (weak_pair, now_text) = (Rc::downgrade(&pair), self.now.text.clone());
+            use_game.connect_clicked(move |_| {
+                if let Some(pair) = weak_pair.upgrade() {
+                    pair.right.replace_text(&now_text);
+                }
+            });
+        }
+        let use_mod = gtk::Button::builder().label(t!("Use Mod's Version")).tooltip_text(t!("Reset editor to the mod's version")).css_classes(["flat"]).build();
+        {
+            let (weak_pair, mod_text) = (Rc::downgrade(&pair), self.mod_text.clone());
+            use_mod.connect_clicked(move |_| {
+                if let Some(pair) = weak_pair.upgrade() {
+                    pair.right.replace_text(&mod_text);
+                }
+            });
+        }
+        pair.right.set_actions(&[use_game.upcast(), use_mod.upcast()]);
+
+        let merge_tool_btn = gtk::Button::builder().label(t!("Merge Tool…")).tooltip_text(t!("Open in your external merge tool to resolve differences manually")).build();
+        {
+            let (update, weak_pair) = (self.clone(), Rc::downgrade(&pair));
+            merge_tool_btn.connect_clicked(move |btn| {
+                update.open_merge_tool(btn, Some(weak_pair.clone()));
+            });
+        }
+        buttons.append(&merge_tool_btn);
+
         let discard = gtk::Button::builder().label(t!("Discard")).build();
         let save = gtk::Button::builder().label(t!("Save to Merged Patch")).css_classes(["suggested-action"]).build();
         buttons.append(&discard);
@@ -382,6 +479,56 @@ impl Update {
         }
         self.stack.add_named(&body, Some("review"));
         self.stack.set_visible_child_name("review");
+    }
+
+    fn manual_review(self: &Rc<Self>, initial_text: String) {
+        let checked = Checked {
+            merged: ai::Merged {
+                script: initial_text.clone(),
+                notes: String::new(),
+                usage: None,
+            },
+            script: Ok(initial_text),
+            retried: false,
+        };
+        self.review(checked, &[]);
+    }
+
+    fn open_merge_tool(self: &Rc<Self>, button: &gtk::Button, weak_pair: Option<std::rc::Weak<Pair>>) {
+        let command = (self.hooks.merge_tool)();
+        if command.is_empty() {
+            (self.hooks.toast)(&t!("Choose a merge tool in Preferences first"));
+            return (self.hooks.open_merge_tool_settings)();
+        }
+        let tool = crate::conflicts_view::merge_tool_name(&command);
+        let left_label = self.analysis.name(self.b.mod_position).to_owned();
+        let right_label = tf!("Stellaris {version}", version = &self.new);
+        let left = crate::conflicts_view::ToolSide { label: left_label, text: self.mod_text.clone() };
+        let right_text = if let Some(ref wp) = weak_pair {
+            wp.upgrade().map(|p| p.right.text()).unwrap_or_else(|| self.now.text.clone())
+        } else {
+            self.now.text.clone()
+        };
+        let right = crate::conflicts_view::ToolSide { label: right_label, text: right_text };
+        let base = Some(self.b.was.text.clone());
+        let (update, weak_pair) = (self.clone(), weak_pair);
+        crate::conflicts_view::run_merge_tool(button, command, left, right, base, move |result| {
+            match result {
+                Ok(Some(merged)) => {
+                    if let Some(ref wp) = weak_pair
+                        && let Some(p) = wp.upgrade()
+                    {
+                        p.right.replace_text(&merged);
+                        (update.hooks.toast)(&t!("The merge tool's result is in the editor; review and save when ready"));
+                    } else {
+                        update.manual_review(merged);
+                        (update.hooks.toast)(&t!("The merge tool's result is in the editor; review and save when ready"));
+                    }
+                }
+                Ok(None) => (update.hooks.toast)(&tf!("{tool} was closed without saving, so nothing changed", tool = tool)),
+                Err(message) => (update.hooks.toast)(&message),
+            }
+        });
     }
 
     fn save(&self, text: &str, error: &gtk::Label) {

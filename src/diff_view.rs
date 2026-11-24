@@ -212,6 +212,7 @@ impl Card {
         self.set_numbers(&numbers_text(lines));
         let buffer = self.code.buffer();
         buffer.set_text(text);
+        self.scroll.hadjustment().set_value(0.0);
         clear_marks(&buffer);
         clear_marks(&self.numbers.buffer());
         for (b, ..) in self.change_bubbles.take() {
@@ -224,6 +225,17 @@ impl Card {
             colour_lines(&buffer, 0, lines);
         }
         buffer.place_cursor(&buffer.start_iter());
+    }
+
+    /// Replaces the editable card's text as a single user action that can be undone.
+    pub fn replace_text(&self, text: &str) {
+        let buffer = self.code.buffer();
+        buffer.begin_user_action();
+        buffer.delete(&mut buffer.start_iter(), &mut buffer.end_iter());
+        buffer.insert(&mut buffer.start_iter(), text);
+        buffer.end_user_action();
+        buffer.place_cursor(&buffer.start_iter());
+        self.scroll.hadjustment().set_value(0.0);
     }
 
     pub fn text(&self) -> String {
@@ -241,6 +253,9 @@ impl Card {
         if !keep_text && set_if_changed(&buffer, &text.lines().collect::<Vec<_>>().join("\n")) {
             buffer.place_cursor(&buffer.start_iter());
             recolour = true;
+        }
+        if !keep_text {
+            self.scroll.hadjustment().set_value(0.0);
         }
         let lines = text.lines().count().max(buffer.line_count() as usize).max(1);
         let numbers = numbers_text(lines);
@@ -784,6 +799,8 @@ impl Pair {
         self.texts.replace((left.to_owned(), right.to_owned()));
         self.compare.replace(compare.clone());
         self.ignore_whitespace.set(ignore_whitespace);
+        self.left.scroll.hadjustment().set_value(0.0);
+        self.right.scroll.hadjustment().set_value(0.0);
         self.update(false);
     }
 
