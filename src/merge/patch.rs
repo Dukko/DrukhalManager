@@ -325,6 +325,11 @@ impl Patch {
         self.manifest.files.iter().find(|f| f.path.eq_ignore_ascii_case(path))
     }
 
+    /// Reads the saved file from the patch at `path`, if it exists.
+    pub fn read_file(&self, path: &str) -> io::Result<String> {
+        std::fs::read_to_string(self.root.join(path))
+    }
+
     /// Adds or replaces a merged copy of `path`, or a chosen copy of an
     /// image or other binary file.
     pub fn save_file(&mut self, user_dir: &Path, game_version: Option<&str>, path: &str, contents: impl AsRef<[u8]>, prints: Vec<Print>) -> io::Result<()> {

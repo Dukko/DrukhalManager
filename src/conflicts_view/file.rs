@@ -139,7 +139,15 @@ impl FileView {
         if file_merge::mergeable(&c.path) {
             let (_, button) = merge_controls(merged, stale.as_deref());
             button.set_css_classes(&["suggested-action"]);
-            button.set_tooltip_text(Some(&t!("Combine the copies object by object, using AI only where they disagree")));
+            let tooltip = if file_merge::can_split(&c.path) {
+                t!("Combine the copies object by object, using AI only where they disagree")
+            } else {
+                t!("Merge the copies with AI")
+            };
+            button.set_tooltip_text(Some(&tooltip));
+            if !merged && !file_merge::can_split(&c.path) {
+                button.set_child(Some(&adw::ButtonContent::builder().icon_name(super::AI_ICON).label(t!("Merge with AI…")).build()));
+            }
             page.bind_key("merge-ai", &button);
             let weak = Rc::downgrade(self);
             let index = self.index;

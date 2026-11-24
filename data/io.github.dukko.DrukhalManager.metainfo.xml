@@ -36,6 +36,11 @@
     <control>keyboard</control>
   </supports>
   <releases>
+    <release version="2.7.10" date="2026-11-23">
+      <description>
+        <p>Enables AI merging for overridden inline scripts and script fragments (such as common/inline_scripts/), combining distinct additions and triggers while preserving evaluation order.</p>
+      </description>
+    </release>
     <release version="2.7.9" date="2026-11-23">
       <description>
         <p>Treats random_names and start_screen_messages as cumulative merged folders rather than individual conflicting objects, removing false conflicts and self-conflicts across empire name formats and intro screen message parts.</p>

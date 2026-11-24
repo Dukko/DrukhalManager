@@ -791,6 +791,11 @@ impl Window {
             .borrow()
             .as_ref()
             .is_some_and(|p| p.get_file(&path).is_some());
+        let saved_text = self
+            .patch
+            .borrow()
+            .as_ref()
+            .and_then(|p| p.read_file(&path).ok());
 
         let weak = Rc::downgrade(self);
         let save = {
@@ -821,6 +826,7 @@ impl Window {
             game_dir: self.game.as_ref().map(|g| g.dir.clone()),
             provider: self.settings.borrow().ready_provider(),
             merged_before,
+            saved_text,
             save,
             merge_tool: {
                 let weak = Rc::downgrade(self);

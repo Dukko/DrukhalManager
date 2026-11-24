@@ -12,7 +12,21 @@ use gtk::{gio, glib};
 use crate::merge::ai::{self, Provider};
 use crate::merge::file_merge::{self, Plan, Status, Version};
 use crate::merge::patch::{Print, VANILLA};
+use crate::merge::source::Source;
 use crate::thinking_view::{self, ThinkingView};
+
+#[derive(Debug, Clone)]
+pub struct WholeFilePlan {
+    pub path: String,
+    pub vanilla: Option<Source>,
+    pub sources: Vec<Source>,
+    pub initial_text: String,
+}
+
+pub enum LoadResult {
+    Objects(Plan, Vec<Print>),
+    WholeFile(WholeFilePlan, Vec<Print>),
+}
 
 #[allow(clippy::type_complexity)]
 pub struct Request {
@@ -23,6 +37,8 @@ pub struct Request {
     pub provider: Option<Provider>,
     /// Whether the patch already holds a merge of this file.
     pub merged_before: bool,
+    /// Existing merge contents from patch, if any.
+    pub saved_text: Option<String>,
     pub save: Box<dyn Fn(&str, Vec<Print>) -> Result<(), String>>,
     /// The external merge tool's command; empty for none.
     pub merge_tool: Box<dyn Fn() -> String>,
@@ -33,6 +49,7 @@ pub struct Request {
 pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
     let request = Rc::new(request);
     let plan: Rc<RefCell<Option<Plan>>> = Rc::default();
+    let whole_file: Rc<RefCell<Option<WholeFilePlan>>> = Rc::default();
 
     let merge_button = gtk::Button::builder().label(t!("Merge Conflicts")).css_classes(["suggested-action"]).sensitive(false).build();
     let save_button = gtk::Button::builder().label(t!("Save to Patch")).sensitive(false).build();
@@ -80,6 +97,7 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
     let path = request.path.clone();
     let origins = request.origins.clone();
     let game_dir = request.game_dir.clone();
+    let saved_text = request.saved_text.clone();
     let prints: Rc<RefCell<Vec<Print>>> = Rc::default();
     glib::spawn_future_local(glib::clone!(
         #[strong]
@@ -97,18 +115,17 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
         #[strong]
         plan,
         #[strong]
+        whole_file,
+        #[strong]
         status_labels,
         #[strong]
         request,
         async move {
-            let planned = gio::spawn_blocking(move || load(&path, &origins, game_dir.as_deref())).await;
-            let p = match planned {
-                Ok(Ok((p, found))) => {
-                    prints.replace(found);
-                    p
-                }
+            let planned = gio::spawn_blocking(move || load(&path, &origins, game_dir.as_deref(), saved_text.as_deref())).await;
+            let loaded = match planned {
+                Ok(Ok(l)) => l,
                 Ok(Err(message)) => {
-                    summary.set_description(Some(&t!("This file can't be merged object by object.")));
+                    summary.set_description(Some(&t!("This file could not be read.")));
                     show(&banner, &message, true);
                     return;
                 }
@@ -118,68 +135,121 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
                 }
             };
 
-            let conflicts = p.conflicts().count();
-            summary.set_description(Some(&describe(&p)));
+            match loaded {
+                LoadResult::Objects(p, found) => {
+                    prints.replace(found);
+                    let conflicts = p.conflicts().count();
+                    summary.set_description(Some(&describe(&p)));
 
-            for (index, item) in p.items.iter().enumerate() {
-                let subtitle = match &item.status {
-                    Status::Same => continue,
-                    Status::Recovered(from) => tf!("Recovered from {from}", from = from.join(", ")),
-                    Status::OneChange(from) => tf!("Only {from} changes this; using its version", from = from),
-                    Status::Conflict { sources, .. } => tf!("Changed differently by {sources}", sources = sources.iter().map(|s| s.label.as_str()).collect::<Vec<_>>().join(", ")),
-                };
-                let row = adw::ActionRow::builder().title(&item.key).subtitle(subtitle).use_markup(false).build();
-                if let Status::Conflict { sources, .. } = &item.status {
-                    // The version picker shows whose version is used; this
-                    // only shows while the AI works on the object.
-                    let label = gtk::Label::builder().visible(false).css_classes(["dim-label", "caption"]).build();
-                    row.add_suffix(&label);
-                    // Choosing a version settles the conflict without AI.
-                    let labels: Vec<&str> = sources.iter().map(|s| s.label.as_str()).collect();
-                    let choice = gtk::DropDown::from_strings(&labels);
-                    choice.set_factory(Some(&label_factory(Some(22))));
-                    choice.set_list_factory(Some(&label_factory(None)));
-                    choice.set_selected(labels.len() as u32 - 1);
-                    choice.set_valign(gtk::Align::Center);
-                    choice.set_tooltip_text(Some(&t!("Whose version to keep")));
-                    let texts: Vec<(String, String)> = sources.iter().map(|s| (s.label.clone(), s.text.clone())).collect();
-                    choice.connect_selected_notify(glib::clone!(
-                        #[strong]
-                        plan,
-                        #[weak]
-                        editor,
-                        #[weak]
-                        label,
-                        move |choice| {
-                            let Some((_, text)) = texts.get(choice.selected() as usize) else { return };
-                            if let Some(p) = plan.borrow_mut().as_mut() {
-                                p.items[index].text = text.clone();
-                                p.items[index].resolved = true;
-                                editor.buffer().set_text(&p.render());
-                            }
-                            // The picker says it all now.
-                            label.set_visible(false);
+                    for (index, item) in p.items.iter().enumerate() {
+                        let subtitle = match &item.status {
+                            Status::Same => continue,
+                            Status::Recovered(from) => tf!("Recovered from {from}", from = from.join(", ")),
+                            Status::OneChange(from) => tf!("Only {from} changes this; using its version", from = from),
+                            Status::Conflict { sources, .. } => tf!("Changed differently by {sources}", sources = sources.iter().map(|s| s.label.as_str()).collect::<Vec<_>>().join(", ")),
+                        };
+                        let row = adw::ActionRow::builder().title(&item.key).subtitle(subtitle).use_markup(false).build();
+                        if let Status::Conflict { sources, .. } = &item.status {
+                            // The version picker shows whose version is used; this
+                            // only shows while the AI works on the object.
+                            let label = gtk::Label::builder().visible(false).css_classes(["dim-label", "caption"]).build();
+                            row.add_suffix(&label);
+                            // Choosing a version settles the conflict without AI.
+                            let labels: Vec<&str> = sources.iter().map(|s| s.label.as_str()).collect();
+                            let choice = gtk::DropDown::from_strings(&labels);
+                            choice.set_factory(Some(&label_factory(Some(22))));
+                            choice.set_list_factory(Some(&label_factory(None)));
+                            choice.set_selected(labels.len() as u32 - 1);
+                            choice.set_valign(gtk::Align::Center);
+                            choice.set_tooltip_text(Some(&t!("Whose version to keep")));
+                            let texts: Vec<(String, String)> = sources.iter().map(|s| (s.label.clone(), s.text.clone())).collect();
+                            choice.connect_selected_notify(glib::clone!(
+                                #[strong]
+                                plan,
+                                #[weak]
+                                editor,
+                                #[weak]
+                                label,
+                                move |choice| {
+                                    let Some((_, text)) = texts.get(choice.selected() as usize) else { return };
+                                    if let Some(p) = plan.borrow_mut().as_mut() {
+                                        p.items[index].text = text.clone();
+                                        p.items[index].resolved = true;
+                                        editor.buffer().set_text(&p.render());
+                                    }
+                                    // The picker says it all now.
+                                    label.set_visible(false);
+                                }
+                            ));
+                            row.add_suffix(&choice);
+                            status_labels.borrow_mut().push((index, label));
+                            row.add_prefix(&gtk::Image::builder().icon_name("dialog-warning-symbolic").css_classes(["warning"]).build());
                         }
-                    ));
-                    row.add_suffix(&choice);
-                    status_labels.borrow_mut().push((index, label));
-                    row.add_prefix(&gtk::Image::builder().icon_name("dialog-warning-symbolic").css_classes(["warning"]).build());
-                }
-                summary.add(&row);
-            }
+                        summary.add(&row);
+                    }
 
-            editor.buffer().set_text(&p.render());
-            save_button.set_sensitive(true);
-            if conflicts > 0 {
-                merge_button.set_label(&tnf!("Merge {count} Conflict with AI", "Merge {count} Conflicts with AI", count = conflicts));
-                merge_button.set_sensitive(true);
-                if let Some(provider) = &request.provider {
-                    merge_button.set_tooltip_text(Some(&tf!("Ask {model} to merge each conflicting object", model = provider.model_name())));
+                    editor.buffer().set_text(&p.render());
+                    save_button.set_sensitive(true);
+                    if conflicts > 0 {
+                        merge_button.set_label(&tnf!("Merge {count} Conflict with AI", "Merge {count} Conflicts with AI", count = conflicts));
+                        merge_button.set_sensitive(true);
+                        if let Some(provider) = &request.provider {
+                            merge_button.set_tooltip_text(Some(&tf!("Ask {model} to merge each conflicting object", model = provider.model_name())));
+                        }
+                    } else {
+                        merge_button.set_visible(false);
+                    }
+                    plan.replace(Some(p));
                 }
-            } else {
-                merge_button.set_visible(false);
+                LoadResult::WholeFile(w, found) => {
+                    prints.replace(found);
+                    let winner = w.sources.last().map(|s| s.label.clone()).unwrap_or_default();
+                    let is_inline = w.path.to_lowercase().starts_with("common/inline_scripts/");
+                    summary.set_title(&if is_inline { t!("Inline Script") } else { t!("Conflicting File") });
+                    summary.set_description(Some(&tnf!("{count} mod ships this file; {winner} wins in game unless merged.", "{count} mods ship this file; {winner} wins in game unless merged.", count = w.sources.len(), winner = &winner)));
+
+                    if let Some(vanilla) = &w.vanilla {
+                        let row = adw::ActionRow::builder().title(&vanilla.label).subtitle(t!("Base game version")).use_markup(false).build();
+                        let use_btn = gtk::Button::builder().label(t!("Use as Base")).valign(gtk::Align::Center).css_classes(["flat"]).build();
+                        let (editor_ref, text, banner_ref) = (editor.clone(), vanilla.text.clone(), banner.clone());
+                        use_btn.connect_clicked(move |_| {
+                            editor_ref.buffer().set_text(&text);
+                            show(&banner_ref, &t!("Loaded the base game's version into the editor."), false);
+                        });
+                        row.add_suffix(&use_btn);
+                        summary.add(&row);
+                    }
+
+                    for (i, source) in w.sources.iter().enumerate() {
+                        let is_winner = i == w.sources.len() - 1;
+                        let subtitle = if is_winner { t!("Used in game (loaded last)") } else { t!("Overridden by later mods") };
+                        let row = adw::ActionRow::builder().title(&source.label).subtitle(subtitle).use_markup(false).build();
+                        let use_btn = gtk::Button::builder().label(t!("Use as Base")).valign(gtk::Align::Center).css_classes(["flat"]).build();
+                        let (editor_ref, text, banner_ref, name) = (editor.clone(), source.text.clone(), banner.clone(), source.label.clone());
+                        use_btn.connect_clicked(move |_| {
+                            editor_ref.buffer().set_text(&text);
+                            show(&banner_ref, &tf!("Loaded {name}'s version into the editor.", name = &name), false);
+                        });
+                        row.add_suffix(&use_btn);
+                        if !is_winner {
+                            row.add_prefix(&gtk::Image::builder().icon_name("dialog-warning-symbolic").css_classes(["warning"]).build());
+                        } else {
+                            row.add_prefix(&gtk::Image::builder().icon_name("emblem-ok-symbolic").css_classes(["success"]).build());
+                        }
+                        summary.add(&row);
+                    }
+
+                    editor.buffer().set_text(&w.initial_text);
+                    save_button.set_sensitive(true);
+                    merge_button.set_label(&t!("Merge with AI"));
+                    merge_button.set_sensitive(true);
+                    merge_button.set_visible(true);
+                    if let Some(provider) = &request.provider {
+                        merge_button.set_tooltip_text(Some(&tf!("Ask {model} to merge this file", model = provider.model_name())));
+                    }
+                    whole_file.replace(Some(w));
+                }
             }
-            plan.replace(Some(p));
         }
     ));
 
@@ -190,6 +260,8 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
         thinking,
         #[strong]
         plan,
+        #[strong]
+        whole_file,
         #[strong]
         status_labels,
         #[weak]
@@ -210,6 +282,58 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
             button.set_sensitive(false);
             save_button.set_sensitive(false);
             editor.set_editable(false);
+
+            if let Some(w) = whole_file.borrow().clone() {
+                let file_name = request.path.rsplit_once('/').map_or(request.path.as_str(), |(_, f)| f).to_owned();
+                glib::spawn_future_local(glib::clone!(
+                    #[strong]
+                    thinking,
+                    #[weak]
+                    button,
+                    #[weak]
+                    editor,
+                    #[weak]
+                    save_button,
+                    #[weak]
+                    banner,
+                    async move {
+                        let path = w.path.clone();
+                        let result = thinking_view::run(&thinking, Some(&file_name), move |on| {
+                            let check = |text: &str| validate_file(&path, text);
+                            ai::merge_file_checked(&provider, &w.path, w.vanilla.as_ref(), &w.sources, &check, on)
+                        })
+                        .await;
+                        match result {
+                            Some(Ok(checked)) => match checked.script {
+                                Ok(script) => {
+                                    editor.buffer().set_text(&script);
+                                    button.set_label(&t!("Merged"));
+                                    button.set_sensitive(false);
+                                    show(&banner, &t!("Merged with AI. Review the result below or click Merge Tool… before saving."), false);
+                                }
+                                Err(e) => {
+                                    button.set_label(&t!("Retry Failed"));
+                                    button.set_sensitive(true);
+                                    show(&banner, &tf!("AI merge was rejected: {error}", error = e), true);
+                                }
+                            },
+                            Some(Err(e)) => {
+                                button.set_label(&t!("Retry Failed"));
+                                button.set_sensitive(true);
+                                show(&banner, &tf!("AI merge failed: {error}", error = e), true);
+                            }
+                            None => {
+                                button.set_sensitive(true);
+                                show(&banner, &t!("AI merge was cancelled or failed unexpectedly"), true);
+                            }
+                        }
+                        editor.set_editable(true);
+                        save_button.set_sensitive(true);
+                    }
+                ));
+                return;
+            }
+
             glib::spawn_future_local(glib::clone!(
                 #[strong]
                 thinking,
@@ -291,8 +415,6 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
         #[strong]
         request,
         #[strong]
-        plan,
-        #[strong]
         prints,
         #[weak]
         dialog,
@@ -301,7 +423,7 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
         #[weak]
         banner,
         move |_| {
-            let Some(category) = plan.borrow().as_ref().map(|p| p.category.clone()) else { return };
+            let category = file_merge::category(&request.path);
             let buffer = editor.buffer();
             let text = buffer.text(&buffer.start_iter(), &buffer.end_iter(), false).to_string();
             if let Err(message) = file_merge::validate(&category, &text) {
@@ -321,10 +443,7 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
     dialog.present(Some(parent));
 }
 
-/// Reads each copy of the file at `path` from `origins` (descriptor id, mod
-/// name, folder; in load order) and the base game's, and plans merging them
-/// object by object. Also returns the fingerprints of what was read.
-pub fn load(path: &str, origins: &[(String, String, PathBuf)], game_dir: Option<&Path>) -> Result<(Plan, Vec<Print>), String> {
+fn read_versions(path: &str, origins: &[(String, String, PathBuf)], game_dir: Option<&Path>) -> Result<(Vec<Version>, Option<String>, Vec<Print>), String> {
     let versions: Vec<Version> = origins
         .iter()
         .map(|(_, label, root)| {
@@ -335,7 +454,71 @@ pub fn load(path: &str, origins: &[(String, String, PathBuf)], game_dir: Option<
     let vanilla = game_dir.and_then(|dir| std::fs::read(dir.join(path)).ok()).map(|b| String::from_utf8_lossy(&b).into_owned());
     let mut found: Vec<Print> = vanilla.iter().map(|v| Print::new(VANILLA, "Vanilla", path, v)).collect();
     found.extend(origins.iter().zip(&versions).map(|((id, label, _), v)| Print::new(id, label, path, &v.text)));
+    Ok((versions, vanilla, found))
+}
+
+/// Reads each copy of the file at `path` from `origins` (descriptor id, mod
+/// name, folder; in load order) and the base game's, and plans merging them
+/// object by object.
+pub fn load_objects(path: &str, origins: &[(String, String, PathBuf)], game_dir: Option<&Path>) -> Result<(Plan, Vec<Print>), String> {
+    let (versions, vanilla, found) = read_versions(path, origins, game_dir)?;
     file_merge::plan(path, vanilla.as_deref(), &versions).map(|plan| (plan, found))
+}
+
+/// Reads each copy of the file at `path` from `origins` and the base game's,
+/// planning an object-by-object merge when possible or whole-file merge otherwise.
+pub fn load(path: &str, origins: &[(String, String, PathBuf)], game_dir: Option<&Path>, saved: Option<&str>) -> Result<LoadResult, String> {
+    let (versions, vanilla, found) = read_versions(path, origins, game_dir)?;
+    if file_merge::can_split(path) {
+        if let Ok(plan) = file_merge::plan(path, vanilla.as_deref(), &versions) {
+            return Ok(LoadResult::Objects(plan, found));
+        }
+    }
+    let vanilla_src = vanilla.as_ref().map(|t| Source { label: "Vanilla".into(), file: path.to_owned(), text: t.clone() });
+    let sources: Vec<Source> = origins.iter().zip(&versions).map(|((_, label, _), v)| Source { label: label.clone(), file: path.to_owned(), text: v.text.clone() }).collect();
+    let initial_text = saved.map(str::to_owned).unwrap_or_else(|| versions.last().map(|v| v.text.clone()).unwrap_or_default());
+    Ok(LoadResult::WholeFile(WholeFilePlan { path: path.to_owned(), vanilla: vanilla_src, sources, initial_text }, found))
+}
+
+/// Validates a whole file merge result.
+fn validate_file(path: &str, text: &str) -> Result<String, String> {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return Err(t!("The merged script is empty"));
+    }
+    for placeholder in ["... rest of", "... remaining", "... existing", "rest of file", "remainder of file"] {
+        if trimmed.to_lowercase().contains(placeholder) {
+            return Err(format!("The merged script contains a truncation placeholder ('{placeholder}') instead of the full file"));
+        }
+    }
+    let mut depth: i32 = 0;
+    let mut in_quote = false;
+    let mut in_comment = false;
+    for ch in text.chars() {
+        match ch {
+            '\n' | '\r' => in_comment = false,
+            '#' if !in_quote => in_comment = true,
+            '"' if !in_comment => in_quote = !in_quote,
+            '{' if !in_quote && !in_comment => depth += 1,
+            '}' if !in_quote && !in_comment => {
+                depth -= 1;
+                if depth < 0 {
+                    return Err(t!("The merged script has an unexpected closing brace `}` before an opening brace"));
+                }
+            }
+            _ => {}
+        }
+    }
+    if depth > 0 {
+        return Err(tf!("The merged script is missing {depth} closing brace `}}`", depth = depth));
+    }
+    let category = file_merge::category(path);
+    if category != "localisation" {
+        if let Err(e) = crate::paradox::script::parse(text) {
+            return Err(format!("The merged script has a syntax error at {e}"));
+        }
+    }
+    Ok(text.to_owned())
 }
 
 /// How a plan combines the copies' objects, e.g. "12 objects kept as is ·
@@ -439,4 +622,49 @@ fn label_factory(max_chars: Option<i32>) -> gtk::SignalListItemFactory {
         label.set_label(&text.string());
     });
     factory
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn validates_whole_files() {
+        assert!(validate_file("common/inline_scripts/test.txt", "triggered_name = { text = a }").is_ok());
+        assert!(validate_file("common/inline_scripts/test.txt", "").is_err());
+        assert!(validate_file("common/inline_scripts/test.txt", "triggered_name = { # ... rest of file ... }").is_err());
+        assert!(validate_file("common/inline_scripts/test.txt", "triggered_name = { text = a").is_err());
+        assert!(validate_file("common/inline_scripts/test.txt", "triggered_name = text = a }").is_err());
+    }
+
+    #[test]
+    fn loads_inline_scripts_as_whole_files() {
+        let temp = std::env::temp_dir().join(format!("drukhal-file-merge-test-{}", std::process::id()));
+        let path = "common/inline_scripts/districts/test.txt";
+        let dir_a = temp.join("mod_a");
+        let dir_b = temp.join("mod_b");
+        let _ = std::fs::remove_dir_all(&temp);
+        std::fs::create_dir_all(dir_a.join("common/inline_scripts/districts")).unwrap();
+        std::fs::create_dir_all(dir_b.join("common/inline_scripts/districts")).unwrap();
+        std::fs::write(dir_a.join(path), "triggered_name = { text = a }\ntriggered_name = { text = a2 }\n").unwrap();
+        std::fs::write(dir_b.join(path), "triggered_name = { text = b }\ntriggered_name = { text = b2 }\n").unwrap();
+
+        let origins = vec![
+            ("id_a".to_owned(), "Mod A".to_owned(), dir_a),
+            ("id_b".to_owned(), "Mod B".to_owned(), dir_b),
+        ];
+
+        let result = load(path, &origins, None, None).expect("load should succeed");
+        match result {
+            LoadResult::WholeFile(w, prints) => {
+                assert_eq!(w.sources.len(), 2);
+                assert_eq!(w.sources[0].label, "Mod A");
+                assert_eq!(w.sources[1].label, "Mod B");
+                assert_eq!(w.initial_text, "triggered_name = { text = b }\ntriggered_name = { text = b2 }\n");
+                assert_eq!(prints.len(), 2);
+            }
+            LoadResult::Objects(..) => panic!("inline scripts should be WholeFile, not Objects"),
+        }
+        let _ = std::fs::remove_dir_all(&temp);
+    }
 }

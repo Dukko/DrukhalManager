@@ -24,12 +24,19 @@ use super::source::Source;
 use crate::paradox::script::{self, Entries, Entry, Value};
 
 /// Whether `path` is a file this module can split into objects.
-pub fn mergeable(path: &str) -> bool {
+pub fn can_split(path: &str) -> bool {
     let lower = path.to_lowercase();
     let Some((dir, _)) = lower.rsplit_once('/') else { return false };
     if super::conflicts::FRAGMENT_FOLDERS.iter().any(|f| lower.starts_with(&format!("{f}/"))) {
         return false;
     }
+    (lower.ends_with(".txt") && (dir.starts_with("common/") || dir == "events")) || ((lower.starts_with("localisation/") || lower.starts_with("localization/")) && lower.ends_with(".yml")) || wrapped(&lower)
+}
+
+/// Whether `path` is a file that can be merged (either split into objects or merged as a whole file).
+pub fn mergeable(path: &str) -> bool {
+    let lower = path.to_lowercase();
+    let Some((dir, _)) = lower.rsplit_once('/') else { return false };
     (lower.ends_with(".txt") && (dir.starts_with("common/") || dir == "events")) || ((lower.starts_with("localisation/") || lower.starts_with("localization/")) && lower.ends_with(".yml")) || wrapped(&lower)
 }
 
@@ -569,8 +576,9 @@ mod tests {
         assert_eq!(plan.render(), "# Merged by DrukhalManager.\n\nguiTypes = {\n\tcontainerWindowType = {\n\t\tname = \"w\"\n\t}\n}\n");
 
         assert!(plan_err("interface/x.gui", &["guiTypes = { 1 2 }", ""]).contains("bare values"));
-        assert!(mergeable("interface/x.gui") && mergeable("gfx/x.gfx") && mergeable("common/governments/civics/x.txt") && mergeable("localisation/english/x_l_english.yml") && mergeable("events/x.txt"));
-        assert!(!mergeable("gfx/x.dds") && !mergeable("common/x.csv") && !mergeable("common/inline_scripts/a/b.txt"));
+        assert!(can_split("interface/x.gui") && can_split("gfx/x.gfx") && can_split("common/governments/civics/x.txt") && can_split("localisation/english/x_l_english.yml") && can_split("events/x.txt"));
+        assert!(!can_split("gfx/x.dds") && !can_split("common/x.csv") && !can_split("common/inline_scripts/a/b.txt"));
+        assert!(mergeable("common/inline_scripts/a/b.txt") && !mergeable("gfx/x.dds") && !mergeable("common/x.csv"));
     }
 
     fn plan_of(path: &str, texts: &[&str]) -> Plan {

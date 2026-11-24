@@ -266,10 +266,10 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
                 Job::Files(files) => files
                     .iter()
                     .map(|(path, origins)| {
-                        if !file_merge::mergeable(path) {
+                        if !file_merge::can_split(path) {
                             return Err(t!("This kind of file can't be merged object by object"));
                         }
-                        file_merge_dialog::load(path, origins, game_dir.as_deref()).map(|(plan, prints)| Unit::File { plan, prints })
+                        file_merge_dialog::load_objects(path, origins, game_dir.as_deref()).map(|(plan, prints)| Unit::File { plan, prints })
                     })
                     .collect(),
             })
