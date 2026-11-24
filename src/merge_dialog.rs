@@ -68,6 +68,14 @@ pub fn validate(category: &str, key: &str, text: &str) -> Result<String, String>
     if source::extract(category, key, text).is_none() {
         return Err(tf!("The merged script must define `{key}`", key = key));
     }
+    let params = crate::merge::script_check::cached_scripted_params();
+    let violations = crate::merge::script_check::find_undeclared_scripted_effect_blocks(text, &params);
+    if let Some(v) = violations.first() {
+        return Err(tf!(
+            "The merged script contains invalid child block `{param} = {{ ... }}` inside scripted effect/trigger `{effect}` near line {line}",
+            param = &v.param, effect = &v.effect, line = v.line
+        ));
+    }
     Ok(text.trim().to_owned())
 }
 

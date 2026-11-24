@@ -95,6 +95,7 @@ impl ScriptCheck {
         let mut folders: Vec<&Path> = vec![game_dir];
         folders.extend(roots.iter().flatten().map(PathBuf::as_path));
         let known = script_check::known(&docs, &folders);
+        script_check::load_scripted_params(&folders);
         let findings = script_check::check_mods(&context, &known, roots, report);
         Some(ScriptCheck { findings, context: Arc::new(context), known: Arc::new(known), docs: Arc::new(docs), game_dir: game_dir.to_owned(), docs_outdated: script_docs::older_than(user_dir, exe) })
     }

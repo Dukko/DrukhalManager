@@ -306,7 +306,9 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
                         match result {
                             Some(Ok(checked)) => match checked.script {
                                 Ok(script) => {
-                                    editor.buffer().set_text(&script);
+                                    let params = crate::merge::script_check::cached_scripted_params();
+                                    let cleaned = crate::merge::script_check::strip_undeclared_scripted_effect_blocks(&script, &params);
+                                    editor.buffer().set_text(&cleaned);
                                     button.set_label(&t!("Merged"));
                                     button.set_sensitive(false);
                                     show(&banner, &t!("Merged with AI. Review the result below or click Merge Tool… before saving."), false);
@@ -426,6 +428,8 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
             let category = file_merge::category(&request.path);
             let buffer = editor.buffer();
             let text = buffer.text(&buffer.start_iter(), &buffer.end_iter(), false).to_string();
+            let params = crate::merge::script_check::cached_scripted_params();
+            let text = crate::merge::script_check::strip_undeclared_scripted_effect_blocks(&text, &params);
             if let Err(message) = file_merge::validate(&category, &text) {
                 show(&banner, &message, true);
                 return;
@@ -514,10 +518,18 @@ fn validate_file(path: &str, text: &str) -> Result<String, String> {
         return Err(tf!("The merged script is missing {depth} closing brace `}}`", depth = depth));
     }
     let category = file_merge::category(path);
-    if category != "localisation"
-        && let Err(e) = crate::paradox::script::parse(text)
-    {
-        return Err(format!("The merged script has a syntax error at {e}"));
+    if category != "localisation" {
+        if let Err(e) = crate::paradox::script::parse(text) {
+            return Err(format!("The merged script has a syntax error at {e}"));
+        }
+        let params = crate::merge::script_check::cached_scripted_params();
+        let violations = crate::merge::script_check::find_undeclared_scripted_effect_blocks(text, &params);
+        if let Some(v) = violations.first() {
+            return Err(format!(
+                "The merged script contains invalid child block `{param} = {{ ... }}` inside scripted effect/trigger `{effect}` near line {line}. Scripted effect calls cannot contain child blocks unless declared as a parameter.",
+                param = v.param, effect = v.effect, line = v.line
+            ));
+        }
     }
     Ok(text.to_owned())
 }

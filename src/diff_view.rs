@@ -256,6 +256,10 @@ impl Card {
         }
         if !keep_text {
             self.scroll.hadjustment().set_value(0.0);
+            let scroll = self.scroll.clone();
+            glib::idle_add_local_once(move || {
+                scroll.hadjustment().set_value(0.0);
+            });
         }
         let lines = text.lines().count().max(buffer.line_count() as usize).max(1);
         let numbers = numbers_text(lines);
@@ -451,6 +455,11 @@ impl Card {
         let buffer = self.code.buffer();
         if let Some(mut iter) = buffer.iter_at_line(line as i32) {
             self.code.scroll_to_iter(&mut iter, 0.0, true, 0.0, 0.3);
+            self.scroll.hadjustment().set_value(0.0);
+            let scroll = self.scroll.clone();
+            glib::idle_add_local_once(move || {
+                scroll.hadjustment().set_value(0.0);
+            });
         }
     }
 
@@ -801,6 +810,11 @@ impl Pair {
         self.ignore_whitespace.set(ignore_whitespace);
         self.left.scroll.hadjustment().set_value(0.0);
         self.right.scroll.hadjustment().set_value(0.0);
+        let (left_scroll, right_scroll) = (self.left.scroll.clone(), self.right.scroll.clone());
+        glib::idle_add_local_once(move || {
+            left_scroll.hadjustment().set_value(0.0);
+            right_scroll.hadjustment().set_value(0.0);
+        });
         self.update(false);
     }
 

@@ -36,6 +36,11 @@
     <control>keyboard</control>
   </supports>
   <releases>
+    <release version="2.7.13" date="2026-11-23">
+      <description>
+        <p>Fixes a Stellaris 4.6 game startup crash (SIGSEGV in CScriptedEffect::visit) caused by invalid undeclared child blocks inside scripted effect calls. DrukhalManager now validates and prevents emitting undeclared child blocks inside scripted effects and scripted triggers in file-level and object-level merges. Also ensures diff cards and code views reset horizontal scrolling so text is never truncated on the left.</p>
+      </description>
+    </release>
     <release version="2.7.12" date="2026-11-23">
       <description>
         <p>Outdated Game Objects: adds manual conflict resolution, external merge tool launching (3-way merge), quick reset buttons (Use Game's Version and Use Mod's Version), and a copyable "Report for Mod Author" bug report button. Also adds quick Merge File buttons for file and inline script conflicts, and ensures diff cards reset horizontal scroll so text is never shifted out of view.</p>

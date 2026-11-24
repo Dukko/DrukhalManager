@@ -6,9 +6,9 @@
 #, fuzzy
 msgid ""
 msgstr ""
-"Project-Id-Version: DrukhalManager 2.7.12\n"
+"Project-Id-Version: DrukhalManager 2.7.13\n"
 "Report-Msgid-Bugs-To: https://github.com/Dukko/DrukhalManager/issues\n"
-"POT-Creation-Date: 2026-11-24 01:01+0000\n"
+"POT-Creation-Date: 2026-11-24 01:50+0000\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -1990,6 +1990,10 @@ msgstr ""
 
 #: src/merge_dialog.rs
 msgid "The merged script must define `{key}`"
+msgstr ""
+
+#: src/merge_dialog.rs
+msgid "The merged script contains invalid child block `{param} = {{ ... }}` inside scripted effect/trigger `{effect}` near line {line}"
 msgstr ""
 
 #. Mods also list optional compatibility targets here, so a

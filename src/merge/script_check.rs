@@ -13,6 +13,7 @@
 use std::collections::{HashMap, HashSet};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, RwLock};
 
 use flate2::read::GzDecoder;
 use flate2::write::GzEncoder;
@@ -364,6 +365,241 @@ fn scripted_names(root: &Path, folder: &str, out: &mut HashSet<String>) {
             }
         }
     }
+}
+
+/// Scripted effect and trigger parameters by name: maps lowercased effect/trigger name -> set of lowercased parameter names ($PARAM$).
+pub type ScriptedParams = HashMap<String, HashSet<String>>;
+
+static CACHED_PARAMS: RwLock<Option<Arc<ScriptedParams>>> = RwLock::new(None);
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UndeclaredBlock {
+    pub effect: String,
+    pub param: String,
+    pub line: usize,
+}
+
+fn default_params() -> ScriptedParams {
+    let mut map = HashMap::new();
+    let mut add_district = HashSet::new();
+    add_district.insert("amount".to_owned());
+    add_district.insert("district".to_owned());
+    map.insert("add_district_and_planet_size_if_needed_effect_amount".to_owned(), add_district);
+    map
+}
+
+/// Returns the cached scripted effect / trigger parameters, or default vanilla parameters if unpopulated.
+pub fn cached_scripted_params() -> Arc<ScriptedParams> {
+    if let Ok(lock) = CACHED_PARAMS.read()
+        && let Some(params) = lock.as_ref()
+    {
+        return params.clone();
+    }
+    Arc::new(default_params())
+}
+
+/// Overwrites the cached scripted parameters (e.g. for testing).
+#[allow(dead_code)]
+pub fn set_cached_scripted_params(params: ScriptedParams) {
+    if let Ok(mut lock) = CACHED_PARAMS.write() {
+        *lock = Some(Arc::new(params));
+    }
+}
+
+/// Extracts all `$PARAM$` parameter tokens from a definition body.
+pub fn extract_dollar_params(text: &str, out: &mut HashSet<String>) {
+    let bytes = text.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'$' {
+            let start = i + 1;
+            if let Some(rel_end) = bytes[start..].iter().position(|&b| b == b'$') {
+                let end = start + rel_end;
+                let token = &text[start..end];
+                if !token.is_empty() && token.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+                    out.insert(token.to_ascii_lowercase());
+                }
+                i = end + 1;
+                continue;
+            }
+        }
+        i += 1;
+    }
+}
+
+/// Reads the top-level scripted effects or triggers in `folder` of `root` and collects their declared `$PARAM$` parameters.
+pub fn collect_scripted_params(root: &Path, folder: &str, out: &mut ScriptedParams) {
+    let mut files = Vec::new();
+    let dir = root.join("common").join(folder);
+    if dir.is_dir() {
+        let _ = conflicts::walk(root, &dir, &mut files);
+    }
+    for file in files.iter().filter(|f| f.to_lowercase().ends_with(".txt")) {
+        let Some(text) = read_text(&root.join(file)) else { continue };
+        let Ok(spans) = script::parse_with_spans(&text) else { continue };
+        for (entry, range) in spans {
+            if let Entry::Assign { key, value, .. } = entry
+                && !key.starts_with('@')
+                && value.as_block().is_some()
+            {
+                let mut params = HashSet::new();
+                extract_dollar_params(&text[range], &mut params);
+                out.entry(key.to_ascii_lowercase()).or_default().extend(params);
+            }
+        }
+    }
+}
+
+/// Loads and caches all declared `$PARAM$` parameters of scripted effects and triggers from `roots`.
+pub fn load_scripted_params(roots: &[&Path]) -> Arc<ScriptedParams> {
+    let mut params = default_params();
+    for root in roots {
+        collect_scripted_params(root, "scripted_effects", &mut params);
+        collect_scripted_params(root, "scripted_triggers", &mut params);
+    }
+    let arc = Arc::new(params);
+    if let Ok(mut lock) = CACHED_PARAMS.write() {
+        *lock = Some(arc.clone());
+    }
+    arc
+}
+
+/// Finds any undeclared child blocks `X = { ... }` passed inside calls to scripted effects or triggers.
+pub fn find_undeclared_scripted_effect_blocks(text: &str, params: &ScriptedParams) -> Vec<UndeclaredBlock> {
+    if params.is_empty() {
+        return Vec::new();
+    }
+    let Ok(nodes) = script::parse_lines(text) else { return Vec::new() };
+    let mut violations = Vec::new();
+    check_nodes_for_undeclared_blocks(&nodes, params, &mut violations);
+    violations
+}
+
+fn check_nodes_for_undeclared_blocks(nodes: &[Node], params: &ScriptedParams, out: &mut Vec<UndeclaredBlock>) {
+    for node in nodes {
+        if let Some(key) = &node.key {
+            let key_lower = key.to_ascii_lowercase();
+            if let Some(declared) = params.get(&key_lower)
+                && let Some(kids) = &node.kids
+            {
+                for kid in kids {
+                    if let Some(kid_key) = &kid.key
+                        && kid.kids.is_some()
+                    {
+                        let kid_lower = kid_key.to_ascii_lowercase();
+                        if !declared.contains(&kid_lower) {
+                            out.push(UndeclaredBlock {
+                                effect: key.clone(),
+                                param: kid_key.clone(),
+                                line: kid.line,
+                            });
+                        }
+                    }
+                }
+            }
+        }
+        if let Some(kids) = &node.kids {
+            check_nodes_for_undeclared_blocks(kids, params, out);
+        }
+    }
+}
+
+/// Strips any undeclared child blocks `X = { ... }` inside scripted effect or trigger calls,
+/// preserving formatting, indentation, and comments of all other lines.
+pub fn strip_undeclared_scripted_effect_blocks(text: &str, params: &ScriptedParams) -> String {
+    let violations = find_undeclared_scripted_effect_blocks(text, params);
+    if violations.is_empty() {
+        return text.to_owned();
+    }
+    let mut violations = violations;
+    // Sort descending by line number so stripping earlier blocks doesn't invalidate subsequent line offsets.
+    violations.sort_by_key(|a| std::cmp::Reverse(a.line));
+
+    let mut result = text.to_owned();
+    for v in violations {
+        result = strip_block_at_line(&result, v.line, &v.param);
+    }
+    result
+}
+
+fn strip_block_at_line(text: &str, target_line: usize, key: &str) -> String {
+    let lines: Vec<&str> = text.split_inclusive('\n').collect();
+    if target_line < 1 || lines.is_empty() {
+        return text.to_owned();
+    }
+
+    let mut line_idx = target_line.saturating_sub(1).min(lines.len() - 1);
+    let key_lower = key.to_ascii_lowercase();
+    let mut found_line = None;
+    for offset in [0i32, -1, 1, -2, 2] {
+        let check = line_idx as i32 + offset;
+        if check >= 0 && (check as usize) < lines.len() {
+            let l = check as usize;
+            if lines[l].to_ascii_lowercase().contains(&key_lower) {
+                found_line = Some(l);
+                break;
+            }
+        }
+    }
+    if let Some(l) = found_line {
+        line_idx = l;
+    }
+
+    let line_start_offset: usize = lines[..line_idx].iter().map(|l| l.len()).sum();
+    let current_line_text = lines[line_idx];
+
+    let Some(key_pos) = current_line_text.to_ascii_lowercase().find(&key_lower) else {
+        return text.to_owned();
+    };
+
+    let block_start = if current_line_text[..key_pos].trim().is_empty() {
+        line_start_offset
+    } else {
+        line_start_offset + key_pos
+    };
+
+    let search_from = line_start_offset + key_pos;
+    let Some(open_brace_rel) = text[search_from..].find('{') else {
+        return text.to_owned();
+    };
+    let open_brace_idx = search_from + open_brace_rel;
+
+    let mut depth = 0;
+    let mut in_quote = false;
+    let mut in_comment = false;
+    let mut i = open_brace_idx;
+    let bytes = text.as_bytes();
+
+    while i < bytes.len() {
+        let b = bytes[i];
+        if b == b'\n' || b == b'\r' {
+            in_comment = false;
+        } else if b == b'#' && !in_quote {
+            in_comment = true;
+        } else if b == b'"' && !in_comment {
+            in_quote = !in_quote;
+        } else if b == b'{' && !in_quote && !in_comment {
+            depth += 1;
+        } else if b == b'}' && !in_quote && !in_comment {
+            depth -= 1;
+            if depth == 0 {
+                let mut block_end = i + 1;
+                if block_end < bytes.len() && bytes[block_end] == b'\r' {
+                    block_end += 1;
+                }
+                if block_end < bytes.len() && bytes[block_end] == b'\n' {
+                    block_end += 1;
+                }
+                let mut stripped = String::with_capacity(text.len() - (block_end - block_start));
+                stripped.push_str(&text[..block_start]);
+                stripped.push_str(&text[block_end..]);
+                return stripped;
+            }
+        }
+        i += 1;
+    }
+
+    text.to_owned()
 }
 
 /// The names the docs list plus the scripted effects and triggers of
@@ -1467,5 +1703,73 @@ mod tests {
             let shown: Vec<&str> = f.siblings.iter().take(8).map(String::as_str).collect();
             println!("NO EVENT {}{} {}:{} {} (namespace has {}: {shown:?})", mods[f.mod_position].0, if f.unused { " [unused]" } else { "" }, f.file, f.line, f.name, f.siblings.len());
         }
+    }
+
+    #[test]
+    fn extracts_dollar_parameters_from_effect_definition() {
+        let def = r#"
+        add_district_and_planet_size_if_needed_effect_amount = {
+            add_district = {
+                district = $district$
+                amount = $amount$
+            }
+        }
+        "#;
+        let mut params = HashSet::new();
+        extract_dollar_params(def, &mut params);
+        assert!(params.contains("district"));
+        assert!(params.contains("amount"));
+        assert_eq!(params.len(), 2);
+    }
+
+    #[test]
+    fn detects_and_strips_undeclared_scripted_effect_child_blocks() {
+        let mut params = HashMap::new();
+        let mut declared = HashSet::new();
+        declared.insert("amount".to_owned());
+        declared.insert("district".to_owned());
+        params.insert("add_district_and_planet_size_if_needed_effect_amount".to_owned(), declared);
+
+        let input = "\
+# Arkship Decks
+if = {
+\tlimit = {
+\t\tis_planet_class = pc_ark
+\t}
+\t# merged: combined amount logic using Expanded Mods Base variable with Exotic Worlds fallback check
+\tadd_district_and_planet_size_if_needed_effect_amount = {
+\t\tamount = ark_basic_districts
+\t\tark_basic_districts = {
+\t\t\tmin = 1
+\t\t}
+\t\tdistrict = district_ark_basic
+\t}
+}
+";
+
+        let violations = find_undeclared_scripted_effect_blocks(input, &params);
+        assert_eq!(violations.len(), 1);
+        assert_eq!(violations[0].effect, "add_district_and_planet_size_if_needed_effect_amount");
+        assert_eq!(violations[0].param, "ark_basic_districts");
+
+        let stripped = strip_undeclared_scripted_effect_blocks(input, &params);
+        let expected = "\
+# Arkship Decks
+if = {
+\tlimit = {
+\t\tis_planet_class = pc_ark
+\t}
+\t# merged: combined amount logic using Expanded Mods Base variable with Exotic Worlds fallback check
+\tadd_district_and_planet_size_if_needed_effect_amount = {
+\t\tamount = ark_basic_districts
+\t\tdistrict = district_ark_basic
+\t}
+}
+";
+        assert_eq!(stripped, expected);
+
+        // Stripping again is a no-op
+        assert_eq!(strip_undeclared_scripted_effect_blocks(&stripped, &params), expected);
+        assert!(find_undeclared_scripted_effect_blocks(&stripped, &params).is_empty());
     }
 }
