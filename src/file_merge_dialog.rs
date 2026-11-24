@@ -60,6 +60,7 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
     header.pack_end(&merge_button);
     let banner = adw::Banner::builder().use_markup(false).build();
     let editor = gtk::TextView::builder().monospace(true).wrap_mode(gtk::WrapMode::None).top_margin(8).bottom_margin(8).left_margin(8).right_margin(8).build();
+    crate::diff_view::attach_clean_up_menu(&editor);
     let tool_button = merge_tool_menu(&request, &editor, &banner);
     // Usable whenever saving is: once the copies are read, and not while
     // the AI is merging.

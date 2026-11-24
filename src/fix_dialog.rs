@@ -59,6 +59,7 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
         .build();
     let repairs = adw::PreferencesGroup::builder().title(t!("Repair")).description(t!("Repairing…")).build();
     let editor = gtk::TextView::builder().monospace(true).wrap_mode(gtk::WrapMode::None).top_margin(8).bottom_margin(8).left_margin(8).right_margin(8).build();
+    crate::diff_view::attach_clean_up_menu(&editor);
     let editor_scroll = gtk::ScrolledWindow::builder().child(&editor).min_content_height(320).css_classes(["card"]).build();
     let result = adw::PreferencesGroup::builder().title(t!("Fixed File")).description(t!("Review and edit before saving. It replaces the mod's copy through the merged patch.")).build();
     let thinking = ThinkingView::new();

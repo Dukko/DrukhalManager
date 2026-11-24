@@ -36,6 +36,17 @@
     <control>keyboard</control>
   </supports>
   <releases>
+    <release version="2.7.20" date="2026-11-24">
+      <description>
+        <p>Adds "Clean Up the Code" option to editor right-click menus:</p>
+        <ul>
+          <li>Formats spacing around operators (<code>=</code>, <code>&lt;</code>, <code>&gt;</code>, <code>!=</code>, <code>&lt;=</code>, <code>&gt;=</code>, <code>?=</code>) and braces</li>
+          <li>Normalizes block nesting with clean tab indentation matching file context</li>
+          <li>Collapses excessive blank lines, removes trailing whitespace, and strips accidental semicolons</li>
+          <li>Cleans selected lines or the entire buffer, fully integrated with single-step undo</li>
+        </ul>
+      </description>
+    </release>
     <release version="2.7.19" date="2026-11-24">
       <description>
         <p>Updates scripting knowledge base and rules for Stellaris 4.6 (Corona Borealis):</p>

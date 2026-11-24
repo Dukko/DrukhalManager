@@ -160,6 +160,7 @@ impl Card {
                     colour_lines(buffer, 0, lines);
                 }
             });
+            attach_clean_up_menu(&card.code);
         }
         card
     }
@@ -236,6 +237,12 @@ impl Card {
         buffer.end_user_action();
         buffer.place_cursor(&buffer.start_iter());
         self.scroll.hadjustment().set_value(0.0);
+    }
+
+    /// Cleans up spacing, indentation, and formatting in this card.
+    #[allow(dead_code)]
+    pub fn clean_up(&self) {
+        clean_up_text_view(&self.code);
     }
 
     pub fn text(&self) -> String {
@@ -748,6 +755,13 @@ impl Pair {
         }
     }
 
+    /// Cleans up the editable right card's formatting and catches up.
+    #[allow(dead_code)]
+    pub fn clean_up(&self) {
+        self.right.clean_up();
+        self.catch_up();
+    }
+
     /// Replaces the editable card's side of difference `index` with the
     /// view-only card's lines, as one edit that can be undone.
     pub fn put_in(&self, index: usize) {
@@ -1036,6 +1050,57 @@ fn numbers_text(lines: usize) -> String {
     (1..=lines).map(|n| n.to_string()).collect::<Vec<_>>().join("\n")
 }
 
+/// Adds "Clean Up the Code" to an editable text view's right-click context menu.
+pub fn attach_clean_up_menu(view: &gtk::TextView) {
+    let action = gio::SimpleAction::new("clean-up-code", None);
+    let weak = view.downgrade();
+    action.connect_activate(move |_, _| {
+        if let Some(view) = weak.upgrade() {
+            clean_up_text_view(&view);
+        }
+    });
+    let group = gio::SimpleActionGroup::new();
+    group.add_action(&action);
+    view.insert_action_group("linter", Some(&group));
+    let menu = gio::Menu::new();
+    menu.append(Some(&t!("Clean Up the Code")), Some("linter.clean-up-code"));
+    view.set_extra_menu(Some(&menu));
+}
+
+/// Cleans up the script code in `view` (the selection if any, or the whole buffer).
+pub fn clean_up_text_view(view: &gtk::TextView) {
+    if !view.is_editable() {
+        return;
+    }
+    let buffer = view.buffer();
+    if let Some((mut start, mut end)) = buffer.selection_bounds() {
+        start.set_line_offset(0);
+        if !end.ends_line() {
+            end.forward_to_line_end();
+        }
+        let selected_text = buffer.text(&start, &end, false);
+        let prefix = buffer.text(&buffer.start_iter(), &start, false);
+        let depth = crate::merge::lint::count_brace_depth(&prefix);
+        let cleaned = crate::merge::lint::clean_up_snippet(&selected_text, depth);
+        if cleaned != selected_text.as_str() {
+            buffer.begin_user_action();
+            buffer.delete(&mut start, &mut end);
+            buffer.insert(&mut start, &cleaned);
+            buffer.end_user_action();
+        }
+    } else {
+        let (mut start, mut end) = buffer.bounds();
+        let full_text = buffer.text(&start, &end, false);
+        let cleaned = crate::merge::lint::clean_up(&full_text);
+        if cleaned != full_text.as_str() {
+            buffer.begin_user_action();
+            buffer.delete(&mut start, &mut end);
+            buffer.insert(&mut start, &cleaned);
+            buffer.end_user_action();
+        }
+    }
+}
+
 fn tag_line(buffer: &gtk::TextBuffer, line: usize, tag: &str) {
     let Some(start) = buffer.iter_at_line(line as i32) else { return };
     let mut end = start;
@@ -1269,6 +1334,18 @@ mod tests {
 
     fn pump(context: &glib::MainContext) {
         while context.iteration(false) {}
+    }
+
+    /// Needs a display: `cargo test --release copy_over_ -- --ignored --test-threads=1 --nocapture`
+    #[test]
+    #[ignore]
+    fn clean_up_formats_card_and_pair() {
+        gtk::init().unwrap();
+        adw::init().unwrap();
+        let card = Card::new(true);
+        card.replace_text("foo={bar=1}\n");
+        card.clean_up();
+        assert_eq!(card.text(), "foo = { bar = 1 }\n");
     }
 
     /// Needs a display: `cargo test --release copy_over_ -- --ignored --test-threads=1 --nocapture`
