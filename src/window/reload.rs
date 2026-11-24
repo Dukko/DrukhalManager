@@ -102,12 +102,16 @@ impl Window {
             if let Some(error) = extra_errors.first() {
                 ui.toast_error_message(error);
             }
+            let was_clean = !ui.state.borrow().dirty;
             let before: std::collections::HashSet<String> = ui.state.borrow().mods.iter().map(|m| m.id.clone()).collect();
             let (added, removed) = ui.state.borrow_mut().reload(found);
             // Mods the collection kept a place for go back in it.
             let returned: std::collections::HashSet<String> = ui.state.borrow().mods.iter().map(|m| m.id.clone()).filter(|id| !before.contains(id)).collect();
             let collection = ui.collections.borrow().active().mods.clone();
             let restored = ui.state.borrow_mut().restore_returned(&collection, &returned);
+            if was_clean && !restored.is_empty() {
+                ui.save();
+            }
             // Updated mods may have new thumbnails and files.
             ui.forget_mod_files();
             ui.check_stale();

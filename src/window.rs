@@ -162,10 +162,17 @@ struct Window {
     patch: RefCell<Option<Patch>>,
     enabled_list: gtk::ListBox,
     disabled_list: gtk::ListBox,
-    /// The active collection's mods that aren't installed, and its heading;
+    /// The active collection's mods that aren't installed, and its header;
     /// hidden when there are none.
     missing_list: gtk::ListBox,
-    missing_heading: gtk::Label,
+    missing_header: gtk::Box,
+    missing_open_all: gtk::Button,
+    /// The dialog currently offering to subscribe to missing mods of an imported collection.
+    missing_dialog: RefCell<Option<adw::AlertDialog>>,
+    /// Details of an imported collection whose missing mods are being subscribed to.
+    pending_import: RefCell<Option<(Option<u64>, String, crate::mods::collections::Shared)>>,
+    /// Manifest modification times from the last check, to detect newly finished downloads.
+    manifest_mtimes: RefCell<std::collections::HashMap<std::path::PathBuf, std::time::SystemTime>>,
     toasts: adw::ToastOverlay,
     /// Every notification, kept to read later.
     bell: Rc<notifications::Bell>,
@@ -317,6 +324,16 @@ pub fn build(
     }
     let missing_list = boxed_list("");
     let missing_heading = heading(&t!("Not Installed"));
+    missing_heading.set_hexpand(true);
+    let missing_open_all = gtk::Button::builder()
+        .label(t!("Open All in Browser"))
+        .valign(gtk::Align::Center)
+        .css_classes(["flat", "small"])
+        .visible(false)
+        .build();
+    let missing_header = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+    missing_header.append(&missing_heading);
+    missing_header.append(&missing_open_all);
     let content = gtk::Box::new(gtk::Orientation::Vertical, 12);
     let all_toggle = gtk::CheckButton::builder()
         .label(t!("Enable All"))
@@ -411,7 +428,7 @@ pub fn build(
     enabled_section.append(&enabled_heading);
     enabled_section.append(&enabled_list);
     content.append(&enabled_section);
-    content.append(&missing_heading);
+    content.append(&missing_header);
     content.append(&missing_list);
     let disabled_order = gtk::DropDown::builder()
         .model(&gtk::StringList::new(&[&t!("Name"), &t!("Recently Updated")]))
@@ -598,7 +615,11 @@ pub fn build(
         enabled_list,
         disabled_list,
         missing_list,
-        missing_heading,
+        missing_header,
+        missing_open_all,
+        missing_dialog: RefCell::new(None),
+        pending_import: RefCell::new(None),
+        manifest_mtimes: RefCell::new(std::collections::HashMap::new()),
         toasts,
         bell,
         undo_action: undo_action.clone(),
@@ -654,6 +675,36 @@ pub fn build(
     ui.window.connect_is_active_notify(move |w| {
         if let (true, Some(ui)) = (w.is_active(), weak.upgrade()) {
             ui.update_continue();
+            ui.check_workshop_downloads();
+        }
+    });
+    let weak = Rc::downgrade(&ui);
+    ui.missing_open_all.connect_clicked(move |_| {
+        if let Some(ui) = weak.upgrade() {
+            let ids: Vec<u64> = ui.collections.borrow().active().placeholders(&ui.state.borrow().mods).into_iter().filter_map(|p| p.steam_id).collect();
+            if !ids.is_empty() {
+                ui.add_toast(adw::Toast::new(&tnf!("Opening {count} Workshop page in browser…", "Opening {count} Workshop pages in browser…", count = ids.len())));
+                collections_ui::open_pages_queued(&ui.window.downgrade(), ids);
+            }
+        }
+    });
+    for dir in crate::paradox::steam::workshop_dirs(&glib::home_dir(), crate::paradox::steam::STELLARIS_APP_ID) {
+        if let (Some(app), Some(workshop)) = (dir.file_name().and_then(|a| a.to_str()), dir.parent().and_then(std::path::Path::parent)) {
+            let acf = workshop.join(format!("appworkshop_{app}.acf"));
+            if let Ok(meta) = std::fs::metadata(&acf)
+                && let Ok(mtime) = meta.modified()
+            {
+                ui.manifest_mtimes.borrow_mut().insert(acf, mtime);
+            }
+        }
+    }
+    let weak = Rc::downgrade(&ui);
+    glib::timeout_add_seconds_local(3, move || {
+        if let Some(ui) = weak.upgrade() {
+            ui.check_workshop_downloads();
+            glib::ControlFlow::Continue
+        } else {
+            glib::ControlFlow::Break
         }
     });
     if let Err(e) = ui.sync_patch() {

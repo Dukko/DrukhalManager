@@ -95,8 +95,13 @@ impl Window {
         self.missing_list.remove_all();
         let placeholders = self.collections.borrow().active().placeholders(&state.mods);
         let show_missing = !placeholders.is_empty() && self.view.get() == mods::filter::View::All && self.category.get().is_none();
-        self.missing_heading.set_visible(show_missing);
+        self.missing_header.set_visible(show_missing);
         self.missing_list.set_visible(show_missing);
+        let steam_ids: Vec<u64> = placeholders.iter().filter_map(|p| p.steam_id).collect();
+        self.missing_open_all.set_visible(!steam_ids.is_empty());
+        if !steam_ids.is_empty() {
+            self.missing_open_all.set_tooltip_text(Some(&tnf!("Open {count} Workshop page in browser", "Open {count} Workshop pages in browser", count = steam_ids.len())));
+        }
         for p in placeholders {
             self.missing_list.append(&self.placeholder_row(p));
         }

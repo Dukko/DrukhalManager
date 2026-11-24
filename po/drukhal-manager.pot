@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: DrukhalManager 2.7.21\n"
 "Report-Msgid-Bugs-To: https://github.com/Dukko/DrukhalManager/issues\n"
-"POT-Creation-Date: 2026-11-24 13:16+0000\n"
+"POT-Creation-Date: 2026-11-24 14:48+0000\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -3599,13 +3599,19 @@ msgid "Open the Collection on the Workshop"
 msgstr ""
 
 #: src/window/collections_ui.rs
+msgid "Open {count} in Browser"
+msgid_plural "Open All {count} in Browser"
+msgstr[0] ""
+msgstr[1] ""
+
+#: src/window/collections_ui.rs
 msgid "{count} Mod Not Installed"
 msgid_plural "{count} Mods Not Installed"
 msgstr[0] ""
 msgstr[1] ""
 
 #: src/window/collections_ui.rs
-msgid "Subscribe to them on the Steam Workshop. Once Steam has downloaded them, reload to add them to “{name}”."
+msgid "Subscribe to them on the Steam Workshop. Once Steam has downloaded them, DrukhalManager will automatically detect them, or you can reload now to add them to “{name}”."
 msgstr ""
 
 #: src/window/collections_ui.rs
@@ -4826,6 +4832,12 @@ msgid "Needs {list}, {status}"
 msgstr ""
 
 #: src/window/list.rs
+msgid "Open {count} Workshop page in browser"
+msgid_plural "Open {count} Workshop pages in browser"
+msgstr[0] ""
+msgstr[1] ""
+
+#: src/window/list.rs
 msgid "Enabled {count} mod"
 msgid_plural "Enabled {count} mods"
 msgstr[0] ""
@@ -5878,6 +5890,10 @@ msgid "Not Installed"
 msgstr ""
 
 #: src/window.rs
+msgid "Open All in Browser"
+msgstr ""
+
+#: src/window.rs
 msgid "Enable All"
 msgstr ""
 
@@ -5942,6 +5958,12 @@ msgstr ""
 #: src/window.rs
 msgid "Show Views"
 msgstr ""
+
+#: src/window.rs
+msgid "Opening {count} Workshop page in browser…"
+msgid_plural "Opening {count} Workshop pages in browser…"
+msgstr[0] ""
+msgstr[1] ""
 
 #: src/window.rs
 msgid "the Disabled list's order"

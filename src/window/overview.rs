@@ -285,7 +285,7 @@ impl Window {
         self.enabled_section.set_visible(view != View::Disabled);
         self.disabled_section.set_visible(category.is_none() && matches!(view, View::All | View::Attention | View::Disabled));
         let show_missing = self.missing_list.first_child().is_some() && view == View::All && category.is_none();
-        self.missing_heading.set_visible(show_missing);
+        self.missing_header.set_visible(show_missing);
         self.missing_list.set_visible(show_missing);
         self.enabled_list.invalidate_filter();
         self.disabled_list.invalidate_filter();

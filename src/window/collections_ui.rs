@@ -480,7 +480,7 @@ impl Window {
                 if let Some(name) = ui.add_and_switch(collection, Vec::new())
                     && !missing.is_empty()
                 {
-                    ui.offer_missing(id, name, shared);
+                    ui.offer_missing(Some(id), name, shared);
                 }
             });
         });
@@ -488,11 +488,20 @@ impl Window {
 
     /// Lists the collection's mods that aren't installed, with links to
     /// subscribe, and reloads once they're downloaded.
-    fn offer_missing(self: &Rc<Self>, collection_id: u64, name: String, shared: collections::Shared) {
+    pub(super) fn offer_missing(self: &Rc<Self>, collection_id: Option<u64>, name: String, shared: collections::Shared) {
         let missing: Vec<&collections::SharedMod> = {
             let installed = &self.state.borrow().mods;
             shared.mods.iter().filter(|s| collections::find(s, installed).is_none()).collect()
         };
+        if missing.is_empty() {
+            self.pending_import.borrow_mut().take();
+            if let Some(d) = self.missing_dialog.borrow_mut().take() {
+                d.close();
+            }
+            return;
+        }
+        *self.pending_import.borrow_mut() = Some((collection_id, name.clone(), shared.clone()));
+
         let list = gtk::ListBox::builder().css_classes(["boxed-list"]).selection_mode(gtk::SelectionMode::None).build();
         for m in &missing {
             let row = adw::ActionRow::builder().title(&m.name).use_markup(false).build();
@@ -505,24 +514,56 @@ impl Window {
             }
             list.append(&row);
         }
-        let all = gtk::Button::builder().label(t!("Open the Collection on the Workshop")).halign(gtk::Align::Center).css_classes(["pill"]).build();
-        let window = self.window.downgrade();
-        all.connect_clicked(move |_| open_page(&window, collection_id));
+        let steam_ids: Vec<u64> = missing.iter().filter_map(|m| m.steam_id).collect();
         let scroll = gtk::ScrolledWindow::builder().child(&list).propagate_natural_height(true).max_content_height(320).hscrollbar_policy(gtk::PolicyType::Never).build();
         let content = gtk::Box::new(gtk::Orientation::Vertical, 12);
         content.append(&scroll);
-        content.append(&all);
+
+        let buttons = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+        buttons.set_halign(gtk::Align::Center);
+
+        if let Some(id) = collection_id {
+            let all = gtk::Button::builder().label(t!("Open the Collection on the Workshop")).css_classes(["pill"]).build();
+            let window = self.window.downgrade();
+            all.connect_clicked(move |_| open_page(&window, id));
+            buttons.append(&all);
+        }
+        if !steam_ids.is_empty() {
+            let label = tnf!("Open {count} in Browser", "Open All {count} in Browser", count = steam_ids.len());
+            let open_all = gtk::Button::builder().label(label).css_classes(["pill"]).build();
+            let window = self.window.downgrade();
+            let ids = steam_ids.clone();
+            open_all.connect_clicked(move |_| open_pages_queued(&window, ids.clone()));
+            buttons.append(&open_all);
+        }
+        if buttons.first_child().is_some() {
+            content.append(&buttons);
+        }
 
         let dialog = adw::AlertDialog::new(
             Some(&tnf!("{count} Mod Not Installed", "{count} Mods Not Installed", count = missing.len())),
-            Some(&tf!("Subscribe to them on the Steam Workshop. Once Steam has downloaded them, reload to add them to “{name}”.", name = &name)),
+            Some(&tf!("Subscribe to them on the Steam Workshop. Once Steam has downloaded them, DrukhalManager will automatically detect them, or you can reload now to add them to “{name}”.", name = &name)),
         );
         dialog.set_extra_child(Some(&content));
         dialog.add_responses(&[("later", &t!("_Later")), ("reload", &t!("_Reload Mods"))]);
         dialog.set_response_appearance("reload", adw::ResponseAppearance::Suggested);
         dialog.set_default_response(Some("reload"));
         dialog.set_close_response("later");
+
+        if let Some(old) = self.missing_dialog.borrow_mut().replace(dialog.clone()) {
+            old.close();
+        }
+
         let weak = Rc::downgrade(self);
+        dialog.connect_closed({
+            let weak = weak.clone();
+            move |_| {
+                if let Some(ui) = weak.upgrade() {
+                    ui.missing_dialog.borrow_mut().take();
+                }
+            }
+        });
+
         dialog.connect_response(None, move |_, response| {
             let (Some(ui), "reload") = (weak.upgrade(), response) else { return };
             let (name, shared) = (name.clone(), shared.clone());
@@ -533,8 +574,12 @@ impl Window {
 
     /// After a reload, matches the imported collection again so newly
     /// downloaded mods join it.
-    fn refill_collection(self: &Rc<Self>, collection_id: u64, name: String, shared: collections::Shared) {
+    fn refill_collection(self: &Rc<Self>, collection_id: Option<u64>, name: String, shared: collections::Shared) {
         if self.collections.borrow().get(&name).is_none() {
+            self.pending_import.borrow_mut().take();
+            if let Some(d) = self.missing_dialog.borrow_mut().take() {
+                d.close();
+            }
             return; // deleted meanwhile
         }
         let (fresh, missing) = collections::import(&shared, &self.state.borrow().mods);
@@ -553,6 +598,10 @@ impl Window {
             }
         }
         if missing.is_empty() {
+            self.pending_import.borrow_mut().take();
+            if let Some(d) = self.missing_dialog.borrow_mut().take() {
+                d.close();
+            }
             self.add_toast(adw::Toast::new(&tf!("Every mod in “{name}” is installed", name = name)));
         } else {
             self.offer_missing(collection_id, name, shared);
@@ -587,7 +636,11 @@ impl Window {
             };
             ui.adopt_notes(&shared);
             let (collection, missing) = collections::import(&shared, &ui.state.borrow().mods);
-            ui.add_and_switch(collection, missing);
+            if let Some(name) = ui.add_and_switch(collection, Vec::new())
+                && !missing.is_empty()
+            {
+                ui.offer_missing(None, name, shared);
+            }
         });
     }
 
@@ -844,7 +897,11 @@ impl Window {
         self.adopt_notes(&shared);
         let (mut collection, missing) = collections::import(&shared, &self.state.borrow().mods);
         collection.patch = patch;
-        self.add_and_switch(collection, missing);
+        if let Some(name) = self.add_and_switch(collection, Vec::new())
+            && !missing.is_empty()
+        {
+            self.offer_missing(None, name, shared);
+        }
     }
 
     /// Exports the load order as an agnostic playset file compatible with
@@ -976,11 +1033,89 @@ impl Window {
             };
             ui.adopt_notes(&shared);
             let (collection, missing) = collections::import(&shared, &ui.state.borrow().mods);
-            ui.add_and_switch(collection, missing);
+            if let Some(name) = ui.add_and_switch(collection, Vec::new())
+                && !missing.is_empty()
+            {
+                ui.offer_missing(None, name, shared);
+            }
         });
     }
 }
 
 fn open_page(window: &glib::WeakRef<adw::ApplicationWindow>, id: u64) {
     gtk::UriLauncher::new(&workshop::page_url(id)).launch(window.upgrade().as_ref(), None::<&gio::Cancellable>, |_| {});
+}
+
+/// Opens Workshop pages in the user's browser, queued with a brief delay
+/// between each so the browser and desktop portal aren't flooded.
+pub(super) fn open_pages_queued(window: &glib::WeakRef<adw::ApplicationWindow>, ids: Vec<u64>) {
+    let window = window.clone();
+    glib::spawn_future_local(async move {
+        for (i, id) in ids.into_iter().enumerate() {
+            if i > 0 {
+                glib::timeout_future(std::time::Duration::from_millis(250)).await;
+            }
+            let Some(win) = window.upgrade() else { break };
+            gtk::UriLauncher::new(&workshop::page_url(id)).launch(Some(&win), None::<&gio::Cancellable>, |_| {});
+        }
+    });
+}
+
+impl Window {
+    /// Checks whether Steam has finished downloading any Workshop items
+    /// (by inspecting `appworkshop_281990.acf` modification times and new
+    /// installed items with descriptors). If so, triggers a reload to bring
+    /// newly downloaded mods into the load order and collection.
+    pub(super) fn check_workshop_downloads(self: &Rc<Self>) {
+        let Some(action) = self.window.lookup_action("reload").and_downcast::<gio::SimpleAction>() else { return };
+        if !action.is_enabled() {
+            return; // reload already in progress
+        }
+
+        let workshop_dirs = crate::paradox::steam::workshop_dirs(&glib::home_dir(), crate::paradox::steam::STELLARIS_APP_ID);
+        if workshop_dirs.is_empty() {
+            return;
+        }
+
+        let mut changed = false;
+        for dir in &workshop_dirs {
+            let (Some(app), Some(workshop)) = (dir.file_name().and_then(|a| a.to_str()), dir.parent().and_then(std::path::Path::parent)) else { continue };
+            let acf = workshop.join(format!("appworkshop_{app}.acf"));
+            let Ok(meta) = std::fs::metadata(&acf) else { continue };
+            let Ok(mtime) = meta.modified() else { continue };
+            let mut mtimes = self.manifest_mtimes.borrow_mut();
+            if mtimes.get(&acf) != Some(&mtime) {
+                mtimes.insert(acf, mtime);
+                changed = true;
+            }
+        }
+
+        if !changed {
+            return;
+        }
+
+        let known: std::collections::HashSet<u64> = self.state.borrow().mods.iter().filter_map(|m| m.descriptor.remote_file_id).collect();
+        let has_new_ready_item = workshop_dirs.iter().any(|dir| {
+            crate::paradox::steam::installed_items(dir).is_some_and(|items| {
+                items.iter().any(|id| !known.contains(id) && dir.join(id.to_string()).join("descriptor.mod").is_file())
+            })
+        });
+
+        if !has_new_ready_item {
+            return;
+        }
+
+        self.reload(move |ui| {
+            if let Some((collection_id, name, shared)) = ui.pending_import.borrow().clone() {
+                ui.refill_collection(collection_id, name, shared);
+            } else {
+                let remaining_placeholders = ui.collections.borrow().active().placeholders(&ui.state.borrow().mods);
+                if remaining_placeholders.is_empty() {
+                    if let Some(dialog) = ui.missing_dialog.borrow_mut().take() {
+                        dialog.close();
+                    }
+                }
+            }
+        });
+    }
 }
