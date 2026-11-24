@@ -443,6 +443,7 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
     dialog.present(Some(parent));
 }
 
+#[allow(clippy::type_complexity)]
 fn read_versions(path: &str, origins: &[(String, String, PathBuf)], game_dir: Option<&Path>) -> Result<(Vec<Version>, Option<String>, Vec<Print>), String> {
     let versions: Vec<Version> = origins
         .iter()
@@ -469,10 +470,10 @@ pub fn load_objects(path: &str, origins: &[(String, String, PathBuf)], game_dir:
 /// planning an object-by-object merge when possible or whole-file merge otherwise.
 pub fn load(path: &str, origins: &[(String, String, PathBuf)], game_dir: Option<&Path>, saved: Option<&str>) -> Result<LoadResult, String> {
     let (versions, vanilla, found) = read_versions(path, origins, game_dir)?;
-    if file_merge::can_split(path) {
-        if let Ok(plan) = file_merge::plan(path, vanilla.as_deref(), &versions) {
-            return Ok(LoadResult::Objects(plan, found));
-        }
+    if file_merge::can_split(path)
+        && let Ok(plan) = file_merge::plan(path, vanilla.as_deref(), &versions)
+    {
+        return Ok(LoadResult::Objects(plan, found));
     }
     let vanilla_src = vanilla.as_ref().map(|t| Source { label: "Vanilla".into(), file: path.to_owned(), text: t.clone() });
     let sources: Vec<Source> = origins.iter().zip(&versions).map(|((_, label, _), v)| Source { label: label.clone(), file: path.to_owned(), text: v.text.clone() }).collect();
@@ -513,10 +514,10 @@ fn validate_file(path: &str, text: &str) -> Result<String, String> {
         return Err(tf!("The merged script is missing {depth} closing brace `}}`", depth = depth));
     }
     let category = file_merge::category(path);
-    if category != "localisation" {
-        if let Err(e) = crate::paradox::script::parse(text) {
-            return Err(format!("The merged script has a syntax error at {e}"));
-        }
+    if category != "localisation"
+        && let Err(e) = crate::paradox::script::parse(text)
+    {
+        return Err(format!("The merged script has a syntax error at {e}"));
     }
     Ok(text.to_owned())
 }
