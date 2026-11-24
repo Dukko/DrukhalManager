@@ -204,6 +204,8 @@ pub struct Session {
     pub selected: Option<String>,
     /// Merges in progress, by object key.
     pub steps: HashMap<String, Steps>,
+    /// Game update conflicts in progress, by item key.
+    pub behind: HashMap<String, crate::behind_dialog::BehindState>,
     pub search: String,
     /// Whether cards mark each version's changes from the base game rather
     /// than the differences between them.
@@ -219,6 +221,7 @@ impl Session {
     /// Forgets merges in progress, whose versions a rescan may have changed.
     pub fn rescanned(&mut self) {
         self.steps.clear();
+        self.behind.clear();
     }
 }
 
@@ -290,6 +293,7 @@ pub fn scanning() -> gtk::Widget {
 pub enum Item {
     Object(usize),
     File(usize),
+    Behind(usize),
     /// Files the game will misread, and mods that couldn't be scanned.
     Problems,
     /// Merges whose mods changed since.
@@ -341,7 +345,7 @@ pub fn shortcuts() -> Vec<(&'static str, &'static str, String)> {
 pub struct Page {
     pub analysis: Rc<Analysis>,
     pub hooks: Rc<MergeHooks>,
-    split: adw::NavigationSplitView,
+    pub split: adw::NavigationSplitView,
     list: gtk::ListBox,
     content: adw::Bin,
     summary: gtk::Label,
@@ -362,6 +366,7 @@ pub struct Page {
     /// the summary.
     files: Vec<usize>,
     objects: Vec<usize>,
+    behind: Vec<usize>,
     involved: usize,
     n_ignored: usize,
     /// The items listed under Resolved at the last [`Page::fill`].
@@ -386,11 +391,32 @@ pub fn build(analysis: &Rc<Analysis>, rescan: gtk::Button, hooks: Rc<MergeHooks>
         .filter(|&i| hooks.show_ignored || !object_ignored(&ignored, &report.objects[i]))
         .filter(|&i| filter.is_none_or(|p| report.objects[i].definitions.iter().any(|d| d.mod_position == p)))
         .collect();
-    let n_ignored = report.files.iter().filter(|c| file_ignored(&ignored, c)).count() + report.objects.iter().filter(|c| object_ignored(&ignored, c)).count();
+    let behind: Vec<usize> = if analysis.behind_versions.is_some() {
+        (0..analysis.behind.len())
+            .filter(|&i| {
+                let b = &analysis.behind[i];
+                let is_ign = (hooks.is_ignored)(&object_key(&b.category, &b.key))
+                    || (hooks.is_ignored)(&objects_folder_key(&b.category))
+                    || (hooks.is_ignored)(&format!("behind:{}:{}", b.category, b.key));
+                hooks.show_ignored || !is_ign
+            })
+            .filter(|&i| filter.is_none_or(|p| analysis.behind[i].mod_position == p))
+            .collect()
+    } else {
+        Vec::new()
+    };
+    let n_ignored = report.files.iter().filter(|c| file_ignored(&ignored, c)).count()
+        + report.objects.iter().filter(|c| object_ignored(&ignored, c)).count()
+        + analysis.behind.iter().filter(|b| {
+            (hooks.is_ignored)(&object_key(&b.category, &b.key))
+                || (hooks.is_ignored)(&objects_folder_key(&b.category))
+                || (hooks.is_ignored)(&format!("behind:{}:{}", b.category, b.key))
+        }).count();
     let involved: BTreeSet<usize> = files
         .iter()
         .flat_map(|&i| report.files[i].mods.iter().copied())
         .chain(objects.iter().flat_map(|&i| report.objects[i].definitions.iter().map(|d| d.mod_position)))
+        .chain(behind.iter().map(|&i| analysis.behind[i].mod_position))
         .collect();
     let has_errors = report.errors.iter().any(|e| filter.is_none_or(|p| e.mod_position == p)) || report.skipped.iter().any(|(p, _)| filter.is_none_or(|f| *p == f));
 
@@ -407,6 +433,18 @@ pub fn build(analysis: &Rc<Analysis>, rescan: gtk::Button, hooks: Rc<MergeHooks>
     }
     if !attention.is_empty() {
         groups.push(Group { title: t!("Needs Attention"), folder_key: None, folder: None, merge_all: false, items: attention });
+    }
+    if let Some((old, new)) = &analysis.behind_versions {
+        let behind_items: Vec<Item> = behind.iter().copied().map(Item::Behind).collect();
+        if !behind_items.is_empty() {
+            groups.push(Group {
+                title: tf!("Changed by the Game Update ({old} → {new})", old = old, new = new),
+                folder_key: None,
+                folder: None,
+                merge_all: true,
+                items: behind_items,
+            });
+        }
     }
     let mut by_category: BTreeMap<&str, Vec<Item>> = BTreeMap::new();
     for &i in &objects {
@@ -432,24 +470,6 @@ pub fn build(analysis: &Rc<Analysis>, rescan: gtk::Button, hooks: Rc<MergeHooks>
     let top = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(6).margin_top(12).margin_start(12).margin_end(12).margin_bottom(6).build();
     top.append(&summary);
     top.append(&details);
-    // Objects already updated in the patch no longer need attention.
-    let pending = analysis.behind.iter().filter(|b| !(hooks.is_merged)(&b.category, &b.key)).count();
-    if let (true, Some((_, version))) = (pending > 0, &analysis.behind_versions) {
-        let label = gtk::Label::builder()
-            .label(tnf!(
-                "{count} object your mods replace changed in Stellaris {version}…",
-                "{count} objects your mods replace changed in Stellaris {version}…",
-                count = pending,
-                version = version
-            ))
-            .wrap(true)
-            .xalign(0.0)
-            .build();
-        let button = gtk::Button::builder().child(&label).css_classes(["flat"]).halign(gtk::Align::Start).build();
-        let (analysis, hooks) = (analysis.clone(), hooks.clone());
-        button.connect_clicked(move |b| crate::behind_dialog::present(b, analysis.clone(), hooks.clone()));
-        top.append(&button);
-    }
     // Names mods use that the game doesn't have, unless the patch already holds a fix.
     if let Some(script) = &analysis.script {
         let pending: Vec<&script_check::Finding> = script.findings.iter().filter(|f| !matches!(f.problem, script_check::Problem::Unsure | script_check::Problem::Elsewhere) && !f.unused && !f.object.as_ref().is_some_and(|(category, key)| (hooks.is_merged)(category, key))).collect();
@@ -550,6 +570,7 @@ pub fn build(analysis: &Rc<Analysis>, rescan: gtk::Button, hooks: Rc<MergeHooks>
         view: RefCell::new(None),
         files,
         objects,
+        behind,
         involved: involved.len(),
         n_ignored,
         resolved: RefCell::default(),
@@ -673,6 +694,10 @@ impl Page {
                 let c = &self.analysis.report.objects[i];
                 object_key(&c.category, &c.key)
             }
+            Item::Behind(i) => {
+                let b = &self.analysis.behind[i];
+                format!("behind:{}:{}", b.category, b.key)
+            }
             Item::File(i) => file_key(&self.analysis.report.files[i].path),
             Item::Problems => "problems".into(),
             Item::Outdated => "outdated".into(),
@@ -684,6 +709,7 @@ impl Page {
         let n_stale = |untracked: bool| self.hooks.stale.borrow().iter().filter(|s| s.untracked == untracked).count();
         match item {
             Item::Object(i) => self.analysis.report.objects[i].key.clone(),
+            Item::Behind(i) => self.analysis.behind[i].key.clone(),
             Item::File(i) => file_name(&self.analysis.report.files[i].path).to_owned(),
             Item::Problems => t!("Problems"),
             Item::Outdated => tnf!("{count} outdated merge", "{count} outdated merges", count = n_stale(false)),
@@ -697,6 +723,10 @@ impl Page {
         }
         let text = match item {
             Item::Object(i) => self.analysis.report.objects[i].key.clone(),
+            Item::Behind(i) => {
+                let b = &self.analysis.behind[i];
+                format!("{} {} {}", b.key, b.category, self.analysis.name(b.mod_position))
+            }
             Item::File(i) => self.analysis.report.files[i].path.clone(),
             _ => self.title_of(item),
         };
@@ -708,6 +738,12 @@ impl Page {
         let ignored = Ignores { keys: &ignored, rules: &self.hooks.rules, names: &self.analysis.names, dependencies: self.hooks.hide_dependencies.then_some(&self.analysis.depends_on[..]) };
         match item {
             Item::Object(i) => object_ignored(&ignored, &self.analysis.report.objects[i]),
+            Item::Behind(i) => {
+                let b = &self.analysis.behind[i];
+                (self.hooks.is_ignored)(&object_key(&b.category, &b.key))
+                    || (self.hooks.is_ignored)(&objects_folder_key(&b.category))
+                    || (self.hooks.is_ignored)(&format!("behind:{}:{}", b.category, b.key))
+            }
             Item::File(i) => file_ignored(&ignored, &self.analysis.report.files[i]),
             _ => false,
         }
@@ -761,6 +797,10 @@ impl Page {
                 let c = &self.analysis.report.objects[i];
                 (self.hooks.is_merged)(&c.category, &c.key) && self.hooks.stale_object(&c.category, &c.key).is_none()
             }
+            Item::Behind(i) => {
+                let b = &self.analysis.behind[i];
+                (self.hooks.is_merged)(&b.category, &b.key) && self.hooks.stale_object(&b.category, &b.key).is_none()
+            }
             Item::File(i) => {
                 let path = &self.analysis.report.files[i].path;
                 (self.hooks.is_file_merged)(path) && self.hooks.stale_file(path).is_none()
@@ -773,7 +813,7 @@ impl Page {
     /// problem fixed. Resolved items move to the list's Resolved section.
     fn is_resolved(&self, item: Item) -> bool {
         match item {
-            Item::Object(_) | Item::File(_) => self.is_saved(item),
+            Item::Object(_) | Item::File(_) | Item::Behind(_) => self.is_saved(item),
             Item::Problems => self.problems_resolved(),
             Item::Outdated | Item::Untracked => false,
         }
@@ -818,6 +858,23 @@ impl Page {
                     },
                 }
             }
+            Item::Behind(i) => {
+                let b = &analysis.behind[i];
+                let mod_name = analysis.name(b.mod_position);
+                if self.is_ignored(item) {
+                    return (Status::Ignored, tf!("{mod_name} · {reason}", mod_name = mod_name, reason = self.ignored_label(item)));
+                }
+                if self.hooks.stale_object(&b.category, &b.key).is_some() {
+                    return (Status::Outdated, tf!("{mod_name} · merge out of date", mod_name = mod_name));
+                }
+                if (self.hooks.is_merged)(&b.category, &b.key) {
+                    return (Status::Saved, tf!("{mod_name} · saved to patch", mod_name = mod_name));
+                }
+                if b.now.is_none() {
+                    return (Status::Attention, tf!("{mod_name} · {removed}", mod_name = mod_name, removed = t!("Removed from the game")));
+                }
+                (Status::Open, tf!("{mod_name} · {category}", mod_name = mod_name, category = &b.category))
+            }
             Item::File(i) => {
                 let c = &analysis.report.files[i];
                 let mods = tnf!("{count} mod", "{count} mods", count = c.mods.len());
@@ -853,7 +910,7 @@ impl Page {
     }
 
     /// Rebuilds the sidebar list for the current search.
-    fn fill(self: &Rc<Self>) {
+    pub fn fill(self: &Rc<Self>) {
         while let Some(row) = self.list.row_at_index(0) {
             self.list.remove(&row);
         }
@@ -995,6 +1052,21 @@ impl Page {
             let button = gtk::MenuButton::builder().icon_name("view-more-symbolic").menu_model(&menu).tooltip_text(t!("Folder actions")).css_classes(["flat", "circular"]).valign(gtk::Align::Center).build();
             button.insert_action_group("folder", Some(&actions));
             heading.append(&button);
+        } else if group.merge_all {
+            let menu = gio::Menu::new();
+            let actions = gio::SimpleActionGroup::new();
+            menu.append(Some(&t!("Update All with AI…")), Some("group.update-all"));
+            let action = gio::SimpleAction::new("update-all", None);
+            let weak = Rc::downgrade(self);
+            action.connect_activate(move |_, _| {
+                if let Some(page) = weak.upgrade() {
+                    crate::behind_dialog::run_update_all(&page);
+                }
+            });
+            actions.add_action(&action);
+            let button = gtk::MenuButton::builder().icon_name("view-more-symbolic").menu_model(&menu).tooltip_text(t!("Update All with AI…")).css_classes(["flat", "circular"]).valign(gtk::Align::Center).build();
+            button.insert_action_group("group", Some(&actions));
+            heading.append(&button);
         }
         gtk::ListBoxRow::builder().child(&heading).selectable(false).activatable(false).css_classes(["folder"]).build()
     }
@@ -1016,6 +1088,10 @@ impl Page {
             Item::Object(i) => {
                 let c = &self.analysis.report.objects[i];
                 c.definitions.iter().map(|d| tf!("{name}: {file}", name = self.analysis.name(d.mod_position), file = &d.file)).collect::<Vec<_>>().join("\n")
+            }
+            Item::Behind(i) => {
+                let b = &self.analysis.behind[i];
+                tf!("{name}: {file}", name = self.analysis.name(b.mod_position), file = &b.file)
             }
             _ => title,
         }));
@@ -1073,7 +1149,11 @@ impl Page {
     }
 
     fn update_summary(&self) {
-        let listed: Vec<Item> = self.objects.iter().map(|&i| Item::Object(i)).chain(self.files.iter().map(|&i| Item::File(i))).filter(|&i| !self.is_ignored(i)).collect();
+        let listed: Vec<Item> = self.objects.iter().map(|&i| Item::Object(i))
+            .chain(self.files.iter().map(|&i| Item::File(i)))
+            .chain(self.behind.iter().map(|&i| Item::Behind(i)))
+            .filter(|&i| !self.is_ignored(i))
+            .collect();
         let saved = listed.iter().filter(|&&i| self.is_saved(i)).count();
         let conflicts = tnf!("{count} conflict", "{count} conflicts", count = listed.len());
         self.summary.set_label(&tf!("{summary} · {saved} saved", summary = &conflicts, saved = saved));
@@ -1096,7 +1176,7 @@ impl Page {
         let items: Vec<Item> = self.rows.borrow().iter().flatten().copied().collect();
         let item = selected
             .and_then(|key| items.iter().copied().find(|&i| self.key_of(i) == key))
-            .or_else(|| items.iter().copied().find(|i| matches!(i, Item::Object(_) | Item::File(_)) && !self.is_saved(*i)))
+            .or_else(|| items.iter().copied().find(|i| matches!(i, Item::Object(_) | Item::File(_) | Item::Behind(_)) && !self.is_saved(*i)))
             .or_else(|| items.first().copied());
         if let Some(item) = item {
             self.show(item);
@@ -1156,7 +1236,7 @@ impl Page {
                 }
             }
             "ignore" => {
-                if let Some(item @ (Item::Object(_) | Item::File(_))) = self.current.get() {
+                if let Some(item @ (Item::Object(_) | Item::File(_) | Item::Behind(_))) = self.current.get() {
                     self.toggle_ignored(item);
                 }
             }
@@ -1182,6 +1262,10 @@ impl Page {
                 let (w, v) = object::view(self, i);
                 (w, Some(v))
             }
+            Item::Behind(i) => {
+                let (w, v) = crate::behind_dialog::view(self, i);
+                (w, Some(v))
+            }
             Item::File(i) => {
                 let (w, v) = file::view(self, i);
                 (w, Some(v))
@@ -1199,7 +1283,7 @@ impl Page {
     pub fn advance(self: &Rc<Self>, item: Item) {
         let rows: Vec<Item> = self.rows.borrow().iter().flatten().copied().collect();
         let start = rows.iter().position(|&i| i == item).map_or(0, |p| p + 1);
-        let next = rows[start..].iter().chain(&rows[..start]).copied().find(|&i| i != item && matches!(i, Item::Object(_) | Item::File(_)) && !self.is_saved(i) && !self.is_ignored(i));
+        let next = rows[start..].iter().chain(&rows[..start]).copied().find(|&i| i != item && matches!(i, Item::Object(_) | Item::File(_) | Item::Behind(_)) && !self.is_saved(i) && !self.is_ignored(i));
         match next {
             Some(next) => self.show(next),
             None => self.show(item),
@@ -1425,6 +1509,7 @@ impl Page {
             // Jump to the conflict, if it's still listed.
             let target = self.rows.borrow().iter().flatten().copied().find(|&i| match (i, &s.object) {
                 (Item::Object(i), Some((c, k))) => &self.analysis.report.objects[i].category == c && &self.analysis.report.objects[i].key == k,
+                (Item::Behind(i), Some((c, k))) => &self.analysis.behind[i].category == c && &self.analysis.behind[i].key == k,
                 (Item::File(i), None) => self.analysis.report.files[i].path.eq_ignore_ascii_case(&s.path),
                 _ => false,
             });

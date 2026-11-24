@@ -4,15 +4,16 @@
 //! at a time or all at once. Update All sends every request first, saving
 //! nothing, then shows the results one by one to save or skip.
 
+use std::any::Any;
 use std::cell::{Cell, RefCell};
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
-use std::rc::Rc;
+use std::rc::{Rc, Weak};
 
 use adw::prelude::*;
 use gtk::{gio, glib};
 
-use crate::conflicts_view::{self, arrow, chip, diff_bar, note, Analysis, DetailHeader, MergeHooks};
+use crate::conflicts_view::{self, arrow, chip, diff_bar, note, Analysis, Item, MergeHooks, Page};
 use crate::diff_view::{Compare, Header, Pair};
 use crate::folder_merge_dialog::{dollars, tokens};
 use crate::merge::ai::{self, Checked, Estimate, Progress, Provider, Versions};
@@ -25,40 +26,14 @@ use crate::merge::vocabulary;
 use crate::merge_dialog;
 use crate::thinking_view::{self, ThinkingView};
 
-pub fn present(parent: &impl IsA<gtk::Widget>, analysis: Rc<Analysis>, hooks: Rc<MergeHooks>) {
-    let Some((old, new)) = analysis.behind_versions.clone() else { return };
-    if analysis.behind.is_empty() {
-        return;
-    }
-    crate::diff_view::install_css();
-
-    let navigation = adw::NavigationView::new();
-    let dialog = adw::Dialog::builder().content_width(1150).content_height(750).child(&navigation).build();
-
-    let page = Rc::new(BehindPage::new(analysis, hooks, old, new, navigation.clone(), dialog.clone()));
-    let split_page = wrap(&t!("Changed by the Game Update"), Some(&tf!("Stellaris {old} → {new}", old = &page.old, new = &page.new)), &page.split);
-    navigation.add(&split_page);
-
-    page.setup(dialog.upcast_ref());
-    dialog.present(Some(parent));
-}
-
-/// A page with its own header bar.
-fn wrap(title: &str, subtitle: Option<&str>, content: &impl IsA<gtk::Widget>) -> adw::NavigationPage {
-    let header = adw::HeaderBar::new();
-    header.set_title_widget(Some(&adw::WindowTitle::new(title, subtitle.unwrap_or_default())));
-    let toolbar = adw::ToolbarView::new();
-    toolbar.add_top_bar(&header);
-    toolbar.set_content(Some(content));
-    adw::NavigationPage::builder().title(title).child(&toolbar).build()
-}
-
-
-/// Ties `value`'s lifetime to `widget`'s, so a pair keeps refreshing its
-/// comparison while its widget is on screen.
-fn keep_alive<T: 'static>(widget: &impl IsA<gtk::Widget>, value: Rc<T>) {
-    let cell = std::cell::RefCell::new(Some(value));
-    widget.connect_destroy(move |_| drop(cell.take()));
+#[derive(Clone, Default)]
+pub struct BehindState {
+    pub current_text: String,
+    pub initial_text: String,
+    pub notes: String,
+    pub warnings: Vec<String>,
+    pub error: Option<String>,
+    pub show_game_changes: bool,
 }
 
 /// The mod's copy of the object as it is on disk now.
@@ -103,9 +78,6 @@ impl Job {
         Versions { before: &self.before, after: &self.after, mod_copy: &self.mod_copy }
     }
 
-    /// Asks the model, and looks for keywords found in neither game version,
-    /// the game's other objects, nor the mod's copy. Blocks on the network
-    /// and reads files, so it runs off the UI thread.
     fn run(&self, provider: &Provider, on: &mut dyn FnMut(Progress)) -> Result<(Checked, Vec<String>), String> {
         let check = |text: &str| merge_dialog::validate(&self.category, &self.key, text);
         let checked = ai::update_checked(provider, &self.category, &self.key, &self.versions(), &check, on)?;
@@ -123,631 +95,395 @@ impl Job {
 /// Saves `text` as the updated copy of `b` to the merged patch.
 fn save_update(analysis: &Analysis, hooks: &MergeHooks, b: &Behind, now: &Saved, mod_text: &str, text: &str) -> Result<(), String> {
     let script = merge_dialog::validate(&b.category, &b.key, text)?;
-    // Fingerprints of both sources, so the patch flags this copy as
-    // outdated if the game or the mod changes again.
     let position = b.mod_position;
     let prints = vec![Print::new(VANILLA, "Vanilla", &now.file, &now.text), Print::new(&analysis.ids[position], analysis.name(position), &b.file, mod_text)];
     (hooks.save_object)(&b.category, &b.key, &script, prints)
 }
 
-struct ItemState {
+/// The view for one game-update conflict embedded directly in the Conflicts page.
+pub struct BehindView {
+    page: Weak<Page>,
     index: usize,
-    b: Behind,
-    mod_text: Option<String>,
-    /// The text currently in the right card editor (kept across switches).
-    current_text: RefCell<String>,
-    /// The initial text before any user edits (for revert button).
-    initial_text: RefCell<String>,
-    /// Model's notes from AI merge if run.
-    notes: RefCell<String>,
-    /// Unknown vocabulary warnings from AI merge.
-    warnings: RefCell<Vec<String>>,
-    /// Error message from AI merge or save.
-    error: RefCell<Option<String>>,
-    /// Whether "Game Changes" is currently toggled for this item.
-    show_game_changes: Cell<bool>,
-    /// Whether unchanged lines should be folded.
-    fold: Cell<bool>,
-    /// Whether whitespace is ignored.
-    ignore_whitespace: Cell<bool>,
+    key: String,
+    root: gtk::Box,
+    header: adw::Bin,
+    notes: gtk::Box,
+    thinking: Rc<ThinkingView>,
+    pair: Rc<Pair>,
+    busy: Cell<bool>,
 }
 
-struct RowWidgets {
-    item: Rc<ItemState>,
-    row: gtk::ListBoxRow,
-    status_label: gtk::Label,
+pub fn view(page: &Rc<Page>, index: usize) -> (gtk::Widget, Rc<dyn Any>) {
+    let b = &page.analysis.behind[index];
+    let key = format!("behind:{}:{}", b.category, b.key);
+    let thinking = ThinkingView::new();
+    let root = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(12).margin_top(18).margin_bottom(18).margin_start(18).margin_end(18).build();
+    let header = adw::Bin::new();
+    let notes = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(6).build();
+    root.append(&header);
+    root.append(&notes);
+    root.append(&thinking.widget);
+
+    let pair = Pair::new(true);
+    root.append(&pair.widget);
+
+    let view = Rc::new(BehindView {
+        page: Rc::downgrade(page),
+        index,
+        key,
+        root: root.clone(),
+        header,
+        notes,
+        thinking,
+        pair,
+        busy: Cell::new(false),
+    });
+
+    view.init(page);
+    (root.upcast(), view)
 }
 
-struct BehindPage {
-    analysis: Rc<Analysis>,
-    hooks: Rc<MergeHooks>,
-    old: String,
-    new: String,
-    navigation: adw::NavigationView,
-    split: adw::NavigationSplitView,
-    list: gtk::ListBox,
-    content_bin: adw::Bin,
-    all_button: gtk::Button,
-    search: gtk::SearchEntry,
-    items: Vec<Rc<ItemState>>,
-    rows: RefCell<Vec<RowWidgets>>,
-    current_index: Cell<Option<usize>>,
-    active_pair: RefCell<Option<Rc<Pair>>>,
-    batch: RefCell<Option<Rc<Batch>>>,
-}
-
-impl BehindPage {
-    fn new(analysis: Rc<Analysis>, hooks: Rc<MergeHooks>, old: String, new: String, navigation: adw::NavigationView, dialog: adw::Dialog) -> Self {
-        let items: Vec<Rc<ItemState>> = analysis
-            .behind
-            .iter()
-            .enumerate()
-            .map(|(index, b)| {
-                let mod_text = read_mod_copy(&analysis, b);
-                let existing = (hooks.existing)(&b.category, &b.key).map(|m| m.script);
+impl BehindView {
+    fn init(self: &Rc<Self>, page: &Rc<Page>) {
+        let b = &page.analysis.behind[self.index];
+        {
+            let mut session = page.hooks.session.borrow_mut();
+            if !session.behind.contains_key(&self.key) {
+                let existing = (page.hooks.existing)(&b.category, &b.key).map(|m| m.script);
                 let initial = existing.unwrap_or_else(|| b.now.as_ref().map(|n| n.text.clone()).unwrap_or_else(|| b.was.text.clone()));
-                Rc::new(ItemState {
-                    index,
-                    b: b.clone(),
-                    mod_text,
-                    current_text: RefCell::new(initial.clone()),
-                    initial_text: RefCell::new(initial),
-                    notes: RefCell::default(),
-                    warnings: RefCell::default(),
-                    error: RefCell::default(),
-                    show_game_changes: Cell::new(false),
-                    fold: Cell::new(false),
-                    ignore_whitespace: Cell::new(false),
-                })
-            })
-            .collect();
-
-        let list = gtk::ListBox::builder().selection_mode(gtk::SelectionMode::Single).css_classes(["navigation-sidebar", "conflict-list"]).build();
-        let list_scroll = gtk::ScrolledWindow::builder().child(&list).hscrollbar_policy(gtk::PolicyType::Never).vexpand(true).build();
-
-        let all_button = gtk::Button::builder().label(t!("Update All with AI")).css_classes(["suggested-action"]).halign(gtk::Align::End).build();
-        let search = gtk::SearchEntry::builder().placeholder_text(t!("Search objects")).build();
-        let desc = gtk::Label::builder()
-            .label(t!("These mods still load their own copies, so the game's changes to these objects don't apply until the mods are updated."))
-            .xalign(0.0)
-            .wrap(true)
-            .css_classes(["dim-label", "caption"])
-            .build();
-
-        let top = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(8).margin_top(12).margin_start(12).margin_end(12).margin_bottom(6).build();
-        top.append(&desc);
-        top.append(&all_button);
-        top.append(&search);
-
-        let sidebar = gtk::Box::builder()
-            .orientation(gtk::Orientation::Vertical)
-            .css_classes(["conflict-sidebar"])
-            .overflow(gtk::Overflow::Hidden)
-            .margin_top(12)
-            .margin_bottom(12)
-            .margin_start(12)
-            .build();
-        sidebar.append(&top);
-        sidebar.append(&list_scroll);
-
-        let content_bin = adw::Bin::builder().hexpand(true).vexpand(true).build();
-        let content_scroll = gtk::ScrolledWindow::builder().child(&content_bin).hscrollbar_policy(gtk::PolicyType::Automatic).vscrollbar_policy(gtk::PolicyType::Automatic).build();
-
-        let split = adw::NavigationSplitView::builder()
-            .sidebar(&adw::NavigationPage::builder().title(t!("Game Update")).child(&sidebar).build())
-            .content(&adw::NavigationPage::builder().title(t!("Object")).child(&content_scroll).build())
-            .min_sidebar_width(280.0)
-            .max_sidebar_width(400.0)
-            .sidebar_width_fraction(0.26)
-            .css_classes(["conflict-split"])
-            .build();
-
-        let _ = dialog;
-        BehindPage {
-            analysis,
-            hooks,
-            old,
-            new,
-            navigation,
-            split,
-            list,
-            content_bin,
-            all_button,
-            search,
-            items,
-            rows: RefCell::default(),
-            current_index: Cell::new(None),
-            active_pair: RefCell::default(),
-            batch: RefCell::default(),
+                session.behind.insert(
+                    self.key.clone(),
+                    BehindState {
+                        current_text: initial.clone(),
+                        initial_text: initial,
+                        notes: String::new(),
+                        warnings: Vec::new(),
+                        error: None,
+                        show_game_changes: false,
+                    },
+                );
+            }
         }
+
+        // Connect editor changes.
+        let weak_view = Rc::downgrade(self);
+        self.pair.connect_edit(move |text| {
+            let Some(view) = weak_view.upgrade() else { return };
+            let Some(page) = view.page.upgrade() else { return };
+            let mut session = page.hooks.session.borrow_mut();
+            if let Some(state) = session.behind.get_mut(&view.key)
+                && !state.show_game_changes
+            {
+                state.current_text = text.to_owned();
+            }
+        });
+
+        self.render();
     }
 
-    fn setup(self: &Rc<Self>, dialog: &adw::Dialog) {
-        let mut by_mod: BTreeMap<usize, Vec<Rc<ItemState>>> = BTreeMap::new();
-        for item in &self.items {
-            by_mod.entry(item.b.mod_position).or_default().push(item.clone());
-        }
-
-        let mut row_widgets = Vec::new();
-        for (position, items) in by_mod {
-            let heading_box = gtk::Box::builder().spacing(6).margin_start(6).margin_top(8).margin_bottom(4).build();
-            let mod_name = self.analysis.name(position);
-            heading_box.append(&gtk::Label::builder().label(mod_name).xalign(0.0).hexpand(true).wrap(true).wrap_mode(gtk::pango::WrapMode::WordChar).css_classes(["dim-label"]).build());
-            heading_box.append(&gtk::Label::builder().label(items.len().to_string()).css_classes(["dim-label", "numeric"]).build());
-            let heading_row = gtk::ListBoxRow::builder().child(&heading_box).selectable(false).activatable(false).css_classes(["folder"]).build();
-            self.list.append(&heading_row);
-
-            for item in items {
-                let row_box = gtk::Box::builder().spacing(8).build();
-                let text_box = gtk::Box::builder().orientation(gtk::Orientation::Vertical).hexpand(true).build();
-                let title_label = gtk::Label::builder().label(&item.b.key).xalign(0.0).ellipsize(gtk::pango::EllipsizeMode::Middle).build();
-                let subtitle_label = gtk::Label::builder().label(&item.b.category).xalign(0.0).ellipsize(gtk::pango::EllipsizeMode::End).css_classes(["dim-label", "caption"]).build();
-                text_box.append(&title_label);
-                text_box.append(&subtitle_label);
-
-                let status_label = gtk::Label::builder().xalign(1.0).build();
-                if item.b.now.is_none() {
-                    status_label.set_label(&t!("Removed from the game"));
-                    status_label.set_css_classes(&["dim-label", "caption"]);
-                } else if (self.hooks.is_merged)(&item.b.category, &item.b.key) {
-                    status_label.set_label(&t!("Updated in the merged patch"));
-                    status_label.set_css_classes(&["success", "caption"]);
-                }
-
-                row_box.append(&text_box);
-                row_box.append(&status_label);
-                let row = gtk::ListBoxRow::builder().child(&row_box).css_classes(["conflict"]).build();
-                self.list.append(&row);
-                row_widgets.push(RowWidgets { item, row, status_label });
-            }
-        }
-        self.rows.replace(row_widgets);
-
-        // Search filtering.
-        let rows_ref = Rc::downgrade(self);
-        self.list.set_filter_func(move |row| {
-            let Some(page) = rows_ref.upgrade() else { return true };
-            if row.has_css_class("folder") {
-                return true;
-            }
-            let query = page.get_search_query();
-            if query.is_empty() {
-                return true;
-            }
-            let rows = page.rows.borrow();
-            let Some(rw) = rows.iter().find(|rw| &rw.row == row) else { return true };
-            let mod_name = page.analysis.name(rw.item.b.mod_position).to_lowercase();
-            let key = rw.item.b.key.to_lowercase();
-            let category = rw.item.b.category.to_lowercase();
-            key.contains(&query) || category.contains(&query) || mod_name.contains(&query)
-        });
-
-        let weak = Rc::downgrade(self);
-        self.list.connect_row_selected(move |_, row| {
-            let Some(page) = weak.upgrade() else { return };
-            let Some(row) = row else { return };
-            if row.has_css_class("folder") {
-                return;
-            }
-            let rows = page.rows.borrow();
-            if let Some(rw) = rows.iter().find(|rw| &rw.row == row) {
-                page.select_item(rw.item.index);
-            }
-        });
-
-        let weak_for_search = Rc::downgrade(self);
-        self.search.connect_search_changed(move |_| {
-            if let Some(page) = weak_for_search.upgrade() {
-                page.list.invalidate_filter();
-            }
-        });
-
-        let weak_refresh = Rc::downgrade(self);
-        let refresh: Rc<dyn Fn()> = Rc::new(move || {
-            if let Some(page) = weak_refresh.upgrade() {
-                page.refresh_status();
-            }
-        });
-
-        let batch = Rc::new(Batch {
-            analysis: self.analysis.clone(),
-            hooks: self.hooks.clone(),
-            navigation: self.navigation.clone(),
-            dialog: dialog.clone(),
-            old: self.old.clone(),
-            new: self.new.clone(),
-            refresh: refresh.clone(),
-            cancelled: Rc::default(),
-        });
-        dialog.connect_closed({
-            let batch = batch.clone();
-            move |_| batch.cancelled.set(true)
-        });
-        self.all_button.connect_clicked({
-            let batch = batch.clone();
-            move |_| batch.ask()
-        });
-        self.batch.replace(Some(batch));
-
-        self.refresh_status();
-
-        // Select the first item initially.
-        if !self.items.is_empty()
-            && let Some(first_row) = self.rows.borrow().first()
-        {
-            self.list.select_row(Some(&first_row.row));
-        }
+    fn with_state<R>(&self, f: impl FnOnce(&mut BehindState) -> R) -> Option<R> {
+        let page = self.page.upgrade()?;
+        let mut session = page.hooks.session.borrow_mut();
+        session.behind.get_mut(&self.key).map(f)
     }
 
-    fn get_search_query(&self) -> String {
-        self.search.text().trim().to_lowercase()
-    }
+    fn render(self: &Rc<Self>) {
+        let Some(page) = self.page.upgrade() else { return };
+        let b = &page.analysis.behind[self.index];
+        let mod_name = page.analysis.name(b.mod_position);
+        let Some((old_ver, new_ver)) = page.analysis.behind_versions.as_ref() else { return };
 
-    fn refresh_status(&self) {
-        let rows = self.rows.borrow();
-        for rw in rows.iter() {
-            if rw.item.b.now.is_none() {
-                rw.status_label.set_label(&t!("Removed from the game"));
-                rw.status_label.set_css_classes(&["dim-label", "caption"]);
-                rw.status_label.set_visible(true);
-            } else if (self.hooks.is_merged)(&rw.item.b.category, &rw.item.b.key) {
-                rw.status_label.set_label(&t!("Updated in the merged patch"));
-                rw.status_label.set_css_classes(&["success", "caption"]);
-                rw.status_label.set_visible(true);
-            } else {
-                rw.status_label.set_visible(false);
-            }
-        }
-        let unmerged = update_all::included(&self.analysis.behind, |c, k| (self.hooks.is_merged)(c, k)).len();
-        self.all_button.set_visible(unmerged >= 2);
-    }
+        let state = page.hooks.session.borrow().behind.get(&self.key).cloned().unwrap_or_default();
+        let is_merged = (page.hooks.is_merged)(&b.category, &b.key);
+        let busy = self.busy.get();
 
-    fn select_item(self: &Rc<Self>, index: usize) {
-        if self.current_index.get() == Some(index) {
-            return;
-        }
-        self.save_active_editor();
-        self.current_index.set(Some(index));
-        let item = self.items[index].clone();
-        let detail_widget = self.render_detail(item);
-        self.content_bin.set_child(Some(&detail_widget));
-        if self.split.is_collapsed() {
-            self.split.set_show_content(true);
-        }
-    }
-
-    fn save_active_editor(&self) {
-        if let (Some(idx), Some(pair)) = (self.current_index.get(), self.active_pair.borrow().as_ref())
-            && idx < self.items.len()
-            && !self.items[idx].show_game_changes.get()
-        {
-            *self.items[idx].current_text.borrow_mut() = pair.right.text();
-        }
-    }
-
-    fn render_detail(self: &Rc<Self>, item: Rc<ItemState>) -> gtk::Widget {
-        let b = &item.b;
-        let mod_name = self.analysis.name(b.mod_position);
+        // Header.
         let subtitle = tf!("Object · {category} · {mod_name} replaces this, and the base game update", category = &b.category, mod_name = mod_name);
-        let header = self.detail_header(&b.key, &subtitle);
+        let header = page.detail_header(&b.key, &subtitle);
 
         let chips = &header.chips;
         chips.insert(&chip(mod_name, Some(b.mod_position), "current"), -1);
         chips.insert(&arrow(), -1);
-        chips.insert(&chip(&tf!("Stellaris {version}", version = &self.new), None, "done"), -1);
-        if (self.hooks.is_merged)(&b.category, &b.key) {
+        chips.insert(&chip(&tf!("Stellaris {version}", version = new_ver), None, "done"), -1);
+        if is_merged {
             chips.insert(&arrow(), -1);
             chips.insert(&chip(&t!("Updated in merged patch"), None, "done"), -1);
         }
 
-        let notes_box = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(6).build();
-        let thinking = ThinkingView::new();
+        // Top actions.
+        let mod_text_opt = read_mod_copy(&page.analysis, b);
+        if let (Some(now), Some(mod_text)) = (&b.now, &mod_text_opt) {
+            let report_btn = gtk::Button::builder()
+                .label(t!("Report for Mod Author"))
+                .icon_name("edit-copy-symbolic")
+                .tooltip_text(t!("Copy a formatted report for the mod author to clipboard"))
+                .css_classes(["flat"])
+                .build();
+            {
+                let (mod_name_str, category_str, key_str, mod_file_str, base_file_str, old_v, new_v, mod_t, now_t, hooks) = (
+                    mod_name.to_owned(),
+                    b.category.clone(),
+                    b.key.clone(),
+                    b.file.clone(),
+                    now.file.clone(),
+                    old_ver.clone(),
+                    new_ver.clone(),
+                    mod_text.clone(),
+                    now.text.clone(),
+                    page.hooks.clone(),
+                );
+                report_btn.connect_clicked(move |btn| {
+                    let text = format!(
+                        "Hi! It looks like {mod_name_str} has an out-of-date override for Stellaris {new_v}:\n\n\
+                         • Object: `{key_str}`\n\
+                         • Category: `{category_str}`\n\
+                         • Mod file: `{mod_file_str}`\n\
+                         • Base game file: `{base_file_str}`\n\n\
+                         The mod's copy appears to be based on Stellaris {old_v} and is missing changes introduced in Stellaris {new_v}.\n\n\
+                         ```stellaris\n\
+                         # Current copy in {mod_name_str}\n\
+                         {mod_t}\n\
+                         ```\n\n\
+                         ```stellaris\n\
+                         # Base game version in Stellaris {new_v}\n\
+                         {now_t}\n\
+                         ```\n"
+                    );
+                    btn.clipboard().set_text(&text);
+                    (hooks.toast)(&t!("Copied report for mod author to clipboard"));
+                });
+            }
+            header.actions.append(&report_btn);
 
-        let root = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(12).margin_top(18).margin_bottom(18).margin_start(18).margin_end(18).build();
-        root.append(&header.widget);
-        root.append(&notes_box);
-        root.append(&thinking.widget);
+            let merge_tool_btn = gtk::Button::builder().label(t!("Merge Tool…")).tooltip_text(t!("Open in your external merge tool to resolve differences manually")).build();
+            {
+                let view = self.clone();
+                merge_tool_btn.connect_clicked(move |btn| {
+                    view.open_merge_tool(btn);
+                });
+            }
+            header.actions.append(&merge_tool_btn);
 
-        if b.now.is_none() {
-            notes_box.append(&note(&t!("This object was removed from Stellaris in this update."), Some("warning")));
-            let pair = Rc::new(Pair::new(false));
-            pair.show(&b.was.text, "", &Compare::Each, false);
-            pair.left.set_header(&Header { title: tf!("Stellaris {version}", version = &self.old), subtitle: b.was.file.clone(), color: None, badge: None });
-            pair.right.set_header(&Header { title: tf!("Stellaris {version}", version = &self.new), subtitle: t!("Removed from the game"), color: None, badge: None });
-            pair.widget.set_vexpand(true);
-            root.append(&pair.widget);
-            keep_alive(&root, pair);
-            return root.upcast();
+            let ai_btn = gtk::Button::builder()
+                .child(&adw::ButtonContent::builder().icon_name(conflicts_view::AI_ICON).label(t!("Update with AI")).build())
+                .css_classes(["suggested-action"])
+                .sensitive(!busy)
+                .build();
+            {
+                let view = self.clone();
+                ai_btn.connect_clicked(move |btn| {
+                    view.update_with_ai(btn);
+                });
+            }
+            page.bind_key("merge-ai", &ai_btn);
+            header.actions.append(&ai_btn);
+
+            let save_btn = gtk::Button::builder().label(t!("Save to Merged Patch")).css_classes(["suggested-action"]).tooltip_text(t!("Save the updated copy to the merged patch")).sensitive(!busy).build();
+            {
+                let view = self.clone();
+                save_btn.connect_clicked(move |_| {
+                    view.save();
+                });
+            }
+            header.actions.append(&save_btn);
         }
 
-        let Some(ref mod_text) = item.mod_text else {
-            notes_box.append(&note(&t!("The mod's copy couldn't be read, so it can't be updated here."), Some("warning")));
-            let pair = Rc::new(Pair::new(false));
-            pair.show(&b.was.text, b.now.as_ref().map_or("", |n| n.text.as_str()), &Compare::Each, false);
-            pair.left.set_header(&Header { title: tf!("Stellaris {version}", version = &self.old), subtitle: b.was.file.clone(), color: None, badge: None });
-            pair.right.set_header(&Header { title: tf!("Stellaris {version}", version = &self.new), subtitle: b.now.as_ref().map_or_else(String::new, |n| n.file.clone()), color: None, badge: None });
-            pair.widget.set_vexpand(true);
-            root.append(&pair.widget);
-            keep_alive(&root, pair);
-            return root.upcast();
-        };
-
-        let now = b.now.as_ref().unwrap();
+        self.header.set_child(Some(&header.widget));
 
         // Notes.
-        notes_box.append(&note(&tf!("{mod_name} still uses its own copy, from {file}.", mod_name = mod_name, file = &b.file), None));
-        if (self.hooks.is_merged)(&b.category, &b.key) {
-            notes_box.append(&note(&t!("Updated in the merged patch. Saving again replaces it."), Some("success")));
+        while let Some(child) = self.notes.first_child() {
+            self.notes.remove(&child);
         }
-        let notes_text = item.notes.borrow().clone();
-        if !notes_text.is_empty() {
-            notes_box.append(&note(&tf!("Notes from the model: {notes}", notes = &notes_text), None));
-        }
-        let warnings = item.warnings.borrow().clone();
-        if !warnings.is_empty() {
-            notes_box.append(&note(&tf!("Not found in Stellaris {version} or the mod's copy: {keys}. Check these before saving.", version = &self.new, keys = warnings.join(", ")), Some("warning")));
-        }
-        let error_msg = item.error.borrow().clone();
-        if let Some(err) = error_msg {
-            notes_box.append(&note(&err, Some("error")));
-        }
-
-        let pair = Pair::new(true);
-        self.active_pair.replace(Some(pair.clone()));
-
-        // Diff bar.
-        let bar = diff_bar(&pair);
-
-        let take_btn = gtk::Button::builder().label(t!("Take Change")).tooltip_text(t!("Copy the highlighted difference from the mod's version into the editable result")).sensitive(false).css_classes(["flat"]).build();
-        {
-            let take_weak = take_btn.downgrade();
-            let item_weak = Rc::downgrade(&item);
-            pair.connect_change(move |_, current, _| {
-                if let (Some(btn), Some(item)) = (take_weak.upgrade(), item_weak.upgrade()) {
-                    btn.set_sensitive(current.is_some() && !item.show_game_changes.get());
-                }
-            });
-            let pair_weak = Rc::downgrade(&pair);
-            take_btn.connect_clicked(move |_| {
-                if let Some(pair) = pair_weak.upgrade() {
-                    pair.put_in_current();
-                }
-            });
-        }
-        bar.extra.append(&take_btn);
-
-        let merge_tool_bar_btn = gtk::Button::builder().label(t!("Merge Tool…")).tooltip_text(t!("Open in your external merge tool to resolve differences manually")).css_classes(["flat"]).build();
-        {
-            let (page, item_ref, pair_ref) = (self.clone(), item.clone(), pair.clone());
-            merge_tool_bar_btn.connect_clicked(move |btn| {
-                page.open_merge_tool(btn, &item_ref, &pair_ref);
-            });
-        }
-        bar.extra.append(&merge_tool_bar_btn);
-
-        let game_changes_toggle = gtk::ToggleButton::builder()
-            .label(t!("Game Changes"))
-            .tooltip_text(tf!("Toggle between comparing the mod's copy with the update and comparing what changed in the base game between Stellaris {old} and {new}", old = &self.old, new = &self.new))
-            .active(item.show_game_changes.get())
-            .css_classes(["flat"])
-            .build();
-        {
-            let (page, item_ref, pair_ref) = (self.clone(), item.clone(), pair.clone());
-            let take_weak = take_btn.downgrade();
-            game_changes_toggle.connect_toggled(move |btn| {
-                let active = btn.is_active();
-                item_ref.show_game_changes.set(active);
-                if let Some(t) = take_weak.upgrade() {
-                    t.set_sensitive(!active && pair_ref.current().is_some());
-                }
-                page.refresh_pair_display(&item_ref, &pair_ref);
-            });
-        }
-        bar.extra.append(&game_changes_toggle);
-
-        let fold_toggle = gtk::ToggleButton::builder().label(t!("Changed Lines Only")).tooltip_text(t!("Fold runs of unchanged lines")).active(item.fold.get()).css_classes(["flat"]).build();
-        {
-            let (page, item_ref, pair_ref) = (self.clone(), item.clone(), pair.clone());
-            fold_toggle.connect_toggled(move |btn| {
-                let active = btn.is_active();
-                item_ref.fold.set(active);
-                pair_ref.set_fold(active);
-                page.refresh_pair_display(&item_ref, &pair_ref);
-            });
-        }
-        bar.extra.append(&fold_toggle);
-
-        let whitespace_toggle = gtk::ToggleButton::builder().label(t!("Ignore Spacing")).tooltip_text(t!("Ignore differences in whitespace")).active(item.ignore_whitespace.get()).css_classes(["flat"]).build();
-        {
-            let (page, item_ref, pair_ref) = (self.clone(), item.clone(), pair.clone());
-            whitespace_toggle.connect_toggled(move |btn| {
-                let active = btn.is_active();
-                item_ref.ignore_whitespace.set(active);
-                page.refresh_pair_display(&item_ref, &pair_ref);
-            });
-        }
-        bar.extra.append(&whitespace_toggle);
-
-        // Header actions.
-        let report_btn = gtk::Button::builder().label(t!("Report for Mod Author")).icon_name("edit-copy-symbolic").tooltip_text(t!("Copy a formatted report for the mod author to clipboard")).css_classes(["flat"]).build();
-        {
-            let (mod_name_str, category_str, key_str, mod_file_str, base_file_str, old_ver, new_ver, mod_t, now_t, hooks) = (
-                mod_name.to_owned(),
-                b.category.clone(),
-                b.key.clone(),
-                b.file.clone(),
-                now.file.clone(),
-                self.old.clone(),
-                self.new.clone(),
-                mod_text.clone(),
-                now.text.clone(),
-                self.hooks.clone(),
-            );
-            report_btn.connect_clicked(move |btn| {
-                let text = format!(
-                    "Hi! It looks like {mod_name_str} has an out-of-date override for Stellaris {new_ver}:\n\n\
-                     • Object: `{key_str}`\n\
-                     • Category: `{category_str}`\n\
-                     • Mod file: `{mod_file_str}`\n\
-                     • Base game file: `{base_file_str}`\n\n\
-                     The mod's copy appears to be based on Stellaris {old_ver} and is missing changes introduced in Stellaris {new_ver}.\n\n\
-                     ```stellaris\n\
-                     # Current copy in {mod_name_str}\n\
-                     {mod_t}\n\
-                     ```\n\n\
-                     ```stellaris\n\
-                     # Base game version in Stellaris {new_ver}\n\
-                     {now_t}\n\
-                     ```\n"
-                );
-                btn.clipboard().set_text(&text);
-                (hooks.toast)(&t!("Copied report for mod author to clipboard"));
-            });
-        }
-        header.actions.append(&report_btn);
-
-        let merge_tool_hdr_btn = gtk::Button::builder().label(t!("Merge Tool…")).tooltip_text(t!("Open in your external merge tool to resolve differences manually")).build();
-        {
-            let (page, item_ref, pair_ref) = (self.clone(), item.clone(), pair.clone());
-            merge_tool_hdr_btn.connect_clicked(move |btn| {
-                page.open_merge_tool(btn, &item_ref, &pair_ref);
-            });
-        }
-        header.actions.append(&merge_tool_hdr_btn);
-
-        let ai_btn = gtk::Button::builder().child(&adw::ButtonContent::builder().icon_name(conflicts_view::AI_ICON).label(t!("Update with AI")).build()).css_classes(["suggested-action"]).build();
-        {
-            let (page, item_ref, pair_ref, thinking_ref) = (self.clone(), item.clone(), pair.clone(), thinking.clone());
-            ai_btn.connect_clicked(move |btn| {
-                page.update_with_ai(btn, &item_ref, &pair_ref, &thinking_ref);
-            });
-        }
-        header.actions.append(&ai_btn);
-
-        let save_btn = gtk::Button::builder().label(t!("Save to Merged Patch")).css_classes(["suggested-action"]).tooltip_text(t!("Save the updated copy to the merged patch")).build();
-        {
-            let (page, item_ref, pair_ref) = (self.clone(), item.clone(), pair.clone());
-            save_btn.connect_clicked(move |_| {
-                page.save_item(&item_ref, &pair_ref);
-            });
-        }
-        header.actions.append(&save_btn);
-
-        // Edit hookup for pair.
-        {
-            let item_weak = Rc::downgrade(&item);
-            pair.connect_edit(move |text| {
-                if let Some(it) = item_weak.upgrade()
-                    && !it.show_game_changes.get()
-                {
-                    *it.current_text.borrow_mut() = text.to_owned();
-                }
-            });
-        }
-
-        pair.set_fold(item.fold.get());
-        self.refresh_pair_display(&item, &pair);
-
-        pair.widget.set_vexpand(true);
-        root.append(&bar.widget);
-        root.append(&pair.widget);
-        keep_alive(&root, pair);
-
-        root.upcast()
-    }
-
-    fn detail_header(&self, title: &str, subtitle: &str) -> DetailHeader {
-        let back = gtk::Button::builder().icon_name("go-previous-symbolic").tooltip_text(t!("Back to the list")).valign(gtk::Align::Center).css_classes(["flat"]).build();
-        self.split.bind_property("collapsed", &back, "visible").sync_create().build();
-        let split_weak = self.split.downgrade();
-        back.connect_clicked(move |_| {
-            if let Some(split) = split_weak.upgrade() {
-                split.set_show_content(false);
-            }
-        });
-        let titles = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(2).hexpand(true).build();
-        titles.append(&gtk::Label::builder().label(title).xalign(0.0).wrap(true).wrap_mode(gtk::pango::WrapMode::WordChar).css_classes(["conflict-title"]).build());
-        titles.append(&gtk::Label::builder().label(subtitle).xalign(0.0).ellipsize(gtk::pango::EllipsizeMode::End).tooltip_text(subtitle).css_classes(["dim-label"]).build());
-        let actions = gtk::Box::builder().spacing(6).valign(gtk::Align::Center).build();
-        let top = gtk::Box::builder().spacing(12).build();
-        top.append(&back);
-        top.append(&titles);
-        top.append(&actions);
-        let chips = gtk::FlowBox::builder().selection_mode(gtk::SelectionMode::None).column_spacing(4).row_spacing(4).max_children_per_line(64).homogeneous(false).build();
-        let widget = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(8).build();
-        widget.append(&top);
-        widget.append(&chips);
-        DetailHeader { widget, chips, actions }
-    }
-
-    fn refresh_pair_display(&self, item: &Rc<ItemState>, pair: &Rc<Pair>) {
-        let mod_name = self.analysis.name(item.b.mod_position);
-        let mod_text = item.mod_text.as_deref().unwrap_or_default();
-        let now = item.b.now.as_ref().unwrap();
-
-        if item.show_game_changes.get() {
-            pair.left.set_header(&Header { title: tf!("Stellaris {version}", version = &self.old), subtitle: item.b.was.file.clone(), color: None, badge: Some((t!("Base Game"), None)) });
-            pair.left.set_actions(&[]);
-            pair.right.set_header(&Header { title: tf!("Stellaris {version}", version = &self.new), subtitle: now.file.clone(), color: None, badge: Some((t!("Base Game"), None)) });
-            pair.right.set_actions(&[]);
-            pair.right.code.set_editable(false);
-            pair.show(&item.b.was.text, &now.text, &Compare::Each, item.ignore_whitespace.get());
+        if b.now.is_none() {
+            self.notes.append(&note(&t!("This object was removed from Stellaris in this update."), Some("warning")));
+        } else if mod_text_opt.is_none() {
+            self.notes.append(&note(&t!("The mod's copy couldn't be read, so it can't be updated here."), Some("warning")));
         } else {
-            let use_mod = gtk::Button::builder().label(t!("Use Mod's Version")).tooltip_text(t!("Reset editor to the mod's version")).css_classes(["flat"]).build();
+            self.notes.append(&note(&tf!("{mod_name} still uses its own copy, from {file}.", mod_name = mod_name, file = &b.file), None));
+            if is_merged {
+                self.notes.append(&note(&t!("Updated in the merged patch. Saving again replaces it."), Some("success")));
+            }
+            if !state.notes.is_empty() {
+                self.notes.append(&note(&tf!("Notes from the model: {notes}", notes = &state.notes), None));
+            }
+            if !state.warnings.is_empty() {
+                self.notes.append(&note(&tf!("Not found in Stellaris {version} or the mod's copy: {keys}. Check these before saving.", version = new_ver, keys = state.warnings.join(", ")), Some("warning")));
+            }
+            if let Some(err) = &state.error {
+                self.notes.append(&note(err, Some("error")));
+            }
+        }
+
+        // Diff controls & cards.
+        let session = page.hooks.session.borrow();
+        self.pair.set_fold(session.fold_unchanged);
+        let ignore_ws = session.ignore_whitespace;
+        drop(session);
+
+        if b.now.is_none() {
+            self.pair.left.set_header(&Header { title: tf!("Stellaris {version}", version = old_ver), subtitle: b.was.file.clone(), color: None, badge: None });
+            self.pair.left.set_actions(&[]);
+            self.pair.right.set_header(&Header { title: tf!("Stellaris {version}", version = new_ver), subtitle: t!("Removed from the game"), color: None, badge: None });
+            self.pair.right.set_actions(&[]);
+            self.pair.right.code.set_editable(false);
+            self.pair.show(&b.was.text, "", &Compare::Each, false);
+            return;
+        }
+
+        let Some(now) = &b.now else { return };
+        let Some(mod_text) = mod_text_opt else {
+            self.pair.left.set_header(&Header { title: tf!("Stellaris {version}", version = old_ver), subtitle: b.was.file.clone(), color: None, badge: None });
+            self.pair.left.set_actions(&[]);
+            self.pair.right.set_header(&Header { title: tf!("Stellaris {version}", version = new_ver), subtitle: now.file.clone(), color: None, badge: None });
+            self.pair.right.set_actions(&[]);
+            self.pair.right.code.set_editable(false);
+            self.pair.show(&b.was.text, &now.text, &Compare::Each, false);
+            return;
+        };
+
+        if state.show_game_changes {
+            self.pair.left.set_header(&Header { title: tf!("Stellaris {version}", version = old_ver), subtitle: b.was.file.clone(), color: None, badge: Some((t!("Base Game"), None)) });
+            self.pair.left.set_actions(&[]);
+            self.pair.right.set_header(&Header { title: tf!("Stellaris {version}", version = new_ver), subtitle: now.file.clone(), color: None, badge: Some((t!("Base Game"), None)) });
+            self.pair.right.set_actions(&[]);
+            self.pair.right.code.set_editable(false);
+            self.pair.show(&b.was.text, &now.text, &Compare::Each, ignore_ws);
+        } else {
+            let use_mod = gtk::Button::builder().label(t!("Use Mod's Version")).tooltip_text(t!("Reset editor to the mod's version")).sensitive(!busy).css_classes(["flat"]).build();
             {
-                let (weak_pair, mod_t) = (Rc::downgrade(pair), mod_text.to_owned());
+                let (weak_pair, mod_t) = (Rc::downgrade(&self.pair), mod_text.clone());
                 use_mod.connect_clicked(move |_| {
                     if let Some(p) = weak_pair.upgrade() {
                         p.right.replace_text(&mod_t);
                     }
                 });
             }
-            pair.left.set_header(&Header { title: mod_name.to_owned(), subtitle: item.b.file.clone(), color: Some(item.b.mod_position), badge: Some((t!("Mod"), None)) });
-            pair.left.set_actions(&[use_mod.upcast()]);
+            self.pair.left.set_header(&Header { title: mod_name.to_owned(), subtitle: b.file.clone(), color: Some(b.mod_position), badge: Some((t!("Mod"), None)) });
+            self.pair.left.set_actions(&[use_mod.upcast()]);
 
-            let is_merged = (self.hooks.is_merged)(&item.b.category, &item.b.key);
             let right_title = if is_merged { t!("Updated in merged patch") } else { t!("Updated Copy") };
             let right_badge = (t!("Editable"), Some("accent"));
-            pair.right.set_header(&Header { title: right_title, subtitle: now.file.clone(), color: None, badge: Some(right_badge) });
+            self.pair.right.set_header(&Header { title: right_title, subtitle: now.file.clone(), color: None, badge: Some(right_badge) });
 
-            let revert = gtk::Button::builder().icon_name("document-revert-symbolic").tooltip_text(t!("Revert edits to initial version")).css_classes(["flat"]).build();
+            let revert = gtk::Button::builder().icon_name("document-revert-symbolic").tooltip_text(t!("Revert edits to initial version")).sensitive(!busy).css_classes(["flat"]).build();
             {
-                let (weak_pair, item_ref) = (Rc::downgrade(pair), item.clone());
+                let (weak_pair, init_text) = (Rc::downgrade(&self.pair), state.initial_text.clone());
                 revert.connect_clicked(move |_| {
                     if let Some(p) = weak_pair.upgrade() {
-                        let init = item_ref.initial_text.borrow().clone();
-                        p.right.replace_text(&init);
+                        p.right.replace_text(&init_text);
                     }
                 });
             }
-            let use_game = gtk::Button::builder().label(t!("Use Game's Version")).tooltip_text(t!("Reset editor to the new base game version")).css_classes(["flat"]).build();
+            let use_game = gtk::Button::builder().label(t!("Use Game's Version")).tooltip_text(t!("Reset editor to the new base game version")).sensitive(!busy).css_classes(["flat"]).build();
             {
-                let (weak_pair, now_t) = (Rc::downgrade(pair), now.text.clone());
+                let (weak_pair, now_t) = (Rc::downgrade(&self.pair), now.text.clone());
                 use_game.connect_clicked(move |_| {
                     if let Some(p) = weak_pair.upgrade() {
                         p.right.replace_text(&now_t);
                     }
                 });
             }
-            pair.right.set_actions(&[revert.upcast(), use_game.upcast()]);
-            pair.right.code.set_editable(true);
-            pair.show(mod_text, &item.current_text.borrow(), &Compare::Each, item.ignore_whitespace.get());
+            self.pair.right.set_actions(&[revert.upcast(), use_game.upcast()]);
+            self.pair.right.code.set_editable(!busy);
+            self.pair.show(&mod_text, &state.current_text, &Compare::Each, ignore_ws);
+        }
+
+        // Set up the diff bar if not attached.
+        if self.root.first_child().as_ref() == Some(self.header.upcast_ref())
+            && self.root.observe_children().n_items() == 4
+        {
+            let bar = diff_bar(&self.pair);
+            let take_btn = gtk::Button::builder().label(t!("Take Change")).tooltip_text(t!("Copy the highlighted difference from the mod's version into the editable result")).sensitive(false).css_classes(["flat"]).build();
+            {
+                let take_weak = take_btn.downgrade();
+                let view_weak = Rc::downgrade(self);
+                self.pair.connect_change(move |_, current, _| {
+                    if let (Some(btn), Some(view)) = (take_weak.upgrade(), view_weak.upgrade()) {
+                        let is_game = view.with_state(|s| s.show_game_changes).unwrap_or(false);
+                        btn.set_sensitive(current.is_some() && !is_game && !view.busy.get());
+                    }
+                });
+                let pair_weak = Rc::downgrade(&self.pair);
+                take_btn.connect_clicked(move |_| {
+                    if let Some(pair) = pair_weak.upgrade() {
+                        pair.put_in_current();
+                    }
+                });
+            }
+            bar.extra.append(&take_btn);
+
+            let merge_tool_bar_btn = gtk::Button::builder().label(t!("Merge Tool…")).tooltip_text(t!("Open in your external merge tool to resolve differences manually")).css_classes(["flat"]).build();
+            {
+                let view = self.clone();
+                merge_tool_bar_btn.connect_clicked(move |btn| {
+                    view.open_merge_tool(btn);
+                });
+            }
+            bar.extra.append(&merge_tool_bar_btn);
+
+            let game_changes_toggle = gtk::ToggleButton::builder()
+                .label(t!("Game Changes"))
+                .tooltip_text(tf!("Toggle between comparing the mod's copy with the update and comparing what changed in the base game between Stellaris {old} and {new}", old = old_ver, new = new_ver))
+                .active(state.show_game_changes)
+                .css_classes(["flat"])
+                .build();
+            {
+                let view = self.clone();
+                game_changes_toggle.connect_toggled(move |btn| {
+                    view.with_state(|s| s.show_game_changes = btn.is_active());
+                    view.render();
+                });
+            }
+            bar.extra.append(&game_changes_toggle);
+
+            let fold_toggle = gtk::ToggleButton::builder().label(t!("Changed Lines Only")).tooltip_text(t!("Fold runs of unchanged lines")).active(page.hooks.session.borrow().fold_unchanged).css_classes(["flat"]).build();
+            {
+                let (pair_weak, page_weak) = (Rc::downgrade(&self.pair), Rc::downgrade(&page));
+                fold_toggle.connect_toggled(move |btn| {
+                    let active = btn.is_active();
+                    if let Some(page) = page_weak.upgrade() {
+                        page.hooks.session.borrow_mut().fold_unchanged = active;
+                    }
+                    if let Some(pair) = pair_weak.upgrade() {
+                        pair.set_fold(active);
+                    }
+                });
+            }
+            bar.extra.append(&fold_toggle);
+
+            let whitespace_toggle = gtk::ToggleButton::builder().label(t!("Ignore Spacing")).tooltip_text(t!("Ignore differences in whitespace")).active(page.hooks.session.borrow().ignore_whitespace).css_classes(["flat"]).build();
+            {
+                let view = self.clone();
+                whitespace_toggle.connect_toggled(move |btn| {
+                    if let Some(page) = view.page.upgrade() {
+                        page.hooks.session.borrow_mut().ignore_whitespace = btn.is_active();
+                    }
+                    view.render();
+                });
+            }
+            bar.extra.append(&whitespace_toggle);
+
+            self.root.insert_child_after(&bar.widget, Some(&self.thinking.widget));
         }
     }
 
-    fn open_merge_tool(&self, button: &gtk::Button, item: &Rc<ItemState>, pair: &Rc<Pair>) {
-        let command = (self.hooks.merge_tool)();
+    fn open_merge_tool(self: &Rc<Self>, button: &gtk::Button) {
+        let Some(page) = self.page.upgrade() else { return };
+        let command = (page.hooks.merge_tool)();
         if command.is_empty() {
-            (self.hooks.toast)(&t!("Choose a merge tool in Preferences first"));
-            return (self.hooks.open_merge_tool_settings)();
+            (page.hooks.toast)(&t!("Choose a merge tool in Preferences first"));
+            return (page.hooks.open_merge_tool_settings)();
         }
+        let b = &page.analysis.behind[self.index];
+        let Some((_, new_ver)) = page.analysis.behind_versions.as_ref() else { return };
         let tool = conflicts_view::merge_tool_name(&command);
-        let left_label = self.analysis.name(item.b.mod_position).to_owned();
-        let right_label = tf!("Stellaris {version}", version = &self.new);
-        let left = conflicts_view::ToolSide { label: left_label, text: item.mod_text.clone().unwrap_or_default() };
-        let right = conflicts_view::ToolSide { label: right_label, text: pair.right.text() };
-        let base = Some(item.b.was.text.clone());
-        let (hooks, pair_weak) = (self.hooks.clone(), Rc::downgrade(pair));
+        let left_label = page.analysis.name(b.mod_position).to_owned();
+        let right_label = tf!("Stellaris {version}", version = new_ver);
+        let mod_text = read_mod_copy(&page.analysis, b).unwrap_or_default();
+        let left = conflicts_view::ToolSide { label: left_label, text: mod_text };
+        let right = conflicts_view::ToolSide { label: right_label, text: self.pair.right.text() };
+        let base = Some(b.was.text.clone());
+        let (hooks, pair_weak) = (page.hooks.clone(), Rc::downgrade(&self.pair));
         conflicts_view::run_merge_tool(button, command, left, right, base, move |result| {
             match result {
                 Ok(Some(merged)) => {
@@ -762,21 +498,27 @@ impl BehindPage {
         });
     }
 
-    fn update_with_ai(self: &Rc<Self>, button: &gtk::Button, item: &Rc<ItemState>, pair: &Rc<Pair>, thinking: &Rc<ThinkingView>) {
-        let Some(provider) = (self.hooks.provider)() else {
-            (self.hooks.toast)(&t!("Set up an AI provider in Preferences first"));
-            (self.hooks.open_preferences)();
+    fn update_with_ai(self: &Rc<Self>, button: &gtk::Button) {
+        let Some(page) = self.page.upgrade() else { return };
+        let Some(provider) = (page.hooks.provider)() else {
+            (page.hooks.toast)(&t!("Set up an AI provider in Preferences first"));
+            (page.hooks.open_preferences)();
             return;
         };
-        let Some(ref now) = item.b.now else { return };
-        let Some(ref mod_text) = item.mod_text else { return };
-        let job = Job::new(&self.analysis, &self.hooks, &item.b, now, &self.old, &self.new, mod_text);
-        button.set_sensitive(false);
-        item.error.replace(None);
+        let b = &page.analysis.behind[self.index];
+        let Some((old_ver, new_ver)) = page.analysis.behind_versions.as_ref() else { return };
+        let Some(ref now) = b.now else { return };
+        let Some(mod_text) = read_mod_copy(&page.analysis, b) else { return };
 
-        let (page, item_ref, pair_ref, thinking_ref, button_ref) = (self.clone(), item.clone(), pair.clone(), thinking.clone(), button.clone());
+        let job = Job::new(&page.analysis, &page.hooks, b, now, old_ver, new_ver, &mod_text);
+        button.set_sensitive(false);
+        self.busy.set(true);
+        self.with_state(|s| s.error = None);
+
+        let (view, thinking, button_ref) = (self.clone(), self.thinking.clone(), button.clone());
         glib::spawn_future_local(async move {
-            let result = thinking_view::run(&thinking_ref, None, move |on| job.run(&provider, on)).await;
+            let result = thinking_view::run(&thinking, None, move |on| job.run(&provider, on)).await;
+            view.busy.set(false);
             button_ref.set_sensitive(true);
             match result {
                 Some(Ok((checked, warnings))) => {
@@ -784,178 +526,370 @@ impl BehindPage {
                         Ok(s) => s,
                         Err(_) => checked.merged.script,
                     };
-                    *item_ref.notes.borrow_mut() = checked.merged.notes;
-                    *item_ref.warnings.borrow_mut() = warnings;
-                    pair_ref.right.replace_text(&script);
-                    page.re_render_current();
+                    view.with_state(|s| {
+                        s.notes = checked.merged.notes;
+                        s.warnings = warnings;
+                        s.current_text = script.clone();
+                    });
+                    view.pair.right.replace_text(&script);
+                    view.render();
                 }
                 Some(Err(message)) => {
-                    item_ref.error.replace(Some(message));
-                    page.re_render_current();
+                    view.with_state(|s| s.error = Some(message));
+                    view.render();
                 }
                 None => {
-                    item_ref.error.replace(Some(t!("The merge failed unexpectedly")));
-                    page.re_render_current();
+                    view.with_state(|s| s.error = Some(t!("The merge failed unexpectedly")));
+                    view.render();
                 }
             }
         });
     }
 
-    fn save_item(self: &Rc<Self>, item: &Rc<ItemState>, pair: &Rc<Pair>) {
-        let Some(ref now) = item.b.now else { return };
-        let Some(ref mod_text) = item.mod_text else { return };
-        let text = pair.right.text();
-        match save_update(&self.analysis, &self.hooks, &item.b, now, mod_text, &text) {
+    fn save(self: &Rc<Self>) {
+        let Some(page) = self.page.upgrade() else { return };
+        let b = &page.analysis.behind[self.index];
+        let Some(ref now) = b.now else { return };
+        let Some(mod_text) = read_mod_copy(&page.analysis, b) else { return };
+        let text = self.pair.right.text();
+        match save_update(&page.analysis, &page.hooks, b, now, &mod_text, &text) {
             Ok(()) => {
-                *item.initial_text.borrow_mut() = text.clone();
-                *item.current_text.borrow_mut() = text;
-                self.hooks.saved();
-                self.refresh_status();
-                (self.hooks.toast)(&tf!("Saved the updated {key} to the merged patch", key = &item.b.key));
-                self.re_render_current();
+                self.with_state(|s| {
+                    s.initial_text = text.clone();
+                    s.current_text = text;
+                    s.error = None;
+                });
+                page.hooks.saved();
+                page.update_status(Item::Behind(self.index));
+                (page.hooks.toast)(&tf!("Saved the updated {key} to the merged patch", key = &b.key));
+                self.render();
             }
             Err(message) => {
-                item.error.replace(Some(message));
-                self.re_render_current();
+                self.with_state(|s| s.error = Some(message));
+                self.render();
             }
         }
     }
+}
 
-    fn re_render_current(self: &Rc<Self>) {
-        if let Some(idx) = self.current_index.get() {
-            let item = self.items[idx].clone();
-            let detail_widget = self.render_detail(item);
-            self.content_bin.set_child(Some(&detail_widget));
-        }
+/// Runs "Update All with AI" for every game-update conflict from the group header action.
+pub fn run_update_all(page: &Rc<Page>) {
+    let Some(provider) = (page.hooks.provider)() else {
+        (page.hooks.toast)(&t!("Set up an AI provider in Preferences first"));
+        (page.hooks.open_preferences)();
+        return;
+    };
+    let Some((old_ver, new_ver)) = page.analysis.behind_versions.clone() else { return };
+    let chosen = update_all::included(&page.analysis.behind, |c, k| (page.hooks.is_merged)(c, k));
+    if chosen.is_empty() {
+        return;
     }
+    let wanted: Vec<(usize, Option<PathBuf>, Behind)> = chosen.iter().map(|&i| (i, page.analysis.roots.get(page.analysis.behind[i].mod_position).cloned().flatten(), page.analysis.behind[i].clone())).collect();
+    let page = page.clone();
+    glib::spawn_future_local(async move {
+        let read = gio::spawn_blocking(move || wanted.into_iter().map(|(i, root, b)| (i, read_copy(root.as_deref(), &b))).collect::<Vec<_>>()).await.unwrap_or_default();
+        let mut items = Vec::new();
+        let mut unreadable = Vec::new();
+        for (index, text) in read {
+            let b = &page.analysis.behind[index];
+            match (text, &b.now) {
+                (Some(mod_text), Some(now)) => {
+                    let job = Job::new(&page.analysis, &page.hooks, b, now, &old_ver, &new_ver, &mod_text);
+                    items.push(Queued { index, now: now.clone(), mod_text, job });
+                }
+                _ => unreadable.push((index, t!("The mod's copy couldn't be read, so it can't be updated here."))),
+            }
+        }
+        if items.is_empty() {
+            return;
+        }
+        confirm_batch(&page, provider, items, unreadable, old_ver, new_ver);
+    });
 }
 
-/// The page of the list and what Update All needs from it.
-struct Batch {
-    analysis: Rc<Analysis>,
-    hooks: Rc<MergeHooks>,
-    navigation: adw::NavigationView,
-    dialog: adw::Dialog,
-    old: String,
-    new: String,
-    /// Refreshes the list's labels and the Update All button.
-    refresh: Rc<dyn Fn()>,
-    /// Set by Stop and by closing the dialog.
-    cancelled: Rc<Cell<bool>>,
-}
-
-/// One object queued for Update All.
 struct Queued {
-    /// Index into the analysis' `behind`.
     index: usize,
     now: Saved,
     mod_text: String,
     job: Job,
 }
 
-/// A finished request: the result and the keywords it uses that nothing has.
 type Done = (Checked, Vec<String>);
-
-/// Finished requests, by position in the queue.
 type Finished = Vec<(usize, Result<Done, String>)>;
 
-impl Batch {
-    /// Reads the mods' copies, then asks the player to confirm with the
-    /// number of requests and what they may cost.
-    fn ask(self: &Rc<Self>) {
-        let Some(provider) = (self.hooks.provider)() else {
-            (self.hooks.toast)(&t!("Set up an AI provider in Preferences first"));
-            (self.hooks.open_preferences)();
-            return;
-        };
-        let chosen = update_all::included(&self.analysis.behind, |c, k| (self.hooks.is_merged)(c, k));
-        if chosen.is_empty() {
+fn confirm_batch(page: &Rc<Page>, provider: Provider, items: Vec<Queued>, unreadable: Vec<(usize, String)>, old: String, new: String) {
+    let total = items.iter().fold(Estimate::default(), |mut sum, q| {
+        sum += ai::estimate_update(&q.job.category, &q.job.key, &q.job.versions());
+        sum
+    });
+    let parallel = page.hooks.merges_at_once.clamp(1, items.len());
+    let count = items.len();
+    let alert = adw::AlertDialog::new(Some(&tnf!("Update {count} Object with AI?", "Update {count} Objects with AI?", count = count)), None);
+    let intro = tf!("Each object is sent to {model} on its own, up to {parallel} at a time. Nothing is saved until you have looked at each result.", model = provider.model_name(), parallel = parallel);
+    let calls = tnf!("{count} AI call", "{count} AI calls", count = count);
+    let summary = tf!("{calls}{without_ai} · about {input} tokens in, {low}–{high} out", calls = &calls, without_ai = "", input = tokens(total.input), low = tokens(total.output_low), high = tokens(total.output_high));
+    let body = {
+        let (intro, summary) = (intro.clone(), summary.clone());
+        move |price_line: &str| format!("{intro}\n\n{summary}\n{price_line}")
+    };
+    alert.set_body(&body(&t!("Looking up the model's price…")));
+    alert.add_responses(&[("cancel", &t!("Cancel")), ("update", &t!("Update All"))]);
+    alert.set_response_appearance("update", adw::ResponseAppearance::Suggested);
+    alert.set_default_response(Some("cancel"));
+    alert.set_close_response("cancel");
+
+    let items = Rc::new(RefCell::new(Some(items)));
+    let (run_page, run_provider, unreadable) = (page.clone(), provider.clone(), RefCell::new(Some(unreadable)));
+    alert.connect_response(None, move |_, response| {
+        if response != "update" {
             return;
         }
-        let wanted: Vec<(usize, Option<PathBuf>, Behind)> = chosen.iter().map(|&i| (i, self.analysis.roots.get(self.analysis.behind[i].mod_position).cloned().flatten(), self.analysis.behind[i].clone())).collect();
-        let batch = self.clone();
+        if let (Some(items), Some(unreadable)) = (items.borrow_mut().take(), unreadable.borrow_mut().take()) {
+            RunDialog::start(&run_page, run_provider.clone(), items, unreadable, old.clone(), new.clone());
+        }
+    });
+    let parent = page.split.root().and_downcast::<gtk::Window>();
+    alert.present(parent.as_ref());
+
+    let alert = alert.downgrade();
+    glib::spawn_future_local(async move {
+        let found = gio::spawn_blocking(move || ai::price(&provider)).await.ok().flatten();
+        let line = match found {
+            Some(p) => tf!(
+                "Estimated cost: {low} to {high}, depending on how much the model thinks. Prices: ${input:.3} per million tokens in, ${output:.3} out.",
+                low = dollars(p.cost(total.input, total.output_low)),
+                high = dollars(p.cost(total.input, total.output_high)),
+                input = p.input,
+                output = p.output
+            ),
+            None => t!("The provider doesn't publish this model's price, so the cost can't be estimated."),
+        };
+        if let Some(alert) = alert.upgrade() {
+            alert.set_body(&body(&line));
+        }
+    });
+}
+
+struct RunDialog {
+    page: Rc<Page>,
+    dialog: adw::Dialog,
+    items: Vec<Queued>,
+    unreadable: Vec<(usize, String)>,
+    stack: gtk::Stack,
+    title: adw::WindowTitle,
+    ready: RefCell<VecDeque<(usize, Done)>>,
+    failed: RefCell<Vec<(usize, String)>>,
+    reviewed: Cell<usize>,
+    to_review: Cell<usize>,
+    saved: Cell<usize>,
+    skipped: Cell<usize>,
+    not_started: Cell<usize>,
+    backed_up: Cell<bool>,
+    cancelled: Rc<Cell<bool>>,
+    new: String,
+}
+
+impl RunDialog {
+    fn start(page: &Rc<Page>, provider: Provider, items: Vec<Queued>, unreadable: Vec<(usize, String)>, _old: String, new: String) {
+        let stack = gtk::Stack::new();
+        let title = adw::WindowTitle::new(&t!("Update All with AI"), "");
+        let header = adw::HeaderBar::new();
+        header.set_title_widget(Some(&title));
+        let toolbar = adw::ToolbarView::new();
+        toolbar.add_top_bar(&header);
+        toolbar.set_content(Some(&stack));
+
+        let dialog = adw::Dialog::builder().content_width(900).content_height(720).child(&toolbar).build();
+
+        let cancelled = Rc::new(Cell::new(false));
+        dialog.connect_closed({
+            let cancelled = cancelled.clone();
+            move |_| cancelled.set(true)
+        });
+
+        let run = Rc::new(RunDialog {
+            page: page.clone(),
+            dialog: dialog.clone(),
+            items,
+            failed: RefCell::new(unreadable.clone()),
+            unreadable,
+            stack,
+            title,
+            ready: RefCell::default(),
+            reviewed: Cell::new(0),
+            to_review: Cell::new(0),
+            saved: Cell::new(0),
+            skipped: Cell::new(0),
+            not_started: Cell::new(0),
+            backed_up: Cell::new(false),
+            cancelled,
+            new,
+        });
+
+        let total = run.items.len();
+        let progress = gtk::ProgressBar::builder().show_text(true).text(tf!("{done} of {total} done", done = 0, total = total)).build();
+        let stop = gtk::Button::builder().label(t!("Stop")).halign(gtk::Align::Center).build();
+        let column = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(18).valign(gtk::Align::Center).margin_start(24).margin_end(24).build();
+        column.append(&progress);
+        column.append(&stop);
+        run.stack.add_named(&column, Some("progress"));
+
+        let cancelled = run.cancelled.clone();
+        stop.connect_clicked(move |stop| {
+            cancelled.set(true);
+            stop.set_sensitive(false);
+            stop.set_label(&t!("Stopping…"));
+        });
+
+        let parent = page.split.root().and_downcast::<gtk::Window>();
+        dialog.present(parent.as_ref());
+
+        let jobs: Rc<Vec<Job>> = Rc::new(run.items.iter().map(|q| q.job.clone()).collect());
+        let queue: Rc<RefCell<VecDeque<usize>>> = Rc::new(RefCell::new((0..total).collect()));
+        let results: Rc<RefCell<Finished>> = Rc::default();
+        let finished = Rc::new(Cell::new(0));
+        let run_clone = run.clone();
         glib::spawn_future_local(async move {
-            let read = gio::spawn_blocking(move || wanted.into_iter().map(|(i, root, b)| (i, read_copy(root.as_deref(), &b))).collect::<Vec<_>>()).await.unwrap_or_default();
-            let mut items = Vec::new();
-            let mut unreadable = Vec::new();
-            for (index, text) in read {
-                let b = &batch.analysis.behind[index];
-                match (text, &b.now) {
-                    (Some(mod_text), Some(now)) => {
-                        let job = Job::new(&batch.analysis, &batch.hooks, b, now, &batch.old, &batch.new, &mod_text);
-                        items.push(Queued { index, now: now.clone(), mod_text, job });
-                    }
-                    _ => unreadable.push((index, t!("The mod's copy couldn't be read, so it can't be updated here."))),
-                }
+            let workers: Vec<_> = (0..run_clone.page.hooks.merges_at_once.clamp(1, total))
+                .map(|_| {
+                    let (provider, jobs, queue, results, finished, cancelled, progress) = (provider.clone(), jobs.clone(), queue.clone(), results.clone(), finished.clone(), run_clone.cancelled.clone(), progress.clone());
+                    glib::spawn_future_local(async move {
+                        loop {
+                            if cancelled.get() {
+                                break;
+                            }
+                            let Some(position) = queue.borrow_mut().pop_front() else { break };
+                            let (job, provider) = (jobs[position].clone(), provider.clone());
+                            let thinking = ThinkingView::new();
+                            let result = thinking_view::run(&thinking, None, move |on| job.run(&provider, on)).await.unwrap_or_else(|| Err(t!("The merge failed unexpectedly")));
+                            let result = result.and_then(|(checked, warnings)| match checked.script {
+                                Ok(_) => Ok((checked, warnings)),
+                                Err(e) => Err(tf!("The model's result was rejected, even after a correction: {error}", error = e)),
+                            });
+                            results.borrow_mut().push((position, result));
+                            finished.set(finished.get() + 1);
+                            progress.set_fraction(finished.get() as f64 / total as f64);
+                            progress.set_text(Some(&tf!("{done} of {total} done", done = finished.get(), total = total)));
+                        }
+                    })
+                })
+                .collect();
+            for worker in workers {
+                let _ = worker.await;
             }
-            if items.is_empty() {
-                // Nothing to send; show why.
-                let run = Rc::new(Run::new(batch.clone(), items, unreadable));
-                return run.finish(0);
-            }
-            batch.confirm(provider, items, unreadable);
+            let sorted = update_all::sort(total, results.take());
+            run_clone.failed.borrow_mut().extend(sorted.failed.into_iter().map(|(position, message)| (run_clone.items[position].index, message)));
+            run_clone.ready.replace(sorted.ready.into_iter().collect());
+            run_clone.finish(sorted.not_started.len());
         });
     }
 
-    /// Shows how many requests will be sent and the estimated cost.
-    fn confirm(self: &Rc<Self>, provider: Provider, items: Vec<Queued>, unreadable: Vec<(usize, String)>) {
-        let total = items.iter().fold(Estimate::default(), |mut sum, q| {
-            sum += ai::estimate_update(&q.job.category, &q.job.key, &q.job.versions());
-            sum
-        });
-        let parallel = self.hooks.merges_at_once.clamp(1, items.len());
-        let count = items.len();
-        let alert = adw::AlertDialog::new(Some(&tnf!("Update {count} Object with AI?", "Update {count} Objects with AI?", count = count)), None);
-        let intro = tf!("Each object is sent to {model} on its own, up to {parallel} at a time. Nothing is saved until you have looked at each result.", model = provider.model_name(), parallel = parallel);
-        let calls = tnf!("{count} AI call", "{count} AI calls", count = count);
-        let summary = tf!("{calls}{without_ai} · about {input} tokens in, {low}–{high} out", calls = &calls, without_ai = "", input = tokens(total.input), low = tokens(total.output_low), high = tokens(total.output_high));
-        let body = {
-            let (intro, summary) = (intro.clone(), summary.clone());
-            move |price_line: &str| format!("{intro}\n\n{summary}\n{price_line}")
-        };
-        alert.set_body(&body(&t!("Looking up the model's price…")));
-        alert.add_responses(&[("cancel", &t!("Cancel")), ("update", &t!("Update All"))]);
-        alert.set_response_appearance("update", adw::ResponseAppearance::Suggested);
-        alert.set_default_response(Some("cancel"));
-        alert.set_close_response("cancel");
+    fn finish(self: &Rc<Self>, not_started: usize) {
+        self.not_started.set(not_started);
+        self.to_review.set(self.ready.borrow().len());
+        self.next();
+    }
 
-        let items = Rc::new(RefCell::new(Some(items)));
-        let batch = self.clone();
-        let (run_provider, unreadable) = (provider.clone(), RefCell::new(Some(unreadable)));
-        alert.connect_response(None, move |_, response| {
-            if response != "update" {
+    fn next(self: &Rc<Self>) {
+        let Some((position, (checked, warnings))) = self.ready.borrow_mut().pop_front() else {
+            return self.summary();
+        };
+        self.reviewed.set(self.reviewed.get() + 1);
+        let q = &self.items[position];
+        let b = &self.page.analysis.behind[q.index];
+        self.title.set_title(&b.key);
+        self.title.set_subtitle(&tf!("{n} of {total}", n = self.reviewed.get(), total = self.to_review.get()));
+
+        let Review { body, pair, error, buttons } = review_parts(&self.page.analysis, b, &q.mod_text, &self.new, checked, &warnings);
+        let skip = gtk::Button::builder().label(t!("Skip")).build();
+        let save = gtk::Button::builder().label(t!("Save to Merged Patch")).css_classes(["suggested-action"]).build();
+        buttons.append(&skip);
+        buttons.append(&save);
+        let run = self.clone();
+        skip.connect_clicked(move |_| {
+            run.skipped.set(run.skipped.get() + 1);
+            run.next();
+        });
+        let (run, weak) = (self.clone(), Rc::downgrade(&pair));
+        save.connect_clicked(move |_| {
+            if let Some(pair) = weak.upgrade() {
+                run.save(position, &pair.right.text(), &error);
+            }
+        });
+        if let Some(old) = self.stack.child_by_name("review") {
+            self.stack.remove(&old);
+        }
+        self.stack.add_named(&body, Some("review"));
+        self.stack.set_visible_child_name("review");
+    }
+
+    fn save(self: &Rc<Self>, position: usize, text: &str, error: &gtk::Label) {
+        let hooks = &self.page.hooks;
+        if !self.backed_up.get() {
+            if let Err(message) = (hooks.backup)(snapshot::BEFORE_UPDATING_ALL) {
+                error.set_label(&message);
+                error.set_visible(true);
                 return;
             }
-            if let (Some(items), Some(unreadable)) = (items.borrow_mut().take(), unreadable.borrow_mut().take()) {
-                batch.cancelled.set(false);
-                Rc::new(Run::new(batch.clone(), items, unreadable)).start(run_provider.clone());
+            self.backed_up.set(true);
+        }
+        let q = &self.items[position];
+        match save_update(&self.page.analysis, hooks, &self.page.analysis.behind[q.index], &q.now, &q.mod_text, text) {
+            Ok(()) => {
+                hooks.saved();
+                self.saved.set(self.saved.get() + 1);
+                self.next();
             }
-        });
-        alert.present(Some(&self.dialog));
+            Err(message) => {
+                error.set_label(&message);
+                error.set_visible(true);
+            }
+        }
+    }
 
-        let alert = alert.downgrade();
-        glib::spawn_future_local(async move {
-            let found = gio::spawn_blocking(move || ai::price(&provider)).await.ok().flatten();
-            let line = match found {
-                Some(p) => tf!(
-                    "Estimated cost: {low} to {high}, depending on how much the model thinks. Prices: ${input:.3} per million tokens in, ${output:.3} out.",
-                    low = dollars(p.cost(total.input, total.output_low)),
-                    high = dollars(p.cost(total.input, total.output_high)),
-                    input = p.input,
-                    output = p.output
-                ),
-                None => t!("The provider doesn't publish this model's price, so the cost can't be estimated."),
-            };
-            if let Some(alert) = alert.upgrade() {
-                alert.set_body(&body(&line));
+    fn summary(self: &Rc<Self>) {
+        self.page.hooks.saved();
+        self.page.fill();
+        self.title.set_title(&t!("Update All with AI"));
+        self.title.set_subtitle("");
+        let failed = self.failed.borrow().clone();
+        let total = self.items.len() + self.unreadable.len();
+        let mut line = tf!("Updated {saved} of {total}", saved = self.saved.get(), total = total);
+        if self.skipped.get() > 0 {
+            line.push_str(&tf!(" · {count} skipped", count = self.skipped.get()));
+        }
+        if !failed.is_empty() {
+            line.push_str(&tf!(" · {count} failed", count = failed.len()));
+        }
+        if self.not_started.get() > 0 {
+            line.push_str(&tf!(" · {count} not started", count = self.not_started.get()));
+        }
+        let page = adw::PreferencesPage::new();
+        let overview = adw::PreferencesGroup::builder().description(line).build();
+        let done = gtk::Button::builder().label(t!("Done")).css_classes(["suggested-action"]).halign(gtk::Align::End).build();
+        overview.add(&done);
+        page.add(&overview);
+        if !failed.is_empty() {
+            let group = adw::PreferencesGroup::builder().title(t!("Not Updated")).description(t!("These objects could not be updated in the batch.")).build();
+            for (index, message) in failed {
+                let b = &self.page.analysis.behind[index];
+                let row = adw::ActionRow::builder().title(&b.key).subtitle(&message).subtitle_lines(3).use_markup(false).build();
+                group.add(&row);
             }
+            page.add(&group);
+        }
+        let dialog = self.dialog.clone();
+        done.connect_clicked(move |_| {
+            dialog.close();
         });
+        if let Some(old) = self.stack.child_by_name("summary") {
+            self.stack.remove(&old);
+        }
+        self.stack.add_named(&page, Some("summary"));
+        self.stack.set_visible_child_name("summary");
     }
 }
 
-/// The result next to the mod's copy, to edit, with the notes, the keyword
-/// warning and the model's remaining problem, if any. The caller adds the
-/// buttons.
 struct Review {
     body: gtk::Box,
     pair: Rc<Pair>,
@@ -966,7 +900,6 @@ struct Review {
 fn review_parts(analysis: &Analysis, b: &Behind, mod_text: &str, version: &str, checked: Checked, warnings: &[String]) -> Review {
     let (script, problem) = match checked.script {
         Ok(script) => (script, None),
-        // Kept even when still rejected, to fix by hand.
         Err(problem) => (checked.merged.script, Some(problem)),
     };
     let pair = Pair::new(true);
@@ -993,222 +926,4 @@ fn review_parts(analysis: &Analysis, b: &Behind, mod_text: &str, version: &str, 
     let buttons = gtk::Box::builder().spacing(6).halign(gtk::Align::End).margin_start(12).margin_end(12).margin_bottom(12).build();
     body.append(&buttons);
     Review { body, pair, error, buttons }
-}
-
-/// One Update All: the requests, then the review of their results.
-struct Run {
-    batch: Rc<Batch>,
-    items: Vec<Queued>,
-    /// Objects that couldn't be sent, by index into `behind`, with why.
-    unreadable: Vec<(usize, String)>,
-    /// The pages of the run: progress, one result at a time, the summary.
-    stack: gtk::Stack,
-    title: adw::WindowTitle,
-    page: adw::NavigationPage,
-    /// Results still to review, as positions in `items`.
-    ready: RefCell<VecDeque<(usize, Done)>>,
-    /// Objects that failed, by index into `behind`, with why.
-    failed: RefCell<Vec<(usize, String)>>,
-    reviewed: Cell<usize>,
-    to_review: Cell<usize>,
-    saved: Cell<usize>,
-    skipped: Cell<usize>,
-    not_started: Cell<usize>,
-    /// Whether the merged patch has been backed up for this run.
-    backed_up: Cell<bool>,
-}
-
-impl Run {
-    fn new(batch: Rc<Batch>, items: Vec<Queued>, unreadable: Vec<(usize, String)>) -> Run {
-        let stack = gtk::Stack::new();
-        let title = adw::WindowTitle::new(&t!("Update All with AI"), "");
-        let header = adw::HeaderBar::new();
-        header.set_title_widget(Some(&title));
-        let toolbar = adw::ToolbarView::new();
-        toolbar.add_top_bar(&header);
-        toolbar.set_content(Some(&stack));
-        let page = adw::NavigationPage::builder().title(t!("Update All with AI")).child(&toolbar).build();
-        Run {
-            batch,
-            items,
-            failed: RefCell::new(unreadable.clone()),
-            unreadable,
-            stack,
-            title,
-            page,
-            ready: RefCell::default(),
-            reviewed: Cell::new(0),
-            to_review: Cell::new(0),
-            saved: Cell::new(0),
-            skipped: Cell::new(0),
-            not_started: Cell::new(0),
-            backed_up: Cell::new(false),
-        }
-    }
-
-    fn start(self: Rc<Self>, provider: Provider) {
-        let total = self.items.len();
-        let progress = gtk::ProgressBar::builder().show_text(true).text(tf!("{done} of {total} done", done = 0, total = total)).build();
-        let stop = gtk::Button::builder().label(t!("Stop")).halign(gtk::Align::Center).build();
-        let column = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(18).valign(gtk::Align::Center).margin_start(24).margin_end(24).build();
-        column.append(&progress);
-        column.append(&stop);
-        self.stack.add_named(&column, Some("progress"));
-        self.page.set_can_pop(false);
-        self.batch.navigation.push(&self.page);
-
-        let cancelled = self.batch.cancelled.clone();
-        stop.connect_clicked(move |stop| {
-            cancelled.set(true);
-            stop.set_sensitive(false);
-            stop.set_label(&t!("Stopping…"));
-        });
-
-        let jobs: Rc<Vec<Job>> = Rc::new(self.items.iter().map(|q| q.job.clone()).collect());
-        let queue: Rc<RefCell<VecDeque<usize>>> = Rc::new(RefCell::new((0..total).collect()));
-        let results: Rc<RefCell<Finished>> = Rc::default();
-        let finished = Rc::new(Cell::new(0));
-        glib::spawn_future_local(async move {
-            let workers: Vec<_> = (0..self.batch.hooks.merges_at_once.clamp(1, total))
-                .map(|_| {
-                    let (provider, jobs, queue, results, finished, cancelled, progress) = (provider.clone(), jobs.clone(), queue.clone(), results.clone(), finished.clone(), self.batch.cancelled.clone(), progress.clone());
-                    glib::spawn_future_local(async move {
-                        loop {
-                            if cancelled.get() {
-                                break;
-                            }
-                            let Some(position) = queue.borrow_mut().pop_front() else { break };
-                            let (job, provider) = (jobs[position].clone(), provider.clone());
-                            let thinking = ThinkingView::new();
-                            let result = thinking_view::run(&thinking, None, move |on| job.run(&provider, on)).await.unwrap_or_else(|| Err(t!("The merge failed unexpectedly")));
-                            let result = result.and_then(|(checked, warnings)| match checked.script {
-                                Ok(_) => Ok((checked, warnings)),
-                                Err(e) => Err(tf!("The model's result was rejected, even after a correction: {error}", error = e)),
-                            });
-                            results.borrow_mut().push((position, result));
-                            finished.set(finished.get() + 1);
-                            progress.set_fraction(finished.get() as f64 / total as f64);
-                            progress.set_text(Some(&tf!("{done} of {total} done", done = finished.get(), total = total)));
-                        }
-                    })
-                })
-                .collect();
-            for worker in workers {
-                let _ = worker.await;
-            }
-            let sorted = update_all::sort(total, results.take());
-            self.failed.borrow_mut().extend(sorted.failed.into_iter().map(|(position, message)| (self.items[position].index, message)));
-            self.ready.replace(sorted.ready.into_iter().collect());
-            self.finish(sorted.not_started.len());
-        });
-    }
-
-    fn finish(self: &Rc<Self>, not_started: usize) {
-        if self.stack.child_by_name("progress").is_none() {
-            self.batch.navigation.push(&self.page);
-        }
-        self.page.set_can_pop(true);
-        self.not_started.set(not_started);
-        self.to_review.set(self.ready.borrow().len());
-        self.next();
-    }
-
-    fn next(self: &Rc<Self>) {
-        let Some((position, (checked, warnings))) = self.ready.borrow_mut().pop_front() else {
-            return self.summary();
-        };
-        self.reviewed.set(self.reviewed.get() + 1);
-        let q = &self.items[position];
-        let b = &self.batch.analysis.behind[q.index];
-        self.title.set_title(&b.key);
-        self.title.set_subtitle(&tf!("{n} of {total}", n = self.reviewed.get(), total = self.to_review.get()));
-        let Review { body, pair, error, buttons } = review_parts(&self.batch.analysis, b, &q.mod_text, &self.batch.new, checked, &warnings);
-        let skip = gtk::Button::builder().label(t!("Skip")).build();
-        let save = gtk::Button::builder().label(t!("Save to Merged Patch")).css_classes(["suggested-action"]).build();
-        buttons.append(&skip);
-        buttons.append(&save);
-        let run = self.clone();
-        skip.connect_clicked(move |_| {
-            run.skipped.set(run.skipped.get() + 1);
-            run.next();
-        });
-        let (run, weak) = (self.clone(), Rc::downgrade(&pair));
-        save.connect_clicked(move |_| {
-            if let Some(pair) = weak.upgrade() {
-                run.save(position, &pair.right.text(), &error);
-            }
-        });
-        keep_alive(&body, pair);
-        if let Some(old) = self.stack.child_by_name("review") {
-            self.stack.remove(&old);
-        }
-        self.stack.add_named(&body, Some("review"));
-        self.stack.set_visible_child_name("review");
-    }
-
-    fn save(self: &Rc<Self>, position: usize, text: &str, error: &gtk::Label) {
-        let hooks = &self.batch.hooks;
-        if !self.backed_up.get() {
-            if let Err(message) = (hooks.backup)(snapshot::BEFORE_UPDATING_ALL) {
-                error.set_label(&message);
-                error.set_visible(true);
-                return;
-            }
-            self.backed_up.set(true);
-        }
-        let q = &self.items[position];
-        match save_update(&self.batch.analysis, hooks, &self.batch.analysis.behind[q.index], &q.now, &q.mod_text, text) {
-            Ok(()) => {
-                hooks.saved();
-                (self.batch.refresh)();
-                self.saved.set(self.saved.get() + 1);
-                self.next();
-            }
-            Err(message) => {
-                error.set_label(&message);
-                error.set_visible(true);
-            }
-        }
-    }
-
-    fn summary(self: &Rc<Self>) {
-        (self.batch.refresh)();
-        self.title.set_title(&t!("Update All with AI"));
-        self.title.set_subtitle("");
-        let failed = self.failed.borrow().clone();
-        let total = self.items.len() + self.unreadable.len();
-        let mut line = tf!("Updated {saved} of {total}", saved = self.saved.get(), total = total);
-        if self.skipped.get() > 0 {
-            line.push_str(&tf!(" · {count} skipped", count = self.skipped.get()));
-        }
-        if !failed.is_empty() {
-            line.push_str(&tf!(" · {count} failed", count = failed.len()));
-        }
-        if self.not_started.get() > 0 {
-            line.push_str(&tf!(" · {count} not started", count = self.not_started.get()));
-        }
-        let page = adw::PreferencesPage::new();
-        let overview = adw::PreferencesGroup::builder().description(line).build();
-        let done = gtk::Button::builder().label(t!("Done")).css_classes(["suggested-action"]).halign(gtk::Align::End).build();
-        overview.add(&done);
-        page.add(&overview);
-        if !failed.is_empty() {
-            let group = adw::PreferencesGroup::builder().title(t!("Not Updated")).description(t!("These objects could not be updated in the batch.")).build();
-            for (index, message) in failed {
-                let b = &self.batch.analysis.behind[index];
-                let row = adw::ActionRow::builder().title(&b.key).subtitle(&message).subtitle_lines(3).use_markup(false).build();
-                group.add(&row);
-            }
-            page.add(&group);
-        }
-        let navigation = self.batch.navigation.clone();
-        done.connect_clicked(move |_| {
-            navigation.pop();
-        });
-        if let Some(old) = self.stack.child_by_name("summary") {
-            self.stack.remove(&old);
-        }
-        self.stack.add_named(&page, Some("summary"));
-        self.stack.set_visible_child_name("summary");
-    }
 }

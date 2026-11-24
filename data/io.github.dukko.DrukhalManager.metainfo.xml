@@ -36,6 +36,17 @@
     <control>keyboard</control>
   </supports>
   <releases>
+    <release version="2.7.16" date="2026-11-23">
+      <description>
+        <p>Integrates "Changed by the Game Update" into the main Conflicts view:</p>
+        <ul>
+          <li>Replaced the standalone modal popup with a first-class "Changed by the Game Update" section directly in the Conflicts sidebar</li>
+          <li>Full support for search, filtering, and status tracking alongside other mod conflicts</li>
+          <li>Inline detail view with split diffs, manual edits, mod author bug report generator, external merge tool launcher, and AI update support</li>
+          <li>"Update All with AI…" action directly accessible from the section header menu</li>
+        </ul>
+      </description>
+    </release>
     <release version="2.7.15" date="2026-11-23">
       <description>
         <p>Redesigned Changed by the Game Update and improved diff copy behavior:</p>
