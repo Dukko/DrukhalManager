@@ -1,0 +1,36 @@
+name: Announce release on Discord
+
+# When a release is published, post it to the Discord webhook.
+# The webhook URL lives in the DISCORD_WEBHOOK_URL repository secret
+# (Settings > Secrets and variables > Actions). Nothing secret is in this file.
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  announce:
+    if: github.event.release.prerelease == false
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Post release to Discord
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          RELEASE_NAME: ${{ github.event.release.name }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          RELEASE_URL: ${{ github.event.release.html_url }}
+          RELEASE_BODY: ${{ github.event.release.body }}
+        run: |
+          if [ -z "$DISCORD_WEBHOOK_URL" ]; then
+            echo "::warning::DISCORD_WEBHOOK_URL secret is not set; skipping Discord post"
+            exit 0
+          fi
+          payload=$(jq -n \
+            --arg title "$RELEASE_NAME ($RELEASE_TAG)" \
+            --arg url "$RELEASE_URL" \
+            --arg desc "$RELEASE_BODY" \
+            '{embeds: [{title: $title, url: $url, description: ($desc | .[0:2000]), color: 5814783}]}')
+          curl -fsS -H "Content-Type: application/json" -d "$payload" "$DISCORD_WEBHOOK_URL"
