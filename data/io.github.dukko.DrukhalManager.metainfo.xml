@@ -36,6 +36,16 @@
     <control>keyboard</control>
   </supports>
   <releases>
+    <release version="2.7.15" date="2026-11-23">
+      <description>
+        <p>Redesigned Changed by the Game Update and improved diff copy behavior:</p>
+        <ul>
+          <li>Redesigned the Changed by the Game Update screen using a split view modeled after the conflict resolver, featuring a sidebar with object search, pills, notes, DiffBar controls, and an editable right card for instant manual and AI resolutions</li>
+          <li>Restored standard clipboard copy so Ctrl+C or right-click Copy no longer automatically mutates the right card</li>
+          <li>Added an explicit "Copy This Over" context menu item to copy selected or clicked differences to the editable card</li>
+        </ul>
+      </description>
+    </release>
     <release version="2.7.14" date="2026-11-23">
       <description>
         <p>Fixes a false "no longer defines it" warning for terraform link object merges (pc_from → pc_to) when checking patch freshness against mod copies and vanilla files.</p>

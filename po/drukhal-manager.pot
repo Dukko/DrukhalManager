@@ -6,9 +6,9 @@
 #, fuzzy
 msgid ""
 msgstr ""
-"Project-Id-Version: DrukhalManager 2.7.13\n"
+"Project-Id-Version: DrukhalManager 2.7.15\n"
 "Report-Msgid-Bugs-To: https://github.com/Dukko/DrukhalManager/issues\n"
-"POT-Creation-Date: 2026-11-24 01:50+0000\n"
+"POT-Creation-Date: 2026-11-24 03:24+0000\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -28,65 +28,84 @@ msgstr[0] ""
 msgstr[1] ""
 
 #: src/behind_dialog.rs
-msgid "These mods still load their own copies, so the game's changes to these objects don't apply until the mods are updated."
+msgid "Changed by the Game Update"
+msgstr ""
+
+#: src/behind_dialog.rs
+msgid "Stellaris {old} → {new}"
+msgstr ""
+
+#: src/behind_dialog.rs src/behind_dialog.rs src/behind_dialog.rs src/behind_dialog.rs src/behind_dialog.rs src/behind_dialog.rs src/behind_dialog.rs src/behind_dialog.rs src/behind_dialog.rs src/behind_dialog.rs src/window/overview.rs
+msgid "Stellaris {version}"
 msgstr ""
 
 #: src/behind_dialog.rs src/behind_dialog.rs src/behind_dialog.rs src/behind_dialog.rs
 msgid "Update All with AI"
 msgstr ""
 
-#: src/behind_dialog.rs src/behind_dialog.rs
+#: src/behind_dialog.rs
+msgid "Search objects"
+msgstr ""
+
+#: src/behind_dialog.rs
+msgid "These mods still load their own copies, so the game's changes to these objects don't apply until the mods are updated."
+msgstr ""
+
+#: src/behind_dialog.rs
+msgid "Game Update"
+msgstr ""
+
+#: src/behind_dialog.rs
+msgid "Object"
+msgstr ""
+
+#: src/behind_dialog.rs src/behind_dialog.rs src/behind_dialog.rs
 msgid "Removed from the game"
 msgstr ""
 
-#. Shown once the object is in the patch, including after a save
-#. from the page this row opens.
-#: src/behind_dialog.rs
+#: src/behind_dialog.rs src/behind_dialog.rs
 msgid "Updated in the merged patch"
 msgstr ""
 
 #: src/behind_dialog.rs
-msgid "Changed by the Game Update"
+msgid "Object · {category} · {mod_name} replaces this, and the base game update"
+msgstr ""
+
+#: src/behind_dialog.rs src/behind_dialog.rs
+msgid "Updated in merged patch"
 msgstr ""
 
 #: src/behind_dialog.rs
-msgid "Objects your enabled mods replace that changed between Stellaris {old} and {new}"
-msgstr ""
-
-#: src/behind_dialog.rs src/behind_dialog.rs src/behind_dialog.rs src/behind_dialog.rs src/behind_dialog.rs src/window/overview.rs
-msgid "Stellaris {version}"
-msgstr ""
-
-#: src/behind_dialog.rs
-msgid "Updated Copy"
-msgstr ""
-
-#: src/behind_dialog.rs src/error_report_dialog.rs
-msgid "Not found in Stellaris {version} or the mod's copy: {keys}. Check these before saving."
-msgstr ""
-
-#: src/behind_dialog.rs src/conflicts_view/object.rs src/error_report_dialog.rs src/script_check_dialog.rs
-msgid "The model's result still has a problem after a correction: {problem}. Fix it by hand, or undo and try again."
-msgstr ""
-
-#: src/behind_dialog.rs
-msgid "{name} still uses its own copy, from {file}."
+msgid "This object was removed from Stellaris in this update."
 msgstr ""
 
 #: src/behind_dialog.rs src/behind_dialog.rs
 msgid "The mod's copy couldn't be read, so it can't be updated here."
 msgstr ""
 
+#. Notes.
 #: src/behind_dialog.rs
-msgid "Report for Mod Author"
+msgid "{mod_name} still uses its own copy, from {file}."
 msgstr ""
 
 #: src/behind_dialog.rs
-msgid "Copy a formatted report for the mod author to clipboard"
+msgid "Updated in the merged patch. Saving again replaces it."
+msgstr ""
+
+#: src/behind_dialog.rs src/conflicts_view/object.rs
+msgid "Notes from the model: {notes}"
+msgstr ""
+
+#: src/behind_dialog.rs src/behind_dialog.rs src/error_report_dialog.rs
+msgid "Not found in Stellaris {version} or the mod's copy: {keys}. Check these before saving."
+msgstr ""
+
+#: src/behind_dialog.rs src/conflicts_view/object.rs src/conflicts_view/object.rs
+msgid "Take Change"
 msgstr ""
 
 #: src/behind_dialog.rs
-msgid "Copied report for mod author to clipboard"
+msgid "Copy the highlighted difference from the mod's version into the editable result"
 msgstr ""
 
 #: src/behind_dialog.rs src/behind_dialog.rs src/conflicts_view/file.rs src/conflicts_view/object.rs src/file_merge_dialog.rs
@@ -98,31 +117,61 @@ msgid "Open in your external merge tool to resolve differences manually"
 msgstr ""
 
 #: src/behind_dialog.rs
-msgid "Resolve Manually"
+msgid "Game Changes"
 msgstr ""
 
 #: src/behind_dialog.rs
-msgid "Edit and merge this object manually in the editor"
+msgid "Toggle between comparing the mod's copy with the update and comparing what changed in the base game between Stellaris {old} and {new}"
+msgstr ""
+
+#: src/behind_dialog.rs src/conflicts_view/file.rs src/conflicts_view/object.rs src/conflicts_view/object.rs
+msgid "Changed Lines Only"
+msgstr ""
+
+#: src/behind_dialog.rs
+msgid "Fold runs of unchanged lines"
+msgstr ""
+
+#: src/behind_dialog.rs src/conflicts_view/file.rs src/conflicts_view/object.rs
+msgid "Ignore Spacing"
+msgstr ""
+
+#: src/behind_dialog.rs
+msgid "Ignore differences in whitespace"
+msgstr ""
+
+#. Header actions.
+#: src/behind_dialog.rs
+msgid "Report for Mod Author"
+msgstr ""
+
+#. Header actions.
+#: src/behind_dialog.rs
+msgid "Copy a formatted report for the mod author to clipboard"
+msgstr ""
+
+#: src/behind_dialog.rs
+msgid "Copied report for mod author to clipboard"
 msgstr ""
 
 #: src/behind_dialog.rs
 msgid "Update with AI"
 msgstr ""
 
-#: src/behind_dialog.rs src/behind_dialog.rs src/conflicts_view/object.rs src/conflicts_view/object.rs src/script_check_dialog.rs
-msgid "Set up an AI provider in Preferences first"
-msgstr ""
-
-#: src/behind_dialog.rs src/behind_dialog.rs src/conflicts_view/object.rs src/folder_merge_dialog.rs
-msgid "The merge failed unexpectedly"
+#: src/behind_dialog.rs src/behind_dialog.rs src/error_report_dialog.rs src/script_check_dialog.rs
+msgid "Save to Merged Patch"
 msgstr ""
 
 #: src/behind_dialog.rs
-msgid "Use Game's Version"
+msgid "Save the updated copy to the merged patch"
 msgstr ""
 
-#: src/behind_dialog.rs
-msgid "Reset editor to the new base game version"
+#: src/behind_dialog.rs src/conflicts_view.rs
+msgid "Back to the list"
+msgstr ""
+
+#: src/behind_dialog.rs src/behind_dialog.rs src/conflicts_view/file.rs src/conflicts_view/file.rs src/conflicts_view/object.rs src/conflicts_view/object.rs
+msgid "Base Game"
 msgstr ""
 
 #: src/behind_dialog.rs
@@ -133,24 +182,48 @@ msgstr ""
 msgid "Reset editor to the mod's version"
 msgstr ""
 
-#: src/behind_dialog.rs src/error_report_dialog.rs src/script_check_dialog.rs
-msgid "Discard"
+#: src/behind_dialog.rs src/window/ignore_rules_ui.rs
+msgid "Mod"
 msgstr ""
 
-#: src/behind_dialog.rs src/behind_dialog.rs src/error_report_dialog.rs src/script_check_dialog.rs
-msgid "Save to Merged Patch"
+#: src/behind_dialog.rs src/behind_dialog.rs
+msgid "Updated Copy"
+msgstr ""
+
+#: src/behind_dialog.rs
+msgid "Editable"
+msgstr ""
+
+#: src/behind_dialog.rs
+msgid "Revert edits to initial version"
+msgstr ""
+
+#: src/behind_dialog.rs
+msgid "Use Game's Version"
+msgstr ""
+
+#: src/behind_dialog.rs
+msgid "Reset editor to the new base game version"
 msgstr ""
 
 #: src/behind_dialog.rs src/conflicts_view/file.rs src/conflicts_view/object.rs
 msgid "Choose a merge tool in Preferences first"
 msgstr ""
 
-#: src/behind_dialog.rs src/behind_dialog.rs
+#: src/behind_dialog.rs
 msgid "The merge tool's result is in the editor; review and save when ready"
 msgstr ""
 
 #: src/behind_dialog.rs src/conflicts_view/file.rs src/conflicts_view/object.rs
 msgid "{tool} was closed without saving, so nothing changed"
+msgstr ""
+
+#: src/behind_dialog.rs src/behind_dialog.rs src/conflicts_view/object.rs src/conflicts_view/object.rs src/script_check_dialog.rs
+msgid "Set up an AI provider in Preferences first"
+msgstr ""
+
+#: src/behind_dialog.rs src/behind_dialog.rs src/conflicts_view/object.rs src/folder_merge_dialog.rs
+msgid "The merge failed unexpectedly"
 msgstr ""
 
 #: src/behind_dialog.rs
@@ -195,6 +268,10 @@ msgstr ""
 
 #: src/behind_dialog.rs src/folder_merge_dialog.rs
 msgid "The provider doesn't publish this model's price, so the cost can't be estimated."
+msgstr ""
+
+#: src/behind_dialog.rs src/conflicts_view/object.rs src/error_report_dialog.rs src/script_check_dialog.rs
+msgid "The model's result still has a problem after a correction: {problem}. Fix it by hand, or undo and try again."
 msgstr ""
 
 #: src/behind_dialog.rs src/behind_dialog.rs src/folder_merge_dialog.rs
@@ -246,7 +323,7 @@ msgid "Not Updated"
 msgstr ""
 
 #: src/behind_dialog.rs
-msgid "Open one to try it on its own."
+msgid "These objects could not be updated in the batch."
 msgstr ""
 
 #: src/conflicts_view/file.rs src/conflicts_view/file.rs
@@ -263,10 +340,6 @@ msgstr ""
 
 #: src/conflicts_view/file.rs
 msgid "Not a text file"
-msgstr ""
-
-#: src/conflicts_view/file.rs src/conflicts_view/file.rs src/conflicts_view/object.rs src/conflicts_view/object.rs
-msgid "Base Game"
 msgstr ""
 
 #: src/conflicts_view/file.rs
@@ -357,15 +430,7 @@ msgid "Mark what each copy changed from the base game, instead of the difference
 msgstr ""
 
 #: src/conflicts_view/file.rs src/conflicts_view/object.rs src/conflicts_view/object.rs
-msgid "Changed Lines Only"
-msgstr ""
-
-#: src/conflicts_view/file.rs src/conflicts_view/object.rs src/conflicts_view/object.rs
 msgid "Fold runs of lines that are the same in both, keeping a few around each difference. Click a fold to open it"
-msgstr ""
-
-#: src/conflicts_view/file.rs src/conflicts_view/object.rs
-msgid "Ignore Spacing"
 msgstr ""
 
 #: src/conflicts_view/file.rs src/conflicts_view/object.rs
@@ -468,10 +533,6 @@ msgid "{reason}, so {which} keeps every change. No AI needed."
 msgstr ""
 
 #: src/conflicts_view/object.rs
-msgid "Notes from the model: {notes}"
-msgstr ""
-
-#: src/conflicts_view/object.rs
 msgid "The definition wasn't found in any mod's file. Rescan, in case the mods changed."
 msgstr ""
 
@@ -509,10 +570,6 @@ msgstr ""
 
 #: src/conflicts_view/object.rs
 msgid "Undo your edits to this version"
-msgstr ""
-
-#: src/conflicts_view/object.rs src/conflicts_view/object.rs
-msgid "Take Change"
 msgstr ""
 
 #: src/conflicts_view/object.rs
@@ -911,10 +968,6 @@ msgid "{tooltip} ({keys})"
 msgstr ""
 
 #: src/conflicts_view.rs
-msgid "Back to the list"
-msgstr ""
-
-#: src/conflicts_view.rs
 msgid "Ignored by rule {line}; click to edit the ignore rules"
 msgstr ""
 
@@ -1153,7 +1206,7 @@ msgid "✦ Removed {count} lines from base"
 msgstr ""
 
 #: src/diff_view.rs
-msgid "Put This In"
+msgid "Copy This Over"
 msgstr ""
 
 #: src/error_report_dialog.rs
@@ -1341,6 +1394,10 @@ msgstr ""
 
 #: src/error_report_dialog.rs src/script_check_dialog.rs
 msgid "Fixed Copy"
+msgstr ""
+
+#: src/error_report_dialog.rs src/script_check_dialog.rs
+msgid "Discard"
 msgstr ""
 
 #: src/file_merge_dialog.rs
@@ -4077,10 +4134,6 @@ msgstr ""
 
 #: src/window/ignore_rules_ui.rs
 msgid "Folder"
-msgstr ""
-
-#: src/window/ignore_rules_ui.rs
-msgid "Mod"
 msgstr ""
 
 #: src/window/ignore_rules_ui.rs

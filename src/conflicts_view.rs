@@ -1473,7 +1473,7 @@ pub struct DetailHeader {
 
 /// A chip naming one version: a coloured dot and the mod's name. `class`
 /// is `done`, `current` or `later`.
-fn chip(label: &str, color: Option<usize>, class: &str) -> gtk::Box {
+pub(crate) fn chip(label: &str, color: Option<usize>, class: &str) -> gtk::Box {
     let b = gtk::Box::builder().spacing(6).css_classes(["chip", class]).valign(gtk::Align::Center).build();
     if let Some(color) = color {
         b.append(&gtk::Box::builder().css_classes(["mod-dot", &format!("mod-color-{}", color % 8)]).valign(gtk::Align::Center).build());
@@ -1482,7 +1482,7 @@ fn chip(label: &str, color: Option<usize>, class: &str) -> gtk::Box {
     b
 }
 
-fn arrow() -> gtk::Image {
+pub(crate) fn arrow() -> gtk::Image {
     gtk::Image::builder().icon_name("go-next-symbolic").css_classes(["dim-label"]).build()
 }
 
@@ -1493,7 +1493,7 @@ pub struct DiffBar {
     pub extra: gtk::Box,
 }
 
-fn diff_bar(pair: &Rc<Pair>) -> DiffBar {
+pub(crate) fn diff_bar(pair: &Rc<Pair>) -> DiffBar {
     let count = gtk::Label::builder().xalign(0.0).css_classes(["dim-label"]).build();
     let prev = gtk::Button::builder().icon_name("go-up-symbolic").tooltip_text(t!("Previous difference (Alt+Up)")).css_classes(["flat"]).build();
     let next = gtk::Button::builder().icon_name("go-down-symbolic").tooltip_text(t!("Next difference (Alt+Down)")).css_classes(["flat"]).build();
@@ -1608,7 +1608,7 @@ fn boxed_list() -> gtk::ListBox {
 
 /// A note above the cards, e.g. the AI's notes or why a version keeps
 /// every change.
-fn note(text: &str, class: Option<&str>) -> gtk::Label {
+pub(crate) fn note(text: &str, class: Option<&str>) -> gtk::Label {
     let label = gtk::Label::builder().label(text).xalign(0.0).wrap(true).selectable(true).build();
     match class {
         Some(c) => label.add_css_class(c),

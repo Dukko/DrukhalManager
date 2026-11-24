@@ -677,16 +677,15 @@ impl Pair {
                 });
                 pair.refresh.replace(Some(id));
             });
-            pair.add_put_in_menu();
-            pair.add_copy_puts_in();
+            pair.add_copy_over_menu();
         }
         pair
     }
 
-    /// Adds Put This In to the view-only card's right-click menu: it
-    /// copies the difference under the pointer into the editable card.
-    fn add_put_in_menu(self: &Rc<Self>) {
-        let action = gio::SimpleAction::new("put-in", None);
+    /// Adds Copy This Over to the view-only card's right-click menu: it
+    /// copies the selection (or difference under the pointer) into the editable card.
+    fn add_copy_over_menu(self: &Rc<Self>) {
+        let action = gio::SimpleAction::new("copy-over", None);
         action.set_enabled(false);
         // The difference that was right-clicked, by its place in the list.
         let clicked: Rc<Cell<Option<usize>>> = Rc::default();
@@ -694,8 +693,8 @@ impl Pair {
         action.connect_activate({
             let clicked = clicked.clone();
             move |_, _| {
-                if let (Some(pair), Some(hunk)) = (weak.upgrade(), clicked.get()) {
-                    pair.put_in(hunk);
+                if let Some(pair) = weak.upgrade() {
+                    pair.copy_over(clicked.get());
                 }
             }
         });
@@ -703,7 +702,7 @@ impl Pair {
         group.add_action(&action);
         self.left.code.insert_action_group("diff", Some(&group));
         let menu = gio::Menu::new();
-        menu.append(Some(&t!("Put This In")), Some("diff.put-in"));
+        menu.append(Some(&t!("Copy This Over")), Some("diff.copy-over"));
         self.left.code.set_extra_menu(Some(&menu));
 
         // Before the text view opens its menu, note what's under the pointer.
@@ -719,20 +718,52 @@ impl Pair {
             let line = iter.line() as usize;
             let hunk = pair.diff.borrow().hunks.iter().position(|h| h.left.contains(&line));
             clicked.set(hunk);
-            action.set_enabled(hunk.is_some());
+            let has_selection_touched = if let Some((start, end)) = code.buffer().selection_bounds() {
+                let first = start.line() as usize;
+                let last = if end.line_offset() == 0 && end.line() > start.line() { end.line() as usize } else { end.line() as usize + 1 };
+                !touched_hunks(&pair.diff.borrow().hunks, first..last).is_empty()
+            } else {
+                false
+            };
+            action.set_enabled(has_selection_touched || hunk.is_some());
         });
         self.left.code.add_controller(click);
     }
 
+    /// Copies over the differences touched by the left card's selection,
+    /// or difference `hunk` if there is no selection.
+    pub fn copy_over(&self, hunk: Option<usize>) {
+        self.catch_up();
+        if let Some((start, end)) = self.left.code.buffer().selection_bounds() {
+            let first = start.line() as usize;
+            let last = if end.line_offset() == 0 && end.line() > start.line() { end.line() as usize } else { end.line() as usize + 1 };
+            let touched = touched_hunks(&self.diff.borrow().hunks, first..last);
+            if !touched.is_empty() {
+                self.put_in_all(&touched);
+                return;
+            }
+        }
+        if let Some(h) = hunk.or_else(|| self.current.get()) {
+            self.put_in(h);
+        }
+    }
+
     /// Replaces the editable card's side of difference `index` with the
     /// view-only card's lines, as one edit that can be undone.
-    fn put_in(&self, index: usize) {
+    pub fn put_in(&self, index: usize) {
         self.put_in_all(&[index]);
+    }
+
+    /// Puts the currently highlighted difference into the editable card, if any.
+    pub fn put_in_current(&self) {
+        if let Some(i) = self.current.get() {
+            self.put_in(i);
+        }
     }
 
     /// Puts in each difference of `indices`, last first so the earlier ones
     /// keep their lines, as one edit that can be undone.
-    fn put_in_all(&self, indices: &[usize]) {
+    pub fn put_in_all(&self, indices: &[usize]) {
         let hunks: Vec<Hunk> = {
             let diff = self.diff.borrow();
             indices.iter().rev().filter_map(|&i| diff.hunks.get(i).cloned()).collect()
@@ -766,25 +797,6 @@ impl Pair {
             self.texts.borrow_mut().1 = self.right.text();
             self.update(true);
         }
-    }
-
-    /// Makes Ctrl+C on the view-only card also put in the differences the
-    /// selection touches. The copy itself is left to the text view.
-    fn add_copy_puts_in(self: &Rc<Self>) {
-        let weak = Rc::downgrade(self);
-        self.left.code.connect_copy_clipboard(move |code| {
-            let Some((start, end)) = code.buffer().selection_bounds() else { return };
-            let first = start.line() as usize;
-            let last = if end.line_offset() == 0 && end.line() > start.line() { end.line() as usize } else { end.line() as usize + 1 };
-            // After the copy: putting in redraws the cards.
-            let weak = weak.clone();
-            glib::idle_add_local_once(move || {
-                let Some(pair) = weak.upgrade() else { return };
-                pair.catch_up();
-                let touched = touched_hunks(&pair.diff.borrow().hunks, first..last);
-                pair.put_in_all(&touched);
-            });
-        });
     }
 
     pub fn connect_change(&self, f: impl Fn(usize, Option<usize>, bool) + 'static) {
@@ -1259,10 +1271,10 @@ mod tests {
         while context.iteration(false) {}
     }
 
-    /// Needs a display: `cargo test --release copying_ -- --ignored --test-threads=1 --nocapture`
+    /// Needs a display: `cargo test --release copy_over_ -- --ignored --test-threads=1 --nocapture`
     #[test]
     #[ignore]
-    fn copying_selected_lines_puts_in_the_changes_they_touch() {
+    fn copy_over_selected_lines_puts_in_changes_while_copy_clipboard_does_not() {
         gtk::init().unwrap();
         adw::init().unwrap();
         let context = glib::MainContext::default();
@@ -1270,18 +1282,24 @@ mod tests {
         pair.show("a\nb\nc\nd\ne\nf\ng", "a\nB\nc\nd\nE\nf\nG", &Compare::Each, false);
         let buffer = pair.left.code.buffer();
 
+        // 1. Regular clipboard copy must NEVER mutate the editable card.
         buffer.select_range(&buffer.iter_at_line(0).unwrap(), &buffer.iter_at_line(4).unwrap());
         pair.left.code.emit_by_name::<()>("copy-clipboard", &[]);
+        pump(&context);
+        assert_eq!(pair.right.text(), "a\nB\nc\nd\nE\nf\nG", "copying to clipboard does not mutate the right card");
+
+        // 2. Explicit "Copy This Over" puts in touched differences.
+        pair.copy_over(None);
         pump(&context);
         assert_eq!(pair.right.text(), "a\nb\nc\nd\nE\nf\nG", "only the change at line 2 is put in");
 
         buffer.select_range(&buffer.iter_at_line(2).unwrap(), &buffer.iter_at_line(3).unwrap());
-        pair.left.code.emit_by_name::<()>("copy-clipboard", &[]);
+        pair.copy_over(None);
         pump(&context);
         assert_eq!(pair.right.text(), "a\nb\nc\nd\nE\nf\nG", "matching lines change nothing");
 
         buffer.select_range(&buffer.iter_at_line(4).unwrap(), &buffer.end_iter());
-        pair.left.code.emit_by_name::<()>("copy-clipboard", &[]);
+        pair.copy_over(None);
         pump(&context);
         assert_eq!(pair.right.text(), "a\nb\nc\nd\ne\nf\ng", "the other two come in together");
 
