@@ -36,6 +36,16 @@
     <control>keyboard</control>
   </supports>
   <releases>
+    <release version="2.7.18" date="2026-11-24">
+      <description>
+        <p>Fixes a false-positive validator error on scripted effect and trigger definitions:</p>
+        <ul>
+          <li>Correctly distinguishes scripted effect and trigger definitions from scripted effect calls</li>
+          <li>Allows control flow blocks (<code>if</code>, <code>switch</code>, <code>while</code>) and scope changes inside scripted effect implementations without false undeclared parameter warnings</li>
+          <li>Continues guarding against invalid undeclared child blocks inside actual scripted effect calls</li>
+        </ul>
+      </description>
+    </release>
     <release version="2.7.17" date="2026-11-24">
       <description>
         <p>Added an agnostic collection export option compatible with Irony Mod Manager (and other cross-tool load orders):</p>

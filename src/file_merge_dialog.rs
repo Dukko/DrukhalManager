@@ -298,6 +298,7 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
                     banner,
                     async move {
                         let path = w.path.clone();
+                        let category = file_merge::category(&w.path);
                         let result = thinking_view::run(&thinking, Some(&file_name), move |on| {
                             let check = |text: &str| validate_file(&path, text);
                             ai::merge_file_checked(&provider, &w.path, w.vanilla.as_ref(), &w.sources, &check, on)
@@ -307,7 +308,8 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
                             Some(Ok(checked)) => match checked.script {
                                 Ok(script) => {
                                     let params = crate::merge::script_check::cached_scripted_params();
-                                    let cleaned = crate::merge::script_check::strip_undeclared_scripted_effect_blocks(&script, &params);
+                                    let is_definitions = crate::merge::script_check::is_scripted_definitions_category(&category);
+                                    let cleaned = crate::merge::script_check::strip_undeclared_scripted_effect_blocks(&script, &params, is_definitions);
                                     editor.buffer().set_text(&cleaned);
                                     button.set_label(&t!("Merged"));
                                     button.set_sensitive(false);
@@ -429,7 +431,8 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
             let buffer = editor.buffer();
             let text = buffer.text(&buffer.start_iter(), &buffer.end_iter(), false).to_string();
             let params = crate::merge::script_check::cached_scripted_params();
-            let text = crate::merge::script_check::strip_undeclared_scripted_effect_blocks(&text, &params);
+            let is_definitions = crate::merge::script_check::is_scripted_definitions_category(&category);
+            let text = crate::merge::script_check::strip_undeclared_scripted_effect_blocks(&text, &params, is_definitions);
             if let Err(message) = file_merge::validate(&category, &text) {
                 show(&banner, &message, true);
                 return;
@@ -523,7 +526,8 @@ fn validate_file(path: &str, text: &str) -> Result<String, String> {
             return Err(format!("The merged script has a syntax error at {e}"));
         }
         let params = crate::merge::script_check::cached_scripted_params();
-        let violations = crate::merge::script_check::find_undeclared_scripted_effect_blocks(text, &params);
+        let is_definitions = crate::merge::script_check::is_scripted_definitions_category(&category);
+        let violations = crate::merge::script_check::find_undeclared_scripted_effect_blocks(text, &params, is_definitions);
         if let Some(v) = violations.first() {
             return Err(format!(
                 "The merged script contains invalid child block `{param} = {{ ... }}` inside scripted effect/trigger `{effect}` near line {line}. Scripted effect calls cannot contain child blocks unless declared as a parameter.",

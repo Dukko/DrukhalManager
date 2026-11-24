@@ -452,7 +452,8 @@ pub fn validate(category: &str, text: &str) -> Result<(), String> {
     }
     script::parse(text).map(|_| ()).map_err(|e| format!("The merged file has a syntax error at {e}"))?;
     let params = crate::merge::script_check::cached_scripted_params();
-    let violations = crate::merge::script_check::find_undeclared_scripted_effect_blocks(text, &params);
+    let is_definitions = crate::merge::script_check::is_scripted_definitions_category(category);
+    let violations = crate::merge::script_check::find_undeclared_scripted_effect_blocks(text, &params, is_definitions);
     if let Some(v) = violations.first() {
         return Err(format!(
             "The merged file contains invalid child block `{param} = {{ ... }}` inside scripted effect/trigger `{effect}` near line {line}",

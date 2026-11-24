@@ -69,7 +69,8 @@ pub fn validate(category: &str, key: &str, text: &str) -> Result<String, String>
         return Err(tf!("The merged script must define `{key}`", key = key));
     }
     let params = crate::merge::script_check::cached_scripted_params();
-    let violations = crate::merge::script_check::find_undeclared_scripted_effect_blocks(text, &params);
+    let is_definitions = crate::merge::script_check::is_scripted_definitions_category(category);
+    let violations = crate::merge::script_check::find_undeclared_scripted_effect_blocks(text, &params, is_definitions);
     if let Some(v) = violations.first() {
         return Err(tf!(
             "The merged script contains invalid child block `{param} = {{ ... }}` inside scripted effect/trigger `{effect}` near line {line}",
@@ -94,5 +95,9 @@ mod tests {
         assert_eq!(validate("localisation", "l_english:lab", "# merged: kept B\n lab:0 \"Lab\" \n").unwrap(), "lab:0 \"Lab\"");
         assert!(validate("localisation", "l_english:lab", "lab:0 \"A\"\nlab:0 \"B\"").is_err());
         assert!(validate("localisation", "l_english:lab", "other:0 \"x\"").is_err());
+
+        // Scripted effects definitions can contain control blocks like `if` and `switch`
+        let scripted_def = "mzilli_star_crisis_heat_planets = { if = { limit = { is_terraforming = yes } cancel_terraformation = yes } }";
+        assert!(validate("common/scripted_effects", "mzilli_star_crisis_heat_planets", scripted_def).is_ok());
     }
 }

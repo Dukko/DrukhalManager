@@ -464,20 +464,46 @@ pub fn load_scripted_params(roots: &[&Path]) -> Arc<ScriptedParams> {
     arc
 }
 
+/// Whether a category represents top-level definitions of scripted effects or triggers.
+pub fn is_scripted_definitions_category(category: &str) -> bool {
+    let lower = category.to_ascii_lowercase();
+    lower.starts_with("common/scripted_effects")
+        || lower.starts_with("common/scripted_triggers")
+        || lower == "scripted_effects"
+        || lower == "scripted_triggers"
+}
+
 /// Finds any undeclared child blocks `X = { ... }` passed inside calls to scripted effects or triggers.
-pub fn find_undeclared_scripted_effect_blocks(text: &str, params: &ScriptedParams) -> Vec<UndeclaredBlock> {
+/// When `is_definitions` is true (e.g. for files or objects in `common/scripted_effects` and
+/// `common/scripted_triggers`), top-level nodes are treated as the definitions themselves: their
+/// child blocks are effect/trigger statements and control structures (such as `if` or `switch`),
+/// not call arguments.
+pub fn find_undeclared_scripted_effect_blocks(
+    text: &str,
+    params: &ScriptedParams,
+    is_definitions: bool,
+) -> Vec<UndeclaredBlock> {
     if params.is_empty() {
         return Vec::new();
     }
     let Ok(nodes) = script::parse_lines(text) else { return Vec::new() };
     let mut violations = Vec::new();
-    check_nodes_for_undeclared_blocks(&nodes, params, &mut violations);
+    check_nodes(&nodes, params, is_definitions, &mut violations);
     violations
 }
 
-fn check_nodes_for_undeclared_blocks(nodes: &[Node], params: &ScriptedParams, out: &mut Vec<UndeclaredBlock>) {
+fn check_nodes(
+    nodes: &[Node],
+    params: &ScriptedParams,
+    is_definitions: bool,
+    out: &mut Vec<UndeclaredBlock>,
+) {
     for node in nodes {
-        if let Some(key) = &node.key {
+        // Only check for undeclared parameter blocks if this node is a CALL,
+        // not a top-level scripted effect / trigger definition.
+        if !is_definitions
+            && let Some(key) = &node.key
+        {
             let key_lower = key.to_ascii_lowercase();
             if let Some(declared) = params.get(&key_lower)
                 && let Some(kids) = &node.kids
@@ -498,16 +524,21 @@ fn check_nodes_for_undeclared_blocks(nodes: &[Node], params: &ScriptedParams, ou
                 }
             }
         }
+        // Descendant nodes are inside a body, so any nested scripted effect is a call.
         if let Some(kids) = &node.kids {
-            check_nodes_for_undeclared_blocks(kids, params, out);
+            check_nodes(kids, params, false, out);
         }
     }
 }
 
 /// Strips any undeclared child blocks `X = { ... }` inside scripted effect or trigger calls,
 /// preserving formatting, indentation, and comments of all other lines.
-pub fn strip_undeclared_scripted_effect_blocks(text: &str, params: &ScriptedParams) -> String {
-    let violations = find_undeclared_scripted_effect_blocks(text, params);
+pub fn strip_undeclared_scripted_effect_blocks(
+    text: &str,
+    params: &ScriptedParams,
+    is_definitions: bool,
+) -> String {
+    let violations = find_undeclared_scripted_effect_blocks(text, params, is_definitions);
     if violations.is_empty() {
         return text.to_owned();
     }
@@ -1728,7 +1759,7 @@ mod tests {
         let mut declared = HashSet::new();
         declared.insert("amount".to_owned());
         declared.insert("district".to_owned());
-        params.insert("add_district_and_planet_size_if_needed_effect_amount".to_owned(), declared);
+        params.insert("add_district_and_planet_size_if_needed_effect_amount".to_owned(), declared.clone());
 
         let input = "\
 # Arkship Decks
@@ -1747,12 +1778,12 @@ if = {
 }
 ";
 
-        let violations = find_undeclared_scripted_effect_blocks(input, &params);
+        let violations = find_undeclared_scripted_effect_blocks(input, &params, false);
         assert_eq!(violations.len(), 1);
         assert_eq!(violations[0].effect, "add_district_and_planet_size_if_needed_effect_amount");
         assert_eq!(violations[0].param, "ark_basic_districts");
 
-        let stripped = strip_undeclared_scripted_effect_blocks(input, &params);
+        let stripped = strip_undeclared_scripted_effect_blocks(input, &params, false);
         let expected = "\
 # Arkship Decks
 if = {
@@ -1769,7 +1800,47 @@ if = {
         assert_eq!(stripped, expected);
 
         // Stripping again is a no-op
-        assert_eq!(strip_undeclared_scripted_effect_blocks(&stripped, &params), expected);
-        assert!(find_undeclared_scripted_effect_blocks(&stripped, &params).is_empty());
+        assert_eq!(strip_undeclared_scripted_effect_blocks(&stripped, &params, false), expected);
+        assert!(find_undeclared_scripted_effect_blocks(&stripped, &params, false).is_empty());
+
+        // When checking a scripted effect definition itself (is_definitions = true):
+        // Top-level if = { ... }, switch = { ... } blocks are effect implementations, not parameter calls.
+        let mut def_params = HashMap::new();
+        def_params.insert("mzilli_star_crisis_heat_planets".to_owned(), HashSet::new());
+        def_params.insert("add_district_and_planet_size_if_needed_effect_amount".to_owned(), declared);
+
+        let def_input = "\
+mzilli_star_crisis_heat_planets = {
+\tif = {
+\t\tlimit = { is_terraforming = yes }
+\t\tcancel_terraformation = yes
+\t}
+\tswitch = {
+\t\ttrigger = is_planet_class
+\t\tpc_molten = {
+\t\t\tset_ring = no
+\t\t}
+\t}
+}
+";
+        assert!(find_undeclared_scripted_effect_blocks(def_input, &def_params, true).is_empty());
+        assert_eq!(strip_undeclared_scripted_effect_blocks(def_input, &def_params, true), def_input);
+
+        // But if the definition calls another scripted effect with an undeclared child block:
+        let def_with_bad_nested_call = "\
+mzilli_star_crisis_heat_planets = {
+\tif = {
+\t\tlimit = { is_terraforming = yes }
+\t\tadd_district_and_planet_size_if_needed_effect_amount = {
+\t\t\tamount = 1
+\t\t\tstray_block = { min = 1 }
+\t\t}
+\t}
+}
+";
+        let nested_violations = find_undeclared_scripted_effect_blocks(def_with_bad_nested_call, &def_params, true);
+        assert_eq!(nested_violations.len(), 1);
+        assert_eq!(nested_violations[0].effect, "add_district_and_planet_size_if_needed_effect_amount");
+        assert_eq!(nested_violations[0].param, "stray_block");
     }
 }
