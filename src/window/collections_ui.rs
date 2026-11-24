@@ -62,6 +62,7 @@ impl Window {
         action("collection-unfreeze", Window::unfreeze_collection);
         action("collection-move-patch", Window::move_patch);
         action("collection-export", Window::export_collection);
+        action("collection-export-irony", Window::export_irony);
         action("collection-export-launcher", Window::export_launcher);
         action("collection-export-bundle", Window::export_bundle);
         action("collection-copy", Window::copy_collection);
@@ -172,6 +173,7 @@ impl Window {
         let export = gio::Menu::new();
         export.append(Some(&t!("To a DrukhalManager _File…")), Some("win.collection-export"));
         export.append(Some(&t!("With the Merged _Patch…")), Some("win.collection-export-bundle"));
+        export.append(Some(&t!("To an _Irony Mod Manager File…")), Some("win.collection-export-irony"));
         export.append(Some(&t!("To a Paradox _Launcher File…")), Some("win.collection-export-launcher"));
         share.append_submenu(Some(&t!("_Export")), &export);
         share.append(Some(&t!("_Copy Load Order")), Some("win.collection-copy"));
@@ -559,7 +561,7 @@ impl Window {
 
     fn import_file(self: &Rc<Self>) {
         let filter = gtk::FileFilter::new();
-        filter.set_name(Some(&t!("Collections (DrukhalManager or Paradox Launcher)")));
+        filter.set_name(Some(&t!("Collections (DrukhalManager, Irony or Paradox Launcher)")));
         filter.add_pattern("*.json");
         filter.add_pattern("*.zip");
         let filters = gio::ListStore::new::<gtk::FileFilter>();
@@ -843,6 +845,47 @@ impl Window {
         let (mut collection, missing) = collections::import(&shared, &self.state.borrow().mods);
         collection.patch = patch;
         self.add_and_switch(collection, missing);
+    }
+
+    /// Exports the load order as an agnostic playset file compatible with
+    /// Irony Mod Manager (and the Paradox Launcher).
+    fn export_irony(self: &Rc<Self>) {
+        let name = self.collections.borrow().active.clone();
+        let dialog = gtk::FileDialog::builder()
+            .title(t!("Export for Irony Mod Manager"))
+            .initial_name(format!("{name} (irony).json"))
+            .modal(true)
+            .build();
+        let weak = Rc::downgrade(self);
+        dialog.save(Some(&self.window), None::<&gio::Cancellable>, move |file| {
+            let (Some(ui), Ok(file)) = (weak.upgrade(), file) else { return };
+            let Some(path) = file.path() else { return };
+            let shared = ui.shared_collection(&name, true);
+            let (json, skipped) = collections::to_irony_json(&shared);
+            if let Err(e) = std::fs::write(&path, json) {
+                return ui.toast_error(&tf!("Could not export: {error}", error = e));
+            }
+            let exported = tnf!(
+                "Exported “{name}” for Irony Mod Manager with {count} mod",
+                "Exported “{name}” for Irony Mod Manager with {count} mods",
+                count = shared.mods.len() - skipped.len(),
+                name = name
+            );
+            if skipped.is_empty() {
+                ui.add_toast(adw::Toast::new(&tf!(
+                    "{exported}. In Irony, import via “Import from Paradox Launcher JSON”.",
+                    exported = exported
+                )));
+            } else {
+                ui.toast_error(&tnf!(
+                    "{exported}. In Irony, import via “Import from Paradox Launcher JSON”. This format only tracks Workshop mods, so this local mod was left out: {mods}",
+                    "{exported}. In Irony, import via “Import from Paradox Launcher JSON”. This format only tracks Workshop mods, so these local mods were left out: {mods}",
+                    count = skipped.len(),
+                    exported = exported,
+                    mods = skipped.join(", ")
+                ));
+            }
+        });
     }
 
     /// Exports the load order as a Paradox Launcher playset file, for

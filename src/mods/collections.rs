@@ -481,9 +481,9 @@ pub fn from_launcher_json(text: &str) -> Option<Shared> {
     Some(Shared { format: 1, name, mods })
 }
 
-/// A shared collection as a Paradox Launcher playset file. The launcher
-/// only knows Workshop mods, so local ones are left out; their names are
-/// returned.
+/// A shared collection as an agnostic playset file for Irony Mod Manager
+/// and the Paradox Launcher. Only Workshop mods are included (identified by
+/// Steam id); local mods are left out and their names are returned.
 pub fn to_launcher_json(shared: &Shared) -> (String, Vec<String>) {
     let (workshop, local): (Vec<&SharedMod>, Vec<&SharedMod>) = shared.mods.iter().partition(|m| m.steam_id.is_some());
     let mods = workshop
@@ -499,6 +499,12 @@ pub fn to_launcher_json(shared: &Shared) -> (String, Vec<String>) {
         .collect();
     let playset = LauncherPlayset { game: stellaris(), name: shared.name.clone(), mods };
     (serde_json::to_string_pretty(&playset).expect("plain data"), local.into_iter().map(|m| m.name.clone()).collect())
+}
+
+/// An alias for [`to_launcher_json`], providing an explicit export format
+/// for Irony Mod Manager.
+pub fn to_irony_json(shared: &Shared) -> (String, Vec<String>) {
+    to_launcher_json(shared)
 }
 
 #[cfg(test)]
@@ -523,6 +529,7 @@ mod tests {
         shared.mods.insert(1, SharedMod { name: "Local".into(), steam_id: None, id: "mod/local.mod".into(), note: None });
         let (json, skipped) = to_launcher_json(&shared);
         assert_eq!(skipped, ["Local"]);
+        assert_eq!(to_irony_json(&shared), (json.clone(), skipped.clone()));
         let back = from_launcher_json(&json).unwrap();
         assert_eq!(back.mods.iter().map(|m| m.steam_id).collect::<Vec<_>>(), [Some(111), Some(222)]);
         assert!(json.contains("\"steamId\": \"111\"") && json.contains("\"position\": 1"));

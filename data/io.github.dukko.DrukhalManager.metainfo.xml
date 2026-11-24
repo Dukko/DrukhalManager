@@ -36,6 +36,16 @@
     <control>keyboard</control>
   </supports>
   <releases>
+    <release version="2.7.17" date="2026-11-24">
+      <description>
+        <p>Added an agnostic collection export option compatible with Irony Mod Manager (and other cross-tool load orders):</p>
+        <ul>
+          <li>New "To an Irony Mod Manager File…" action in the Collections Export menu that generates a clean playset JSON</li>
+          <li>Provides explicit in-app guidance on importing into Irony Mod Manager via "Import from Paradox Launcher JSON"</li>
+          <li>Updated the collection file open filter to recognize Irony Mod Manager collections</li>
+        </ul>
+      </description>
+    </release>
     <release version="2.7.16" date="2026-11-23">
       <description>
         <p>Integrates "Changed by the Game Update" into the main Conflicts view:</p>

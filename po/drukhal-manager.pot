@@ -6,9 +6,9 @@
 #, fuzzy
 msgid ""
 msgstr ""
-"Project-Id-Version: DrukhalManager 2.7.16\n"
+"Project-Id-Version: DrukhalManager 2.7.17\n"
 "Report-Msgid-Bugs-To: https://github.com/Dukko/DrukhalManager/issues\n"
-"POT-Creation-Date: 2026-11-24 04:27+0000\n"
+"POT-Creation-Date: 2026-11-24 11:17+0000\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -3399,6 +3399,10 @@ msgid "With the Merged _Patch…"
 msgstr ""
 
 #: src/window/collections_ui.rs
+msgid "To an _Irony Mod Manager File…"
+msgstr ""
+
+#: src/window/collections_ui.rs
 msgid "To a Paradox _Launcher File…"
 msgstr ""
 
@@ -3622,7 +3626,7 @@ msgid "Every mod in “{name}” is installed"
 msgstr ""
 
 #: src/window/collections_ui.rs
-msgid "Collections (DrukhalManager or Paradox Launcher)"
+msgid "Collections (DrukhalManager, Irony or Paradox Launcher)"
 msgstr ""
 
 #: src/window/collections_ui.rs
@@ -3721,7 +3725,7 @@ msgid_plural "Exported “{name}” with {count} mods"
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/window/collections_ui.rs src/window/collections_ui.rs src/window/collections_ui.rs
+#: src/window/collections_ui.rs src/window/collections_ui.rs src/window/collections_ui.rs src/window/collections_ui.rs
 msgid "Could not export: {error}"
 msgstr ""
 
@@ -3762,6 +3766,26 @@ msgstr ""
 #: src/window/collections_ui.rs
 msgid "Could not install the merged patch, so nothing was imported: {error}"
 msgstr ""
+
+#: src/window/collections_ui.rs
+msgid "Export for Irony Mod Manager"
+msgstr ""
+
+#: src/window/collections_ui.rs
+msgid "Exported “{name}” for Irony Mod Manager with {count} mod"
+msgid_plural "Exported “{name}” for Irony Mod Manager with {count} mods"
+msgstr[0] ""
+msgstr[1] ""
+
+#: src/window/collections_ui.rs
+msgid "{exported}. In Irony, import via “Import from Paradox Launcher JSON”."
+msgstr ""
+
+#: src/window/collections_ui.rs
+msgid "{exported}. In Irony, import via “Import from Paradox Launcher JSON”. This format only tracks Workshop mods, so this local mod was left out: {mods}"
+msgid_plural "{exported}. In Irony, import via “Import from Paradox Launcher JSON”. This format only tracks Workshop mods, so these local mods were left out: {mods}"
+msgstr[0] ""
+msgstr[1] ""
 
 #: src/window/collections_ui.rs
 msgid "Export for the Paradox Launcher"
