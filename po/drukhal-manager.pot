@@ -6,9 +6,9 @@
 #, fuzzy
 msgid ""
 msgstr ""
-"Project-Id-Version: DrukhalManager 2.7.20\n"
+"Project-Id-Version: DrukhalManager 2.7.21\n"
 "Report-Msgid-Bugs-To: https://github.com/Dukko/DrukhalManager/issues\n"
-"POT-Creation-Date: 2026-11-24 12:27+0000\n"
+"POT-Creation-Date: 2026-11-24 13:16+0000\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -41,10 +41,6 @@ msgid "Updated in merged patch"
 msgstr ""
 
 #: src/behind_dialog.rs
-msgid "Report for Mod Author"
-msgstr ""
-
-#: src/behind_dialog.rs
 msgid "Copy a formatted report for the mod author to clipboard"
 msgstr ""
 
@@ -52,11 +48,11 @@ msgstr ""
 msgid "Copied report for mod author to clipboard"
 msgstr ""
 
-#: src/behind_dialog.rs src/behind_dialog.rs src/conflicts_view/file.rs src/conflicts_view/object.rs src/file_merge_dialog.rs
+#: src/behind_dialog.rs src/conflicts_view/file.rs src/conflicts_view/object.rs src/file_merge_dialog.rs
 msgid "Merge Tool…"
 msgstr ""
 
-#: src/behind_dialog.rs src/behind_dialog.rs
+#: src/behind_dialog.rs
 msgid "Open in your external merge tool to resolve differences manually"
 msgstr ""
 
@@ -118,10 +114,6 @@ msgstr ""
 
 #: src/behind_dialog.rs src/behind_dialog.rs
 msgid "Updated Copy"
-msgstr ""
-
-#: src/behind_dialog.rs
-msgid "Editable"
 msgstr ""
 
 #: src/behind_dialog.rs
@@ -480,6 +472,10 @@ msgstr ""
 
 #: src/conflicts_view/object.rs
 msgid "Couldn't find the definition in: {mods}"
+msgstr ""
+
+#: src/conflicts_view/object.rs
+msgid "no longer defines it"
 msgstr ""
 
 #: src/conflicts_view/object.rs
@@ -1969,8 +1965,16 @@ msgstr ""
 msgid "The base game changed it in an update"
 msgstr ""
 
+#: src/merge/patch.rs src/merge/patch.rs
+msgid "{name} isn't enabled any more"
+msgstr ""
+
 #: src/merge/patch.rs
-msgid "no longer defines it"
+msgid "{name} no longer defines it"
+msgstr ""
+
+#: src/merge/patch.rs src/merge/patch.rs
+msgid "{name} changed it"
 msgstr ""
 
 #: src/merge/patch.rs
@@ -1998,15 +2002,7 @@ msgid "It is no longer in the patch"
 msgstr ""
 
 #: src/merge/patch.rs
-msgid "{name} isn't enabled any more"
-msgstr ""
-
-#: src/merge/patch.rs
 msgid "{name} {missing}"
-msgstr ""
-
-#: src/merge/patch.rs
-msgid "{name} changed it"
 msgstr ""
 
 #: src/merge/snapshot.rs

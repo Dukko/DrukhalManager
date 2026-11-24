@@ -464,6 +464,7 @@ Your job is to write the mod's copy with the game's changes applied. Work out wh
 How to resolve it:
 - Where the game and the mod changed the same value differently, keep the mod's value, because it's the mod's intent, and say so in the notes. The exception is a change that only makes sense with the new game, such as a renamed or removed trigger, effect, modifier or scope. In that case, follow the game and say so.
 - Don't invent changes. Don't drop anything the mod added.
+- Don't restore lines or blocks the mod intentionally removed relative to <game_before>. If <mod> omits a block (such as an `opposites = { ... }` block, restrictions, triggers, or costs) that existed in <game_before>, keep it omitted; do NOT re-add it from <game_after> unless <game_after> newly introduced it.
 - NEVER emit an `X = { ... }` child block inside a scripted-effect or scripted-trigger call unless `X` is an explicitly declared parameter (`$X$`) of that effect/trigger. Scripted effect calls only pass parameter assignments (e.g. `amount = var`, `district = type`), never synthetic constraint blocks (such as `var = { min = 1 }`), nested conditions, or invented sub-blocks.
 - Keep the mod's formatting and comments. Add a short `# updated:` comment only where you made a judgement call.
 

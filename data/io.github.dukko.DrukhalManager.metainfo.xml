@@ -36,6 +36,17 @@
     <control>keyboard</control>
   </supports>
   <releases>
+    <release version="2.7.21" date="2026-11-24">
+      <description>
+        <p>Fixes false stale merge warnings and polishes game update conflict view:</p>
+        <ul>
+          <li>Tracks mod definitions moved between files across mod updates so merges are not falsely flagged as "no longer defines it"</li>
+          <li>Filters out contradictory stale merge warnings when a mod definition is actively loaded in the conflict view</li>
+          <li>Cleans up Game Update conflict detail view by removing duplicate buttons and redundant editable badges, compacting author report action, and ensuring all controls fit comfortably</li>
+          <li>Refines AI merge guidelines to prevent restoring blocks intentionally omitted by mods</li>
+        </ul>
+      </description>
+    </release>
     <release version="2.7.20" date="2026-11-24">
       <description>
         <p>Adds "Clean Up the Code" option to editor right-click menus:</p>

@@ -214,7 +214,6 @@ impl BehindView {
         let mod_text_opt = read_mod_copy(&page.analysis, b);
         if let (Some(now), Some(mod_text)) = (&b.now, &mod_text_opt) {
             let report_btn = gtk::Button::builder()
-                .label(t!("Report for Mod Author"))
                 .icon_name("edit-copy-symbolic")
                 .tooltip_text(t!("Copy a formatted report for the mod author to clipboard"))
                 .css_classes(["flat"])
@@ -286,6 +285,7 @@ impl BehindView {
                 });
             }
             header.actions.append(&save_btn);
+            header.actions.append(&page.ignore_button(conflicts_view::Item::Behind(self.index)));
         }
 
         self.header.set_child(Some(&header.widget));
@@ -362,8 +362,7 @@ impl BehindView {
             self.pair.left.set_actions(&[use_mod.upcast()]);
 
             let right_title = if is_merged { t!("Updated in merged patch") } else { t!("Updated Copy") };
-            let right_badge = (t!("Editable"), Some("accent"));
-            self.pair.right.set_header(&Header { title: right_title, subtitle: now.file.clone(), color: None, badge: Some(right_badge) });
+            self.pair.right.set_header(&Header { title: right_title, subtitle: now.file.clone(), color: None, badge: None });
 
             let revert = gtk::Button::builder().icon_name("document-revert-symbolic").tooltip_text(t!("Revert edits to initial version")).sensitive(!busy).css_classes(["flat"]).build();
             {
@@ -411,15 +410,6 @@ impl BehindView {
                 });
             }
             bar.extra.append(&take_btn);
-
-            let merge_tool_bar_btn = gtk::Button::builder().label(t!("Merge Tool…")).tooltip_text(t!("Open in your external merge tool to resolve differences manually")).css_classes(["flat"]).build();
-            {
-                let view = self.clone();
-                merge_tool_bar_btn.connect_clicked(move |btn| {
-                    view.open_merge_tool(btn);
-                });
-            }
-            bar.extra.append(&merge_tool_bar_btn);
 
             let game_changes_toggle = gtk::ToggleButton::builder()
                 .label(t!("Game Changes"))

@@ -462,7 +462,16 @@ impl ObjectView {
             self.notes.append(&note(&tf!("Couldn't find the definition in: {mods}", mods = steps.loaded.missing.join(", ")), Some("warning")));
         }
         if let Some(reasons) = hooks.stale_object(&self.category, &self.name) {
-            self.notes.append(&note(&tf!("The saved merge is out of date: {reasons}. Saving a new one replaces it.", reasons = reasons.join("; ")), Some("warning")));
+            let stale_suffix = t!("no longer defines it");
+            let filtered: Vec<_> = reasons
+                .into_iter()
+                .filter(|r| {
+                    !steps.loaded.sources.iter().any(|s| r.starts_with(&s.label) && r.ends_with(&stale_suffix))
+                })
+                .collect();
+            if !filtered.is_empty() {
+                self.notes.append(&note(&tf!("The saved merge is out of date: {reasons}. Saving a new one replaces it.", reasons = filtered.join("; ")), Some("warning")));
+            }
         }
         if steps.from_saved {
             let sources = (hooks.existing)(&self.category, &self.name).map(|m| m.sources.join(", ")).unwrap_or_default();

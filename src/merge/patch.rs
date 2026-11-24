@@ -489,7 +489,31 @@ impl Patch {
             let mut check = Check::default();
             for p in &mut m.prints {
                 if p.mod_id != VANILLA {
-                    check.mod_print(p, roots, &read, &t!("no longer defines it"));
+                    let Some(root) = roots.get(&p.mod_id) else {
+                        check.reasons.push(tf!("{name} isn't enabled any more", name = &p.name));
+                        continue;
+                    };
+                    let mut now = read(root, &p.file);
+                    if now.is_none() {
+                        // Mod updates often move definitions between files.
+                        let moved = super::source::vanilla_files(root, &category).into_iter().find_map(|path| {
+                            let file = crate::platform::game_path(path.strip_prefix(root).ok()?);
+                            let text = read(root, &file)?;
+                            Some((file, text))
+                        });
+                        if let Some((file, text)) = moved {
+                            if fingerprint(&text) == p.hash {
+                                p.file = file;
+                                dirty = true;
+                            }
+                            now = Some(text);
+                        }
+                    }
+                    match now {
+                        None => check.reasons.push(tf!("{name} no longer defines it", name = &p.name)),
+                        Some(text) if fingerprint(&text) != p.hash => check.reasons.push(tf!("{name} changed it", name = &p.name)),
+                        Some(_) => {}
+                    }
                     continue;
                 }
                 let Some(dir) = game_dir else { continue };
@@ -1120,6 +1144,17 @@ mod tests {
         patch.manifest.merges.iter_mut().for_each(|m| m.game_version = None);
         patch.recheck(&roots, Some("v4.6.1"));
         assert_eq!(patch.get("common/buildings", "mine").unwrap().game_version.as_deref(), Some("v4.6.1"));
+        // A mod update moves lab from m.txt to m_renamed.txt unchanged.
+        std::fs::remove_file(a.join("common/buildings/m.txt")).unwrap();
+        write(&a, "common/buildings/m_renamed.txt", "lab = {}");
+        let stale = patch.recheck(&roots, Some("v4.6.1"));
+        // lab is still stale from the base game update, but not because mod A moved it.
+        let lab_stale = stale.iter().find(|s| s.object.as_ref().is_some_and(|(_, k)| k == "lab")).unwrap();
+        assert_eq!(lab_stale.reasons, ["The base game changed it in an update"]);
+        let reopened = Patch::open(&user, &test_target()).unwrap();
+        let a_print = reopened.get("common/buildings", "lab").unwrap().prints.iter().find(|p| p.mod_id == "mod/a.mod").unwrap();
+        assert_eq!(a_print.file, "common/buildings/m_renamed.txt");
+
         std::fs::remove_dir_all(root).unwrap();
     }
 
