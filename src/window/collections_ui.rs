@@ -1110,10 +1110,10 @@ impl Window {
                 ui.refill_collection(collection_id, name, shared);
             } else {
                 let remaining_placeholders = ui.collections.borrow().active().placeholders(&ui.state.borrow().mods);
-                if remaining_placeholders.is_empty() {
-                    if let Some(dialog) = ui.missing_dialog.borrow_mut().take() {
-                        dialog.close();
-                    }
+                if remaining_placeholders.is_empty()
+                    && let Some(dialog) = ui.missing_dialog.borrow_mut().take()
+                {
+                    dialog.close();
                 }
             }
         });
