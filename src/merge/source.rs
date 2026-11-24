@@ -18,6 +18,12 @@ pub struct Source {
     pub text: String,
 }
 
+/// The substring of `key` that must appear in a file defining it.
+pub fn key_token(key: &str) -> &str {
+    let check = key.rsplit(':').next().unwrap_or(key);
+    check.split_once(" → ").map_or(check, |(from, _)| from)
+}
+
 /// Finds the definition of `key` in `src`. For script objects this includes
 /// any file-local `@variables` the definition uses, since it can't be moved
 /// to another file without them.
@@ -25,9 +31,7 @@ pub fn extract(category: &str, key: &str, src: &str) -> Option<String> {
     if category == "localisation" {
         return localisation_line(key, src);
     }
-    let check = key.rsplit(':').next().unwrap_or(key);
-    let check = check.split_once(" → ").map_or(check, |(from, _)| from);
-    if !src.contains(check) {
+    if !src.contains(key_token(key)) {
         return None;
     }
     let entries = script::parse_with_spans(src).ok()?;
@@ -240,7 +244,7 @@ impl Files {
             return extract_parsed(category, key, &self.text(root, file)?, &[]);
         }
         // As `extract` does: files that can't define it aren't parsed.
-        if !self.text(root, file)?.contains(key.rsplit(':').next().unwrap_or(key)) {
+        if !self.text(root, file)?.contains(key_token(key)) {
             return None;
         }
         let (text, entries) = self.parsed(root, file)?;
@@ -300,7 +304,7 @@ pub fn vanilla_many(game_dir: &Path, category: &str, keys: &[String]) -> std::co
         }
         // Parsing is the slow part: skip files that can't define any of them.
         let remaining: Vec<&&str> = wanted.iter().filter(|k| !found.contains_key(**k)).collect();
-        if remaining.len() <= 64 && !remaining.iter().any(|k| src.contains(**k)) {
+        if remaining.len() <= 64 && !remaining.iter().any(|k| src.contains(key_token(k))) {
             continue;
         }
         for (key, text) in index(category, &src) {
@@ -410,5 +414,16 @@ mod tests {
 
         let tf = "terraform_link = {\n\tfrom = pc_barren\n\tto = pc_desert\n}\n";
         assert_eq!(extract("common/terraform", "pc_barren → pc_desert", tf).as_deref(), Some(tf.trim_end()));
+
+        let files = Files::default();
+        let root = std::env::temp_dir().join(format!("dm-source-tf-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("common/terraform")).unwrap();
+        std::fs::write(root.join("common/terraform/links.txt"), tf).unwrap();
+        assert_eq!(
+            files.object(&root, "common/terraform/links.txt", "common/terraform", "pc_barren → pc_desert").as_deref(),
+            Some(tf.trim_end())
+        );
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

@@ -36,6 +36,11 @@
     <control>keyboard</control>
   </supports>
   <releases>
+    <release version="2.7.14" date="2026-11-23">
+      <description>
+        <p>Fixes a false "no longer defines it" warning for terraform link object merges (pc_from → pc_to) when checking patch freshness against mod copies and vanilla files.</p>
+      </description>
+    </release>
     <release version="2.7.13" date="2026-11-23">
       <description>
         <p>Fixes a Stellaris 4.6 game startup crash (SIGSEGV in CScriptedEffect::visit) caused by invalid undeclared child blocks inside scripted effect calls. DrukhalManager now validates and prevents emitting undeclared child blocks inside scripted effects and scripted triggers in file-level and object-level merges. Also ensures diff cards and code views reset horizontal scrolling so text is never truncated on the left.</p>
