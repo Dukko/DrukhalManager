@@ -4,6 +4,7 @@ name: Announce release on Discord
 # Can also be run manually from the Actions tab to announce a specific tag.
 # The webhook URL lives in the DISCORD_WEBHOOK_URL repository secret
 # (Settings > Secrets and variables > Actions). Nothing secret is in this file.
+# Release posts ping the DrukhalManager Updates role (<@&1574751790812102766>).
 
 on:
   release:
@@ -36,5 +37,5 @@ jobs:
           fi
           release=$(curl -fsS -H "Authorization: Bearer $GH_TOKEN" \
             "https://api.github.com/repos/$REPO/releases/tags/$TAG")
-          payload=$(echo "$release" | jq '{embeds: [{title: (if .name and .name != "" then .name + " (" + .tag_name + ")" else .tag_name end), url: .html_url, description: ((.body // "") | .[0:2000]), color: 5814783}]}')
+          payload=$(echo "$release" | jq --arg mention "<@&1574751790812102766>" '(if .name and .name != "" then .name + " (" + .tag_name + ")" else .tag_name end) as $title | {content: ($mention + " New release: " + $title), embeds: [{title: $title, url: .html_url, description: ((.body // "") | .[0:2000]), color: 5814783}]}')
           curl -fsS -H "Content-Type: application/json" -d "$payload" "$DISCORD_WEBHOOK_URL"
