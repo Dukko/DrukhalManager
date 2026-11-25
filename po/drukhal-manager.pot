@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: DrukhalManager 2.7.21\n"
 "Report-Msgid-Bugs-To: https://github.com/Dukko/DrukhalManager/issues\n"
-"POT-Creation-Date: 2026-11-24 14:48+0000\n"
+"POT-Creation-Date: 2026-11-25 22:43+0000\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -142,6 +142,16 @@ msgstr ""
 
 #: src/behind_dialog.rs
 msgid "Toggle between comparing the mod's copy with the update and comparing what changed in the base game between Stellaris {old} and {new}"
+msgstr ""
+
+#: src/behind_dialog.rs src/conflicts_view/object.rs src/conflicts_view.rs
+msgid "Inline Script ({count})"
+msgid_plural "Inline Scripts ({count})"
+msgstr[0] ""
+msgstr[1] ""
+
+#: src/behind_dialog.rs
+msgid "Compare the inline script files that differ or were replaced between the mod and the base game"
 msgstr ""
 
 #: src/behind_dialog.rs src/conflicts_view/file.rs src/conflicts_view/object.rs src/conflicts_view/object.rs
@@ -536,6 +546,10 @@ msgstr ""
 
 #: src/conflicts_view/object.rs
 msgid "Copy the right card's side of the highlighted difference into the left card"
+msgstr ""
+
+#: src/conflicts_view/object.rs
+msgid "Compare the inline script files that differ or were replaced between these two versions"
 msgstr ""
 
 #: src/conflicts_view/object.rs

@@ -92,6 +92,14 @@ impl Window {
                 }
             }
         }
+        // Prevent GTK from scrolling the viewport when a focused row is moved,
+        // rebuilt, or re-selected during refresh.
+        let scroller = self.enabled_list.ancestor(gtk::ScrolledWindow::static_type()).and_downcast::<gtk::ScrolledWindow>();
+        let saved_scroll = scroller.as_ref().map(|s| s.vadjustment().value());
+        let viewport = self.enabled_list.ancestor(gtk::Viewport::static_type()).and_downcast::<gtk::Viewport>();
+        if let Some(vp) = &viewport {
+            vp.set_scroll_to_focus(false);
+        }
         self.missing_list.remove_all();
         let placeholders = self.collections.borrow().active().placeholders(&state.mods);
         let show_missing = !placeholders.is_empty() && self.view.get() == mods::filter::View::All && self.category.get().is_none();
@@ -209,6 +217,18 @@ impl Window {
         self.update_bulk_bar();
         self.undo_action.set_enabled(can_undo);
         self.redo_action.set_enabled(can_redo);
+        if let (Some(scroller), Some(value)) = (scroller, saved_scroll) {
+            glib::idle_add_local_once(move || {
+                let adj = scroller.vadjustment();
+                let max = (adj.upper() - adj.page_size()).max(0.0);
+                adj.set_value(value.clamp(0.0, max));
+                if let Some(vp) = viewport {
+                    vp.set_scroll_to_focus(true);
+                }
+            });
+        } else if let Some(vp) = viewport {
+            glib::idle_add_local_once(move || vp.set_scroll_to_focus(true));
+        }
         self.scan_if_stale();
     }
 

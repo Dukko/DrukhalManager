@@ -53,6 +53,12 @@ pub fn host_config_dir() -> PathBuf {
     host_xdg_dir("HOST_XDG_CONFIG_HOME", "XDG_CONFIG_HOME", ".config")
 }
 
+/// `~/.local/state` on the host.
+#[cfg(unix)]
+pub fn host_state_dir() -> PathBuf {
+    host_xdg_dir("HOST_XDG_STATE_HOME", "XDG_STATE_HOME", ".local/state")
+}
+
 /// The app's settings folder, shared between a Flatpak and a native install.
 pub fn config_dir() -> PathBuf {
     #[cfg(unix)]

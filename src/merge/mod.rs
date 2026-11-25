@@ -8,6 +8,7 @@ pub mod conflicts;
 pub mod external;
 pub mod file_merge;
 pub mod ignore_rules;
+pub mod inline_scripts;
 pub mod lint;
 pub mod order_check;
 pub mod patch;

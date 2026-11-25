@@ -426,6 +426,33 @@ impl BehindView {
             }
             bar.extra.append(&game_changes_toggle);
 
+            let now_text = b.now.as_ref().map(|n| n.text.as_str()).unwrap_or(&b.was.text);
+            let mut left_roots: Vec<(&str, &Path)> = Vec::new();
+            if let Some(Some(root)) = page.analysis.roots.get(b.mod_position) {
+                left_roots.push((page.analysis.name(b.mod_position), root.as_path()));
+            }
+            let mut right_roots: Vec<(&str, &Path)> = Vec::new();
+            if let Some(game_dir) = page.hooks.game_dir.as_deref() {
+                left_roots.push(("Vanilla", game_dir));
+                right_roots.push(("Vanilla", game_dir));
+            }
+            let inline_comparisons = crate::merge::inline_scripts::find_comparisons(&mod_text, &left_roots, now_text, &right_roots);
+            if !inline_comparisons.is_empty() {
+                let label = tnf!("Inline Script ({count})", "Inline Scripts ({count})", count = inline_comparisons.len());
+                let btn = gtk::Button::builder()
+                    .label(label)
+                    .tooltip_text(t!("Compare the inline script files that differ or were replaced between the mod and the base game"))
+                    .css_classes(["flat"])
+                    .build();
+                let page_weak = Rc::downgrade(&page);
+                btn.connect_clicked(move |b| {
+                    let Some(page) = page_weak.upgrade() else { return };
+                    let session = page.hooks.session.borrow();
+                    conflicts_view::show_inline_scripts(b, inline_comparisons.clone(), session.fold_unchanged, session.ignore_whitespace);
+                });
+                bar.extra.append(&btn);
+            }
+
             let fold_toggle = gtk::ToggleButton::builder().label(t!("Changed Lines Only")).tooltip_text(t!("Fold runs of unchanged lines")).active(page.hooks.session.borrow().fold_unchanged).css_classes(["flat"]).build();
             {
                 let (pair_weak, page_weak) = (Rc::downgrade(&self.pair), Rc::downgrade(&page));
@@ -552,7 +579,7 @@ impl BehindView {
                 page.hooks.saved();
                 page.update_status(Item::Behind(self.index));
                 (page.hooks.toast)(&tf!("Saved the updated {key} to the merged patch", key = &b.key));
-                self.render();
+                page.advance(Item::Behind(self.index));
             }
             Err(message) => {
                 self.with_state(|s| s.error = Some(message));

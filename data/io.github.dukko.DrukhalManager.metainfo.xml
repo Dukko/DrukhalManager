@@ -36,6 +36,18 @@
     <control>keyboard</control>
   </supports>
   <releases>
+    <release version="2.7.22" date="2026-11-25">
+      <description>
+        <p>Inline script comparison, Omarchy theming, and smoother collection &amp; conflict workflows:</p>
+        <ul>
+          <li>Adds side-by-side comparison for replaced or modified inline scripts in Object Conflicts and Game Update views</li>
+          <li>Advances to the next unresolved conflict when clicking Save to Merged Patch in Game Update and File Conflicts views</li>
+          <li>Adds live Omarchy desktop theme support (colors.toml and light.mode) for native and Flatpak builds</li>
+          <li>Preserves scroll position when enabling or adding mods so the mod list does not jump to the top</li>
+          <li>Shows the Missing Mods dialog on all collection imports (file, bundle, and clipboard), adds queued batch opening in browser, and auto-detects finished Steam Workshop downloads</li>
+        </ul>
+      </description>
+    </release>
     <release version="2.7.21" date="2026-11-24">
       <description>
         <p>Fixes false stale merge warnings and polishes game update conflict view:</p>

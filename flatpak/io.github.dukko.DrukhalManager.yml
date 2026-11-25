@@ -26,6 +26,8 @@ finish-args:
   # The user's GTK 4 stylesheet, so custom libadwaita colour schemes
   # (Gradience, matugen, DankMaterialShell and the like) apply.
   - --filesystem=xdg-config/gtk-4.0:ro
+  # Omarchy's active theme, when XDG_CONFIG_HOME is outside ~/.config.
+  - --filesystem=xdg-config/omarchy:ro
 build-options:
   append-path: /usr/lib/sdk/rust-stable/bin
   env:

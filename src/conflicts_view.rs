@@ -1735,6 +1735,74 @@ pub fn run_merge_tool(button: &impl IsA<gtk::Widget>, command: String, left: Too
     });
 }
 
+/// Opens a dialog comparing inline scripts that differ or were replaced
+/// between two object versions.
+pub(crate) fn show_inline_scripts(
+    parent: &impl IsA<gtk::Widget>,
+    comparisons: Vec<crate::merge::inline_scripts::InlineScriptComparison>,
+    fold: bool,
+    ignore_whitespace: bool,
+) {
+    if comparisons.is_empty() {
+        return;
+    }
+    let pair = Pair::new(false);
+    pair.set_fold(fold);
+    let bar = diff_bar(&pair);
+
+    let show = {
+        let pair = Rc::clone(&pair);
+        let comparisons = comparisons.clone();
+        move |index: usize| {
+            let Some(c) = comparisons.get(index) else { return };
+            pair.left.set_header(&crate::diff_view::Header {
+                title: c.left.source_label.clone(),
+                subtitle: c.left.path.clone(),
+                color: None,
+                badge: None,
+            });
+            pair.right.set_header(&crate::diff_view::Header {
+                title: c.right.source_label.clone(),
+                subtitle: c.right.path.clone(),
+                color: None,
+                badge: None,
+            });
+            pair.show(&c.left.text, &c.right.text, &crate::diff_view::Compare::Each, ignore_whitespace);
+        }
+    };
+
+    if comparisons.len() > 1 {
+        let labels: Vec<String> = comparisons
+            .iter()
+            .map(|c| {
+                if c.left.name.eq_ignore_ascii_case(&c.right.name) {
+                    c.left.name.clone()
+                } else {
+                    format!("{} ↔ {}", c.left.name, c.right.name)
+                }
+            })
+            .collect();
+        let picker = gtk::DropDown::from_strings(&labels.iter().map(String::as_str).collect::<Vec<_>>());
+        let show_fn = show.clone();
+        picker.connect_selected_notify(move |p| show_fn(p.selected() as usize));
+        bar.extra.append(&picker);
+    }
+    show(0);
+
+    let body = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(8).margin_top(12).margin_bottom(12).margin_start(12).margin_end(12).build();
+    body.append(&bar.widget);
+    body.append(&pair.widget);
+
+    let toolbar = adw::ToolbarView::new();
+    toolbar.add_top_bar(&adw::HeaderBar::new());
+    toolbar.set_content(Some(&body));
+
+    let title = tnf!("Inline Script ({count})", "Inline Scripts ({count})", count = comparisons.len());
+    let dialog = adw::Dialog::builder().title(title).content_width(980).content_height(720).child(&toolbar).build();
+    object::keep_alive(&dialog, pair);
+    dialog.present(Some(parent));
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

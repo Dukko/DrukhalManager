@@ -425,7 +425,7 @@ impl FileView {
                 page.hooks.saved();
                 (page.hooks.toast)(message);
                 page.update_status(self.item);
-                self.render();
+                page.advance(self.item);
             }
             Err(message) => {
                 self.error.replace(Some(message));

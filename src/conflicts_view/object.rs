@@ -611,6 +611,22 @@ impl ObjectView {
         }
         bar.extra.append(&take);
         bar.extra.append(&self.merge_tool_button(page, &left.label, &left.text, &steps.right_source(), steps.loaded.vanilla.as_ref().map(|v| v.text.as_str()), busy));
+        let inline_comparisons = self.inline_comparisons(page, &left.text, steps);
+        if !inline_comparisons.is_empty() {
+            let label = tnf!("Inline Script ({count})", "Inline Scripts ({count})", count = inline_comparisons.len());
+            let btn = gtk::Button::builder()
+                .label(label)
+                .tooltip_text(t!("Compare the inline script files that differ or were replaced between these two versions"))
+                .css_classes(["flat"])
+                .build();
+            let page_ref = Rc::downgrade(page);
+            btn.connect_clicked(move |b| {
+                let Some(page) = page_ref.upgrade() else { return };
+                let session = page.hooks.session.borrow();
+                super::show_inline_scripts(b, inline_comparisons.clone(), session.fold_unchanged, session.ignore_whitespace);
+            });
+            bar.extra.append(&btn);
+        }
         self.view_options(page, &bar.extra, steps.loaded.vanilla.is_some());
 
         let session = page.hooks.session.borrow();
@@ -627,6 +643,36 @@ impl ObjectView {
         // The pair lives as long as its widgets.
         keep_alive(&body, pair);
         body.upcast()
+    }
+
+    fn inline_comparisons(&self, page: &Rc<Page>, left_text: &str, steps: &Steps) -> Vec<crate::merge::inline_scripts::InlineScriptComparison> {
+        let mut left_roots: Vec<(&str, &std::path::Path)> = Vec::new();
+        for name in steps.from.iter().rev() {
+            if let Some(pos) = page.analysis.names.iter().position(|n| n == name)
+                && let Some(Some(root)) = page.analysis.roots.get(pos)
+            {
+                left_roots.push((page.analysis.name(pos), root.as_path()));
+            }
+        }
+        for (pos, root) in page.analysis.roots.iter().enumerate().rev() {
+            if let Some(root) = root.as_deref() {
+                let name = page.analysis.name(pos);
+                if !left_roots.iter().any(|&(n, _)| n == name) {
+                    left_roots.push((name, root));
+                }
+            }
+        }
+        let mut right_roots: Vec<(&str, &std::path::Path)> = Vec::new();
+        if let Some(&pos) = steps.positions.get(steps.next)
+            && let Some(Some(root)) = page.analysis.roots.get(pos)
+        {
+            right_roots.push((page.analysis.name(pos), root.as_path()));
+        }
+        if let Some(game_dir) = page.hooks.game_dir.as_deref() {
+            left_roots.push(("Vanilla", game_dir));
+            right_roots.push(("Vanilla", game_dir));
+        }
+        crate::merge::inline_scripts::find_comparisons(left_text, &left_roots, &steps.right_source().text, &right_roots)
     }
 
     /// Opens both versions in the external merge tool; what it saves
