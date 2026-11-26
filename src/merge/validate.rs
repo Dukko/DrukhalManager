@@ -249,8 +249,14 @@ pub fn validate_file(
     let mut depth: i32 = 0;
     let mut in_quote = false;
     let mut in_comment = false;
+    let mut escaped = false;
     for ch in text.chars() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
         match ch {
+            '\\' if in_quote && !in_comment => escaped = true,
             '\n' | '\r' => in_comment = false,
             '#' if !in_quote => in_comment = true,
             '"' if !in_comment => in_quote = !in_quote,
@@ -1004,6 +1010,58 @@ mod tests {
             );
             assert!(!res.is_ok(), "{bad}: {:?}", res.problems);
         }
+    }
+
+    #[test]
+    fn brace_check_honours_escaped_quotes_in_strings() {
+        let path = "common/buildings/t.txt";
+        let ok = validate_file(
+            path,
+            "building_lab = { desc = \"he said \\\"hi\\\" }\" }",
+            None,
+            &[],
+            None,
+        );
+        assert!(ok.is_ok(), "{:?}", ok.problems);
+
+        let escaped_backslash = validate_file(
+            path,
+            "building_lab = { desc = \"path\\\\\" }",
+            None,
+            &[],
+            None,
+        );
+        assert!(escaped_backslash.is_ok(), "{:?}", escaped_backslash.problems);
+    }
+
+    #[test]
+    fn brace_check_still_reports_real_imbalance_after_escaped_quotes() {
+        let path = "common/buildings/t.txt";
+        let missing = validate_file(
+            path,
+            "building_lab = { desc = \"a \\\" b\"",
+            None,
+            &[],
+            None,
+        );
+        assert!(
+            missing.problems.iter().any(|p| p.message.contains("missing 1 closing brace")),
+            "{:?}",
+            missing.problems
+        );
+
+        let early = validate_file(
+            path,
+            "desc = \"a \\\" }\" }",
+            None,
+            &[],
+            None,
+        );
+        assert!(
+            early.problems.iter().any(|p| p.message.contains("unexpected closing brace")),
+            "{:?}",
+            early.problems
+        );
     }
 
     #[test]
