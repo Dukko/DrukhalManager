@@ -1296,6 +1296,52 @@ fn write_atomic(path: &Path, contents: &[u8]) -> io::Result<()> {
 mod tests {
     use super::*;
 
+    fn script_files(dir: &Path, out: &mut Vec<PathBuf>) {
+        let Ok(read) = std::fs::read_dir(dir) else { return };
+        let mut paths: Vec<_> = read.flatten().map(|e| e.path()).collect();
+        paths.sort();
+        for path in paths {
+            if path.is_dir() {
+                script_files(&path, out);
+            } else if path.extension().is_some_and(|e| e == "txt") {
+                out.push(path);
+            }
+        }
+    }
+
+    /// Runs the save validators over a patch folder's saved merges, read
+    /// only, and prints what they reject.
+    /// `DRUKHAL_PATCH_DIR=<patch folder> cargo test saved_patch_survey -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn saved_patch_survey() {
+        let Some(dir) = std::env::var_os("DRUKHAL_PATCH_DIR").map(PathBuf::from) else {
+            println!("SURVEY skipped: set DRUKHAL_PATCH_DIR");
+            return;
+        };
+        let manifest = Manifest::parse(&std::fs::read_to_string(dir.join(MANIFEST)).unwrap()).unwrap();
+        let mut rejected = 0;
+        for merge in &manifest.merges {
+            if let Err(e) = crate::merge_dialog::validate(&merge.category, &merge.key, &merge.script) {
+                rejected += 1;
+                println!("OBJECT {} {}: {e}", merge.category, merge.key);
+            }
+        }
+        let mut files: Vec<PathBuf> = manifest.files.iter().map(|f| dir.join(&f.path)).collect();
+        script_files(&dir.join("common/inline_scripts"), &mut files);
+        let is_script = |p: &Path| p.extension().is_some_and(|e| ["txt", "gfx", "gui", "asset", "sfx", "yml"].iter().any(|x| e.eq_ignore_ascii_case(x)));
+        files.retain(|p| is_script(p));
+        for path in &files {
+            let relative = path.strip_prefix(&dir).unwrap().to_string_lossy().replace('\\', "/");
+            let text = String::from_utf8_lossy(&std::fs::read(path).unwrap()).into_owned();
+            if let Err(e) = crate::merge::file_merge::validate(&crate::merge::file_merge::category(&relative), &text) {
+                rejected += 1;
+                println!("FILE {relative}: {e}");
+            }
+        }
+        println!("SURVEY {} objects, {} files, {rejected} rejected", manifest.merges.len(), files.len());
+    }
+
     #[test]
     fn names_each_collections_patch() {
         assert_eq!(folder_for("Main Campaign!", |_| false), "drukhal_patch_main_campaign");

@@ -501,13 +501,17 @@ fn is_single_valued_key(category: &str, key: &str) -> bool {
     false
 }
 
-fn is_conditional_variant(value: &Value) -> bool {
+fn guard_of(value: &Value) -> Option<&Value> {
     let Value::Block(inner) = value else {
-        return false;
+        return None;
     };
-    inner.iter().any(|entry| {
-        matches!(entry, Entry::Assign { key, value: Value::Block(_), .. }
-            if ["trigger", "limit", "potential"].iter().any(|guard| key.eq_ignore_ascii_case(guard)))
+    inner.iter().find_map(|entry| match entry {
+        Entry::Assign { key, value: guard @ Value::Block(_), .. }
+            if ["trigger", "limit", "potential"].iter().any(|g| key.eq_ignore_ascii_case(g)) =>
+        {
+            Some(guard)
+        }
+        _ => None,
     })
 }
 
@@ -518,24 +522,42 @@ fn check_duplicate_single_valued_keys(
 ) {
     // A repeat only conflicts when it sets different values outright: a copy
     // equal to an earlier one is harmless, and a block guarded by a
-    // `trigger`/`limit`/`potential` is a variant the game picks by condition.
+    // `trigger`/`limit`/`potential` is a variant the game picks by condition,
+    // so it conflicts only with an earlier copy under the same guard.
     let mut seen: HashMap<String, Vec<&Value>> = HashMap::new();
+    let mut guarded: HashMap<String, Vec<(&Value, &Value)>> = HashMap::new();
+    let mut reported: HashSet<String> = HashSet::new();
     for entry in entries {
         match entry {
             Entry::Assign { key, value, .. } => {
-                if is_single_valued_key(category, key) && !is_conditional_variant(value) {
-                    let distinct = seen.entry(key.to_ascii_lowercase()).or_default();
-                    if !distinct.contains(&value) {
-                        distinct.push(value);
-                        if distinct.len() == 2 {
-                            problems.push(Problem::error(
-                                ProblemKind::DuplicateScalarKey,
-                                tf!(
-                                    "Single-valued key `{key}` appears more than once in the same block",
-                                    key = key
-                                ),
-                            ));
+                if is_single_valued_key(category, key) {
+                    let lower = key.to_ascii_lowercase();
+                    let conflict = if let Some(guard) = guard_of(value) {
+                        let variants = guarded.entry(lower.clone()).or_default();
+                        match variants.iter().find(|(g, _)| *g == guard) {
+                            Some((_, body)) => *body != value,
+                            None => {
+                                variants.push((guard, value));
+                                false
+                            }
                         }
+                    } else {
+                        let distinct = seen.entry(lower.clone()).or_default();
+                        if distinct.contains(&value) {
+                            false
+                        } else {
+                            distinct.push(value);
+                            distinct.len() == 2
+                        }
+                    };
+                    if conflict && reported.insert(lower) {
+                        problems.push(Problem::error(
+                            ProblemKind::DuplicateScalarKey,
+                            tf!(
+                                "Single-valued key `{key}` appears more than once in the same block",
+                                key = key
+                            ),
+                        ));
                     }
                 }
                 if let Value::Block(inner) = value {

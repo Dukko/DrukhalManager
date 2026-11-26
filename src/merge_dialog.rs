@@ -107,6 +107,14 @@ mod tests {
     }
 
     #[test]
+    fn manual_save_compares_repeats_under_the_same_guard() {
+        let same_guard_other_body = "building_lab = { cost = { trigger = { a = b } energy = 1 } cost = { trigger = { a = b } energy = 2 } }";
+        assert!(validate("common/buildings", "building_lab", same_guard_other_body).is_err());
+        let same_guard_same_body = "building_lab = { cost = { trigger = { a = b } energy = 1 } cost = { trigger = { a = b } energy = 1 } }";
+        assert!(validate("common/buildings", "building_lab", same_guard_same_body).is_ok());
+    }
+
+    #[test]
     fn manual_save_rejects_unguarded_conflicting_repeats() {
         assert!(validate("common/technology", "tech_a", "tech_a = { cost = 100 cost = 200 }").is_err());
         assert!(validate("common/buildings", "building_lab", "building_lab = { cost = { a = 1 } cost = { a = 2 } }").is_err());
