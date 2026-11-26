@@ -36,6 +36,17 @@
     <control>keyboard</control>
   </supports>
   <releases>
+    <release version="2.7.26" date="2026-11-25">
+      <description>
+        <p>Keeps Fix with AI from dropping the content it is repairing:</p>
+        <ul>
+          <li>Rejects a brace repair that drops, alters or reorders any line, key, value or comment</li>
+          <li>Asks the model once more with the missing content when a repair is rejected</li>
+          <li>Leaves the editor untouched and reports the reason when the second repair is rejected too</li>
+          <li>Stops a repair as soon as Stop is pressed, including during the retry</li>
+        </ul>
+      </description>
+    </release>
     <release version="2.7.25" date="2026-11-25">
       <description>
         <p>Fixes saving a merged object when the result was opened after Merge All:</p>

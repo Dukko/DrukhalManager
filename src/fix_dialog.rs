@@ -241,14 +241,31 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
                         label.set_label(&t!("Fixing…"));
                         let (provider, c, k, object, fixes, m) = (provider.clone(), category.clone(), key.clone(), text[range].to_owned(), fixes.clone(), mod_name.clone());
                         let heading = key.clone();
-                        let result = thinking_view::run(&thinking, Some(&heading), move |on| ai::fix(&provider, &c, &k, &object, &fixes, &m, on)).await;
+                        let result = thinking_view::run_cancellable(&thinking, Some(&heading), move |cancel, on| {
+                            ai::fix_checked(
+                                &provider,
+                                &c,
+                                &k,
+                                &object,
+                                &fixes,
+                                &m,
+                                &|candidate| {
+                                    let script = merge_dialog::validate(&c, &k, candidate)?;
+                                    lint::verify_brace_repair(&object, &script)?;
+                                    Ok(script)
+                                },
+                                Some(cancel),
+                                on,
+                            )
+                        })
+                        .await;
                         if cancelled.get() || thinking.is_stopped() {
                             label.set_label(&t!("Stopped"));
                             label.set_css_classes(&["dim-label", "caption"]);
                             break;
                         }
                         let fixed = match result {
-                            Some(Ok(f)) => merge_dialog::validate(&category, &key, &f.script).map(|script| (script, f.notes)),
+                            Some(Ok(checked)) => checked.script.map(|script| (script, checked.merged.notes)),
                             Some(Err(e)) => Err(e),
                             None => Err(t!("failed unexpectedly")),
                         };

@@ -135,6 +135,103 @@ pub fn replace_object(category: &str, key: &str, text: &str, replacement: &str) 
     Some(format!("{}{}{}", &text[..range.start], replacement.trim(), &text[range.end..]))
 }
 
+fn non_brace_tokens(text: &str) -> Vec<Token> {
+    text.lines()
+        .flat_map(|line| {
+            let (code, _) = split_line_comment(line);
+            tokenize_line(code)
+                .into_iter()
+                .filter(|t| !matches!(t, Token::Open | Token::Close))
+        })
+        .collect()
+}
+
+/// The comments in `text`, in order, without trailing whitespace.
+fn comments(text: &str) -> Vec<String> {
+    text.lines()
+        .filter_map(|line| split_line_comment(line).1)
+        .map(|comment| comment.trim_end().to_owned())
+        .collect()
+}
+
+/// The entries of `wanted` that `found` doesn't contain, in order.
+fn missing_in_order(wanted: &[String], found: &[String]) -> Vec<String> {
+    let mut at = 0usize;
+    let mut missing = Vec::new();
+    for want in wanted {
+        match found[at..].iter().position(|have| have == want) {
+            Some(offset) => at += offset + 1,
+            None => missing.push(want.clone()),
+        }
+    }
+    missing
+}
+
+/// Ensures a brace repair only moved `{`/`}` and kept every non-brace token
+/// and every comment, in the same order. Added comments and whitespace changes
+/// are allowed.
+///
+/// The message is deliberately untranslated: it also goes to the model as the
+/// reason a repair was rejected.
+pub fn verify_brace_repair(original: &str, repaired: &str) -> Result<(), String> {
+    let orig_tokens = non_brace_tokens(original);
+    let new_tokens = non_brace_tokens(repaired);
+    let missing_comments = missing_in_order(&comments(original), &comments(repaired));
+    if orig_tokens == new_tokens && missing_comments.is_empty() {
+        return Ok(());
+    }
+
+    if orig_tokens != new_tokens {
+        let mut sorted_orig = orig_tokens.clone();
+        sorted_orig.sort();
+        let mut sorted_new = new_tokens.clone();
+        sorted_new.sort();
+        if sorted_orig == sorted_new {
+            return Err(
+                "The repair reordered tokens instead of only moving braces. Keep every line, key and value in its original order."
+                    .to_owned(),
+            );
+        }
+    }
+
+    let mut lost = Vec::new();
+    let mut pos = 0usize;
+    for line in original.lines() {
+        let (code, _) = split_line_comment(line);
+        let line_tokens: Vec<Token> = tokenize_line(code)
+            .into_iter()
+            .filter(|t| !matches!(t, Token::Open | Token::Close))
+            .collect();
+        if line_tokens.is_empty() {
+            continue;
+        }
+        let matched = new_tokens[pos..]
+            .windows(line_tokens.len())
+            .position(|w| w == line_tokens.as_slice());
+        match matched {
+            Some(offset) => pos += offset + line_tokens.len(),
+            None => lost.push(line.trim().to_owned()),
+        }
+    }
+    lost.extend(missing_comments);
+
+    if lost.is_empty() {
+        return Err(
+            "The repair changed tokens instead of only moving braces. Keep every line, key and value exactly as it was."
+                .to_owned(),
+        );
+    }
+    let sample = lost.iter().take(10).cloned().collect::<Vec<_>>().join("\n");
+    let extra = if lost.len() > 10 {
+        format!("\n... (+{} more lines)", lost.len() - 10)
+    } else {
+        String::new()
+    };
+    Err(format!(
+        "The repair dropped or changed this content. Restore it exactly:\n{sample}{extra}"
+    ))
+}
+
 /// `key = {` at column 0, the convention for top-level objects.
 fn starts_top_level_object(line: &str) -> bool {
     let Some(first) = line.chars().next() else { return false };
@@ -145,7 +242,7 @@ fn starts_top_level_object(line: &str) -> bool {
     !key.trim().contains(char::is_whitespace) && rest.trim_start().starts_with('{')
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 enum Token {
     Word(String),
     String(String),
@@ -576,5 +673,68 @@ foo = {  # comment next to open
         assert_eq!(count_brace_depth(text), 2);
         let closed = format!("{text}}}}}}}");
         assert_eq!(count_brace_depth(&closed), 0);
+    }
+
+    #[test]
+    fn brace_repair_accepts_moved_braces_and_complex_tokens() {
+        let orig = "sv = {\n\tcomplex_trigger_modifier = {\n\t\ttrigger = check_variable\n\t\tparameters = { who = planet.value:foo|CHAIN|bar| }\n\t\t}\n\t\tmult = 2\n}";
+        let moved = "sv = {\n\tcomplex_trigger_modifier = {\n\t\ttrigger = check_variable # moved comment\n\t\tparameters = {\n\t\t\twho = planet.value:foo|CHAIN|bar|\n\t\t}\n\t}\n\tmult = 2\n}";
+        assert_eq!(verify_brace_repair(orig, moved), Ok(()));
+    }
+
+    #[test]
+    fn brace_repair_rejects_deleted_line_and_stub() {
+        let orig = "building_imperial_government_sv = {\n\tbase = 0\n\tcomplex_trigger_modifier = {\n\t\ttrigger = num_assigned_jobs\n\t}\n\tmodifier = {\n\t\tadd = 1\n\t}\n\tmult = 2\n}";
+        let stub = "building_imperial_government_sv = { base = 0 }";
+        let err = verify_brace_repair(orig, stub).unwrap_err();
+        assert!(err.contains("dropped or changed"), "{err}");
+        assert!(err.contains("mult = 2"), "{err}");
+
+        let empty = "building_imperial_government_sv = {}";
+        assert!(verify_brace_repair(orig, empty).is_err());
+
+        let altered = orig.replace("mult = 2", "mult = 3");
+        let err = verify_brace_repair(orig, &altered).unwrap_err();
+        assert!(err.contains("mult = 2"), "{err}");
+    }
+
+    #[test]
+    fn brace_repair_rejects_reordered_values() {
+        let orig = "sv = {\n\ta = 1\n\tb = 2\n}";
+        let reordered = "sv = {\n\tb = 2\n\ta = 1\n}";
+        let err = verify_brace_repair(orig, reordered).unwrap_err();
+        assert!(err.contains("reordered"), "{err}");
+        assert!(!err.contains("dropped or changed"), "{err}");
+    }
+
+    #[test]
+    fn brace_repair_keeps_comments_and_allows_new_ones() {
+        let orig = "sv = {\n\ta = 1 # keep\n\tb = 2 # also keep\n}";
+        let dropped = "sv = {\n\ta = 1\n\tb = 2 # also keep\n}";
+        let err = verify_brace_repair(orig, dropped).unwrap_err();
+        assert!(err.contains("# keep"), "{err}");
+        assert!(!err.contains("# also keep"), "{err}");
+
+        let added = "sv = {\n\ta = 1 # keep\n\tb = 2 # also keep\n\t# extra\n}";
+        assert_eq!(verify_brace_repair(orig, added), Ok(()));
+
+        let swapped = "sv = {\n\tb = 2 # also keep\n\ta = 1 # keep\n}";
+        let err = verify_brace_repair(orig, swapped).unwrap_err();
+        assert!(err.contains("reordered"), "{err}");
+    }
+
+    #[test]
+    fn brace_repair_accepts_a_different_nesting() {
+        let orig = "sv = {\n\tblock = {\n\t\ta = 1\n\t}\n}";
+        let nested = "sv = {\n\tblock = {\n\t}\n\ta = 1\n}";
+        assert_eq!(verify_brace_repair(orig, nested), Ok(()));
+    }
+
+    #[test]
+    fn brace_repair_accepts_the_reported_scripted_value() {
+        let orig = "building_imperial_government_sv = {\n\tbase = 0\n\tcomplex_trigger_modifier = {\n\t\tpotential = { NOT = { has_global_flag = PR_installed } }\n\t\ttrigger = count_owned_pop\n\t\tparameters = {\n\t\t\tlimit = {\n\t\t\t\tOR = {\n\t\t\t\t\thas_job = priest\n\t\t\t\t\thas_job = head_maid # rogue maid\n\t\t\t\t}\n\t\t\t}\n\t\t}\n\t\tmode = add\n\t}\n\tmodifier = {\n\t\thas_global_flag = PR_installed\n\t\tadd = planet.value:PR_prmt_sv_plnt_JOB_efficiency|CHAIN|culture|JIC|planet_administrators|\n\t}\n\tmult = value:imperial_governance_produces_mult_sv\n}";
+        let moved = orig.replace("\t\tparameters = {\n", "\t\tparameters =\n\t\t{\n").replace("\t\tmode = add\n\t}", "\t\tmode = add }");
+        assert_ne!(orig, moved);
+        assert_eq!(verify_brace_repair(orig, &moved), Ok(()));
     }
 }
