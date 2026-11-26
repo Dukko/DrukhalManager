@@ -5,7 +5,7 @@
 //! `/chat/completions` endpoint such as OpenRouter, Ollama or LM Studio.
 //! Calls are blocking; run them off the main thread.
 
-use std::io::BufRead;
+use std::io::{BufRead, Read};
 use std::sync::{Arc, OnceLock};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
@@ -1653,7 +1653,7 @@ fn merge_anthropic(
             return Err(http_error("The Claude API", status, &reply));
         }
         return anthropic_stream(
-            std::io::BufReader::new(response.into_body().into_reader()),
+            stream_reader(response.into_body(), cancel),
             claude_price(model),
             cancel,
             on,
@@ -1742,24 +1742,114 @@ fn backoff_with_jitter(attempt: u32, asked: Option<u64>) -> Duration {
     (base + Duration::from_millis(extra_ms)).min(Duration::from_secs(120))
 }
 
+/// The most a reply may stream, so a misbehaving endpoint can't feed memory forever.
+const MAX_STREAM_BYTES: u64 = 32 * 1024 * 1024;
+/// The longest line, and the longest event's data, read from a stream.
+const MAX_LINE_BYTES: usize = 4 * 1024 * 1024;
+/// The most reasoning text one reply may stream.
+const MAX_THINKING_BYTES: usize = 8 * 1024 * 1024;
+/// A reply body to read as it streams: capped at [`MAX_STREAM_BYTES`], and
+/// stopping promptly when `cancel` is set.
+fn stream_reader(body: ureq::Body, _cancel: Option<&CancelToken>) -> Box<dyn BufRead> {
+    let reader = body.into_with_config().limit(MAX_STREAM_BYTES).reader();
+    Box::new(std::io::BufReader::new(reader))
+}
+
+fn read_error(e: &std::io::Error, cancel: Option<&CancelToken>) -> String {
+    if cancel.is_some_and(CancelToken::is_cancelled) {
+        return "Cancelled".into();
+    }
+    let over_limit = e
+        .get_ref()
+        .and_then(|inner| inner.downcast_ref::<ureq::Error>())
+        .is_some_and(|inner| matches!(inner, ureq::Error::BodyExceedsLimit(_)));
+    if over_limit {
+        format!(
+            "The AI provider's reply is longer than {} MiB, so it was cut off.",
+            MAX_STREAM_BYTES / (1024 * 1024)
+        )
+    } else {
+        format!("The connection broke off: {e}")
+    }
+}
+
+fn line_too_long() -> String {
+    format!(
+        "The AI provider sent a line longer than {} MiB, so the reply was cut off.",
+        MAX_LINE_BYTES / (1024 * 1024)
+    )
+}
+
+/// Appends the next line, without its newline, to `line`; false at the end
+/// of the stream.
+fn read_capped_line(
+    reader: &mut impl BufRead,
+    line: &mut Vec<u8>,
+    cancel: Option<&CancelToken>,
+) -> Result<bool, String> {
+    loop {
+        let buf = reader.fill_buf().map_err(|e| read_error(&e, cancel))?;
+        if buf.is_empty() {
+            return Ok(!line.is_empty());
+        }
+        let (take, end) = match buf.iter().position(|&b| b == b'\n') {
+            Some(i) => (i + 1, true),
+            None => (buf.len(), false),
+        };
+        if line.len() + take > MAX_LINE_BYTES {
+            return Err(line_too_long());
+        }
+        line.extend_from_slice(&buf[..take]);
+        reader.consume(take);
+        if end {
+            line.pop();
+            if line.last() == Some(&b'\r') {
+                line.pop();
+            }
+            return Ok(true);
+        }
+    }
+}
+
+/// Adds `added` bytes of reasoning to `total`, failing past [`MAX_THINKING_BYTES`].
+fn count_thinking(total: &mut usize, added: usize) -> Result<(), String> {
+    *total += added;
+    if *total > MAX_THINKING_BYTES {
+        return Err(format!(
+            "The model's reasoning ran past {} MiB, so the reply was cut off.",
+            MAX_THINKING_BYTES / (1024 * 1024)
+        ));
+    }
+    Ok(())
+}
+
 /// Reads Server-Sent Events, calling `f` with each event's data.
 fn read_sse(
-    reader: impl BufRead,
+    mut reader: impl BufRead,
     cancel: Option<&CancelToken>,
     mut f: impl FnMut(&str) -> Result<(), String>,
 ) -> Result<(), String> {
     let mut data = String::new();
-    for line in reader.lines() {
+    let mut line = Vec::new();
+    loop {
+        line.clear();
+        let more = read_capped_line(&mut reader, &mut line, cancel)?;
         if cancel.is_some_and(CancelToken::is_cancelled) {
             return Err("Cancelled".into());
         }
-        let line = line.map_err(|e| format!("The connection broke off: {e}"))?;
+        if !more {
+            break;
+        }
+        let line = String::from_utf8_lossy(&line);
         if line.is_empty() {
             if !data.is_empty() {
                 f(&data)?;
                 data.clear();
             }
         } else if let Some(rest) = line.strip_prefix("data:") {
+            if data.len() + rest.len() > MAX_LINE_BYTES {
+                return Err(line_too_long());
+            }
             if !data.is_empty() {
                 data.push('\n');
             }
@@ -1779,6 +1869,7 @@ fn anthropic_stream(
     on: &mut dyn FnMut(Progress),
 ) -> Result<Merged, String> {
     let mut text = String::new();
+    let mut thinking_total = 0;
     let mut stop_reason = None;
     let mut usage = Usage::default();
     let count = |u: &Value, field: &str| u[field].as_u64().unwrap_or(0);
@@ -1795,12 +1886,11 @@ fn anthropic_stream(
                 usage.cost = price.map(|p| p.cost(usage.input, usage.output));
             }
             Some("content_block_delta") => match event["delta"]["type"].as_str() {
-                Some("thinking_delta") => on(Progress::Thinking(
-                    event["delta"]["thinking"]
-                        .as_str()
-                        .unwrap_or_default()
-                        .to_owned(),
-                )),
+                Some("thinking_delta") => {
+                    let delta = event["delta"]["thinking"].as_str().unwrap_or_default();
+                    count_thinking(&mut thinking_total, delta.len())?;
+                    on(Progress::Thinking(delta.to_owned()));
+                }
                 Some("text_delta") => {
                     let delta = event["delta"]["text"].as_str().unwrap_or_default();
                     text.push_str(delta);
@@ -1901,7 +1991,7 @@ fn merge_openai(
             return Err(http_error("The AI provider", status, &reply));
         }
         return openai_stream(
-            std::io::BufReader::new(response.into_body().into_reader()),
+            stream_reader(response.into_body(), cancel),
             cancel,
             on,
         );
@@ -1934,7 +2024,7 @@ fn openai_stream(
     // Some servers ignore `stream` and send a single JSON reply.
     let first = reader
         .fill_buf()
-        .map_err(|e| format!("The connection broke off: {e}"))?
+        .map_err(|e| read_error(&e, cancel))?
         .iter()
         .copied()
         .find(|b| !b.is_ascii_whitespace());
@@ -1942,7 +2032,7 @@ fn openai_stream(
         let mut body = String::new();
         reader
             .read_to_string(&mut body)
-            .map_err(|e| e.to_string())?;
+            .map_err(|e| read_error(&e, cancel))?;
         let reply: Value = serde_json::from_str(&body)
             .map_err(|e| format!("Unreadable reply from the AI provider: {e}"))?;
         let message = &reply["choices"][0]["message"];
@@ -1956,6 +2046,7 @@ fn openai_stream(
     }
 
     let (mut raw, mut thinking_sent, mut answer_sent) = (String::new(), 0, 0);
+    let mut thinking_total = 0;
     let mut finish = None;
     let mut usage = None;
     read_sse(reader, cancel, |data| {
@@ -1981,12 +2072,14 @@ fn openai_stream(
             .or(delta["reasoning_content"].as_str())
             .filter(|r| !r.is_empty())
         {
+            count_thinking(&mut thinking_total, reasoning.len())?;
             on(Progress::Thinking(reasoning.to_owned()));
         }
         if let Some(content) = delta["content"].as_str() {
             raw.push_str(content);
             let (thinking, answer) = split_think(&raw);
             if thinking.len() > thinking_sent {
+                count_thinking(&mut thinking_total, thinking.len() - thinking_sent)?;
                 on(Progress::Thinking(thinking[thinking_sent..].to_owned()));
                 thinking_sent = thinking.len();
             }
@@ -3689,5 +3782,99 @@ mod tests {
         }
 
         assert_eq!(accepted.load(Ordering::SeqCst), 1, "the second request opened a new connection");
+    }
+
+    /// Answers one request with `head`, then writes `chunk` until the client
+    /// hangs up or 40 MiB are out, which is past the stream cap.
+    fn serve_endless(head: &'static str, chunk: &'static [u8]) -> String {
+        use std::io::Write;
+        let (url, _) = serve(move |mut stream| {
+            if !read_request(&mut stream) {
+                return;
+            }
+            stream.write_all(head.as_bytes()).unwrap();
+            for _ in 0..(40 * 1024 * 1024 / chunk.len()) {
+                if stream.write_all(chunk).is_err() {
+                    return;
+                }
+            }
+        });
+        url
+    }
+
+    #[test]
+    fn a_stream_past_the_size_cap_stops_with_a_clear_error() {
+        const PADDING: &[u8] = b": padding padding padding padding padding padding padding\n";
+        let url = serve_endless(
+            "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\nconnection: close\r\n\r\n",
+            PADDING,
+        );
+
+        let err = merge_openai(&url, "m", "", "sys", "prompt", 1000, None, &mut |_| {}).unwrap_err();
+
+        assert_eq!(err, "The AI provider's reply is longer than 32 MiB, so it was cut off.");
+    }
+
+    #[test]
+    fn a_single_json_reply_past_the_size_cap_stops_with_a_clear_error() {
+        const SPACES: &[u8] = &[b' '; 1024];
+        let url = serve_endless(
+            "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\nconnection: close\r\n\r\n{",
+            SPACES,
+        );
+
+        let err = merge_openai(&url, "m", "", "sys", "prompt", 1000, None, &mut |_| {}).unwrap_err();
+
+        assert_eq!(err, "The AI provider's reply is longer than 32 MiB, so it was cut off.");
+    }
+
+    #[test]
+    fn a_line_past_the_line_cap_stops_the_stream() {
+        let mut stream = b"data: ".to_vec();
+        stream.extend(std::iter::repeat_n(b'x', 5 * 1024 * 1024));
+
+        let err = read_sse(std::io::Cursor::new(stream), None, |_| Ok(())).unwrap_err();
+
+        assert_eq!(err, "The AI provider sent a line longer than 4 MiB, so the reply was cut off.");
+    }
+
+    #[test]
+    fn an_event_split_over_many_lines_counts_against_the_line_cap() {
+        let line = format!("data: {}\n", "x".repeat(1024 * 1024));
+        let stream = line.repeat(5);
+
+        let err = read_sse(std::io::Cursor::new(stream), None, |_| Ok(())).unwrap_err();
+
+        assert_eq!(err, "The AI provider sent a line longer than 4 MiB, so the reply was cut off.");
+    }
+
+    #[test]
+    fn reasoning_past_the_cap_stops_the_stream() {
+        let event = format!(
+            "data: {}\n\n",
+            json!({"type": "content_block_delta", "delta": {"type": "thinking_delta", "thinking": "x".repeat(1024 * 1024)}})
+        );
+        let stream = event.repeat(9);
+
+        let err = anthropic_stream(std::io::Cursor::new(stream), None, None, &mut |_| {}).unwrap_err();
+
+        assert_eq!(err, "The model's reasoning ran past 8 MiB, so the reply was cut off.");
+    }
+
+    #[test]
+    fn crlf_line_endings_and_a_last_unterminated_event_still_read() {
+        let mut events = Vec::new();
+
+        read_sse(
+            std::io::Cursor::new("data: one\r\n\r\ndata: two"),
+            None,
+            |data| {
+                events.push(data.to_owned());
+                Ok(())
+            },
+        )
+        .unwrap();
+
+        assert_eq!(events, ["one", "two"]);
     }
 }
