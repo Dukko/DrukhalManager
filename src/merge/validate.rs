@@ -345,8 +345,14 @@ pub fn validate_file(
 /// A localisation line without its `#` comment; a `#` inside quotes is text.
 pub(crate) fn localisation_without_comment(line: &str) -> &str {
     let mut quoted = false;
+    let mut escaped = false;
     for (i, c) in line.char_indices() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
         match c {
+            '\\' if quoted => escaped = true,
             '"' => quoted = !quoted,
             '#' if !quoted => return &line[..i],
             _ => {}
@@ -1032,6 +1038,26 @@ mod tests {
             None,
         );
         assert!(escaped_backslash.is_ok(), "{:?}", escaped_backslash.problems);
+    }
+
+    #[test]
+    fn brace_check_accepts_a_string_holding_only_an_escaped_quote() {
+        let ok = validate_file(
+            "common/buildings/t.txt",
+            "a = { d = \"\\\"\" }",
+            None,
+            &[],
+            None,
+        );
+        assert!(ok.is_ok(), "{:?}", ok.problems);
+    }
+
+    #[test]
+    fn localisation_comment_starts_after_an_escaped_quote() {
+        assert_eq!(
+            localisation_without_comment("key:0 \"a \\\" # b\" # note"),
+            "key:0 \"a \\\" # b\" "
+        );
     }
 
     #[test]
