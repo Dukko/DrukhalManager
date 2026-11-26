@@ -12,6 +12,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::io::{Read, Write};
+use std::ops::Range;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
 
@@ -21,7 +22,7 @@ use flate2::Compression;
 use serde::{Deserialize, Serialize};
 
 use super::conflicts::{self, ObjectConflict, Report};
-use super::{file_merge, source};
+use super::file_merge;
 use crate::paradox::script::{self, Entry, Node};
 use crate::paradox::script_docs::Docs;
 
@@ -1046,20 +1047,31 @@ fn vanilla_events(game_dir: &Path) -> (HashSet<String>, HashMap<String, Vec<Stri
     (ids, templates)
 }
 
-/// The objects found at lines of one file, as (category, key).
-type Objects = HashMap<usize, Option<(String, String)>>;
+/// A file's top-level entries with their spans, parsed on the first lookup
+/// of an object in it.
+#[derive(Default)]
+struct Objects(Option<Option<Vec<(Entry, Range<usize>)>>>);
+
+impl Objects {
+    /// The key of the top-level object whose definition covers 1-based `line`
+    /// of `text`, as [`source::object_at`] finds it.
+    fn key_at(&mut self, category: &str, text: &str, line: usize) -> Option<String> {
+        if category == "localisation" || line == 0 {
+            return None;
+        }
+        let entries = self.0.get_or_insert_with(|| script::parse_with_spans(text).ok()).as_ref()?;
+        let start = if line == 1 { 0 } else { text.match_indices('\n').nth(line - 2)?.0 + 1 };
+        let end = text[start..].find('\n').map_or(text.len(), |i| start + i);
+        let (entry, _) = entries.iter().find(|(_, range)| range.start <= end && range.end > start)?;
+        conflicts::object_key_for_entry(category, entry)
+    }
+}
 
 /// The object at `line` of a mod's file, if found, or `None` when another
-/// mod's copy of that object is the one the game uses. `objects` caches
-/// the lookups of one file by line.
+/// mod's copy of that object is the one the game uses.
 fn used_object(report: &Report, position: usize, file: &str, text: &str, line: usize, objects: &mut Objects) -> Option<Option<(String, String)>> {
-    let object = objects
-        .entry(line)
-        .or_insert_with(|| {
-            let category = file_merge::category(file);
-            source::object_at(&category, text, line).map(|(key, _)| (category, key))
-        })
-        .clone();
+    let category = file_merge::category(file);
+    let object = objects.key_at(&category, text, line).map(|key| (category, key));
     if let Some((category, key)) = &object
         && let Some(definitions) = report.defined.get(&(category.clone(), key.clone()))
         && definitions.len() > 1
@@ -1114,7 +1126,7 @@ pub fn check_mods(context: &Context, known: &Known, roots: &[Option<PathBuf>], r
             if problems.is_empty() {
                 continue;
             }
-            let mut objects = HashMap::new();
+            let mut objects = Objects::default();
             for (line, name, ctx, problem, call) in problems {
                 let Some(object) = used_object(report, position, file, &text, line, &mut objects) else { continue };
                 found.push(Finding { mod_position: position, file: file.clone(), line, name, ctx, problem, object, unused: false, call, siblings: Vec::new() });
@@ -1146,7 +1158,7 @@ pub fn check_mods(context: &Context, known: &Known, roots: &[Option<PathBuf>], r
             continue;
         }
         let Some(root) = &roots[position] else { continue };
-        let (text, objects) = texts.entry((position, file.clone())).or_insert_with(|| (read_text(&root.join(&file)).unwrap_or_default(), HashMap::new()));
+        let (text, objects) = texts.entry((position, file.clone())).or_insert_with(|| (read_text(&root.join(&file)).unwrap_or_default(), Objects::default()));
         let Some(object) = used_object(report, position, &file, text, line, objects) else { continue };
         let (problem, siblings) = match by_namespace.get(namespace(&id)) {
             Some(ids) => {
