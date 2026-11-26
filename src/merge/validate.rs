@@ -343,7 +343,7 @@ pub fn validate_file(
 }
 
 /// A localisation line without its `#` comment; a `#` inside quotes is text.
-fn localisation_without_comment(line: &str) -> &str {
+pub(crate) fn localisation_without_comment(line: &str) -> &str {
     let mut quoted = false;
     for (i, c) in line.char_indices() {
         match c {

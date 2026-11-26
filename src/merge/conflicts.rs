@@ -745,8 +745,8 @@ fn localisation_keys(src: &str) -> Vec<String> {
     let mut keys = Vec::new();
     for line in src.lines() {
         let line = line.trim_start_matches('\u{feff}');
-        let trimmed = line.trim();
-        if trimmed.is_empty() || trimmed.starts_with('#') {
+        let trimmed = super::validate::localisation_without_comment(line).trim();
+        if trimmed.is_empty() {
             continue;
         }
         let Some((key, rest)) = trimmed.split_once(':') else {
@@ -1693,6 +1693,13 @@ mod tests {
             localisation_keys(src),
             ["l_english:a", "l_simp_chinese:c", "l_braz_por:d"]
         );
+    }
+
+    #[test]
+    fn localisation_headers_with_trailing_comments_set_the_language() {
+        let src = "l_english: # note\n a:0 \"x # not a comment\"\nl_german:# more\n b:0 \"y\"\n";
+
+        assert_eq!(localisation_keys(src), ["l_english:a", "l_german:b"]);
     }
 
     #[test]

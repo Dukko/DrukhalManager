@@ -205,14 +205,15 @@ fn localisation_line(key: &str, src: &str) -> Option<String> {
     for line in src.lines() {
         let line = line.trim_start_matches('\u{feff}');
         let trimmed = line.trim();
-        if trimmed.starts_with('#') {
+        let code = super::validate::localisation_without_comment(line).trim();
+        if code.is_empty() {
             continue;
         }
-        if !line.starts_with([' ', '\t']) && trimmed.ends_with(':') {
-            current = trimmed.trim_end_matches(':');
+        if !line.starts_with([' ', '\t']) && code.ends_with(':') {
+            current = code.trim_end_matches(':');
             continue;
         }
-        if current == language && trimmed.split_once(':').is_some_and(|(k, _)| k == key) {
+        if current == language && code.split_once(':').is_some_and(|(k, _)| k == key) {
             return Some(trimmed.to_owned());
         }
     }
@@ -482,6 +483,19 @@ mod tests {
             "namespace = ns\ncountry_event = { id = ns.1 }\nship_event = {\n\tid = ns.2\n}\n";
         assert_eq!(object_at("events", events, 4).unwrap().0, "ns.2");
         assert_eq!(object_at("events", events, 1), None);
+    }
+
+    #[test]
+    fn extracts_localisation_lines_under_commented_headers() {
+        let src = "l_english: # note\n building_lab:0 \"Lab\"\nl_german: # hinweis\n building_lab:0 \"Labor\"\n";
+        assert_eq!(
+            extract("localisation", "l_english:building_lab", src).unwrap(),
+            "building_lab:0 \"Lab\""
+        );
+        assert_eq!(
+            extract("localisation", "l_german:building_lab", src).unwrap(),
+            "building_lab:0 \"Labor\""
+        );
     }
 
     #[test]
