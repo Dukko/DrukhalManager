@@ -6,7 +6,7 @@
 //! Calls are blocking; run them off the main thread.
 
 use std::io::BufRead;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
@@ -116,11 +116,7 @@ pub fn claude_price(model: &str) -> Option<Price> {
 /// The Claude models this key can use for merging, newest first, from the
 /// Models API. Blocking; run it off the main thread.
 pub fn claude_models(api_key: &str) -> Result<Vec<ClaudeModel>, String> {
-    let mut response = ureq::Agent::config_builder()
-        .http_status_as_error(false)
-        .timeout_global(Some(Duration::from_secs(20)))
-        .build()
-        .new_agent()
+    let mut response = model_list_agent()
         .get(ANTHROPIC_MODELS_URL)
         .header("x-api-key", api_key.trim())
         .header("anthropic-version", API_VERSION)
@@ -399,12 +395,7 @@ pub fn price(provider: &Provider) -> Option<Price> {
             api_key,
         } => {
             let url = format!("{}/models", base_url.trim_end_matches('/'));
-            let mut request = ureq::Agent::config_builder()
-                .http_status_as_error(false)
-                .timeout_global(Some(Duration::from_secs(20)))
-                .build()
-                .new_agent()
-                .get(&url);
+            let mut request = model_list_agent().get(&url);
             if !api_key.is_empty() {
                 request = request.header("authorization", &format!("Bearer {}", api_key.trim()));
             }
@@ -500,12 +491,30 @@ fn schema() -> Value {
     })
 }
 
+fn shared_agent(
+    cell: &'static OnceLock<ureq::Agent>,
+    timeout: Duration,
+) -> ureq::Agent {
+    cell.get_or_init(|| {
+        ureq::Agent::config_builder()
+            .http_status_as_error(false)
+            .timeout_global(Some(timeout))
+            .build()
+            .into()
+    })
+    .clone()
+}
+
+/// The agent for merge requests, shared so retries and corrections reuse
+/// its connections.
 fn agent() -> ureq::Agent {
-    ureq::Agent::config_builder()
-        .http_status_as_error(false)
-        .timeout_global(Some(Duration::from_secs(600)))
-        .build()
-        .into()
+    static AGENT: OnceLock<ureq::Agent> = OnceLock::new();
+    shared_agent(&AGENT, Duration::from_secs(600))
+}
+
+fn model_list_agent() -> ureq::Agent {
+    static AGENT: OnceLock<ureq::Agent> = OnceLock::new();
+    shared_agent(&AGENT, Duration::from_secs(20))
 }
 
 /// A merge checked by the validator, after at most `max_attempts - 1` corrections.
@@ -3616,5 +3625,69 @@ mod tests {
         assert_eq!(checked.unwrap_err(), "Cancelled");
         let _first_req = seen.recv().unwrap();
         assert!(seen.try_recv().is_err());
+    }
+
+    /// Runs `handler` on its own thread for every connection, and counts them.
+    fn serve(
+        handler: impl Fn(std::net::TcpStream) + Send + Sync + 'static,
+    ) -> (String, Arc<std::sync::atomic::AtomicUsize>) {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        let accepted = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let count = accepted.clone();
+        let handler = Arc::new(handler);
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                let Ok(stream) = stream else { break };
+                count.fetch_add(1, Ordering::SeqCst);
+                let handler = handler.clone();
+                std::thread::spawn(move || handler(stream));
+            }
+        });
+        (url, accepted)
+    }
+
+    /// Reads one request, headers and body; false once the client is gone.
+    fn read_request(stream: &mut std::net::TcpStream) -> bool {
+        use std::io::Read;
+        let mut reader = std::io::BufReader::new(&*stream);
+        let mut length = 0;
+        loop {
+            let mut line = String::new();
+            if reader.read_line(&mut line).unwrap_or(0) == 0 {
+                return false;
+            }
+            if line == "\r\n" {
+                break;
+            }
+            if let Some(v) = line.to_ascii_lowercase().strip_prefix("content-length:") {
+                length = v.trim().parse().unwrap();
+            }
+        }
+        std::io::copy(&mut reader.take(length), &mut std::io::sink()).unwrap();
+        true
+    }
+
+    #[test]
+    fn sequential_requests_share_one_connection() {
+        use std::io::Write;
+        let reply = json!({"choices": [{"message": {"content": "{\"script\":\"x = 1\",\"notes\":\"n\"}"}}]}).to_string();
+        let (url, accepted) = serve(move |mut stream| {
+            while read_request(&mut stream) {
+                write!(
+                    stream,
+                    "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\n\r\n{reply}",
+                    reply.len()
+                )
+                .unwrap();
+            }
+        });
+
+        for _ in 0..2 {
+            let merged = merge_openai(&url, "m", "", "sys", "prompt", 1000, None, &mut |_| {}).unwrap();
+            assert_eq!(merged.script, "x = 1");
+        }
+
+        assert_eq!(accepted.load(Ordering::SeqCst), 1, "the second request opened a new connection");
     }
 }

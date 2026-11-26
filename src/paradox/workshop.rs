@@ -205,8 +205,12 @@ fn parse_previews(json: &str) -> Result<HashMap<u64, String>, String> {
         .collect())
 }
 
+/// One agent for every Workshop call, so batches reuse the same connections.
 fn agent() -> ureq::Agent {
-    ureq::Agent::config_builder().timeout_global(Some(std::time::Duration::from_secs(30))).build().into()
+    static AGENT: std::sync::OnceLock<ureq::Agent> = std::sync::OnceLock::new();
+    AGENT
+        .get_or_init(|| ureq::Agent::config_builder().timeout_global(Some(std::time::Duration::from_secs(30))).build().into())
+        .clone()
 }
 
 fn user_agent() -> String {
@@ -471,6 +475,36 @@ pub fn fetch(root: u64) -> Result<Shared, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sequential_requests_share_one_connection() {
+        use std::io::{Read, Write};
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let accepted = std::sync::Arc::new(AtomicUsize::new(0));
+        let count = accepted.clone();
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                let mut stream = stream.unwrap();
+                count.fetch_add(1, Ordering::SeqCst);
+                std::thread::spawn(move || {
+                    let mut buf = [0u8; 1024];
+                    while stream.read(&mut buf).is_ok_and(|n| n > 0) {
+                        stream.write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 2\r\n\r\nok").unwrap();
+                    }
+                });
+            }
+        });
+        let url = format!("http://127.0.0.1:{port}/");
+
+        for _ in 0..2 {
+            let body = agent().get(&url).call().unwrap().body_mut().read_to_string().unwrap();
+            assert_eq!(body, "ok");
+        }
+
+        assert_eq!(accepted.load(Ordering::SeqCst), 1, "the second request opened a new connection");
+    }
 
     #[test]
     fn reads_ids_from_links() {
