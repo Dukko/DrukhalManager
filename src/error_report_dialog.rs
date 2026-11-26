@@ -462,10 +462,7 @@ fn fix(button: &gtk::Button, ctx: &Rc<Context>, message: String, target: Target,
                     ai::repair_own_checked(&provider, &t.category, &t.key, &t.mod_copy, &job_message, &reference, &check, on)?
                 }
             };
-            let text = match &checked.script {
-                Ok(script) => script.clone(),
-                Err(_) => checked.merged.script.clone(),
-            };
+            let text = draft(&checked).script;
             // Keywords found in neither the game nor the mod's copy.
             let warnings = match base_game::ensure(&base_game::dir(), &game_dir, &game_version) {
                 Ok(snapshot) => vocabulary::unknown(&text, snapshot.texts().chain(t.game.as_ref().map(|g| g.text.as_str())).chain([t.mod_copy.text.as_str()])),
@@ -477,6 +474,9 @@ fn fix(button: &gtk::Button, ctx: &Rc<Context>, message: String, target: Target,
         stop_button.set_visible(false);
         match result {
             Some(Ok((checked, warnings))) => {
+                if let Some(rejected) = draft(&checked).rejected {
+                    crate::diagnostics::log!("ai", "Error-log fix for {} {} failed validation: {rejected}", target.category, target.key);
+                }
                 ctx.ai_notes.borrow_mut().insert(message.clone(), checked.merged.notes.clone());
                 let version = ctx.explain.fixer.as_ref().map(|f| f.game_version.clone()).unwrap_or_default();
                 let page = review(&ctx, &dialog, &target, checked, &warnings, &version, on_saved);
@@ -543,12 +543,34 @@ impl OwnCheck {
 
 /// The fix next to the mod's copy, to edit and save.
 fn review(ctx: &Rc<Context>, dialog: &adw::Dialog, target: &Target, checked: ai::Checked, warnings: &[String], version: &str, on_saved: Rc<dyn Fn()>) -> gtk::Box {
-    let (script, problem) = match checked.script {
-        Ok(script) => (script, None),
-        // Kept even when still rejected, to fix by hand.
-        Err(problem) => (checked.merged.script, Some(problem)),
-    };
-    show_review(ctx, dialog, target, script, &checked.merged.notes, problem, warnings, version, on_saved)
+    let Draft { script, rejected } = draft(&checked);
+    show_review(ctx, dialog, target, script, &checked.merged.notes, rejected, warnings, version, on_saved)
+}
+
+/// The script to show for a checked fix.
+#[derive(Debug, PartialEq)]
+struct Draft {
+    script: String,
+    /// Why the validator rejected `script`; none when it passed.
+    rejected: Option<String>,
+}
+
+/// A rejected answer is kept as a draft, with the reason, rather than passed
+/// off as the fix.
+fn draft(checked: &ai::Checked) -> Draft {
+    match &checked.script {
+        Ok(script) => Draft { script: script.clone(), rejected: None },
+        Err(summary) => {
+            let mut reason = summary.clone();
+            for problem in &checked.problems {
+                if !reason.contains(&problem.message) {
+                    reason.push_str("; ");
+                    reason.push_str(&problem.message);
+                }
+            }
+            Draft { script: checked.merged.script.clone(), rejected: Some(reason) }
+        }
+    }
 }
 
 /// The mod's own copy next to itself, to correct by hand and save.
@@ -558,14 +580,16 @@ fn review_manual(ctx: &Rc<Context>, dialog: &adw::Dialog, target: &Target, versi
 }
 
 /// `script` next to the mod's copy, to edit and save. `notes` is what the
-/// model said, or how to start; `problem` is why a model's result was still
-/// rejected.
+/// model said, or how to start; `problem` is why a model's result was rejected,
+/// which keeps Save off until the user chooses to use it anyway.
 #[allow(clippy::too_many_arguments)]
 fn show_review(ctx: &Rc<Context>, dialog: &adw::Dialog, target: &Target, script: String, notes: &str, problem: Option<String>, warnings: &[String], version: &str, on_saved: Rc<dyn Fn()>) -> gtk::Box {
+    let has_problem = problem.is_some();
     let pair = Pair::new(true);
     pair.show(&target.mod_copy.text, &script, &Compare::Each, false);
     pair.left.set_header(&Header { title: target.mod_name.clone(), subtitle: target.mod_copy.file.clone(), color: None, badge: None });
-    pair.right.set_header(&Header { title: t!("Fixed Copy"), subtitle: String::new(), color: None, badge: None });
+    let right_title = if problem.is_some() { t!("Rejected Draft") } else { t!("Fixed Copy") };
+    pair.right.set_header(&Header { title: right_title, subtitle: String::new(), color: None, badge: None });
     pair.widget.set_vexpand(true);
 
     let body = gtk::Box::new(gtk::Orientation::Vertical, 6);
@@ -586,17 +610,31 @@ fn show_review(ctx: &Rc<Context>, dialog: &adw::Dialog, target: &Target, script:
     let error = label(String::new(), &["error"]);
     error.set_visible(false);
     if let Some(problem) = problem {
-        error.set_label(&tf!("The model's result still has a problem after a correction: {problem}. Fix it by hand, or undo and try again.", problem = problem));
+        error.set_label(&tf!("The model's result failed validation: {problem}. It is shown as a draft only. Fix it by hand, use it anyway, or discard it and try again.", problem = problem));
         error.set_visible(true);
     }
     body.append(&error);
+    let use_anyway = gtk::Button::builder().label(t!("Use It Anyway")).build();
     let discard = gtk::Button::builder().label(t!("Discard")).build();
     let save = gtk::Button::builder().label(t!("Save to Merged Patch")).css_classes(["suggested-action"]).build();
     let buttons = gtk::Box::builder().spacing(6).halign(gtk::Align::End).build();
     margins(&buttons);
     buttons.append(&discard);
+    if has_problem {
+        save.set_sensitive(false);
+        buttons.append(&use_anyway);
+    }
     buttons.append(&save);
     body.append(&buttons);
+
+    use_anyway.connect_clicked(glib::clone!(
+        #[strong]
+        save,
+        move |btn| {
+            save.set_sensitive(true);
+            btn.set_visible(false);
+        }
+    ));
 
     let close = dialog.clone();
     discard.connect_clicked(move |_| {
@@ -639,4 +677,33 @@ fn show_review(ctx: &Rc<Context>, dialog: &adw::Dialog, target: &Target, script:
 fn open(widget: &impl IsA<gtk::Widget>, path: &std::path::Path) {
     let window = widget.root().and_downcast::<gtk::Window>();
     gtk::FileLauncher::new(Some(&gio::File::for_path(path))).launch(window.as_ref(), None::<&gio::Cancellable>, |_| {});
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn checked(script: Result<String, String>) -> ai::Checked {
+        ai::Checked {
+            merged: ai::Merged { script: "a = { b = 1 ".into(), notes: String::new(), usage: None },
+            script,
+            problems: Vec::new(),
+            retried: true,
+            scripts: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn rejected_answer_is_a_draft_carrying_the_reason() {
+        let draft = draft(&checked(Err("unbalanced braces".into())));
+
+        assert_eq!(draft, Draft { script: "a = { b = 1 ".into(), rejected: Some("unbalanced braces".into()) });
+    }
+
+    #[test]
+    fn accepted_answer_is_used_without_a_warning() {
+        let draft = draft(&checked(Ok("a = { b = 1 }".into())));
+
+        assert_eq!(draft, Draft { script: "a = { b = 1 }".into(), rejected: None });
+    }
 }
