@@ -36,6 +36,15 @@
     <control>keyboard</control>
   </supports>
   <releases>
+    <release version="2.7.37" date="2026-11-26">
+      <description>
+        <p>Catches two kinds of broken script:</p>
+        <ul>
+          <li>Script Check flags mod files that start with a byte-order mark (BOM) where the game fails to read them, and can save a fixed copy to the merged patch</li>
+          <li>Merges are rejected, and saved merges flagged, when two options share the same name, which the game shows twice (for example Mixed Economy)</li>
+        </ul>
+      </description>
+    </release>
     <release version="2.7.36" date="2026-11-26">
       <description>
         <p>Makes Script Check much faster:</p>

@@ -6,9 +6,9 @@
 #, fuzzy
 msgid ""
 msgstr ""
-"Project-Id-Version: DrukhalManager 2.7.36\n"
+"Project-Id-Version: DrukhalManager 2.7.37\n"
 "Report-Msgid-Bugs-To: https://github.com/Dukko/DrukhalManager/issues\n"
-"POT-Creation-Date: 2026-11-26 19:04+0000\n"
+"POT-Creation-Date: 2026-11-26 19:43+0000\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -1390,7 +1390,7 @@ msgstr ""
 
 #. Shown once the object is in the patch, including after a save
 #. from the page this row opens.
-#: src/error_report_dialog.rs src/script_check_dialog.rs
+#: src/error_report_dialog.rs src/script_check_dialog.rs src/script_check_dialog.rs
 msgid "Fixed in the merged patch"
 msgstr ""
 
@@ -2198,6 +2198,14 @@ msgstr ""
 msgid "{name} {missing}"
 msgstr ""
 
+#: src/merge/script_check.rs src/multiplayer_dialog.rs
+msgid "Could not read {file}: {error}"
+msgstr ""
+
+#: src/merge/script_check.rs
+msgid "This file no longer starts with a byte-order mark. Rescan to see what's left."
+msgstr ""
+
 #: src/merge/snapshot.rs
 msgid "The backup is gone"
 msgstr ""
@@ -2248,6 +2256,10 @@ msgstr ""
 
 #: src/merge/validate.rs
 msgid "Single-valued key `{key}` appears more than once in the same block"
+msgstr ""
+
+#: src/merge/validate.rs
+msgid "Two `{key}` blocks are both named {name}"
 msgstr ""
 
 #: src/merge/validate.rs
@@ -2628,10 +2640,6 @@ msgstr ""
 
 #: src/multiplayer_dialog.rs
 msgid "Comparing"
-msgstr ""
-
-#: src/multiplayer_dialog.rs
-msgid "Could not read {file}: {error}"
 msgstr ""
 
 #: src/multiplayer_dialog.rs
@@ -3319,6 +3327,14 @@ msgstr ""
 msgid "Script Problems"
 msgstr ""
 
+#: src/script_check_dialog.rs
+msgid "Save Fixed Copy to Patch"
+msgstr ""
+
+#: src/script_check_dialog.rs
+msgid "Saved a copy of {file} without the byte-order mark to the merged patch"
+msgstr ""
+
 #: src/script_check_dialog.rs src/window/overview.rs
 msgid "{count} problem"
 msgid_plural "{count} problems"
@@ -3355,6 +3371,10 @@ msgstr ""
 
 #: src/script_check_dialog.rs
 msgid "Line {line}: {name} has the wrong capitalisation"
+msgstr ""
+
+#: src/script_check_dialog.rs
+msgid "Starts with a byte-order mark (BOM); the game can't read the first entry and misreads the rest"
 msgstr ""
 
 #: src/script_check_dialog.rs
