@@ -2,7 +2,7 @@
 //! by object, uses AI only for objects the copies really disagree on, and
 //! saves the result into the merged patch at the same path.
 
-use std::cell::{Cell, RefCell};
+use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
@@ -142,15 +142,12 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
     let game_dir = request.game_dir.clone();
     let saved_text = request.saved_text.clone();
     let prints: Rc<RefCell<Vec<Print>>> = Rc::default();
-    let recorded_scripts: Rc<RefCell<Vec<String>>> = Rc::default();
-    let scripts_changed = Rc::new(Cell::new(false));
+    let staged: Rc<RefCell<file_merge::StagedScripts>> = Rc::default();
     glib::spawn_future_local(glib::clone!(
         #[strong]
         prints,
         #[strong]
-        recorded_scripts,
-        #[strong]
-        scripts_changed,
+        staged,
         #[weak]
         summary,
         #[weak]
@@ -245,9 +242,7 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
                                 #[strong]
                                 plan,
                                 #[strong]
-                                recorded_scripts,
-                                #[strong]
-                                scripts_changed,
+                                staged,
                                 #[weak]
                                 editor,
                                 #[weak]
@@ -262,8 +257,7 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
                                         p.items[index].resolved = true;
                                         editor.buffer().set_text(&p.render());
                                     }
-                                    recorded_scripts.borrow_mut().clear();
-                                    scripts_changed.set(false);
+                                    staged.borrow_mut().unstage(index);
                                     // The picker says it all now.
                                     label.set_visible(false);
                                 }
@@ -426,9 +420,7 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
         #[strong]
         prints,
         #[strong]
-        recorded_scripts,
-        #[strong]
-        scripts_changed,
+        staged,
         #[weak]
         dialog,
         #[weak]
@@ -535,9 +527,7 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
                 #[strong]
                 prints,
                 #[strong]
-                recorded_scripts,
-                #[strong]
-                scripts_changed,
+                staged,
                 #[weak]
                 button,
                 #[weak]
@@ -602,15 +592,7 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
                                     Err(t!("the merge was closed")),
                                     |p| p.validate_item(index, &script),
                                 )?;
-                                scripts_changed.set(true);
-                                for script in &checked.scripts {
-                                    (request.save_script)(
-                                        &script.name,
-                                        &script.script,
-                                        script.prints.clone(),
-                                    )?;
-                                    recorded_scripts.borrow_mut().push(script.name.clone());
-                                }
+                                staged.borrow_mut().stage(index, checked.scripts);
                                 Ok(text)
                             }),
                             Some(Err(e)) => Err(e),
@@ -659,9 +641,7 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
         #[strong]
         prints,
         #[strong]
-        recorded_scripts,
-        #[strong]
-        scripts_changed,
+        staged,
         #[weak]
         dialog,
         #[weak]
@@ -669,26 +649,26 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
         #[weak]
         banner,
         move |_| {
-            let category = file_merge::category(&request.path);
             let buffer = editor.buffer();
             let text = buffer
                 .text(&buffer.start_iter(), &buffer.end_iter(), false)
                 .to_string();
-            if let Err(message) = file_merge::validate(&category, &text) {
-                show(&banner, &message, true);
-                return;
-            }
-            match (request.save)(&text, prints.borrow().clone()) {
+            let prints = prints.borrow().clone();
+            let outcome = {
+                let staged = staged.borrow();
+                file_merge::commit_save(
+                    &request.path,
+                    &text,
+                    &staged,
+                    |name, script, script_prints| {
+                        (request.save_script)(name, script, script_prints)
+                    },
+                    |contents| (request.save)(contents, prints),
+                    |path, names| (request.set_file_scripts)(path, names),
+                )
+            };
+            match outcome {
                 Ok(()) => {
-                    if scripts_changed.get()
-                        && let Err(message) = (request.set_file_scripts)(
-                            &request.path,
-                            recorded_scripts.borrow().clone(),
-                        )
-                    {
-                        show(&banner, &message, true);
-                        return;
-                    }
                     dialog.close();
                     (request.on_saved)();
                 }

@@ -18,8 +18,10 @@
 //! top-level blocks (`guiTypes = { ... }`, `spriteTypes = { ... }`), which
 //! are rebuilt around them.
 
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 
+use super::ai::MergedScript;
+use super::patch::Print;
 use super::source::Source;
 use crate::paradox::script::{self, Entries, Entry, Value};
 
@@ -489,6 +491,93 @@ pub fn validate(category: &str, text: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Inline scripts produced by AI merges inside the file-merge dialog, held in
+/// memory until the user actually commits a Save.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct StagedScripts {
+    by_item: BTreeMap<usize, Vec<MergedScript>>,
+    changed: bool,
+}
+
+/// Ordered write plan produced when saving a file merge.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SavePlan {
+    /// Merged inline scripts to write before the merged file itself.
+    pub scripts: Vec<MergedScript>,
+    /// Script names to record on the file's manifest entry after saving, or
+    /// `None` if AI inline scripts were never applied in this session.
+    pub record_scripts: Option<Vec<String>>,
+}
+
+impl StagedScripts {
+    /// Records the inline scripts produced by an AI merge of item `index`,
+    /// replacing any earlier scripts staged for that item.
+    pub fn stage(&mut self, item_index: usize, scripts: Vec<MergedScript>) {
+        self.changed = true;
+        self.by_item.insert(item_index, scripts);
+    }
+
+    /// Drops staged scripts for `item_index` (for example when the user picks
+    /// a mod copy manually instead of keeping the AI merge).
+    pub fn unstage(&mut self, item_index: usize) {
+        self.by_item.remove(&item_index);
+    }
+
+    /// Deduplicated staged scripts in item order (case-insensitive by name,
+    /// keeping the latest version if two items touch the same script).
+    pub fn scripts(&self) -> Vec<MergedScript> {
+        let mut out: Vec<MergedScript> = Vec::new();
+        for script in self.by_item.values().flatten() {
+            if let Some(existing) = out
+                .iter_mut()
+                .find(|s| s.name.eq_ignore_ascii_case(&script.name))
+            {
+                *existing = script.clone();
+            } else {
+                out.push(script.clone());
+            }
+        }
+        out
+    }
+
+    /// Validates `text` for `category` and builds the ordered save plan
+    /// without performing any writes.
+    pub fn prepare_save(&self, category: &str, text: &str) -> Result<SavePlan, String> {
+        validate(category, text)?;
+        let scripts = self.scripts();
+        let record_scripts = self
+            .changed
+            .then(|| scripts.iter().map(|s| s.name.clone()).collect());
+        Ok(SavePlan { scripts, record_scripts })
+    }
+}
+
+/// Validates `text` and commits a file merge in order:
+/// 1. Validate `text` before writing anything.
+/// 2. Write every staged inline script (`save_script`).
+/// 3. Write the merged file (`save_file`).
+/// 4. Record the file's inline script references (`set_file_scripts`), if any
+///    AI item merge ran.
+pub fn commit_save(
+    path: &str,
+    text: &str,
+    staged: &StagedScripts,
+    mut save_script: impl FnMut(&str, &str, Vec<Print>) -> Result<(), String>,
+    save_file: impl FnOnce(&str) -> Result<(), String>,
+    set_file_scripts: impl FnOnce(&str, Vec<String>) -> Result<(), String>,
+) -> Result<(), String> {
+    let category = category(path);
+    let plan = staged.prepare_save(&category, text)?;
+    for script in &plan.scripts {
+        save_script(&script.name, &script.script, script.prints.clone())?;
+    }
+    save_file(text)?;
+    if let Some(names) = plan.record_scripts {
+        set_file_scripts(path, names)?;
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -639,6 +728,158 @@ mod tests {
     fn plan_err(path: &str, texts: &[&str]) -> String {
         let versions: Vec<Version> = texts.iter().enumerate().map(|(i, t)| v(&format!("M{i}"), t)).collect();
         plan(path, None, &versions).unwrap_err()
+    }
+
+    fn staged_script(name: &str, text: &str) -> MergedScript {
+        MergedScript {
+            name: name.to_owned(),
+            script: text.to_owned(),
+            prints: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn staged_scripts_write_nothing_on_cancel() {
+        let user = std::env::temp_dir().join(format!("drukhal-file-merge-cancel-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&user);
+        let patch = crate::merge::patch::Patch::open(&user, &crate::merge::patch::test_target()).unwrap();
+        let root = crate::merge::patch::test_target().root(&user);
+
+        let mut staged = StagedScripts::default();
+        staged.stage(0, vec![staged_script("MECR/factions/imperialist_460", "demand = {}")]);
+        // Simulating dialog cancel: `staged` is simply dropped without calling `commit_save`.
+        assert_eq!(staged.scripts().len(), 1);
+        drop(staged);
+
+        let script_path = "common/inline_scripts/MECR/factions/imperialist_460.txt";
+        assert!(!root.join(script_path).exists(), "cancel must not write script file");
+        assert!(patch.get_file(script_path).is_none(), "cancel must not add manifest entry");
+        let _ = std::fs::remove_dir_all(&user);
+    }
+
+    #[test]
+    fn staged_scripts_commit_in_order_on_save() {
+        use std::cell::RefCell;
+
+        let user = std::env::temp_dir().join(format!("drukhal-file-merge-save-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&user);
+        let patch = RefCell::new(
+            crate::merge::patch::Patch::open(&user, &crate::merge::patch::test_target()).unwrap(),
+        );
+        let root = crate::merge::patch::test_target().root(&user);
+
+        let mut staged = StagedScripts::default();
+        staged.stage(0, vec![staged_script("MECR/factions/a", "demand = { value = 1 }")]);
+        staged.stage(1, vec![staged_script("MECR/factions/b", "demand = { value = 2 }")]);
+
+        let merged_path = "common/pop_faction_types/00_factions.txt";
+        let merged_text = "imperialist = { inline_script = { script = MECR/factions/a } }\nisolationist = { inline_script = { script = MECR/factions/b } }\n";
+
+        let log: RefCell<Vec<String>> = RefCell::default();
+        commit_save(
+            merged_path,
+            merged_text,
+            &staged,
+            |name, script, prints| {
+                log.borrow_mut().push(format!("save_script:{name}"));
+                let rel = crate::merge::inline_scripts::file_path(name).unwrap();
+                patch
+                    .borrow_mut()
+                    .save_file(&user, None, &rel, script.as_bytes(), prints)
+                    .map_err(|e| e.to_string())
+            },
+            |contents| {
+                log.borrow_mut().push("save_file".into());
+                patch
+                    .borrow_mut()
+                    .save_file(&user, None, merged_path, contents.as_bytes(), vec![])
+                    .map_err(|e| e.to_string())
+            },
+            |path, names| {
+                log.borrow_mut()
+                    .push(format!("set_file_scripts:{path}:{}", names.join(",")));
+                patch
+                    .borrow_mut()
+                    .set_file_scripts(path, names)
+                    .map_err(|e| e.to_string())
+            },
+        )
+        .unwrap();
+
+        assert_eq!(
+            *log.borrow(),
+            vec![
+                "save_script:MECR/factions/a",
+                "save_script:MECR/factions/b",
+                "save_file",
+                "set_file_scripts:common/pop_faction_types/00_factions.txt:MECR/factions/a,MECR/factions/b",
+            ],
+            "scripts must be written before the file, and recorded afterwards"
+        );
+        assert!(root.join("common/inline_scripts/MECR/factions/a.txt").is_file());
+        assert!(root.join("common/inline_scripts/MECR/factions/b.txt").is_file());
+        assert!(root.join(merged_path).is_file());
+        assert_eq!(
+            patch.borrow().get_file(merged_path).unwrap().scripts,
+            vec!["MECR/factions/a".to_owned(), "MECR/factions/b".to_owned()]
+        );
+        let _ = std::fs::remove_dir_all(&user);
+    }
+
+    #[test]
+    fn staged_scripts_unstage_per_item_dedup_and_abort_on_invalid_file() {
+        use std::cell::Cell;
+
+        let mut staged = StagedScripts::default();
+        staged.stage(0, vec![staged_script("shared/x", "a = 1"), staged_script("only/zero", "z = 0")]);
+        staged.stage(1, vec![staged_script("Shared/X", "a = 2")]);
+
+        // Unstaging item 0 drops `only/zero` while keeping item 1's `Shared/X`.
+        staged.unstage(0);
+        let kept = staged.scripts();
+        assert_eq!(kept.len(), 1);
+        assert_eq!(kept[0].name, "Shared/X");
+        assert_eq!(kept[0].script, "a = 2");
+
+        // Invalid file syntax aborts before any callback runs.
+        let wrote = Cell::new(false);
+        let err = commit_save(
+            "common/buildings/00.txt",
+            "broken = { unclosed",
+            &staged,
+            |_, _, _| {
+                wrote.set(true);
+                Ok(())
+            },
+            |_| {
+                wrote.set(true);
+                Ok(())
+            },
+            |_, _| {
+                wrote.set(true);
+                Ok(())
+            },
+        )
+        .unwrap_err();
+        assert!(err.contains("syntax error"), "{err}");
+        assert!(!wrote.get(), "validation failure must not touch scripts or files");
+
+        // Without any AI merge, `set_file_scripts` is skipped on save.
+        let untouched = StagedScripts::default();
+        let mut set_called = false;
+        commit_save(
+            "common/buildings/00.txt",
+            "b = { cost = 10 }",
+            &untouched,
+            |_, _, _| Ok(()),
+            |_| Ok(()),
+            |_, _| {
+                set_called = true;
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert!(!set_called);
     }
 }
 
