@@ -94,14 +94,14 @@ pub struct ScriptCheck {
 impl ScriptCheck {
     /// Checks the enabled mods' scripts. `None` if the documentation isn't
     /// there. Reads many files; call it off the UI thread.
-    pub fn run(user_dir: &Path, game_dir: &Path, exe: &Path, version: &str, roots: &[Option<PathBuf>], report: &Report) -> Option<ScriptCheck> {
+    pub fn run(user_dir: &Path, game_dir: &Path, exe: &Path, version: &str, roots: &[Option<PathBuf>], report: &Report, patch: &Path) -> Option<ScriptCheck> {
         let docs = script_docs::load(user_dir)?;
         let context = script_check::ensure_context(&base_game::dir().join("script-context"), game_dir, &docs, version);
         let mut folders: Vec<&Path> = vec![game_dir];
         folders.extend(roots.iter().flatten().map(PathBuf::as_path));
         let known = script_check::known(&docs, &folders);
         script_check::load_scripted_params(&folders);
-        let findings = script_check::check_mods(&context, &known, roots, report);
+        let findings = script_check::check_mods(&context, &known, roots, report, Some(patch));
         Some(ScriptCheck { findings, context: Arc::new(context), known: Arc::new(known), docs: Arc::new(docs), game_dir: game_dir.to_owned(), docs_outdated: script_docs::older_than(user_dir, exe) })
     }
 
@@ -534,7 +534,7 @@ pub fn build(analysis: &Rc<Analysis>, rescan: gtk::Button, hooks: Rc<MergeHooks>
     top.append(&details);
     // Names mods use that the game doesn't have, unless the patch already holds a fix.
     if let Some(script) = &analysis.script {
-        let pending: Vec<&script_check::Finding> = script.findings.iter().filter(|f| !matches!(f.problem, script_check::Problem::Unsure | script_check::Problem::Elsewhere) && !f.unused && !f.object.as_ref().is_some_and(|(category, key)| (hooks.is_merged)(category, key))).collect();
+        let pending: Vec<&script_check::Finding> = script.findings.iter().filter(|f| !matches!(f.problem, script_check::Problem::Unsure | script_check::Problem::Elsewhere) && !f.unused && !f.object.as_ref().is_some_and(|(category, key)| (hooks.is_merged)(category, key)) && !(f.problem == script_check::Problem::Bom && (hooks.is_file_merged)(&f.file))).collect();
         if !pending.is_empty() {
             let mods = pending.iter().map(|f| f.mod_position).collect::<BTreeSet<_>>().len();
             let label = gtk::Label::builder()

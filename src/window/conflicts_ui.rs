@@ -87,6 +87,7 @@ impl Window {
         let analysis_version = game_version.clone();
         let game_exe = self.game.as_ref().map(|g| g.exe.clone());
         let user_dir = self.paths.user_dir.clone();
+        let patch_root = self.patch_target().root(&user_dir);
         let cache = self.scan_cache.clone();
         let saved = cache.clone();
         let languages = self.settings.borrow().game.languages(&self.paths.user_dir);
@@ -147,7 +148,7 @@ impl Window {
                 let script_started = std::time::Instant::now();
                 let script = match (game_dir.as_deref(), game_exe.as_deref(), game_version.as_deref()) {
                     (Some(game_dir), Some(exe), Some(version)) => {
-                        let script = conflicts_view::ScriptCheck::run(&user_dir, game_dir, exe, version, &roots, &report);
+                        let script = conflicts_view::ScriptCheck::run(&user_dir, game_dir, exe, version, &roots, &report, &patch_root);
                         match &script {
                             Some(script) => crate::diagnostics::log!("scan", "Script Check found {} problems in {} mods", script.findings.len(), script.mods()),
                             None => crate::diagnostics::log!("scan", "Script Check skipped: the game hasn't written its script documentation yet"),

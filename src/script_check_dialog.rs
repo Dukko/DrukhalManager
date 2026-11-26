@@ -42,6 +42,7 @@ pub fn present(parent: &impl IsA<gtk::Widget>, analysis: Rc<Analysis>, hooks: Rc
 
     let mut objects: BTreeMap<(usize, String, String, String), Object> = BTreeMap::new();
     let mut loose: BTreeMap<usize, Vec<&Finding>> = BTreeMap::new();
+    let mut boms: BTreeMap<usize, Vec<Finding>> = BTreeMap::new();
     let mut less: BTreeMap<usize, Vec<Finding>> = BTreeMap::new();
     let mut elsewhere: BTreeMap<usize, Vec<Finding>> = BTreeMap::new();
     for finding in &script.findings {
@@ -50,6 +51,7 @@ pub fn present(parent: &impl IsA<gtk::Widget>, analysis: Rc<Analysis>, hooks: Rc
                 let id = (finding.mod_position, category.clone(), key.clone(), finding.file.clone());
                 objects.entry(id).or_insert_with(|| Object { position: finding.mod_position, category: category.clone(), key: key.clone(), file: finding.file.clone(), findings: Vec::new() }).findings.push(finding.clone());
             }
+            None if finding.problem == Problem::Bom => boms.entry(finding.mod_position).or_default().push(finding.clone()),
             None if finding.problem == Problem::Unsure => less.entry(finding.mod_position).or_default().push(finding.clone()),
             None if finding.problem == Problem::Elsewhere => elsewhere.entry(finding.mod_position).or_default().push(finding.clone()),
             None => loose.entry(finding.mod_position).or_default().push(finding),
@@ -66,17 +68,20 @@ pub fn present(parent: &impl IsA<gtk::Widget>, analysis: Rc<Analysis>, hooks: Rc
         }
         certain
     });
-    let mut positions: Vec<usize> = objects.values().map(|o| o.position).chain(loose.keys().copied()).chain(less.keys().copied()).chain(elsewhere.keys().copied()).collect();
+    let mut positions: Vec<usize> = objects.values().map(|o| o.position).chain(loose.keys().copied()).chain(boms.keys().copied()).chain(less.keys().copied()).chain(elsewhere.keys().copied()).collect();
     positions.sort_unstable();
     positions.dedup();
     // Objects nothing calls have no effect in game, so they come last.
     let unused = |o: &Object| o.findings.iter().all(|f| f.unused);
-    let live = |position: usize| loose.contains_key(&position) || objects.values().any(|o| o.position == position && !unused(o));
+    let live = |position: usize| loose.contains_key(&position) || boms.contains_key(&position) || objects.values().any(|o| o.position == position && !unused(o));
     positions.sort_by_key(|&position| !live(position));
     for position in positions {
         let group = adw::PreferencesGroup::builder().title(glib_escape(analysis.name(position))).build();
         for object in objects.values().filter(|o| o.position == position && !unused(o)) {
             group.add(&object_row(&navigation, &analysis, &hooks, object));
+        }
+        for finding in boms.get(&position).into_iter().flatten() {
+            group.add(&bom_row(&analysis, &hooks, finding));
         }
         for finding in loose.get(&position).into_iter().flatten() {
             let row = adw::ActionRow::builder().title(format!("{}:{}", finding.file, finding.line)).subtitle(describe(finding)).use_markup(false).build();
@@ -115,6 +120,33 @@ pub fn present(parent: &impl IsA<gtk::Widget>, analysis: Rc<Analysis>, hooks: Rc
     adw::Dialog::builder().content_width(900).content_height(720).child(&navigation).build().present(Some(parent));
 }
 
+/// A row for a script file that starts with a byte-order mark, with a button
+/// that saves a copy without it to the merged patch.
+fn bom_row(analysis: &Rc<Analysis>, hooks: &Rc<MergeHooks>, finding: &Finding) -> adw::ActionRow {
+    let row = adw::ActionRow::builder().title(&finding.file).subtitle(describe(finding)).use_markup(false).build();
+    let already = (hooks.is_file_merged)(&finding.file);
+    let fixed = gtk::Label::builder().label(t!("Fixed in the merged patch")).css_classes(["success"]).visible(already).valign(gtk::Align::Center).build();
+    let save = gtk::Button::builder().label(t!("Save Fixed Copy to Patch")).valign(gtk::Align::Center).visible(!already).build();
+    row.add_suffix(&fixed);
+    row.add_suffix(&save);
+    let (analysis, hooks, finding) = (analysis.clone(), hooks.clone(), finding.clone());
+    save.connect_clicked(move |button| {
+        let position = finding.mod_position;
+        let Some(root) = analysis.roots.get(position).and_then(Option::as_ref) else { return };
+        let saved = script_check::fix_bom(root, &finding.file, &analysis.ids[position], analysis.name(position), hooks.game_dir.as_deref()).and_then(|fix| (hooks.save_file)(&finding.file, &fix.contents, fix.prints));
+        match saved {
+            Ok(()) => {
+                hooks.saved();
+                button.set_visible(false);
+                fixed.set_visible(true);
+                (hooks.toast)(&tf!("Saved a copy of {file} without the byte-order mark to the merged patch", file = &finding.file));
+            }
+            Err(message) => (hooks.toast)(&message),
+        }
+    });
+    row
+}
+
 /// A row that opens the page for fixing one object.
 fn object_row(navigation: &adw::NavigationView, analysis: &Rc<Analysis>, hooks: &Rc<MergeHooks>, object: &Object) -> adw::ActionRow {
     let problems = tnf!("{count} problem", "{count} problems", count = object.findings.len());
@@ -142,6 +174,7 @@ fn describe(f: &Finding) -> String {
         (Problem::Elsewhere, _) => tf!("Line {line}: {name} looks like it comes from another mod, and no installed mod defines it", line = f.line, name = &f.name),
         (Problem::Unsure, _) => tf!("Line {line}: {name} isn't a setting this kind of block takes in the base game", line = f.line, name = &f.name),
         (Problem::Capitalisation, _) => tf!("Line {line}: {name} has the wrong capitalisation", line = f.line, name = &f.name),
+        (Problem::Bom, _) => t!("Starts with a byte-order mark (BOM); the game can't read the first entry and misreads the rest"),
         (Problem::NoEvent, _) => tf!("Line {line}: fires the event {name}, which neither the game nor an enabled mod has, so nothing happens", line = f.line, name = &f.name),
     }
 }
@@ -165,6 +198,7 @@ fn problems_for_model(findings: &[Finding]) -> Vec<String> {
                 Ctx::Trigger => ("a trigger", "an effect"),
             };
             let what = match f.problem {
+                Problem::Bom => "the file starts with a byte-order mark".to_owned(),
                 Problem::Unknown => format!("`{}` isn't {kind} the current game has", f.name),
                 Problem::WrongKind => format!("`{}` is {other}, used where {kind} belongs", f.name),
                 Problem::Elsewhere => format!("`{}` may come from another mod; leave it", f.name),
