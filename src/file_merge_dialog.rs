@@ -777,75 +777,14 @@ pub fn load(
     ))
 }
 
-/// Validates a whole file merge result.
+/// Validates a whole file merge result with the shared validator.
 #[cfg(test)]
 fn validate_file(path: &str, text: &str) -> Result<String, String> {
-    let trimmed = text.trim();
-    if trimmed.is_empty() {
-        return Err(t!("The merged script is empty"));
+    let validation = crate::merge::validate::validate_file(path, text, None, &[], None);
+    match validation.error_summary() {
+        Some(problems) => Err(problems),
+        None => Ok(text.to_owned()),
     }
-    for placeholder in [
-        "... rest of",
-        "... remaining",
-        "... existing",
-        "rest of file",
-        "remainder of file",
-    ] {
-        if trimmed.to_lowercase().contains(placeholder) {
-            return Err(format!(
-                "The merged script contains a truncation placeholder ('{placeholder}') instead of the full file"
-            ));
-        }
-    }
-    let mut depth: i32 = 0;
-    let mut in_quote = false;
-    let mut in_comment = false;
-    for ch in text.chars() {
-        match ch {
-            '\n' | '\r' => in_comment = false,
-            '#' if !in_quote => in_comment = true,
-            '"' if !in_comment => in_quote = !in_quote,
-            '{' if !in_quote && !in_comment => depth += 1,
-            '}' if !in_quote && !in_comment => {
-                depth -= 1;
-                if depth < 0 {
-                    return Err(t!(
-                        "The merged script has an unexpected closing brace `}` before an opening brace"
-                    ));
-                }
-            }
-            _ => {}
-        }
-    }
-    if depth > 0 {
-        return Err(tf!(
-            "The merged script is missing {depth} closing brace `}}`",
-            depth = depth
-        ));
-    }
-    let category = file_merge::category(path);
-    if category != "localisation" {
-        if let Err(e) = crate::paradox::script::parse(text) {
-            return Err(format!("The merged script has a syntax error at {e}"));
-        }
-        let params = crate::merge::script_check::cached_scripted_params();
-        let is_definitions =
-            crate::merge::script_check::is_scripted_definitions_category(&category);
-        let violations = crate::merge::script_check::find_undeclared_scripted_effect_blocks(
-            text,
-            &params,
-            is_definitions,
-        );
-        if let Some(v) = violations.first() {
-            return Err(format!(
-                "The merged script contains invalid child block `{param} = {{ ... }}` inside scripted effect/trigger `{effect}` near line {line}. Scripted effect calls cannot contain child blocks unless declared as a parameter.",
-                param = v.param,
-                effect = v.effect,
-                line = v.line
-            ));
-        }
-    }
-    Ok(text.to_owned())
 }
 
 /// How a plan combines the copies' objects, e.g. "12 objects kept as is ·
@@ -1036,6 +975,18 @@ mod tests {
             )
             .is_err()
         );
+    }
+
+    #[test]
+    fn whole_file_saves_reject_duplicate_single_valued_keys() {
+        let err = validate_file("common/buildings/00.txt", "b = { cost = { a = 1 } cost = { a = 2 } }").unwrap_err();
+        assert!(err.contains("`cost`"), "{err}");
+    }
+
+    #[test]
+    fn whole_file_saves_accept_localisation_and_several_objects() {
+        assert!(validate_file("localisation/english/x_l_english.yml", "l_english:\n lab:0 \"Lab\"\n other:0 \"Other\"\n").is_ok());
+        assert!(validate_file("common/buildings/00.txt", "@c = 1\nb1 = { cost = @c }\nb2 = { cost = 2 }\n").is_ok());
     }
 
     #[test]
