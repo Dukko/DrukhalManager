@@ -322,6 +322,12 @@ fn joined(log: &str) -> Vec<String> {
     out
 }
 
+/// The files, lowercased, the game says it failed to read because they start
+/// with a byte-order mark.
+pub fn bom_files(log: &str) -> std::collections::HashSet<String> {
+    joined(log).iter().filter(|l| l.contains("verify encoding is UTF8 (no BOM)")).filter_map(|l| find_path(l)).map(|f| f.to_lowercase()).collect()
+}
+
 /// How many lines of `log` are real problems, after joining multi-line errors.
 pub fn count_problems(log: &str) -> usize {
     joined(log).iter().filter(|l| Kind::classify(message(l)) == Kind::Problem).count()

@@ -101,7 +101,8 @@ impl ScriptCheck {
         folders.extend(roots.iter().flatten().map(PathBuf::as_path));
         let known = script_check::known(&docs, &folders);
         script_check::load_scripted_params(&folders);
-        let findings = script_check::check_mods(&context, &known, roots, report, Some(patch));
+        let log = std::fs::read(crate::paradox::error_log::path(user_dir)).map(|b| String::from_utf8_lossy(&b).into_owned()).unwrap_or_default();
+        let findings = script_check::check_mods(&context, &known, roots, report, Some(patch), &crate::paradox::error_log::bom_files(&log));
         Some(ScriptCheck { findings, context: Arc::new(context), known: Arc::new(known), docs: Arc::new(docs), game_dir: game_dir.to_owned(), docs_outdated: script_docs::older_than(user_dir, exe) })
     }
 

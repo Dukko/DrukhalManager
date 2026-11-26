@@ -1123,6 +1123,16 @@ fn starts_with_bom(path: &Path) -> bool {
     std::fs::File::open(path).and_then(|mut f| std::io::Read::read_exact(&mut f, &mut start)).is_ok() && start == BOM
 }
 
+/// Folders whose files the game fails to read when they start with a BOM.
+/// Elsewhere it reads them, so a BOM only counts once the game's error log
+/// names the file.
+const STRICT_BOM_FOLDERS: [&str; 1] = ["common/decisions/"];
+
+fn game_fails_on_bom(file: &str, logged: &HashSet<String>) -> bool {
+    let lower = file.to_lowercase();
+    STRICT_BOM_FOLDERS.iter().any(|folder| lower.starts_with(folder)) || logged.contains(&lower)
+}
+
 /// A copy of a mod's script file without its byte-order mark, and what the
 /// patch needs to track it.
 #[derive(Debug)]
@@ -1186,8 +1196,10 @@ fn check_file(context: &Context, known: &Known, report: &Report, position: usize
 }
 
 /// `patch` is the merged patch's folder: it loads after every mod, so a
-/// file it holds at the same path replaces the mods' copies.
-pub fn check_mods(context: &Context, known: &Known, roots: &[Option<PathBuf>], report: &Report, patch: Option<&Path>) -> Vec<Finding> {
+/// file it holds at the same path replaces the mods' copies. `logged_boms`
+/// are the files, lowercased, the game's error log says it couldn't read
+/// because of a BOM; see [`crate::paradox::error_log::bom_files`].
+pub fn check_mods(context: &Context, known: &Known, roots: &[Option<PathBuf>], report: &Report, patch: Option<&Path>, logged_boms: &HashSet<String>) -> Vec<Finding> {
     let mut patched: HashSet<String> = HashSet::new();
     if let Some(patch) = patch {
         let mut files = Vec::new();
@@ -1246,7 +1258,7 @@ pub fn check_mods(context: &Context, known: &Known, roots: &[Option<PathBuf>], r
         templates.extend(result.template);
         fired.extend(result.fires.into_iter().map(|(line, id)| (position, file.to_owned(), line, id)));
         found.extend(result.found);
-        if result.bom && !patched.contains(&file.to_lowercase()) {
+        if result.bom && game_fails_on_bom(file, logged_boms) && !patched.contains(&file.to_lowercase()) {
             found.push(bom_finding(position, file));
         }
     }
@@ -1260,7 +1272,7 @@ pub fn check_mods(context: &Context, known: &Known, roots: &[Option<PathBuf>], r
     }
     for (position, (root, files)) in roots.iter().zip(&interface).enumerate() {
         let Some(root) = root else { continue };
-        for file in files.iter().filter(|file| last_interface.get(&file.to_lowercase()) == Some(&position) && !patched.contains(&file.to_lowercase())) {
+        for file in files.iter().filter(|file| last_interface.get(&file.to_lowercase()) == Some(&position) && !patched.contains(&file.to_lowercase()) && game_fails_on_bom(file, logged_boms)) {
             if starts_with_bom(&root.join(file)) {
                 found.push(bom_finding(position, file));
             }
@@ -1539,7 +1551,7 @@ mod tests {
             ],
         );
         let known = known(&docs, &[&game, &mod_root]);
-        let found = check_mods(&context, &known, &[Some(mod_root.clone())], &Report::default(), None);
+        let found = check_mods(&context, &known, &[Some(mod_root.clone())], &Report::default(), None, &HashSet::new());
         let events: Vec<(&str, Problem)> = found.iter().filter(|f| matches!(f.problem, Problem::NoEvent | Problem::Elsewhere)).map(|f| (f.name.as_str(), f.problem)).collect();
         assert_eq!(events, [("g.3", Problem::NoEvent), ("other_mod.5", Problem::Elsewhere)]);
         assert_eq!(found.iter().find(|f| f.name == "g.3").unwrap().siblings, ["g.1", "g.2"]);
@@ -1595,7 +1607,7 @@ mod tests {
         let root = temp(&format!("{name}-mod"));
         write(&root, files);
         let known = known(&docs(), &[&game, &root]);
-        let found = check_mods(&context, &known, &[Some(root.clone())], &Report::default(), None);
+        let found = check_mods(&context, &known, &[Some(root.clone())], &Report::default(), None, &HashSet::new());
         let _ = std::fs::remove_dir_all(game);
         let _ = std::fs::remove_dir_all(root);
         found
@@ -1607,7 +1619,7 @@ mod tests {
         let root = temp(&format!("{name}-mod"));
         write(&root, files);
         let known = known(&docs(), &[&game, &root]);
-        let found = check_mods(&context, &known, &[Some(root.clone())], &Report::default(), None);
+        let found = check_mods(&context, &known, &[Some(root.clone())], &Report::default(), None, &HashSet::new());
         let _ = std::fs::remove_dir_all(game);
         let _ = std::fs::remove_dir_all(root);
         found.into_iter().map(|f| (f.object.map(|(_, key)| key).unwrap_or_default(), f.unused)).collect()
@@ -1647,7 +1659,7 @@ mod tests {
         let root = temp("unused-vanilla-mod");
         write(&root, &[("common/scripted_effects/v.txt", "vanilla_fx = { every_system_colony = { } }")]);
         let known = known(&docs, &[&game, &root]);
-        let found = check_mods(&context, &known, &[Some(root.clone())], &Report::default(), None);
+        let found = check_mods(&context, &known, &[Some(root.clone())], &Report::default(), None, &HashSet::new());
         assert_eq!(found.len(), 1);
         assert!(!found[0].unused);
         let _ = std::fs::remove_dir_all(game);
@@ -1704,7 +1716,7 @@ mod tests {
         write(&second, &[("events/e.txt", "country_event = { id = o.1 immediate = { set_flag = a } }")]);
         write(&third, &[("common/buildings/skip.txt", "x = { potential = { has_technology = t } }")]);
         let roots = [Some(first.clone()), Some(second.clone()), Some(third.clone()), None];
-        let found = check_mods(&context, &known, &roots, &Report::default(), None);
+        let found = check_mods(&context, &known, &roots, &Report::default(), None, &HashSet::new());
         assert_eq!(found.len(), 1);
         assert_eq!((found[0].mod_position, found[0].file.as_str(), found[0].line, found[0].name.as_str()), (0, "events/f.txt", 1, "every_system_colony"));
         assert_eq!(found[0].object, Some(("events".to_owned(), "o.1".to_owned())));
@@ -1723,10 +1735,10 @@ mod tests {
         let mut report = Report::default();
         report.defined.insert(("events".into(), "w.1".into()), vec![Definition { mod_position: 0, file: "events/a_first.txt".into() }, Definition { mod_position: 1, file: "events/b_second.txt".into() }]);
         let roots = [Some(first.clone()), Some(second.clone())];
-        let found = check_mods(&context, &known, &roots, &report, None);
+        let found = check_mods(&context, &known, &roots, &report, None, &HashSet::new());
         // Events keep the first definition they read.
         assert_eq!(found.iter().map(|f| f.mod_position).collect::<Vec<_>>(), [0]);
-        assert_eq!(check_mods(&context, &known, &roots, &Report::default(), None).len(), 2);
+        assert_eq!(check_mods(&context, &known, &roots, &Report::default(), None, &HashSet::new()).len(), 2);
         for dir in [game, first, second] {
             let _ = std::fs::remove_dir_all(dir);
         }
@@ -1763,7 +1775,8 @@ mod tests {
         let context = Context { version: "survey".into(), anchors: HashMap::new(), allowed: HashMap::new(), seen: HashSet::new(), used: HashSet::new(), events: HashSet::new(), event_templates: HashMap::new() };
         let known = Known { effects: HashSet::new(), triggers: HashSet::new(), scopes: HashSet::new(), modifiers: HashSet::new(), effect_iters: HashSet::new(), trigger_iters: HashSet::new() };
         let started = std::time::Instant::now();
-        let found = check_mods(&context, &known, &roots, &Report::default(), patch.as_deref());
+        let log = std::fs::read(crate::paradox::error_log::path(&user)).map(|b| String::from_utf8_lossy(&b).into_owned()).unwrap_or_default();
+        let found = check_mods(&context, &known, &roots, &Report::default(), patch.as_deref(), &crate::paradox::error_log::bom_files(&log));
         println!("check_mods over {} mods took {} ms", roots.len(), started.elapsed().as_millis());
         for f in found.iter().filter(|f| f.problem == Problem::Bom) {
             let root = roots[f.mod_position].as_ref().unwrap();
@@ -1785,17 +1798,23 @@ mod tests {
     }
 
     #[test]
-    fn flags_script_files_that_start_with_a_bom_but_not_localisation() {
+    fn flags_a_bom_file_only_where_the_game_fails_on_it() {
         let (game, context, known) = setup("bom-flag");
         let root = temp("bom-flag-mod");
         write_bytes(&root, "common/decisions/99_a.txt", BOM_SCRIPT);
         write_bytes(&root, "common/decisions/00_clean.txt", b"decision_b = {\r\n\tx = 1\r\n}\r\n");
+        write_bytes(&root, "common/scripted_triggers/t.txt", BOM_SCRIPT);
         write_bytes(&root, "interface/a.gui", b"\xEF\xBB\xBFguiTypes = { }");
         write_bytes(&root, "localisation/english/a_l_english.yml", b"\xEF\xBB\xBFl_english:\n a:0 \"A\"\n");
+        let roots = [Some(root.clone())];
 
-        let found = check_mods(&context, &known, &[Some(root.clone())], &Report::default(), None);
+        let found = check_mods(&context, &known, &roots, &Report::default(), None, &HashSet::new());
+        assert_eq!(bom_files(&found), [(0, "common/decisions/99_a.txt")]);
 
-        assert_eq!(bom_files(&found), [(0, "common/decisions/99_a.txt"), (0, "interface/a.gui")]);
+        let log = "[13:10:46][persistent.cpp:41]: Error: \"Expected format is \"key={\", check formatting and verify encoding is UTF8 (no BOM): x, near line: 4\n\" in file: \"common/scripted_triggers/t.txt\" near line: 9\n[13:10:47][persistent.cpp:41]: Error: \"Unexpected token: a, near line: 1\n\" in file: \"interface/a.gui\" near line: 1\n";
+        let logged = crate::paradox::error_log::bom_files(log);
+        let found = check_mods(&context, &known, &roots, &Report::default(), None, &logged);
+        assert_eq!(bom_files(&found), [(0, "common/decisions/99_a.txt"), (0, "common/scripted_triggers/t.txt")]);
         for dir in [game, root] {
             let _ = std::fs::remove_dir_all(dir);
         }
@@ -1813,10 +1832,12 @@ mod tests {
         write_bytes(&patch, "common/decisions/99_b.txt", b"decision_a = { x = 1 }");
         let roots = [Some(first.clone()), Some(second.clone())];
 
-        let found = check_mods(&context, &known, &roots, &Report::default(), Some(&patch));
+        let logged: HashSet<String> = ["interface/a.gui".to_owned()].into();
+
+        let found = check_mods(&context, &known, &roots, &Report::default(), Some(&patch), &logged);
 
         assert_eq!(bom_files(&found), []);
-        let without_patch = check_mods(&context, &known, &roots, &Report::default(), None);
+        let without_patch = check_mods(&context, &known, &roots, &Report::default(), None, &logged);
         assert_eq!(bom_files(&without_patch), [(0, "common/decisions/99_b.txt")]);
         for dir in [game, first, second, patch] {
             let _ = std::fs::remove_dir_all(dir);
@@ -1985,7 +2006,7 @@ mod tests {
         // The same, split by whether anything calls the object they're in.
         let timed = std::time::Instant::now();
         let roots: Vec<Option<PathBuf>> = mods.iter().map(|(_, root)| Some(root.clone())).collect();
-        let found = check_mods(&context, &known, &roots, &Report::default(), None);
+        let found = check_mods(&context, &known, &roots, &Report::default(), None, &HashSet::new());
         println!("check_mods took {} ms", timed.elapsed().as_millis());        for (position, (name, _)) in mods.iter().enumerate() {
             let here: Vec<&Finding> = found.iter().filter(|f| f.mod_position == position).collect();
             if here.is_empty() {
