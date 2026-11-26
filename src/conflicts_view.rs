@@ -56,6 +56,8 @@ pub struct Analysis {
     /// Each scanned mod's position in the full load order (the merged patch
     /// itself is not scanned, so these can differ).
     pub load_positions: Vec<usize>,
+    /// The game version the scan was made against, when known.
+    pub game_version: Option<String>,
     pub report: Report,
     /// Object conflicts that need no AI to merge, by index, with why.
     pub simple: HashMap<usize, String>,
@@ -118,6 +120,8 @@ pub struct MergeHooks {
     pub save_object: Box<dyn Fn(&str, &str, &str, Vec<Print>) -> Result<(), String>>,
     /// Saves a whole file to the patch at `path`.
     pub save_file: Box<dyn Fn(&str, &[u8], Vec<Print>) -> Result<(), String>>,
+    /// Records the inline scripts saved alongside an object merge.
+    pub set_scripts: Box<dyn Fn(&str, &str, Vec<String>) -> Result<(), String>>,
     /// Called after anything was saved to the patch.
     pub patch_saved: Box<dyn Fn()>,
     /// Whether the patch already holds a merged copy of a file.

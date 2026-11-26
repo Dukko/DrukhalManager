@@ -29,7 +29,11 @@ pub struct ThinkingView {
 impl ThinkingView {
     pub fn new() -> Rc<Self> {
         let spinner = adw::Spinner::new();
-        let title = gtk::Label::builder().xalign(0.0).ellipsize(gtk::pango::EllipsizeMode::End).hexpand(true).build();
+        let title = gtk::Label::builder()
+            .xalign(0.0)
+            .ellipsize(gtk::pango::EllipsizeMode::End)
+            .hexpand(true)
+            .build();
         let header = gtk::Box::new(gtk::Orientation::Horizontal, 8);
         header.append(&spinner);
         header.append(&title);
@@ -47,10 +51,33 @@ impl ThinkingView {
             .right_margin(10)
             .css_classes(["dim-label"])
             .build();
-        let scroll = gtk::ScrolledWindow::builder().child(&view).hscrollbar_policy(gtk::PolicyType::Never).min_content_height(80).max_content_height(260).propagate_natural_height(true).css_classes(["card"]).margin_top(6).build();
-        let widget = gtk::Expander::builder().label_widget(&header).child(&crate::resize_grip::resizable(&scroll)).visible(false).build();
+        let scroll = gtk::ScrolledWindow::builder()
+            .child(&view)
+            .hscrollbar_policy(gtk::PolicyType::Never)
+            .min_content_height(80)
+            .max_content_height(260)
+            .propagate_natural_height(true)
+            .css_classes(["card"])
+            .margin_top(6)
+            .build();
+        let widget = gtk::Expander::builder()
+            .label_widget(&header)
+            .child(&crate::resize_grip::resizable(&scroll))
+            .visible(false)
+            .build();
         widget.set_tooltip_text(Some(&t!("What the model is thinking. Click to expand.")));
-        Rc::new(Self { widget, title, spinner, view, buffer, words: Cell::new(0), output: Cell::new(0), reasoned: Cell::new(false), stopped: Cell::new(false), cancel: RefCell::new(None) })
+        Rc::new(Self {
+            widget,
+            title,
+            spinner,
+            view,
+            buffer,
+            words: Cell::new(0),
+            output: Cell::new(0),
+            reasoned: Cell::new(false),
+            stopped: Cell::new(false),
+            cancel: RefCell::new(None),
+        })
     }
 
     /// Stops the running job immediately and updates the title.
@@ -80,7 +107,8 @@ impl ThinkingView {
             if end.offset() > 0 {
                 self.buffer.insert(&mut end, "\n\n");
             }
-            self.buffer.insert_with_tags_by_name(&mut end, heading, &["heading"]);
+            self.buffer
+                .insert_with_tags_by_name(&mut end, heading, &["heading"]);
             self.buffer.insert(&mut end, "\n");
         }
     }
@@ -89,18 +117,31 @@ impl ThinkingView {
         match progress {
             Progress::Thinking(text) => {
                 self.reasoned.set(true);
-                self.words.set(self.words.get() + text.split_whitespace().count());
+                self.words
+                    .set(self.words.get() + text.split_whitespace().count());
                 let mut end = self.buffer.end_iter();
                 self.buffer.insert(&mut end, &text);
-                self.view.scroll_to_iter(&mut self.buffer.end_iter(), 0.0, false, 0.0, 1.0);
+                self.view
+                    .scroll_to_iter(&mut self.buffer.end_iter(), 0.0, false, 0.0, 1.0);
                 // The header previews the latest line of reasoning.
-                let all = self.buffer.text(&self.buffer.start_iter(), &self.buffer.end_iter(), false);
-                let latest = all.lines().rev().map(str::trim).find(|l| !l.is_empty()).unwrap_or_default();
-                self.title.set_label(&tf!("Thinking: {thought}", thought = latest));
+                let all =
+                    self.buffer
+                        .text(&self.buffer.start_iter(), &self.buffer.end_iter(), false);
+                let latest = all
+                    .lines()
+                    .rev()
+                    .map(str::trim)
+                    .find(|l| !l.is_empty())
+                    .unwrap_or_default();
+                self.title
+                    .set_label(&tf!("Thinking: {thought}", thought = latest));
             }
             Progress::Output(text) => {
                 self.output.set(self.output.get() + text.chars().count());
-                self.title.set_label(&tf!("Writing the result… {count} characters", count = self.output.get()));
+                self.title.set_label(&tf!(
+                    "Writing the result… {count} characters",
+                    count = self.output.get()
+                ));
             }
         }
     }
@@ -120,14 +161,31 @@ impl ThinkingView {
 
 /// Runs `job` off the main thread, streaming its progress into `view`.
 /// `heading` labels this run in the reasoning, for dialogs that run several.
-pub async fn run<T: Send + 'static>(view: &Rc<ThinkingView>, heading: Option<&str>, job: impl FnOnce(&mut dyn FnMut(Progress)) -> T + Send + 'static) -> Option<T> {
+pub async fn run<T: Send + 'static>(
+    view: &Rc<ThinkingView>,
+    heading: Option<&str>,
+    job: impl FnOnce(&mut dyn FnMut(Progress)) -> T + Send + 'static,
+) -> Option<T> {
+    run_cancellable(view, heading, |_, on| job(on)).await
+}
+
+/// Like [`run`], passing a cooperative [`crate::merge::ai::CancelToken`] that
+/// is triggered immediately when `view.stop()` is called.
+pub async fn run_cancellable<T: Send + 'static>(
+    view: &Rc<ThinkingView>,
+    heading: Option<&str>,
+    job: impl FnOnce(&crate::merge::ai::CancelToken, &mut dyn FnMut(Progress)) -> T + Send + 'static,
+) -> Option<T> {
     let (tx, rx) = async_channel::unbounded();
     let rx_close = rx.clone();
+    let token = crate::merge::ai::CancelToken::new();
+    let token_cancel = token.clone();
     view.cancel.borrow_mut().replace(Box::new(move || {
+        token_cancel.cancel();
         rx_close.close();
     }));
     view.begin(heading);
-    let handle = gio::spawn_blocking(move || job(&mut |p| drop(tx.send_blocking(p))));
+    let handle = gio::spawn_blocking(move || job(&token, &mut |p| drop(tx.send_blocking(p))));
     // The channel closes when the job finishes and drops its sender,
     // or when the run is stopped via `view.stop()`.
     while let Ok(progress) = rx.recv().await {

@@ -69,6 +69,11 @@ impl Snapshot {
         self.objects.get(&id(category, key))
     }
 
+    /// The base game's copy of inline script `name`, if this version has it.
+    pub fn script(&self, name: &str) -> Option<&Saved> {
+        self.get("common/inline_scripts", name)
+    }
+
     /// The text of every object, for collecting the game's keywords.
     pub fn texts(&self) -> impl Iterator<Item = &str> {
         self.objects.values().map(|s| s.text.as_str())
@@ -153,6 +158,35 @@ fn collect(game_dir: &Path, version: &str) -> Taken {
             let src = text.trim_start_matches('\u{feff}');
             for (key, text) in source::index(&category, src) {
                 objects.entry(id(&category, &key)).or_insert_with(|| Saved { file: file.clone(), text });
+            }
+        }
+    }
+    // Inline scripts have no single object key, so store each file whole by
+    // its script name; game updates can then be applied to mod replacements.
+    let inline_dir = game_dir.join("common/inline_scripts");
+    if inline_dir.is_dir() {
+        let mut scripts = Vec::new();
+        if conflicts::walk(game_dir, &inline_dir, &mut scripts).is_ok() {
+            for file in scripts {
+                let Ok(bytes) = std::fs::read(game_dir.join(&file)) else {
+                    unreadable += 1;
+                    continue;
+                };
+                let name = file
+                    .strip_prefix("common/inline_scripts/")
+                    .unwrap_or(&file);
+                let name = name
+                    .strip_suffix(".txt")
+                    .or_else(|| name.strip_suffix(".TXT"))
+                    .unwrap_or(name)
+                    .to_owned();
+                let text = String::from_utf8_lossy(&bytes)
+                    .trim_start_matches('\u{feff}')
+                    .to_owned();
+                objects
+                    .entry(id("common/inline_scripts", &name))
+                    .or_insert(Saved { file, text });
+                read += 1;
             }
         }
     }
@@ -352,6 +386,34 @@ mod tests {
         assert_eq!(snap.get("events", "a.1").unwrap().file, "events/a.txt");
         assert_eq!(snap.get("events", "a.1").unwrap().text, "country_event = { id = a.1 }");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn snapshots_inline_scripts_by_name() {
+        let game = temp("inline");
+        write(
+            &game,
+            &[
+                (
+                    "common/inline_scripts/MECR/factions/imperialist_460.txt",
+                    "demand = { value = 1 }",
+                ),
+                (
+                    "common/pop_faction_types/00_imperialist.txt",
+                    "imperialist = { }",
+                ),
+            ],
+        );
+        let snap = take(&game, "v");
+        let script = snap
+            .script("MECR/factions/imperialist_460")
+            .expect("script recorded");
+        assert_eq!(script.text, "demand = { value = 1 }");
+        assert_eq!(
+            script.file,
+            "common/inline_scripts/MECR/factions/imperialist_460.txt"
+        );
+        std::fs::remove_dir_all(game).unwrap();
     }
 
     #[test]

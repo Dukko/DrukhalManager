@@ -60,8 +60,16 @@ pub fn validate(category: &str, key: &str, text: &str) -> Result<String, String>
     }
     let entries = script::parse(text).map_err(|e| tf!("The merged script has a syntax error at {error}", error = e))?;
     // Like an AI's object merge, exactly one object may come back: an extra
-    // one would be written into the patch's highest-priority file.
-    let objects = entries.iter().filter(|entry| matches!(entry, script::Entry::Assign { key, .. } if !key.starts_with('@'))).count();
+    // one would be written into the patch's highest-priority file. A
+    // `common/scripted_variables` merge defines an `@variable` itself, so
+    // count that one; other `@variable` lines it needs stay preamble.
+    let objects = entries
+        .iter()
+        .filter(|entry| match entry {
+            script::Entry::Assign { key: entry_key, .. } => !entry_key.starts_with('@') || entry_key.as_str() == key,
+            _ => false,
+        })
+        .count();
     if objects != 1 {
         return Err(tf!("The merged script must define `{key}` and nothing else", key = key));
     }
@@ -99,5 +107,11 @@ mod tests {
         // Scripted effects definitions can contain control blocks like `if` and `switch`
         let scripted_def = "mzilli_star_crisis_heat_planets = { if = { limit = { is_terraforming = yes } cancel_terraformation = yes } }";
         assert!(validate("common/scripted_effects", "mzilli_star_crisis_heat_planets", scripted_def).is_ok());
+
+        // A scripted variable is its own object, and may bring other
+        // `@variable` lines it needs.
+        assert!(validate("common/scripted_variables", "@my_cost", "@my_cost = 100").is_ok());
+        assert!(validate("common/scripted_variables", "@my_cost", "@helper = 2\n@my_cost = 100").is_ok());
+        assert!(validate("common/scripted_variables", "@my_cost", "@other = 100").is_err());
     }
 }

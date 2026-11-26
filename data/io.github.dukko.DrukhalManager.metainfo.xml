@@ -36,6 +36,19 @@
     <control>keyboard</control>
   </supports>
   <releases>
+    <release version="2.7.23" date="2026-11-25">
+      <description>
+        <p>Merges replaced inline scripts with their objects, and makes conflict merging safer:</p>
+        <ul>
+          <li>Detects when a mod replaces a vanilla inline script with its own copy, merges the script and the object together, saves it under the mod's script name, and rewrites the object's call to it</li>
+          <li>Updates replaced inline scripts during game updates when the vanilla script changed</li>
+          <li>Tracks merged inline scripts in the patch, removes them with their object or file, and keeps scripts shared by several merges</li>
+          <li>Gives AI merges the folder priority rule, the current winner, game version and replaced-script context; validates single-value keys, dropped additions, scripted variables and localisation files</li>
+          <li>Carries the missing source content into corrections instead of replaying the whole request</li>
+          <li>Adds AI result caching, model limits, request preflight, cancellation and cost reporting; retries transient provider errors and unsupported optional parameters</li>
+        </ul>
+      </description>
+    </release>
     <release version="2.7.22" date="2026-11-25">
       <description>
         <p>Inline script comparison, Omarchy theming, and smoother collection &amp; conflict workflows:</p>

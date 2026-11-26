@@ -533,6 +533,7 @@ fn check_nodes(
 
 /// Strips any undeclared child blocks `X = { ... }` inside scripted effect or trigger calls,
 /// preserving formatting, indentation, and comments of all other lines.
+#[cfg(test)]
 pub fn strip_undeclared_scripted_effect_blocks(
     text: &str,
     params: &ScriptedParams,
@@ -553,6 +554,7 @@ pub fn strip_undeclared_scripted_effect_blocks(
     result
 }
 
+#[cfg(test)]
 fn strip_block_at_line(text: &str, target_line: usize, key: &str) -> String {
     let lines: Vec<&str> = text.split_inclusive('\n').collect();
     if target_line < 1 || lines.is_empty() {

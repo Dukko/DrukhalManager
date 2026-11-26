@@ -40,7 +40,12 @@ pub fn extract(category: &str, key: &str, src: &str) -> Option<String> {
 
 /// As [`extract`], from `src` already parsed into `entries`, so one parse
 /// can serve many lookups.
-pub fn extract_parsed(category: &str, key: &str, src: &str, entries: &[(Entry, std::ops::Range<usize>)]) -> Option<String> {
+pub fn extract_parsed(
+    category: &str,
+    key: &str,
+    src: &str,
+    entries: &[(Entry, std::ops::Range<usize>)],
+) -> Option<String> {
     if category == "localisation" {
         return localisation_line(key, src);
     }
@@ -52,7 +57,11 @@ pub fn extract_parsed(category: &str, key: &str, src: &str, entries: &[(Entry, s
     let mut parts: Vec<&str> = entries
         .iter()
         .filter_map(|(entry, range)| match entry {
-            Entry::Assign { key: var, .. } if var.starts_with('@') && uses_variable(text, var) => Some(&src[range.clone()]),
+            Entry::Assign { key: var, .. }
+                if var.starts_with('@') && var != key && uses_variable(text, var) =>
+            {
+                Some(&src[range.clone()])
+            }
             _ => None,
         })
         .collect();
@@ -73,13 +82,24 @@ pub fn object_at(category: &str, src: &str, line: usize) -> Option<(String, Stri
 }
 
 /// As [`object_at`], from `src` already parsed into `entries`.
-fn object_at_parsed(category: &str, src: &str, entries: &[(Entry, Range<usize>)], line: usize) -> Option<(String, String)> {
+fn object_at_parsed(
+    category: &str,
+    src: &str,
+    entries: &[(Entry, Range<usize>)],
+    line: usize,
+) -> Option<(String, String)> {
     if category == "localisation" || line == 0 {
         return None;
     }
-    let start = if line == 1 { 0 } else { src.match_indices('\n').nth(line - 2)?.0 + 1 };
+    let start = if line == 1 {
+        0
+    } else {
+        src.match_indices('\n').nth(line - 2)?.0 + 1
+    };
     let end = src[start..].find('\n').map_or(src.len(), |i| start + i);
-    let (entry, _) = entries.iter().find(|(_, range)| range.start <= end && range.end > start)?;
+    let (entry, _) = entries
+        .iter()
+        .find(|(_, range)| range.start <= end && range.end > start)?;
     let key = crate::merge::conflicts::object_key_for_entry(category, entry)?;
     let text = extract_parsed(category, &key, src, entries)?;
     Some((key, text))
@@ -102,26 +122,38 @@ pub fn index(category: &str, src: &str) -> HashMap<String, String> {
                 continue;
             }
             if let Some((key, _)) = trimmed.split_once(':') {
-                found.entry(format!("{current}:{key}")).or_insert_with(|| trimmed.to_owned());
+                found
+                    .entry(format!("{current}:{key}"))
+                    .or_insert_with(|| trimmed.to_owned());
             }
         }
         return found;
     }
-    let Ok(entries) = script::parse_with_spans(src) else { return found };
+    let Ok(entries) = script::parse_with_spans(src) else {
+        return found;
+    };
     let variables: Vec<(&str, &str)> = entries
         .iter()
         .filter_map(|(entry, range)| match entry {
-            Entry::Assign { key, .. } if key.starts_with('@') => Some((key.as_str(), &src[range.clone()])),
+            Entry::Assign { key, .. } if key.starts_with('@') => {
+                Some((key.as_str(), &src[range.clone()]))
+            }
             _ => None,
         })
         .collect();
     for (entry, range) in &entries {
-        let Some(name) = crate::merge::conflicts::object_key_for_entry(category, entry) else { continue };
+        let Some(name) = crate::merge::conflicts::object_key_for_entry(category, entry) else {
+            continue;
+        };
         if found.contains_key(&name) {
             continue;
         }
         let text = &src[range.clone()];
-        let mut parts: Vec<&str> = variables.iter().filter(|(var, _)| uses_variable(text, var)).map(|(_, definition)| *definition).collect();
+        let mut parts: Vec<&str> = variables
+            .iter()
+            .filter(|(var, _)| *var != name && uses_variable(text, var))
+            .map(|(_, definition)| *definition)
+            .collect();
         parts.push(text);
         found.insert(name, parts.join("\n"));
     }
@@ -130,7 +162,11 @@ pub fn index(category: &str, src: &str) -> HashMap<String, String> {
 
 /// Calls `f` with each wanted `language:key` entry in a localisation file
 /// and its line, without allocating for the rest.
-fn localisation_lines(src: &str, wanted: &std::collections::HashSet<&str>, mut f: impl FnMut(String, &str)) {
+fn localisation_lines(
+    src: &str,
+    wanted: &std::collections::HashSet<&str>,
+    mut f: impl FnMut(String, &str),
+) {
     let mut current = "";
     let mut buffer = String::new();
     for line in src.lines() {
@@ -215,7 +251,9 @@ impl Files {
         if let Some(text) = self.texts.borrow().get(&path) {
             return text.clone();
         }
-        let text = std::fs::read(&path).ok().map(|b| Rc::new(String::from_utf8_lossy(&b).into_owned()));
+        let text = std::fs::read(&path)
+            .ok()
+            .map(|b| Rc::new(String::from_utf8_lossy(&b).into_owned()));
         self.texts.borrow_mut().insert(path, text.clone());
         text
     }
@@ -253,7 +291,13 @@ impl Files {
 
     /// The object covering `line` in the file, as [`object_at`] finds it,
     /// but parsing each file only once.
-    pub fn object_at(&self, root: &Path, file: &str, category: &str, line: usize) -> Option<(String, String)> {
+    pub fn object_at(
+        &self,
+        root: &Path,
+        file: &str,
+        category: &str,
+        line: usize,
+    ) -> Option<(String, String)> {
         if category == "localisation" || line == 0 {
             return None;
         }
@@ -264,17 +308,27 @@ impl Files {
 
 /// The base game's definition of the object, if it has one.
 pub fn vanilla(game_dir: &Path, category: &str, key: &str) -> Option<Source> {
-    vanilla_files(game_dir, category).into_iter().find_map(|path| {
-        let src = String::from_utf8_lossy(&std::fs::read(&path).ok()?).into_owned();
-        let text = extract(category, key, &src)?;
-        let file = crate::platform::game_path(path.strip_prefix(game_dir).ok()?);
-        Some(Source { label: "Vanilla".into(), file, text })
-    })
+    vanilla_files(game_dir, category)
+        .into_iter()
+        .find_map(|path| {
+            let src = String::from_utf8_lossy(&std::fs::read(&path).ok()?).into_owned();
+            let text = extract(category, key, &src)?;
+            let file = crate::platform::game_path(path.strip_prefix(game_dir).ok()?);
+            Some(Source {
+                label: "Vanilla".into(),
+                file,
+                text,
+            })
+        })
 }
 
 /// The base game's definitions of several objects in one category, reading
 /// each game file once. Missing ones are left out.
-pub fn vanilla_many(game_dir: &Path, category: &str, keys: &[String]) -> std::collections::HashMap<String, Source> {
+pub fn vanilla_many(
+    game_dir: &Path,
+    category: &str,
+    keys: &[String],
+) -> std::collections::HashMap<String, Source> {
     let (dir, recursive, extension) = match category {
         "localisation" => (game_dir.join("localisation"), true, "yml"),
         _ => (game_dir.join(category), false, "txt"),
@@ -284,8 +338,17 @@ pub fn vanilla_many(game_dir: &Path, category: &str, keys: &[String]) -> std::co
     files.sort();
     if category == "localisation" {
         // Only the languages asked for; the game ships a dozen.
-        let languages: std::collections::HashSet<String> = keys.iter().filter_map(|k| Some(format!("_{}.yml", k.split_once(':')?.0.to_lowercase()))).collect();
-        files.retain(|f| f.file_name().is_some_and(|n| languages.iter().any(|l| n.to_string_lossy().to_lowercase().ends_with(l.as_str()))));
+        let languages: std::collections::HashSet<String> = keys
+            .iter()
+            .filter_map(|k| Some(format!("_{}.yml", k.split_once(':')?.0.to_lowercase())))
+            .collect();
+        files.retain(|f| {
+            f.file_name().is_some_and(|n| {
+                languages
+                    .iter()
+                    .any(|l| n.to_string_lossy().to_lowercase().ends_with(l.as_str()))
+            })
+        });
     }
     let wanted: std::collections::HashSet<&str> = keys.iter().map(String::as_str).collect();
     let mut found = HashMap::new();
@@ -293,12 +356,24 @@ pub fn vanilla_many(game_dir: &Path, category: &str, keys: &[String]) -> std::co
         if found.len() == wanted.len() {
             break;
         }
-        let Ok(bytes) = std::fs::read(&path) else { continue };
+        let Ok(bytes) = std::fs::read(&path) else {
+            continue;
+        };
         let src = String::from_utf8_lossy(&bytes);
-        let Some(file) = path.strip_prefix(game_dir).ok().map(crate::platform::game_path) else { continue };
+        let Some(file) = path
+            .strip_prefix(game_dir)
+            .ok()
+            .map(crate::platform::game_path)
+        else {
+            continue;
+        };
         if category == "localisation" {
             localisation_lines(&src, &wanted, |key, line| {
-                found.entry(key).or_insert_with(|| Source { label: "Vanilla".into(), file: file.clone(), text: line.to_owned() });
+                found.entry(key).or_insert_with(|| Source {
+                    label: "Vanilla".into(),
+                    file: file.clone(),
+                    text: line.to_owned(),
+                });
             });
             continue;
         }
@@ -310,7 +385,14 @@ pub fn vanilla_many(game_dir: &Path, category: &str, keys: &[String]) -> std::co
         for (key, text) in index(category, &src) {
             // The first file defining it wins, as with `vanilla`.
             if wanted.contains(key.as_str()) && !found.contains_key(&key) {
-                found.insert(key, Source { label: "Vanilla".into(), file: file.clone(), text });
+                found.insert(
+                    key,
+                    Source {
+                        label: "Vanilla".into(),
+                        file: file.clone(),
+                        text,
+                    },
+                );
             }
         }
     }
@@ -318,14 +400,19 @@ pub fn vanilla_many(game_dir: &Path, category: &str, keys: &[String]) -> std::co
 }
 
 fn collect(dir: &Path, recursive: bool, extension: &str, out: &mut Vec<std::path::PathBuf>) {
-    let Ok(entries) = std::fs::read_dir(dir) else { return };
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
     for entry in entries.flatten() {
         let path = entry.path();
         if path.is_dir() {
             if recursive {
                 collect(&path, recursive, extension, out);
             }
-        } else if path.extension().is_some_and(|e| e.eq_ignore_ascii_case(extension)) {
+        } else if path
+            .extension()
+            .is_some_and(|e| e.eq_ignore_ascii_case(extension))
+        {
             out.push(path);
         }
     }
@@ -338,14 +425,20 @@ mod tests {
     #[test]
     fn extracts_objects_with_their_variables() {
         let src = "@cost = 10\n@unused = 1\n@cost_extra = 2\n# Lab\nbuilding_lab = {\n\tcost = @cost # cheap\n}\nbuilding_other = { cost = @unused }";
-        assert_eq!(extract("common/buildings", "building_lab", src).unwrap(), "@cost = 10\nbuilding_lab = {\n\tcost = @cost # cheap\n}");
+        assert_eq!(
+            extract("common/buildings", "building_lab", src).unwrap(),
+            "@cost = 10\nbuilding_lab = {\n\tcost = @cost # cheap\n}"
+        );
         assert_eq!(extract("common/buildings", "building_missing", src), None);
     }
 
     #[test]
     fn extracts_events_by_id() {
         let src = "namespace = ns\ncountry_event = { id = ns.1 }\nship_event = {\n\tid = ns.2\n\tis_triggered_only = yes\n}";
-        assert_eq!(extract("events", "ns.2", src).unwrap(), "ship_event = {\n\tid = ns.2\n\tis_triggered_only = yes\n}");
+        assert_eq!(
+            extract("events", "ns.2", src).unwrap(),
+            "ship_event = {\n\tid = ns.2\n\tis_triggered_only = yes\n}"
+        );
     }
 
     #[test]
@@ -356,12 +449,23 @@ mod tests {
             assert_eq!(all.get(key), extract("common/buildings", key, src).as_ref());
         }
         assert_eq!(all.len(), 2);
-        let events = "namespace = ns\ncountry_event = { id = ns.1 }\nship_event = {\n\tid = ns.2\n}";
-        assert_eq!(index("events", events).get("ns.2"), extract("events", "ns.2", events).as_ref());
-        let loc = "\u{feff}l_english:\n building_lab:0 \"Lab\"\nl_german:\n building_lab:0 \"Labor\"\n";
+        let events =
+            "namespace = ns\ncountry_event = { id = ns.1 }\nship_event = {\n\tid = ns.2\n}";
+        assert_eq!(
+            index("events", events).get("ns.2"),
+            extract("events", "ns.2", events).as_ref()
+        );
+        let loc =
+            "\u{feff}l_english:\n building_lab:0 \"Lab\"\nl_german:\n building_lab:0 \"Labor\"\n";
         let all = index("localisation", loc);
-        assert_eq!(all.get("l_german:building_lab"), extract("localisation", "l_german:building_lab", loc).as_ref());
-        assert_eq!(all.get("l_english:building_lab").map(String::as_str), Some("building_lab:0 \"Lab\""));
+        assert_eq!(
+            all.get("l_german:building_lab"),
+            extract("localisation", "l_german:building_lab", loc).as_ref()
+        );
+        assert_eq!(
+            all.get("l_english:building_lab").map(String::as_str),
+            Some("building_lab:0 \"Lab\"")
+        );
     }
 
     #[test]
@@ -374,7 +478,8 @@ mod tests {
         assert_eq!(object_at("common/x", src, 5), None);
         assert_eq!(object_at("common/x", src, 1), None);
         assert_eq!(object_at("common/x", src, 0), None);
-        let events = "namespace = ns\ncountry_event = { id = ns.1 }\nship_event = {\n\tid = ns.2\n}\n";
+        let events =
+            "namespace = ns\ncountry_event = { id = ns.1 }\nship_event = {\n\tid = ns.2\n}\n";
         assert_eq!(object_at("events", events, 4).unwrap().0, "ns.2");
         assert_eq!(object_at("events", events, 1), None);
     }
@@ -382,38 +487,83 @@ mod tests {
     #[test]
     fn extracts_localisation_lines() {
         let src = "\u{feff}l_english:\r\n# Buildings:\r\n building_lab:0 \"Lab\"\r\n building_lab_desc:0 \"A lab\"\nl_german:\n building_lab:0 \"Labor\"\n";
-        assert_eq!(extract("localisation", "l_english:building_lab", src).unwrap(), "building_lab:0 \"Lab\"");
-        assert_eq!(extract("localisation", "l_german:building_lab", src).unwrap(), "building_lab:0 \"Labor\"");
+        assert_eq!(
+            extract("localisation", "l_english:building_lab", src).unwrap(),
+            "building_lab:0 \"Lab\""
+        );
+        assert_eq!(
+            extract("localisation", "l_german:building_lab", src).unwrap(),
+            "building_lab:0 \"Labor\""
+        );
     }
 
     #[test]
     fn extracts_inner_keyed_objects() {
         let sets = "component_set = { key = \"SET_1\" icon = \"GFX_1\" }\ncomponent_set = { key = \"SET_2\" icon = \"GFX_2\" }\n";
-        assert_eq!(extract("common/component_sets", "SET_1", sets).as_deref(), Some("component_set = { key = \"SET_1\" icon = \"GFX_1\" }"));
-        assert_eq!(extract("common/component_sets", "SET_2", sets).as_deref(), Some("component_set = { key = \"SET_2\" icon = \"GFX_2\" }"));
-        assert_eq!(object_at("common/component_sets", sets, 2).unwrap().0, "SET_2");
+        assert_eq!(
+            extract("common/component_sets", "SET_1", sets).as_deref(),
+            Some("component_set = { key = \"SET_1\" icon = \"GFX_1\" }")
+        );
+        assert_eq!(
+            extract("common/component_sets", "SET_2", sets).as_deref(),
+            Some("component_set = { key = \"SET_2\" icon = \"GFX_2\" }")
+        );
+        assert_eq!(
+            object_at("common/component_sets", sets, 2).unwrap().0,
+            "SET_2"
+        );
 
         let tmpls = "@pow = 5\nutility_component_template = { key = \"UTIL_1\" power = @pow }\nweapon_component_template = { key = \"WEAP_1\" }\n";
-        assert_eq!(extract("common/component_templates", "UTIL_1", tmpls).as_deref(), Some("@pow = 5\nutility_component_template = { key = \"UTIL_1\" power = @pow }"));
-        assert_eq!(extract("common/component_templates", "WEAP_1", tmpls).as_deref(), Some("weapon_component_template = { key = \"WEAP_1\" }"));
+        assert_eq!(
+            extract("common/component_templates", "UTIL_1", tmpls).as_deref(),
+            Some("@pow = 5\nutility_component_template = { key = \"UTIL_1\" power = @pow }")
+        );
+        assert_eq!(
+            extract("common/component_templates", "WEAP_1", tmpls).as_deref(),
+            Some("weapon_component_template = { key = \"WEAP_1\" }")
+        );
 
         let amb = "ambient_object = { name = \"amb_x\" entity = \"ent_x\" }\n";
-        assert_eq!(extract("common/ambient_objects", "amb_x", amb).as_deref(), Some("ambient_object = { name = \"amb_x\" entity = \"ent_x\" }"));
+        assert_eq!(
+            extract("common/ambient_objects", "amb_x", amb).as_deref(),
+            Some("ambient_object = { name = \"amb_x\" entity = \"ent_x\" }")
+        );
 
         let msg = "message_type = { key = \"msg_x\" sound = \"s\" }\n";
-        assert_eq!(extract("common/message_types", "msg_x", msg).as_deref(), Some("message_type = { key = \"msg_x\" sound = \"s\" }"));
+        assert_eq!(
+            extract("common/message_types", "msg_x", msg).as_deref(),
+            Some("message_type = { key = \"msg_x\" sound = \"s\" }")
+        );
 
         let ship = "ship_design = { name = \"ship_x\" }\n";
-        assert_eq!(extract("common/global_ship_designs", "ship_x", ship).as_deref(), Some("ship_design = { name = \"ship_x\" }"));
+        assert_eq!(
+            extract("common/global_ship_designs", "ship_x", ship).as_deref(),
+            Some("ship_design = { name = \"ship_x\" }")
+        );
 
         let proj = "special_project = { key = \"SYNTHETIC_EVOLUTION_PROJECT\" cost = 100 }\n";
-        assert_eq!(extract("common/special_projects", "SYNTHETIC_EVOLUTION_PROJECT", proj).as_deref(), Some("special_project = { key = \"SYNTHETIC_EVOLUTION_PROJECT\" cost = 100 }"));
+        assert_eq!(
+            extract(
+                "common/special_projects",
+                "SYNTHETIC_EVOLUTION_PROJECT",
+                proj
+            )
+            .as_deref(),
+            Some("special_project = { key = \"SYNTHETIC_EVOLUTION_PROJECT\" cost = 100 }")
+        );
 
-        let rl = "random_list = {\n\tname = \"rl_habitable_normal\"\n\tplanets = { pc_desert }\n}\n";
-        assert_eq!(extract("common/planet_classes", "rl_habitable_normal", rl).as_deref(), Some(rl.trim_end()));
+        let rl =
+            "random_list = {\n\tname = \"rl_habitable_normal\"\n\tplanets = { pc_desert }\n}\n";
+        assert_eq!(
+            extract("common/planet_classes", "rl_habitable_normal", rl).as_deref(),
+            Some(rl.trim_end())
+        );
 
         let tf = "terraform_link = {\n\tfrom = pc_barren\n\tto = pc_desert\n}\n";
-        assert_eq!(extract("common/terraform", "pc_barren → pc_desert", tf).as_deref(), Some(tf.trim_end()));
+        assert_eq!(
+            extract("common/terraform", "pc_barren → pc_desert", tf).as_deref(),
+            Some(tf.trim_end())
+        );
 
         let files = Files::default();
         let root = std::env::temp_dir().join(format!("dm-source-tf-{}", std::process::id()));
@@ -421,7 +571,14 @@ mod tests {
         std::fs::create_dir_all(root.join("common/terraform")).unwrap();
         std::fs::write(root.join("common/terraform/links.txt"), tf).unwrap();
         assert_eq!(
-            files.object(&root, "common/terraform/links.txt", "common/terraform", "pc_barren → pc_desert").as_deref(),
+            files
+                .object(
+                    &root,
+                    "common/terraform/links.txt",
+                    "common/terraform",
+                    "pc_barren → pc_desert"
+                )
+                .as_deref(),
             Some(tf.trim_end())
         );
         let _ = std::fs::remove_dir_all(&root);

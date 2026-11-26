@@ -6,19 +6,19 @@ use std::rc::Rc;
 use adw::prelude::*;
 use gtk::{gio, glib};
 
-use super::{display_name, status_page};
 use super::Window;
+use super::{display_name, status_page};
 use crate::conflicts_view::{self, Analysis, MergeHooks};
 use crate::file_merge_dialog;
-use crate::folder_merge_dialog;
 use crate::fix_dialog;
+use crate::folder_merge_dialog;
 use crate::merge::base_game;
 use crate::merge::conflicts::{self, ModInput};
 use crate::merge::order_check;
 use crate::merge::patch::{self, Patch};
 use crate::merge::scan_cache::ScanCache;
 use crate::merge::snapshot;
-use crate::mods::{self, archive, Mod};
+use crate::mods::{self, Mod, archive};
 use crate::settings;
 
 impl Window {
@@ -61,8 +61,14 @@ impl Window {
                 .map(|(_, m)| display_name(m).to_owned())
                 .collect();
             let ids = scanned.iter().map(|(_, m)| m.id.clone()).collect();
-            let descriptor_names: Vec<String> = scanned.iter().map(|(_, m)| m.descriptor.name.clone()).collect();
-            let dependencies: Vec<Vec<String>> = scanned.iter().map(|(_, m)| m.descriptor.dependencies.clone()).collect();
+            let descriptor_names: Vec<String> = scanned
+                .iter()
+                .map(|(_, m)| m.descriptor.name.clone())
+                .collect();
+            let dependencies: Vec<Vec<String>> = scanned
+                .iter()
+                .map(|(_, m)| m.descriptor.dependencies.clone())
+                .collect();
             let depends_on = conflicts::depends_on(&descriptor_names, &dependencies);
             let positions = scanned.iter().map(|(p, _)| *p).collect();
             let inputs: Vec<ModInput> = scanned
@@ -78,6 +84,7 @@ impl Window {
         let weak = Rc::downgrade(self);
         let game_dir = self.game.as_ref().map(|g| g.dir.clone());
         let game_version = self.game.as_ref().and_then(|g| g.version.clone());
+        let analysis_version = game_version.clone();
         let game_exe = self.game.as_ref().map(|g| g.exe.clone());
         let user_dir = self.paths.user_dir.clone();
         let cache = self.scan_cache.clone();
@@ -163,7 +170,16 @@ impl Window {
             let Some(ui) = weak.upgrade() else { return };
             ui.scanning.set(false);
             match result {
-                Ok((report, roots, simple, [unpacking, reading, checking, base, order_time, script_time], behind, behind_versions, order, script)) => {
+                Ok((
+                    report,
+                    roots,
+                    simple,
+                    [unpacking, reading, checking, base, order_time, script_time],
+                    behind,
+                    behind_versions,
+                    order,
+                    script,
+                )) => {
                     let unused = crate::merge::unused::unused(&report, &depends_on, &order);
                     crate::diagnostics::log!(
                         "scan",
@@ -180,11 +196,20 @@ impl Window {
                         report.errors.len(),
                         report.skipped.len(),
                         behind.len(),
-                        order.iter().filter(|r| r.misplaced()).map(|r| r.patch).collect::<std::collections::BTreeSet<_>>().len(),
+                        order
+                            .iter()
+                            .filter(|r| r.misplaced())
+                            .map(|r| r.patch)
+                            .collect::<std::collections::BTreeSet<_>>()
+                            .len(),
                         unused.len()
                     );
                     for (position, reason) in &report.skipped {
-                        crate::diagnostics::log!("scan", "Skipped {}: {reason}", names.get(*position).map_or("a mod", String::as_str));
+                        crate::diagnostics::log!(
+                            "scan",
+                            "Skipped {}: {reason}",
+                            names.get(*position).map_or("a mod", String::as_str)
+                        );
                     }
                     ui.check_stale();
                     ui.conflict_session.borrow_mut().rescanned();
@@ -194,6 +219,7 @@ impl Window {
                         ids,
                         roots,
                         load_positions,
+                        game_version: analysis_version,
                         report,
                         simple,
                         depends_on,
@@ -210,7 +236,11 @@ impl Window {
                 }
                 Err(panic) => {
                     // The panic's message, to report it.
-                    let detail = panic.downcast_ref::<String>().map(String::as_str).or_else(|| panic.downcast_ref::<&str>().copied()).unwrap_or("unknown error");
+                    let detail = panic
+                        .downcast_ref::<String>()
+                        .map(String::as_str)
+                        .or_else(|| panic.downcast_ref::<&str>().copied())
+                        .unwrap_or("unknown error");
                     crate::diagnostics::log!("scan", "Scan failed: {detail}");
                     ui.conflicts_page.set_child(Some(&status_page(
                         &t!("Scan Failed"),
@@ -230,7 +260,12 @@ impl Window {
         let mut roots: std::collections::HashMap<String, std::path::PathBuf> = state
             .enabled
             .iter()
-            .filter_map(|&i| Some((state.mods[i].id.clone(), archive::cached(state.mods[i].content.as_deref()?)?)))
+            .filter_map(|&i| {
+                Some((
+                    state.mods[i].id.clone(),
+                    archive::cached(state.mods[i].content.as_deref()?)?,
+                ))
+            })
             .collect();
         if let Some(game) = &self.game {
             roots.insert(patch::VANILLA.to_owned(), game.dir.clone());
@@ -245,9 +280,7 @@ impl Window {
             .patch
             .borrow_mut()
             .as_mut()
-            .map(|p| {
-                p.check(&roots, version)
-            })
+            .map(|p| p.check(&roots, version))
             .unwrap_or_default();
         self.stale.replace(stale);
     }
@@ -257,29 +290,54 @@ impl Window {
     /// The patch is backed up first.
     pub(super) fn update_picks(self: &Rc<Self>, only: Option<&patch::Stale>) {
         let roots = self.stale_roots();
-        let mut picks = self.patch.borrow().as_ref().map(|p| p.picks_to_update(&roots)).unwrap_or_default();
+        let mut picks = self
+            .patch
+            .borrow()
+            .as_ref()
+            .map(|p| p.picks_to_update(&roots))
+            .unwrap_or_default();
         if let Some(only) = only {
             picks.retain(|p| p.matches(only));
         }
         if picks.is_empty() {
-            return self.toast_error_message(&t!("Nothing to update: the mods changed again since the last check"));
+            return self.toast_error_message(&t!(
+                "Nothing to update: the mods changed again since the last check"
+            ));
         }
         if let Err(e) = self.snapshot_patch(snapshot::BEFORE_UPDATING_PICKS) {
             return self.toast_error_message(&e);
         }
         let count = picks.len();
         let what = match only {
-            Some(s) => s.object.as_ref().map_or_else(|| s.path.rsplit('/').next().unwrap_or(&s.path).to_owned(), |(_, k)| k.clone()),
-            None => tnf!("{count} picked version", "{count} picked versions", count = count),
+            Some(s) => s.object.as_ref().map_or_else(
+                || s.path.rsplit('/').next().unwrap_or(&s.path).to_owned(),
+                |(_, k)| k.clone(),
+            ),
+            None => tnf!(
+                "{count} picked version",
+                "{count} picked versions",
+                count = count
+            ),
         };
-        let result = self.with_patch(|p, user_dir, version| p.update_picks(user_dir, version, picks));
+        let result =
+            self.with_patch(|p, user_dir, version| p.update_picks(user_dir, version, picks));
         match result {
             Ok(()) => {
                 self.check_stale();
                 self.refresh();
-                self.add_toast(adw::Toast::builder().title(tf!("Updated {what} to the new version", what = what)).button_label(t!("Backups…")).action_name("win.patch-backups").build());
+                self.add_toast(
+                    adw::Toast::builder()
+                        .title(tf!("Updated {what} to the new version", what = what))
+                        .button_label(t!("Backups…"))
+                        .action_name("win.patch-backups")
+                        .build(),
+                );
             }
-            Err(e) => self.toast_error_message(&tf!("Could not update {what}: {error}", what = &what, error = e)),
+            Err(e) => self.toast_error_message(&tf!(
+                "Could not update {what}: {error}",
+                what = &what,
+                error = e
+            )),
         }
     }
 
@@ -287,18 +345,33 @@ impl Window {
         self.check_stale();
         let merges: Vec<patch::Stale> = {
             let current = self.stale.borrow();
-            merges.iter().filter(|m| current.iter().any(|s| s.object == m.object && s.path == m.path)).cloned().collect()
+            merges
+                .iter()
+                .filter(|m| {
+                    current
+                        .iter()
+                        .any(|s| s.object == m.object && s.path == m.path)
+                })
+                .cloned()
+                .collect()
         };
         // After the handler returns, since this replaces the page the button is on.
         let ui = self.clone();
         glib::idle_add_local_once(move || ui.render_conflicts());
         if merges.is_empty() {
-            return self.toast_error_message(&t!("Nothing to remove: the merges changed since the last check"));
+            return self.toast_error_message(&t!(
+                "Nothing to remove: the merges changed since the last check"
+            ));
         }
         if let Err(e) = self.snapshot_patch(snapshot::BEFORE_REMOVING) {
             return self.toast_error_message(&e);
         }
-        let name = |stale: &patch::Stale| stale.object.as_ref().map_or(stale.path.clone(), |(_, k)| k.clone());
+        let name = |stale: &patch::Stale| {
+            stale
+                .object
+                .as_ref()
+                .map_or(stale.path.clone(), |(_, k)| k.clone())
+        };
         let removed = std::cell::Cell::<usize>::new(0);
         let result = self.with_patch(|p, _, _| {
             merges.iter().try_for_each(|stale| {
@@ -314,12 +387,38 @@ impl Window {
         self.refresh();
         let count = merges.len();
         match result {
-            Ok(()) if count == 1 => self.add_toast(adw::Toast::new(&tf!("Removed {what} from the patch", what = name(&merges[0])))),
-            Ok(()) => self.add_toast(adw::Toast::builder().title(tnf!("Removed {count} merge from the patch", "Removed {count} merges from the patch", count = count)).button_label(t!("Backups…")).action_name("win.patch-backups").build()),
+            Ok(()) if count == 1 => self.add_toast(adw::Toast::new(&tf!(
+                "Removed {what} from the patch",
+                what = name(&merges[0])
+            ))),
+            Ok(()) => self.add_toast(
+                adw::Toast::builder()
+                    .title(tnf!(
+                        "Removed {count} merge from the patch",
+                        "Removed {count} merges from the patch",
+                        count = count
+                    ))
+                    .button_label(t!("Backups…"))
+                    .action_name("win.patch-backups")
+                    .build(),
+            ),
             Err(e) if count == 1 => self.toast_error_message(&e),
             Err(e) => {
-                let title = tnf!("Removed {done} of {count}, then could not remove {what}: {error}", "Removed {done} of {count}, then could not remove {what}: {error}", count = count, done = removed.get(), what = name(&merges[removed.get()]), error = e);
-                self.add_toast(adw::Toast::builder().title(title).button_label(t!("Backups…")).action_name("win.patch-backups").build());
+                let title = tnf!(
+                    "Removed {done} of {count}, then could not remove {what}: {error}",
+                    "Removed {done} of {count}, then could not remove {what}: {error}",
+                    count = count,
+                    done = removed.get(),
+                    what = name(&merges[removed.get()]),
+                    error = e
+                );
+                self.add_toast(
+                    adw::Toast::builder()
+                        .title(title)
+                        .button_label(t!("Backups…"))
+                        .action_name("win.patch-backups")
+                        .build(),
+                );
             }
         }
     }
@@ -327,12 +426,28 @@ impl Window {
     /// Starts tracking a merge saved before fingerprints existed, taking its
     /// mods' current versions (from the last scan) as what it merged.
     pub(super) fn keep_merge(self: &Rc<Self>, stale: &patch::Stale) {
-        let what = stale.object.as_ref().map_or(stale.path.clone(), |(_, k)| k.clone());
-        let Some(analysis) = self.analysis.borrow().clone() else { return };
-        let Some(sources) = self.patch.borrow().as_ref().and_then(|p| p.sources(stale.object.as_ref(), &stale.path).map(<[String]>::to_vec)) else { return };
+        let what = stale
+            .object
+            .as_ref()
+            .map_or(stale.path.clone(), |(_, k)| k.clone());
+        let Some(analysis) = self.analysis.borrow().clone() else {
+            return;
+        };
+        let Some(sources) = self.patch.borrow().as_ref().and_then(|p| {
+            p.sources(stale.object.as_ref(), &stale.path)
+                .map(<[String]>::to_vec)
+        }) else {
+            return;
+        };
         let source_mod = |m: usize| -> Option<patch::SourceMod> {
             let name = analysis.name(m);
-            sources.iter().any(|s| s == name).then(|| Some((analysis.ids[m].clone(), name.to_owned(), analysis.roots[m].clone()?)))?
+            sources.iter().any(|s| s == name).then(|| {
+                Some((
+                    analysis.ids[m].clone(),
+                    name.to_owned(),
+                    analysis.roots[m].clone()?,
+                ))
+            })?
         };
         // Which mods define it now, according to the last scan.
         enum Found {
@@ -345,13 +460,27 @@ impl Window {
                 .objects
                 .iter()
                 .find(|c| &c.category == category && &c.key == key)
-                .map(|c| Found::Object(category.clone(), key.clone(), c.definitions.iter().filter_map(|d| Some((source_mod(d.mod_position)?, d.file.clone()))).collect())),
+                .map(|c| {
+                    Found::Object(
+                        category.clone(),
+                        key.clone(),
+                        c.definitions
+                            .iter()
+                            .filter_map(|d| Some((source_mod(d.mod_position)?, d.file.clone())))
+                            .collect(),
+                    )
+                }),
             None => analysis
                 .report
                 .files
                 .iter()
                 .find(|c| c.path.eq_ignore_ascii_case(&stale.path))
-                .map(|c| Found::File(stale.path.clone(), c.mods.iter().filter_map(|&m| source_mod(m)).collect())),
+                .map(|c| {
+                    Found::File(
+                        stale.path.clone(),
+                        c.mods.iter().filter_map(|&m| source_mod(m)).collect(),
+                    )
+                }),
         };
         let empty = match &found {
             Some(Found::Object(_, _, mods)) => mods.is_empty(),
@@ -367,8 +496,12 @@ impl Window {
         glib::spawn_future_local(async move {
             // Reading the base game's version parses whole folders.
             let prints = gio::spawn_blocking(move || match found {
-                Some(Found::Object(category, key, mods)) => patch::object_prints(&category, &key, game_dir.as_deref(), &mods),
-                Some(Found::File(path, mods)) => patch::file_prints(&path, game_dir.as_deref(), &mods),
+                Some(Found::Object(category, key, mods)) => {
+                    patch::object_prints(&category, &key, game_dir.as_deref(), &mods)
+                }
+                Some(Found::File(path, mods)) => {
+                    patch::file_prints(&path, game_dir.as_deref(), &mods)
+                }
                 None => Vec::new(),
             })
             .await
@@ -378,7 +511,10 @@ impl Window {
                 Ok(()) => {
                     ui.check_stale();
                     ui.render_conflicts();
-                    ui.add_toast(adw::Toast::new(&tf!("Kept {what}; changes to its mods will be noticed from now on", what = &what)));
+                    ui.add_toast(adw::Toast::new(&tf!(
+                        "Kept {what}; changes to its mods will be noticed from now on",
+                        what = &what
+                    )));
                 }
                 Err(e) => ui.toast_error_message(&e),
             }
@@ -399,7 +535,8 @@ impl Window {
         self.conflicts_page.set_child(Some(&widget));
         // On the window, so the shortcuts work wherever the focus is.
         if let Ok(page) = view.clone().downcast::<conflicts_view::Page>() {
-            self.window.insert_action_group("conflicts", Some(&page.actions()));
+            self.window
+                .insert_action_group("conflicts", Some(&page.actions()));
         }
         self.conflicts_view.replace(Some(view));
     }
@@ -407,7 +544,9 @@ impl Window {
     /// Opens the Conflicts page showing only the conflicts of the mod at
     /// `index` in the mod list.
     pub(super) fn show_conflicts_of(self: &Rc<Self>, index: usize) {
-        let Some(id) = self.state.borrow().mods.get(index).map(|m| m.id.clone()) else { return };
+        let Some(id) = self.state.borrow().mods.get(index).map(|m| m.id.clone()) else {
+            return;
+        };
         self.conflict_filter.replace(Some(id));
         self.stack.set_visible_child_name("conflicts");
         self.render_conflicts();
@@ -437,21 +576,42 @@ impl Window {
     pub(super) fn merge_hooks(self: &Rc<Self>, analysis: &Rc<Analysis>) -> Rc<MergeHooks> {
         let weak = Rc::downgrade(self);
         let is_merged = Box::new(move |category: &str, key: &str| {
-            weak.upgrade().is_some_and(|ui| ui.patch.borrow().as_ref().is_some_and(|p| p.get(category, key).is_some()))
+            weak.upgrade().is_some_and(|ui| {
+                ui.patch
+                    .borrow()
+                    .as_ref()
+                    .is_some_and(|p| p.get(category, key).is_some())
+            })
         });
         let weak = Rc::downgrade(self);
         let existing = Box::new(move |category: &str, key: &str| {
-            weak.upgrade().and_then(|ui| ui.patch.borrow().as_ref().and_then(|p| p.get(category, key).cloned()))
+            weak.upgrade().and_then(|ui| {
+                ui.patch
+                    .borrow()
+                    .as_ref()
+                    .and_then(|p| p.get(category, key).cloned())
+            })
         });
         let weak = Rc::downgrade(self);
-        let save_object = Box::new(move |category: &str, key: &str, script: &str, prints: Vec<patch::Print>| {
-            let ui = weak.upgrade().ok_or("The window was closed")?;
-            ui.save_merge(category, key, script, prints)
-        });
+        let save_object = Box::new(
+            move |category: &str, key: &str, script: &str, prints: Vec<patch::Print>| {
+                let ui = weak.upgrade().ok_or("The window was closed")?;
+                ui.save_merge(category, key, script, prints)
+            },
+        );
         let weak = Rc::downgrade(self);
-        let save_file = Box::new(move |path: &str, contents: &[u8], prints: Vec<patch::Print>| {
+        let save_file = Box::new(
+            move |path: &str, contents: &[u8], prints: Vec<patch::Print>| {
+                let ui = weak.upgrade().ok_or("The window was closed")?;
+                ui.with_patch(|patch, user_dir, version| {
+                    patch.save_file(user_dir, version, path, contents, prints)
+                })
+            },
+        );
+        let weak = Rc::downgrade(self);
+        let set_scripts = Box::new(move |category: &str, key: &str, scripts: Vec<String>| {
             let ui = weak.upgrade().ok_or("The window was closed")?;
-            ui.with_patch(|patch, user_dir, version| patch.save_file(user_dir, version, path, contents, prints))
+            ui.with_patch(|patch, _user_dir, _version| patch.set_scripts(category, key, scripts))
         });
         let weak = Rc::downgrade(self);
         let patch_saved = Box::new(move || {
@@ -460,10 +620,19 @@ impl Window {
             }
         });
         let weak = Rc::downgrade(self);
-        let reload_stale = Box::new(move || weak.upgrade().map(|ui| ui.stale.borrow().clone()).unwrap_or_default());
+        let reload_stale = Box::new(move || {
+            weak.upgrade()
+                .map(|ui| ui.stale.borrow().clone())
+                .unwrap_or_default()
+        });
         let weak = Rc::downgrade(self);
         let is_file_merged = Box::new(move |path: &str| {
-            weak.upgrade().is_some_and(|ui| ui.patch.borrow().as_ref().is_some_and(|p| p.get_file(path).is_some()))
+            weak.upgrade().is_some_and(|ui| {
+                ui.patch
+                    .borrow()
+                    .as_ref()
+                    .is_some_and(|p| p.get_file(path).is_some())
+            })
         });
         let weak = Rc::downgrade(self);
         let files = analysis.clone();
@@ -494,7 +663,10 @@ impl Window {
             }
         });
         let weak = Rc::downgrade(self);
-        let is_ignored = Box::new(move |key: &str| weak.upgrade().is_some_and(|ui| ui.settings.borrow().ignored.contains(key)));
+        let is_ignored = Box::new(move |key: &str| {
+            weak.upgrade()
+                .is_some_and(|ui| ui.settings.borrow().ignored.contains(key))
+        });
         let weak = Rc::downgrade(self);
         let set_ignored = Box::new(move |key: &str, ignore: bool| {
             if let Some(ui) = weak.upgrade() {
@@ -522,12 +694,17 @@ impl Window {
                 glib::idle_add_local_once(move || ui.render_conflicts());
             }
         });
-        let filter = self.conflict_filter.borrow().as_ref().and_then(|id| analysis.ids.iter().position(|i| i == id));
+        let filter = self
+            .conflict_filter
+            .borrow()
+            .as_ref()
+            .and_then(|id| analysis.ids.iter().position(|i| i == id));
         let weak = Rc::downgrade(self);
         let ids = analysis.ids.clone();
         let set_filter = Box::new(move |position: Option<usize>| {
             if let Some(ui) = weak.upgrade() {
-                ui.conflict_filter.replace(position.and_then(|p| ids.get(p).cloned()));
+                ui.conflict_filter
+                    .replace(position.and_then(|p| ids.get(p).cloned()));
                 // After the handler returns, since this replaces the page.
                 glib::idle_add_local_once(move || ui.render_conflicts());
             }
@@ -557,9 +734,16 @@ impl Window {
             }
         });
         let weak = Rc::downgrade(self);
-        let provider = Box::new(move || weak.upgrade().and_then(|ui| ui.settings.borrow().ready_provider()));
+        let provider = Box::new(move || {
+            weak.upgrade()
+                .and_then(|ui| ui.settings.borrow().ready_provider())
+        });
         let weak = Rc::downgrade(self);
-        let merge_tool = Box::new(move || weak.upgrade().map(|ui| ui.settings.borrow().merge_tool.clone()).unwrap_or_default());
+        let merge_tool = Box::new(move || {
+            weak.upgrade()
+                .map(|ui| ui.settings.borrow().merge_tool.clone())
+                .unwrap_or_default()
+        });
         let weak = Rc::downgrade(self);
         let open_preferences = Box::new(move || {
             if let Some(ui) = weak.upgrade() {
@@ -579,12 +763,17 @@ impl Window {
             }
         });
         let weak = Rc::downgrade(self);
-        let backup = Box::new(move |reason: &str| weak.upgrade().ok_or_else(|| "The window was closed".to_owned())?.snapshot_patch(reason));
+        let backup = Box::new(move |reason: &str| {
+            weak.upgrade()
+                .ok_or_else(|| "The window was closed".to_owned())?
+                .snapshot_patch(reason)
+        });
         Rc::new(MergeHooks {
             is_merged,
             existing,
             save_object,
             save_file,
+            set_scripts,
             patch_saved,
             is_file_merged,
             open_file,
@@ -622,7 +811,12 @@ impl Window {
     /// Opens the AI merge of the object conflicts at `indices`, which are
     /// all in one folder.
     pub(super) fn open_folder_merge(self: &Rc<Self>, analysis: &Rc<Analysis>, indices: Vec<usize>) {
-        let Some(category) = indices.first().map(|&i| analysis.report.objects[i].category.clone()) else { return };
+        let Some(category) = indices
+            .first()
+            .map(|&i| analysis.report.objects[i].category.clone())
+        else {
+            return;
+        };
         let items = {
             let patch = self.patch.borrow();
             let stale = self.stale.borrow();
@@ -633,24 +827,77 @@ impl Window {
                     let origins = c
                         .definitions
                         .iter()
-                        .filter_map(|d| Some((analysis.ids[d.mod_position].clone(), analysis.name(d.mod_position).to_owned(), analysis.roots[d.mod_position].clone()?, d.file.clone())))
+                        .filter_map(|d| {
+                            Some((
+                                analysis.ids[d.mod_position].clone(),
+                                analysis.name(d.mod_position).to_owned(),
+                                analysis.roots[d.mod_position].clone()?,
+                                d.file.clone(),
+                            ))
+                        })
                         .collect();
-                    let is_stale = stale.iter().any(|s| s.object.as_ref().is_some_and(|(cat, k)| cat == &c.category && k == &c.key));
-                    let saved = patch.as_ref().and_then(|p| p.get(&c.category, &c.key)).map(|m| m.script.clone());
+                    let is_stale = stale.iter().any(|s| {
+                        s.object
+                            .as_ref()
+                            .is_some_and(|(cat, k)| cat == &c.category && k == &c.key)
+                    });
+                    let saved = patch
+                        .as_ref()
+                        .and_then(|p| p.get(&c.category, &c.key))
+                        .map(|m| m.script.clone());
                     let merged = saved.is_some() && !is_stale;
-                    folder_merge_dialog::Item { key: c.key.clone(), origins, merged, saved }
+                    let positions = c
+                        .definitions
+                        .iter()
+                        .map(|d| analysis.load_positions[d.mod_position])
+                        .collect();
+                    let winner = c.winner().map(|(i, reason)| {
+                        let d = &c.definitions[i];
+                        (
+                            analysis.load_positions[d.mod_position],
+                            analysis.name(d.mod_position).to_owned(),
+                            reason,
+                        )
+                    });
+                    folder_merge_dialog::Item {
+                        key: c.key.clone(),
+                        origins,
+                        positions,
+                        winner,
+                        merged,
+                        saved,
+                    }
                 })
                 .collect()
         };
         let save_category = category.clone();
-        let items = folder_merge_dialog::Items::Objects { category: category.clone(), items };
-        self.present_merge_all(items, &category, move |ui, key, script, prints| ui.save_merge(&save_category, key, script, prints));
+        let replace_path_mods: Vec<String> = analysis
+            .report
+            .replace_path_mods(&category)
+            .into_iter()
+            .map(|p| analysis.name(p).to_owned())
+            .collect();
+        let items = folder_merge_dialog::Items::Objects {
+            category: category.clone(),
+            items,
+        };
+        self.present_merge_all(
+            items,
+            &category,
+            replace_path_mods,
+            move |ui, key, script, prints| ui.save_merge(&save_category, key, script, prints),
+        );
     }
 
     /// Opens the AI merge of the overridden files at `indices`, which are
     /// all in one folder.
     pub(super) fn open_files_merge(self: &Rc<Self>, analysis: &Rc<Analysis>, indices: Vec<usize>) {
-        let Some(folder) = indices.first().map(|&i| conflicts_view::file_folder(&analysis.report.files[i].path).to_owned()) else { return };
+        let Some(folder) = indices
+            .first()
+            .map(|&i| conflicts_view::file_folder(&analysis.report.files[i].path).to_owned())
+        else {
+            return;
+        };
         let files = {
             let patch = self.patch.borrow();
             let stale = self.stale.borrow();
@@ -658,17 +905,52 @@ impl Window {
                 .iter()
                 .map(|&i| {
                     let c = &analysis.report.files[i];
-                    let origins = c.mods.iter().filter_map(|&m| Some((analysis.ids[m].clone(), analysis.name(m).to_owned(), analysis.roots[m].clone()?))).collect();
-                    let is_stale = stale.iter().any(|s| s.object.is_none() && s.path.eq_ignore_ascii_case(&c.path));
-                    let merged = patch.as_ref().is_some_and(|p| p.get_file(&c.path).is_some()) && !is_stale;
-                    folder_merge_dialog::FileItem { path: c.path.clone(), origins, merged }
+                    let origins = c
+                        .mods
+                        .iter()
+                        .filter_map(|&m| {
+                            Some((
+                                analysis.ids[m].clone(),
+                                analysis.name(m).to_owned(),
+                                analysis.roots[m].clone()?,
+                            ))
+                        })
+                        .collect();
+                    let is_stale = stale
+                        .iter()
+                        .any(|s| s.object.is_none() && s.path.eq_ignore_ascii_case(&c.path));
+                    let merged = patch
+                        .as_ref()
+                        .is_some_and(|p| p.get_file(&c.path).is_some())
+                        && !is_stale;
+                    folder_merge_dialog::FileItem {
+                        path: c.path.clone(),
+                        origins,
+                        merged,
+                    }
                 })
                 .collect()
         };
-        let items = folder_merge_dialog::Items::Files { folder: folder.clone(), files };
-        self.present_merge_all(items, &folder, |ui, path, contents, prints| {
-            ui.with_patch(|patch, user_dir, version| patch.save_file(user_dir, version, path, contents, prints))
-        });
+        let replace_path_mods: Vec<String> = analysis
+            .report
+            .replace_path_mods(&folder)
+            .into_iter()
+            .map(|p| analysis.name(p).to_owned())
+            .collect();
+        let items = folder_merge_dialog::Items::Files {
+            folder: folder.clone(),
+            files,
+        };
+        self.present_merge_all(
+            items,
+            &folder,
+            replace_path_mods,
+            |ui, path, contents, prints| {
+                ui.with_patch(|patch, user_dir, version| {
+                    patch.save_file(user_dir, version, path, contents, prints)
+                })
+            },
+        );
     }
 
     /// Opens Merge All for `items` from `folder`, saving each result with
@@ -677,14 +959,16 @@ impl Window {
         self: &Rc<Self>,
         items: folder_merge_dialog::Items,
         folder: &str,
+        replace_path_mods: Vec<String>,
         save: impl Fn(&Rc<Self>, &str, &str, Vec<patch::Print>) -> Result<(), String> + 'static,
     ) {
+        let shared_backup = Rc::new(std::cell::Cell::new(false));
         let weak = Rc::downgrade(self);
         let save = {
             let reason = snapshot::before_merge_all(folder);
             // The patch is backed up before the run's first save, so runs
             // that save nothing leave no backup behind.
-            let backed_up = std::cell::Cell::new(false);
+            let backed_up = shared_backup.clone();
             Box::new(move |name: &str, text: &str, prints: Vec<patch::Print>| {
                 let ui = weak.upgrade().ok_or("The window was closed")?;
                 if !backed_up.get() {
@@ -694,6 +978,28 @@ impl Window {
                 save(&ui, name, text, prints)
             })
         };
+        let weak = Rc::downgrade(self);
+        let save_script = {
+            let reason = snapshot::before_merge_all(folder);
+            let backed_up = shared_backup;
+            Box::new(move |name: &str, script: &str, prints: Vec<patch::Print>| {
+                let ui = weak.upgrade().ok_or("The window was closed")?;
+                if !backed_up.get() {
+                    ui.snapshot_patch(&reason)?;
+                    backed_up.set(true);
+                }
+                let path = crate::merge::inline_scripts::file_path(name)
+                    .ok_or_else(|| tf!("Unsafe inline script path: {name}", name = name))?;
+                ui.with_patch(|patch, user_dir, version| {
+                    patch.save_file(user_dir, version, &path, script.as_bytes(), prints)
+                })
+            })
+        };
+        let weak = Rc::downgrade(self);
+        let set_scripts = Box::new(move |category: &str, key: &str, scripts: Vec<String>| {
+            let ui = weak.upgrade().ok_or("The window was closed")?;
+            ui.with_patch(|patch, _user_dir, _version| patch.set_scripts(category, key, scripts))
+        });
         let weak = Rc::downgrade(self);
         let open_preferences = Box::new(move || {
             if let Some(ui) = weak.upgrade() {
@@ -707,12 +1013,42 @@ impl Window {
                 ui.render_conflicts();
             }
         });
+        let roots = self
+            .analysis
+            .borrow()
+            .as_ref()
+            .map(|analysis| {
+                analysis
+                    .roots
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(pos, root)| {
+                        Some(crate::merge::inline_scripts::ScriptRoot {
+                            id: analysis.ids.get(pos)?.clone(),
+                            label: analysis.name(pos).to_owned(),
+                            root: root.clone()?,
+                        })
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        let weak = Rc::downgrade(self);
+        let set_file_scripts = Box::new(move |path: &str, scripts: Vec<String>| {
+            let ui = weak.upgrade().ok_or("The window was closed")?;
+            ui.with_patch(|patch, _user_dir, _version| patch.set_file_scripts(path, scripts))
+        });
         let request = folder_merge_dialog::Request {
             items,
             game_dir: self.game.as_ref().map(|g| g.dir.clone()),
+            game_version: self.game.as_ref().and_then(|g| g.version.clone()),
+            roots,
+            replace_path_mods,
             provider: self.settings.borrow().ready_provider(),
             parallel: self.settings.borrow().merges_at_once(),
             save,
+            save_script,
+            set_scripts,
+            set_file_scripts,
             open_preferences,
             on_done,
         };
@@ -820,17 +1156,55 @@ impl Window {
                 ui.patch_saved();
             }
         });
+        let roots = analysis
+            .roots
+            .iter()
+            .enumerate()
+            .filter_map(|(pos, root)| {
+                Some(crate::merge::inline_scripts::ScriptRoot {
+                    id: analysis.ids.get(pos)?.clone(),
+                    label: analysis.name(pos).to_owned(),
+                    root: root.clone()?,
+                })
+            })
+            .collect();
         let request = file_merge_dialog::Request {
             path,
             origins,
             game_dir: self.game.as_ref().map(|g| g.dir.clone()),
+            game_version: self.game.as_ref().and_then(|g| g.version.clone()),
+            roots,
             provider: self.settings.borrow().ready_provider(),
             merged_before,
             saved_text,
             save,
+            save_script: {
+                let weak = Rc::downgrade(self);
+                Box::new(move |name: &str, script: &str, prints: Vec<patch::Print>| {
+                    let ui = weak.upgrade().ok_or("The window was closed")?;
+                    let path = crate::merge::inline_scripts::file_path(name)
+                        .ok_or_else(|| tf!("Unsafe inline script path: {name}", name = name))?;
+                    ui.with_patch(|patch, user_dir, version| {
+                        patch.save_file(user_dir, version, &path, script.as_bytes(), prints)
+                    })
+                })
+            },
+            set_file_scripts: {
+                let weak = Rc::downgrade(self);
+                Box::new(move |path: &str, scripts: Vec<String>| {
+                    let ui = weak.upgrade().ok_or("The window was closed")?;
+                    ui.with_patch(|patch, _user_dir, _version| {
+                        patch.set_file_scripts(path, scripts)
+                    })
+                })
+            },
             merge_tool: {
                 let weak = Rc::downgrade(self);
-                Box::new(move || weak.upgrade().map(|ui| ui.settings.borrow().merge_tool.clone()).unwrap_or_default())
+                Box::new(move || {
+                    weak.upgrade()
+                        .map(|ui| ui.settings.borrow().merge_tool.clone())
+                        .unwrap_or_default()
+                })
             },
             open_preferences,
             on_saved,
@@ -842,10 +1216,23 @@ impl Window {
     /// it has none.
     pub(super) fn patch_target(&self) -> patch::Target {
         let user_dir = &self.paths.user_dir;
-        let legacy = patch::Target::new(patch::LEGACY_FOLDER, "").root(user_dir).is_dir();
-        let (target, given) = self.collections.borrow_mut().patch_target(legacy, |folder| user_dir.join("mod").join(folder).exists());
-        if given && let Err(e) = self.collections.borrow().save(&crate::mods::collections::path()) {
-            self.add_toast(adw::Toast::new(&tf!("Could not save collections: {error}", error = e)));
+        let legacy = patch::Target::new(patch::LEGACY_FOLDER, "")
+            .root(user_dir)
+            .is_dir();
+        let (target, given) = self
+            .collections
+            .borrow_mut()
+            .patch_target(legacy, |folder| user_dir.join("mod").join(folder).exists());
+        if given
+            && let Err(e) = self
+                .collections
+                .borrow()
+                .save(&crate::mods::collections::path())
+        {
+            self.add_toast(adw::Toast::new(&tf!(
+                "Could not save collections: {error}",
+                error = e
+            )));
         }
         target
     }
@@ -860,10 +1247,12 @@ impl Window {
         }
         // Renamed: the launcher shows the patch by its collection's name.
         if open.as_ref().is_some_and(|o| o.folder == target.folder) {
-            patch::link(&self.paths.user_dir, &target).map_err(|e| tf!("Could not rename the merged patch: {error}", error = e))?;
+            patch::link(&self.paths.user_dir, &target)
+                .map_err(|e| tf!("Could not rename the merged patch: {error}", error = e))?;
         }
         self.patch.replace(None);
-        let opened = Patch::open(&self.paths.user_dir, &target).map_err(|e| tf!("Could not read the merged patch: {error}", error = e))?;
+        let opened = Patch::open(&self.paths.user_dir, &target)
+            .map_err(|e| tf!("Could not read the merged patch: {error}", error = e))?;
         self.patch.replace(Some(opened));
         Ok(())
     }
@@ -933,7 +1322,11 @@ impl Window {
         let toast = adw::Toast::builder().title(tf!("Saved to {name}", name = &target.name));
         let toast = match added {
             Some(change) => toast
-                .title(tf!("Saved to {name}, which was {change}", name = &target.name, change = change))
+                .title(tf!(
+                    "Saved to {name}, which was {change}",
+                    name = &target.name,
+                    change = change
+                ))
                 .button_label(t!("Save Load Order"))
                 .action_name("win.save"),
             None => toast,

@@ -6,9 +6,9 @@
 #, fuzzy
 msgid ""
 msgstr ""
-"Project-Id-Version: DrukhalManager 2.7.21\n"
+"Project-Id-Version: DrukhalManager 2.7.23\n"
 "Report-Msgid-Bugs-To: https://github.com/Dukko/DrukhalManager/issues\n"
-"POT-Creation-Date: 2026-11-25 22:43+0000\n"
+"POT-Creation-Date: 2026-11-26 02:16+0000\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -29,6 +29,18 @@ msgstr[1] ""
 
 #: src/behind_dialog.rs src/behind_dialog.rs src/behind_dialog.rs src/behind_dialog.rs src/behind_dialog.rs src/behind_dialog.rs src/behind_dialog.rs src/behind_dialog.rs src/behind_dialog.rs src/behind_dialog.rs src/window/overview.rs
 msgid "Stellaris {version}"
+msgstr ""
+
+#: src/behind_dialog.rs src/merge/ai.rs
+msgid "The replaced inline script `{name}` has an unsafe path"
+msgstr ""
+
+#: src/behind_dialog.rs
+msgid "The replaced inline script `{name}` was rejected: {problem}"
+msgstr ""
+
+#: src/behind_dialog.rs
+msgid "The updated inline script `{name}` has an unsafe path"
 msgstr ""
 
 #. Header.
@@ -185,6 +197,12 @@ msgstr ""
 #: src/behind_dialog.rs src/behind_dialog.rs src/conflicts_view/object.rs src/conflicts_view/object.rs src/script_check_dialog.rs
 msgid "Set up an AI provider in Preferences first"
 msgstr ""
+
+#: src/behind_dialog.rs src/behind_dialog.rs
+msgid " · {count} inline script updated"
+msgid_plural " · {count} inline scripts updated"
+msgstr[0] ""
+msgstr[1] ""
 
 #: src/behind_dialog.rs src/behind_dialog.rs src/conflicts_view/object.rs src/folder_merge_dialog.rs
 msgid "The merge failed unexpectedly"
@@ -621,6 +639,24 @@ msgstr ""
 
 #: src/conflicts_view/object.rs
 msgid "Copy the right card's side of the highlighted difference into the result"
+msgstr ""
+
+#: src/conflicts_view/object.rs src/folder_merge_dialog.rs
+msgid " · {count} replaced inline script merged"
+msgid_plural " · {count} replaced inline scripts merged"
+msgstr[0] ""
+msgstr[1] ""
+
+#: src/conflicts_view/object.rs
+msgid "The merged inline script `{name}` has an unsafe path"
+msgstr ""
+
+#: src/conflicts_view/object.rs
+msgid "The merged inline script `{name}` could not be saved: {error}"
+msgstr ""
+
+#: src/conflicts_view/object.rs
+msgid "The merge was saved, but its inline scripts could not be recorded: {error}"
 msgstr ""
 
 #: src/conflicts_view.rs
@@ -1534,8 +1570,8 @@ msgstr ""
 msgid "the merge was closed"
 msgstr ""
 
-#: src/file_merge_dialog.rs src/fix_dialog.rs src/folder_merge_dialog.rs
-msgid "failed unexpectedly"
+#: src/file_merge_dialog.rs src/fix_dialog.rs src/folder_merge_dialog.rs src/thinking_view.rs
+msgid "Stopped"
 msgstr ""
 
 #: src/file_merge_dialog.rs
@@ -1552,15 +1588,15 @@ msgstr[1] ""
 msgid "Could not read {label}'s copy: {error}"
 msgstr ""
 
-#: src/file_merge_dialog.rs
+#: src/file_merge_dialog.rs src/merge/validate.rs
 msgid "The merged script is empty"
 msgstr ""
 
-#: src/file_merge_dialog.rs
+#: src/file_merge_dialog.rs src/merge/validate.rs
 msgid "The merged script has an unexpected closing brace `}` before an opening brace"
 msgstr ""
 
-#: src/file_merge_dialog.rs
+#: src/file_merge_dialog.rs src/merge/validate.rs
 msgid "The merged script is missing {depth} closing brace `}}`"
 msgstr ""
 
@@ -1688,8 +1724,8 @@ msgstr ""
 msgid "Fixing…"
 msgstr ""
 
-#: src/fix_dialog.rs src/thinking_view.rs
-msgid "Stopped"
+#: src/fix_dialog.rs
+msgid "failed unexpectedly"
 msgstr ""
 
 #: src/fix_dialog.rs
@@ -1883,6 +1919,10 @@ msgid "{key}: not reached before the run was stopped"
 msgstr ""
 
 #: src/folder_merge_dialog.rs
+msgid "{key}: stopped before it was merged"
+msgstr ""
+
+#: src/folder_merge_dialog.rs
 msgid "rejected, even after a correction: {error}"
 msgstr ""
 
@@ -1915,6 +1955,14 @@ msgid "under $0.01"
 msgstr ""
 
 #: src/merge/ai.rs
+msgid "The replaced inline script `{name}` could not be merged: {error}"
+msgstr ""
+
+#: src/merge/ai.rs
+msgid "This merge is too large for {model} (~{tokens} input tokens, limit {limit}); try splitting it into individual objects or merging two versions at a time."
+msgstr ""
+
+#: src/merge/ai.rs
 msgid "Claude declined to merge this object."
 msgstr ""
 
@@ -1938,7 +1986,6 @@ msgstr ""
 msgid "Mod files not found"
 msgstr ""
 
-#. Zips are unpacked before scanning; this one couldn't be.
 #: src/merge/conflicts.rs
 msgid "Could not unpack this zipped mod"
 msgstr ""
@@ -2032,6 +2079,10 @@ msgid "Every mod ships the same version"
 msgstr ""
 
 #: src/merge/trivial.rs
+msgid "Localisation override: {name} wins (last loaded)"
+msgstr ""
+
+#: src/merge/trivial.rs
 msgid "Only {name} changed it from the base game"
 msgstr ""
 
@@ -2039,20 +2090,40 @@ msgstr ""
 msgid "Only {names} changed it from the base game, in the same way"
 msgstr ""
 
-#: src/merge_dialog.rs
+#: src/merge/trivial.rs
+msgid "{name} includes all changes from the other mods"
+msgstr ""
+
+#: src/merge/validate.rs src/merge_dialog.rs
 msgid "A localisation merge must be a single line starting with `{name}:`"
 msgstr ""
 
-#: src/merge_dialog.rs
+#: src/merge/validate.rs src/merge_dialog.rs
 msgid "The merged script has a syntax error at {error}"
 msgstr ""
 
-#: src/merge_dialog.rs
+#: src/merge/validate.rs src/merge_dialog.rs
 msgid "The merged script must define `{key}` and nothing else"
 msgstr ""
 
-#: src/merge_dialog.rs
+#: src/merge/validate.rs src/merge_dialog.rs
 msgid "The merged script must define `{key}`"
+msgstr ""
+
+#: src/merge/validate.rs src/merge/validate.rs
+msgid "Invalid child block `{param} = {{ ... }}` inside scripted effect/trigger `{effect}` near line {line}"
+msgstr ""
+
+#: src/merge/validate.rs
+msgid "Single-valued key `{key}` appears more than once in the same block"
+msgstr ""
+
+#: src/merge/validate.rs
+msgid "Missing additions from {name}: {items}{more}"
+msgstr ""
+
+#: src/merge/validate.rs
+msgid "Unknown or misplaced script names introduced: {names}"
 msgstr ""
 
 #: src/merge_dialog.rs
@@ -2966,6 +3037,30 @@ msgid "How the model works"
 msgstr ""
 
 #: src/preferences.rs
+msgid "AI Merge Cache"
+msgstr ""
+
+#: src/preferences.rs
+msgid "Cached AI merge results, automatically invalidated when any mod changes."
+msgstr ""
+
+#: src/preferences.rs
+msgid "Clear Cache"
+msgstr ""
+
+#: src/preferences.rs
+msgid "Clear Cached AI Merges"
+msgstr ""
+
+#: src/preferences.rs
+msgid "Cleared"
+msgstr ""
+
+#: src/preferences.rs
+msgid "Cache cleared"
+msgstr ""
+
+#: src/preferences.rs
 msgid "DrukhalManager"
 msgstr ""
 
@@ -2974,7 +3069,6 @@ msgstr ""
 msgid "Version {version}{flatpak}"
 msgstr ""
 
-#. The version links to its release notes on GitHub.
 #: src/preferences.rs
 msgid " (Flatpak)"
 msgstr ""
@@ -3891,6 +3985,10 @@ msgstr ""
 
 #: src/window/conflicts_ui.rs
 msgid "Could not save ignored conflicts: {error}"
+msgstr ""
+
+#: src/window/conflicts_ui.rs src/window/conflicts_ui.rs
+msgid "Unsafe inline script path: {name}"
 msgstr ""
 
 #: src/window/conflicts_ui.rs

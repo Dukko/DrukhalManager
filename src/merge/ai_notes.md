@@ -26,7 +26,7 @@
 - `every_owned_pop` → `every_owned_pop_group`: iterate pop groups, not individual pops.
 - `random_owned_pop` → `random_owned_pop_group`: select a random pop group, not individual pops.
 - `any_owned_pop` → `any_owned_pop_group`: check any pop group, not individual pops.
-- `count_owned_pop` → `count_owned_pop_group`: count pop groups, not individual pops.
+- `count_owned_pop` → `count_owned_pop_amount`, `count_owned_pop_job`, `num_assigned_jobs`, `count_owned_pop_group`: use `count_owned_pop_amount` for pop count, `count_owned_pop_job` or `num_assigned_jobs` for job count; `count_owned_pop_group` changes the unit to pop groups.
 - `ordered_owned_pop` → `ordered_owned_pop_group`: order pop groups, not individual pops.
 - `kill_pop` → `kill_pop_group`: kill an amount or percentage of a pop group.
 - `create_pop` → `create_pop_group`: create a pop group.

@@ -104,6 +104,10 @@ pub struct Merge {
     /// update adds; `None` for merges saved before versions were recorded.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub game_version: Option<String>,
+    /// Inline scripts merged with this object and saved to the patch, by
+    /// script name. Removing the merge removes them too.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub scripts: Vec<String>,
 }
 
 /// A fingerprint of one source of a merge, to notice when it changes.
@@ -230,6 +234,9 @@ pub struct FileMerge {
     /// As [`Merge::game_version`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub game_version: Option<String>,
+    /// Inline scripts merged with objects in this file.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub scripts: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -249,6 +256,15 @@ impl Manifest {
             return Err(io::Error::new(io::ErrorKind::InvalidData, format!("the patch lists \"{path}\", which is outside its folder")));
         }
         let bad_language = manifest.merges.iter().filter(|m| m.category == "localisation").filter_map(|m| m.key.split_once(':')).find(|(language, _)| !conflicts::is_language_header(language));
+        let unsafe_script = manifest
+            .merges
+            .iter()
+            .flat_map(|m| &m.scripts)
+            .chain(manifest.files.iter().flat_map(|f| &f.scripts))
+            .find(|name| super::inline_scripts::file_path(name).is_none());
+        if let Some(name) = unsafe_script {
+            return Err(io::Error::new(io::ErrorKind::InvalidData, format!("the patch lists the inline script \"{name}\", which is not a safe path")));
+        }
         match bad_language {
             Some((language, _)) => Err(io::Error::new(io::ErrorKind::InvalidData, format!("the patch lists the language \"{language}\", which is not one"))),
             None => Ok(manifest),
@@ -343,7 +359,14 @@ impl Patch {
         let target = self.root.join(path);
         std::fs::create_dir_all(target.parent().unwrap())?;
         write_atomic(&target, contents.as_ref())?;
-        let merge = FileMerge { path: path.to_owned(), sources, prints, game_version: game_version.map(str::to_owned) };
+        let scripts = self
+            .manifest
+            .files
+            .iter()
+            .find(|f| f.path.eq_ignore_ascii_case(path))
+            .map(|f| f.scripts.clone())
+            .unwrap_or_default();
+        let merge = FileMerge { path: path.to_owned(), sources, prints, game_version: game_version.map(str::to_owned), scripts };
         match self.manifest.files.iter_mut().find(|f| f.path.eq_ignore_ascii_case(path)) {
             Some(existing) => *existing = merge,
             None => self.manifest.files.push(merge),
@@ -359,8 +382,115 @@ impl Patch {
 
     fn remove_unlogged(&mut self, category: &str, key: &str) -> io::Result<()> {
         if let Some(at) = self.manifest.merges.iter().position(|m| m.category == category && m.key == key) {
-            remove_if_present(&self.root.join(&self.manifest.merges[at].file))?;
-            self.manifest.merges.remove(at);
+            let merge = self.manifest.merges.remove(at);
+            remove_if_present(&self.root.join(&merge.file))?;
+            for name in &merge.scripts {
+                let shared = self
+                    .manifest
+                    .merges
+                    .iter()
+                    .any(|m| m.scripts.iter().any(|n| n.eq_ignore_ascii_case(name)))
+                    || self
+                        .manifest
+                        .files
+                        .iter()
+                        .any(|f| f.scripts.iter().any(|n| n.eq_ignore_ascii_case(name)));
+                if !shared {
+                    self.remove_script(name)?;
+                }
+            }
+        }
+        self.write_manifest()
+    }
+
+    /// Records the inline scripts merged with an object, removing script
+    /// files the object no longer needs.
+    pub fn set_scripts(&mut self, category: &str, key: &str, scripts: Vec<String>) -> io::Result<()> {
+        let safe: Vec<String> = scripts
+            .into_iter()
+            .filter(|name| super::inline_scripts::file_path(name).is_some())
+            .collect();
+        if let Some(at) = self
+            .manifest
+            .merges
+            .iter()
+            .position(|m| m.category == category && m.key == key)
+        {
+            let old = self.manifest.merges[at].scripts.clone();
+            for name in old {
+                if safe.iter().any(|n| n.eq_ignore_ascii_case(&name)) {
+                    continue;
+                }
+                let shared = self
+                    .manifest
+                    .merges
+                    .iter()
+                    .enumerate()
+                    .any(|(i, m)| i != at && m.scripts.iter().any(|n| n.eq_ignore_ascii_case(&name)))
+                    || self
+                        .manifest
+                        .files
+                        .iter()
+                        .any(|f| f.scripts.iter().any(|n| n.eq_ignore_ascii_case(&name)));
+                if !shared {
+                    self.remove_script(&name)?;
+                }
+            }
+            self.manifest.merges[at].scripts = safe;
+        }
+        self.write_manifest()
+    }
+
+    fn remove_script(&mut self, name: &str) -> io::Result<()> {
+        let Some(path) = super::inline_scripts::file_path(name) else {
+            return Ok(());
+        };
+        remove_if_present(&self.root.join(&path))?;
+        self.manifest
+            .files
+            .retain(|f| !f.path.eq_ignore_ascii_case(&path));
+        for file in &mut self.manifest.files {
+            file.scripts.retain(|n| {
+                !super::inline_scripts::file_path(n)
+                    .is_some_and(|script| script.eq_ignore_ascii_case(&path))
+            });
+        }
+        Ok(())
+    }
+
+    /// Records the inline scripts merged with objects in a file.
+    pub fn set_file_scripts(&mut self, path: &str, scripts: Vec<String>) -> io::Result<()> {
+        let safe: Vec<String> = scripts
+            .into_iter()
+            .filter(|name| super::inline_scripts::file_path(name).is_some())
+            .collect();
+        if let Some(at) = self
+            .manifest
+            .files
+            .iter()
+            .position(|f| f.path.eq_ignore_ascii_case(path))
+        {
+            let old = self.manifest.files[at].scripts.clone();
+            for name in old {
+                if safe.iter().any(|n| n.eq_ignore_ascii_case(&name)) {
+                    continue;
+                }
+                let shared = self
+                    .manifest
+                    .merges
+                    .iter()
+                    .any(|m| m.scripts.iter().any(|n| n.eq_ignore_ascii_case(&name)))
+                    || self
+                        .manifest
+                        .files
+                        .iter()
+                        .enumerate()
+                        .any(|(i, f)| i != at && f.scripts.iter().any(|n| n.eq_ignore_ascii_case(&name)));
+                if !shared {
+                    self.remove_script(&name)?;
+                }
+            }
+            self.manifest.files[at].scripts = safe;
         }
         self.write_manifest()
     }
@@ -373,8 +503,29 @@ impl Patch {
 
     fn remove_file_unlogged(&mut self, path: &str) -> io::Result<()> {
         if let Some(at) = self.manifest.files.iter().position(|f| f.path.eq_ignore_ascii_case(path)) {
-            remove_if_present(&self.root.join(&self.manifest.files[at].path))?;
-            self.manifest.files.remove(at);
+            let merge = self.manifest.files.remove(at);
+            remove_if_present(&self.root.join(&merge.path))?;
+            for name in &merge.scripts {
+                let shared = self
+                    .manifest
+                    .merges
+                    .iter()
+                    .any(|m| m.scripts.iter().any(|n| n.eq_ignore_ascii_case(name)))
+                    || self
+                        .manifest
+                        .files
+                        .iter()
+                        .any(|f| f.scripts.iter().any(|n| n.eq_ignore_ascii_case(name)));
+                if !shared {
+                    self.remove_script(name)?;
+                }
+            }
+        }
+        for merge in &mut self.manifest.merges {
+            merge.scripts.retain(|name| {
+                !super::inline_scripts::file_path(name)
+                    .is_some_and(|script| script.eq_ignore_ascii_case(path))
+            });
         }
         self.write_manifest()
     }
@@ -629,7 +780,14 @@ impl Patch {
         std::fs::create_dir_all(path.parent().unwrap())?;
         write_atomic(&path, render(category, key, script).as_bytes())?;
 
-        let merge = Merge { category: category.into(), key: key.into(), script: script.into(), sources, file, prints, game_version: game_version.map(str::to_owned) };
+        let scripts = self
+            .manifest
+            .merges
+            .iter()
+            .find(|m| m.category == category && m.key == key)
+            .map(|m| m.scripts.clone())
+            .unwrap_or_default();
+        let merge = Merge { category: category.into(), key: key.into(), script: script.into(), sources, file, prints, game_version: game_version.map(str::to_owned), scripts };
         match self.manifest.merges.iter_mut().find(|m| m.category == category && m.key == key) {
             Some(existing) => {
                 if existing.file != merge.file {
@@ -1404,6 +1562,7 @@ mod tests {
             r#"{"merges":[],"files":[{"path":"common/../../victim.txt","sources":[]}]}"#.to_owned(),
             merge_keyed("localisation", "../../x:lab", "localisation/replace/english/a.yml"),
             merge_keyed("localisation", "l_english/..:lab", "localisation/replace/english/a.yml"),
+            r#"{"merges":[{"category":"common/buildings","key":"lab","script":"","sources":[],"file":"common/buildings/a.txt","scripts":["../../victim"]}]}"#.to_owned(),
         ];
         for manifest in manifests {
             let root = test_target().root(&user);
@@ -1417,6 +1576,86 @@ mod tests {
             assert_eq!(std::fs::read_to_string(&victim).unwrap(), "keep", "{manifest}");
             assert_eq!(std::fs::read_to_string(root.join(MANIFEST)).unwrap(), manifest, "left as it was");
         }
+        std::fs::remove_dir_all(&user).unwrap();
+    }
+
+    #[test]
+    fn removing_a_merge_removes_its_inline_scripts() {
+        let user = std::env::temp_dir().join(format!("drukhal-patch-scripts-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&user);
+        let mut patch = Patch::open(&user, &test_target()).unwrap();
+        patch
+            .save(&user, None, "common/pop_faction_types", "imperialist", "imperialist = {}", vec![])
+            .unwrap();
+        let script = "common/inline_scripts/MECR/factions/imperialist_460.txt";
+        patch
+            .save_file(&user, None, script, "demand = {}", vec![])
+            .unwrap();
+        patch
+            .set_scripts(
+                "common/pop_faction_types",
+                "imperialist",
+                vec!["MECR/factions/imperialist_460".into()],
+            )
+            .unwrap();
+        let root = test_target().root(&user);
+        assert!(root.join(script).is_file());
+        // Saving the object again keeps its script record.
+        patch
+            .save(&user, None, "common/pop_faction_types", "imperialist", "imperialist = { a = 1 }", vec![])
+            .unwrap();
+        assert_eq!(
+            patch.get("common/pop_faction_types", "imperialist").unwrap().scripts,
+            vec!["MECR/factions/imperialist_460".to_owned()]
+        );
+        patch
+            .remove("common/pop_faction_types", "imperialist")
+            .unwrap();
+        assert!(!root.join(script).is_file());
+        assert!(patch.get_file(script).is_none());
+        std::fs::remove_dir_all(&user).unwrap();
+    }
+
+    #[test]
+    fn a_script_shared_by_two_merges_survives_until_the_last_one() {
+        let user = std::env::temp_dir().join(format!("drukhal-patch-shared-scripts-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&user);
+        let mut patch = Patch::open(&user, &test_target()).unwrap();
+        for key in ["imperialist", "isolationist"] {
+            patch.save(&user, None, "common/pop_faction_types", key, &format!("{key} = {{}}"), vec![]).unwrap();
+        }
+        let script = "common/inline_scripts/MECR/factions/imperialist_460.txt";
+        patch.save_file(&user, None, script, "demand = {}", vec![]).unwrap();
+        for key in ["imperialist", "isolationist"] {
+            patch
+                .set_scripts("common/pop_faction_types", key, vec!["MECR/factions/imperialist_460".into()])
+                .unwrap();
+        }
+        let root = test_target().root(&user);
+        patch.remove("common/pop_faction_types", "imperialist").unwrap();
+        assert!(root.join(script).is_file(), "the other merge still uses it");
+        patch.remove("common/pop_faction_types", "isolationist").unwrap();
+        assert!(!root.join(script).is_file(), "the last merge removes it");
+        std::fs::remove_dir_all(&user).unwrap();
+    }
+
+    #[test]
+    fn removing_a_file_merge_removes_its_inline_scripts() {
+        let user = std::env::temp_dir().join(format!("drukhal-patch-file-scripts-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&user);
+        let mut patch = Patch::open(&user, &test_target()).unwrap();
+        let merged = "common/pop_faction_types/00_imperialist.txt";
+        let script = "common/inline_scripts/MECR/factions/imperialist_460.txt";
+        patch.save_file(&user, None, merged, "imperialist = {}", vec![]).unwrap();
+        patch.save_file(&user, None, script, "demand = {}", vec![]).unwrap();
+        patch
+            .set_file_scripts(merged, vec!["MECR/factions/imperialist_460".into()])
+            .unwrap();
+        let root = test_target().root(&user);
+        assert!(root.join(script).is_file());
+        patch.remove_file(merged).unwrap();
+        assert!(!root.join(script).is_file());
+        assert!(patch.get_file(script).is_none());
         std::fs::remove_dir_all(&user).unwrap();
     }
 }

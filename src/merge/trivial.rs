@@ -2,13 +2,14 @@
 //! version, or only one version differs from the base game, so taking it
 //! keeps every mod's changes.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use super::conflicts::Report;
-use super::scan_cache::ScanCache;
 use super::patch::fingerprint;
+use super::scan_cache::ScanCache;
 use super::source::{self, Source};
+use super::validate;
 
 /// A version that can be used as the merge as it is.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -22,26 +23,113 @@ pub struct Resolved {
 /// Picks the version to use when no real merge is needed. `sources` are the
 /// mods' versions in load order.
 pub fn resolve(vanilla: Option<&Source>, sources: &[Source]) -> Option<Resolved> {
+    resolve_for("", vanilla, sources, false)
+}
+
+/// Like [`resolve`], also taking the conflict `category` and whether a mod's
+/// `replace_path` covers it (ignoring `vanilla` as a base).
+pub fn resolve_for(
+    category: &str,
+    vanilla: Option<&Source>,
+    sources: &[Source],
+    has_replace_path: bool,
+) -> Option<Resolved> {
+    let vanilla = if has_replace_path { None } else { vanilla };
     let prints: Vec<String> = sources.iter().map(|s| print(&s.text)).collect();
     let last = prints.len().checked_sub(1)?;
     let base = vanilla.map(|v| print(&v.text));
     if prints.iter().all(|p| *p == prints[0]) {
-        let reason = if base.as_ref() == Some(&prints[0]) { t!("Every mod's version matches the base game") } else { t!("Every mod ships the same version") };
-        return Some(Resolved { index: last, reason });
+        let reason = if base.as_ref() == Some(&prints[0]) {
+            t!("Every mod's version matches the base game")
+        } else {
+            t!("Every mod ships the same version")
+        };
+        return Some(Resolved {
+            index: last,
+            reason,
+        });
+    }
+    if category == "localisation" {
+        return Some(Resolved {
+            index: last,
+            reason: tf!(
+                "Localisation override: {name} wins (last loaded)",
+                name = &sources[last].label
+            ),
+        });
     }
     let base = base?;
     let changed: Vec<usize> = (0..prints.len()).filter(|&i| prints[i] != base).collect();
     let &newest = changed.last()?;
-    if changed.iter().any(|&i| prints[i] != prints[newest]) {
+    if changed.iter().all(|&i| prints[i] == prints[newest]) {
+        let mut names: Vec<&str> = changed.iter().map(|&i| sources[i].label.as_str()).collect();
+        names.dedup();
+        let reason = match names[..] {
+            [one] => tf!("Only {name} changed it from the base game", name = one),
+            _ => tf!(
+                "Only {names} changed it from the base game, in the same way",
+                names = join(&names)
+            ),
+        };
+        return Some(Resolved {
+            index: newest,
+            reason,
+        });
+    }
+    superset_resolution(vanilla, sources, &changed)
+}
+
+/// Resolves without AI when one changed mod includes all additions/edits of the
+/// other changed mods relative to `vanilla`, plus strictly more changes.
+fn superset_resolution(
+    vanilla: Option<&Source>,
+    sources: &[Source],
+    changed: &[usize],
+) -> Option<Resolved> {
+    if changed.len() < 2 {
         return None;
     }
-    let mut names: Vec<&str> = changed.iter().map(|&i| sources[i].label.as_str()).collect();
-    names.dedup();
-    let reason = match names[..] {
-        [one] => tf!("Only {name} changed it from the base game", name = one),
-        _ => tf!("Only {names} changed it from the base game, in the same way", names = join(&names)),
-    };
-    Some(Resolved { index: newest, reason })
+    let vanilla_entries = crate::paradox::script::parse(&vanilla?.text).ok()?;
+    let mut vanilla_leaves = Vec::new();
+    validate::leaf_signatures(&vanilla_entries, &mut vanilla_leaves);
+    let vanilla_set: HashSet<String> = vanilla_leaves.into_iter().collect();
+
+    let mut deltas = Vec::with_capacity(changed.len());
+    for &idx in changed {
+        let entries = crate::paradox::script::parse(&sources[idx].text).ok()?;
+        let mut leaves = Vec::new();
+        validate::leaf_signatures(&entries, &mut leaves);
+        let delta: HashSet<String> = leaves
+            .into_iter()
+            .filter(|l| !vanilla_set.contains(l))
+            .collect();
+        if delta.is_empty() {
+            return None;
+        }
+        deltas.push(delta);
+    }
+
+    for cand in (0..changed.len()).rev() {
+        let is_superset_of_all = deltas
+            .iter()
+            .enumerate()
+            .all(|(j, d)| j == cand || d.is_subset(&deltas[cand]));
+        let strictly_larger = deltas
+            .iter()
+            .enumerate()
+            .any(|(j, d)| j != cand && d.len() < deltas[cand].len());
+        if is_superset_of_all && strictly_larger {
+            let idx = changed[cand];
+            return Some(Resolved {
+                index: idx,
+                reason: tf!(
+                    "{name} includes all changes from the other mods",
+                    name = &sources[idx].label
+                ),
+            });
+        }
+    }
+    None
 }
 
 /// The object conflicts in `report` that need no AI, by index, with the
@@ -49,15 +137,34 @@ pub fn resolve(vanilla: Option<&Source>, sources: &[Source]) -> Option<Resolved>
 /// and each game folder once; slow parts of a big load order, so run it off
 /// the main thread.
 #[cfg(test)]
-pub fn simple_conflicts(report: &Report, roots: &[Option<PathBuf>], names: &[String], game_dir: Option<&Path>) -> HashMap<usize, String> {
-    simple_conflicts_cached(report, roots, names, game_dir, None, &mut ScanCache::default())
+pub fn simple_conflicts(
+    report: &Report,
+    roots: &[Option<PathBuf>],
+    names: &[String],
+    game_dir: Option<&Path>,
+) -> HashMap<usize, String> {
+    simple_conflicts_cached(
+        report,
+        roots,
+        names,
+        game_dir,
+        None,
+        &mut ScanCache::default(),
+    )
 }
 
 /// Like `simple_conflicts`, taking the verdicts `cache` has for conflicts
 /// whose files haven't changed, and keeping the new ones. `game_version`
 /// stands for the base game's files; without it nothing is cached, unless
 /// there's no game to compare with either.
-pub fn simple_conflicts_cached(report: &Report, roots: &[Option<PathBuf>], names: &[String], game_dir: Option<&Path>, game_version: Option<&str>, cache: &mut ScanCache) -> HashMap<usize, String> {
+pub fn simple_conflicts_cached(
+    report: &Report,
+    roots: &[Option<PathBuf>],
+    names: &[String],
+    game_dir: Option<&Path>,
+    game_version: Option<&str>,
+    cache: &mut ScanCache,
+) -> HashMap<usize, String> {
     let game = match (game_dir, game_version) {
         (None, _) => Some("none"),
         (Some(_), version) => version,
@@ -68,9 +175,18 @@ pub fn simple_conflicts_cached(report: &Report, roots: &[Option<PathBuf>], names
     let mut by_category: HashMap<&str, Vec<usize>> = HashMap::new();
     for (i, c) in report.objects.iter().enumerate() {
         let print = game.and_then(|game| {
-            let paths: Option<Vec<PathBuf>> = c.definitions.iter().map(|d| Some(roots.get(d.mod_position)?.as_ref()?.join(&d.file))).collect();
+            let paths: Option<Vec<PathBuf>> = c
+                .definitions
+                .iter()
+                .map(|d| Some(roots.get(d.mod_position)?.as_ref()?.join(&d.file)))
+                .collect();
             let paths = paths?;
-            let definitions: Vec<(&str, &str, &Path)> = c.definitions.iter().zip(&paths).map(|(d, p)| (names[d.mod_position].as_str(), d.file.as_str(), p.as_path())).collect();
+            let definitions: Vec<(&str, &str, &Path)> = c
+                .definitions
+                .iter()
+                .zip(&paths)
+                .map(|(d, p)| (names[d.mod_position].as_str(), d.file.as_str(), p.as_path()))
+                .collect();
             cache.conflict_print(&c.category, &c.key, game, &definitions)
         });
         if let Some(print) = print {
@@ -85,21 +201,42 @@ pub fn simple_conflicts_cached(report: &Report, roots: &[Option<PathBuf>], names
     // Each file parsed once: its objects by key.
     let mut files: HashMap<(PathBuf, &str), HashMap<String, String>> = HashMap::new();
     for (category, indices) in by_category {
-        let keys: Vec<String> = indices.iter().map(|&i| report.objects[i].key.clone()).collect();
-        let vanilla = game_dir.map(|dir| source::vanilla_many(dir, category, &keys)).unwrap_or_default();
+        let has_replace = !report.replace_path_mods(category).is_empty();
+        let keys: Vec<String> = indices
+            .iter()
+            .map(|&i| report.objects[i].key.clone())
+            .collect();
+        let vanilla = if has_replace {
+            HashMap::new()
+        } else {
+            game_dir
+                .map(|dir| source::vanilla_many(dir, category, &keys))
+                .unwrap_or_default()
+        };
         'objects: for i in indices {
             let c = &report.objects[i];
             let mut sources = Vec::new();
             for d in &c.definitions {
-                let Some(root) = roots.get(d.mod_position).cloned().flatten() else { continue 'objects };
+                let Some(root) = roots.get(d.mod_position).cloned().flatten() else {
+                    continue 'objects;
+                };
                 let path = root.join(&d.file);
                 let objects = files.entry((path.clone(), category)).or_insert_with(|| {
-                    std::fs::read(&path).map(|b| source::index(category, &String::from_utf8_lossy(&b))).unwrap_or_default()
+                    std::fs::read(&path)
+                        .map(|b| source::index(category, &String::from_utf8_lossy(&b)))
+                        .unwrap_or_default()
                 });
-                let Some(text) = objects.get(&c.key).cloned() else { continue 'objects };
-                sources.push(Source { label: names[d.mod_position].clone(), file: d.file.clone(), text });
+                let Some(text) = objects.get(&c.key).cloned() else {
+                    continue 'objects;
+                };
+                sources.push(Source {
+                    label: names[d.mod_position].clone(),
+                    file: d.file.clone(),
+                    text,
+                });
             }
-            let reason = resolve(vanilla.get(&c.key), &sources).map(|r| r.reason);
+            let reason =
+                resolve_for(category, vanilla.get(&c.key), &sources, has_replace).map(|r| r.reason);
             if let Some(print) = prints.remove(&i) {
                 cache.set_verdict(print, reason.clone());
             }
@@ -120,7 +257,11 @@ fn join(names: &[&str]) -> String {
 
 /// A fingerprint that ignores formatting and comments.
 fn print(text: &str) -> String {
-    let stripped: String = text.lines().map(strip_comment).collect::<Vec<_>>().join("\n");
+    let stripped: String = text
+        .lines()
+        .map(strip_comment)
+        .collect::<Vec<_>>()
+        .join("\n");
     fingerprint(&stripped)
 }
 
@@ -142,7 +283,11 @@ mod tests {
     use super::*;
 
     fn src(label: &str, text: &str) -> Source {
-        Source { label: label.into(), file: "f.txt".into(), text: text.into() }
+        Source {
+            label: label.into(),
+            file: "f.txt".into(),
+            text: text.into(),
+        }
     }
 
     #[test]
@@ -151,10 +296,22 @@ mod tests {
         let a = src("A", "x = {\n\tcost = 100 # same, reformatted\n}");
         let b = src("B", "x = { cost = 50 }");
         let c = src("C", "x = { cost = 100 }");
-        assert_eq!(resolve(Some(&v), &[a.clone(), b.clone(), c]), Some(Resolved { index: 1, reason: "Only B changed it from the base game".into() }));
+        assert_eq!(
+            resolve(Some(&v), &[a.clone(), b.clone(), c]),
+            Some(Resolved {
+                index: 1,
+                reason: "Only B changed it from the base game".into()
+            })
+        );
         // Two mods making the same change.
         let b2 = src("B2", "x = { cost = 50 } # cheaper");
-        assert_eq!(resolve(Some(&v), &[b.clone(), a.clone(), b2]).unwrap(), Resolved { index: 2, reason: "Only B and B2 changed it from the base game, in the same way".into() });
+        assert_eq!(
+            resolve(Some(&v), &[b.clone(), a.clone(), b2]).unwrap(),
+            Resolved {
+                index: 2,
+                reason: "Only B and B2 changed it from the base game, in the same way".into()
+            }
+        );
         // Two different changes need a real merge.
         assert_eq!(resolve(Some(&v), &[b, src("D", "x = { cost = 70 }")]), None);
     }
@@ -164,14 +321,45 @@ mod tests {
         use crate::merge::conflicts::{Definition, ObjectConflict};
         let root = std::env::temp_dir().join(format!("drukhal-simple-{}", std::process::id()));
         let (game, a, b) = (root.join("game"), root.join("a"), root.join("b"));
-        for (dir, text) in [(&game, "x = { cost = 1 }\ny = { cost = 1 }"), (&a, "x = { cost = 1 }\ny = { cost = 2 }"), (&b, "x = { cost = 3 }\ny = { cost = 4 }")] {
+        for (dir, text) in [
+            (&game, "x = { cost = 1 }\ny = { cost = 1 }"),
+            (&a, "x = { cost = 1 }\ny = { cost = 2 }"),
+            (&b, "x = { cost = 3 }\ny = { cost = 4 }"),
+        ] {
             std::fs::create_dir_all(dir.join("common/things")).unwrap();
             std::fs::write(dir.join("common/things/t.txt"), text).unwrap();
         }
-        let conflict = |key: &str| ObjectConflict { category: "common/things".into(), key: key.into(), definitions: vec![Definition { mod_position: 0, file: "common/things/t.txt".into() }, Definition { mod_position: 1, file: "common/things/t.txt".into() }] };
-        let report = Report { files: vec![], objects: vec![conflict("x"), conflict("y")], errors: vec![], skipped: vec![], ..Default::default() };
-        let simple = simple_conflicts(&report, &[Some(a), Some(b)], &["A".into(), "B".into()], Some(&game));
-        assert_eq!(simple.get(&0).map(String::as_str), Some("Only B changed it from the base game"));
+        let conflict = |key: &str| ObjectConflict {
+            category: "common/things".into(),
+            key: key.into(),
+            definitions: vec![
+                Definition {
+                    mod_position: 0,
+                    file: "common/things/t.txt".into(),
+                },
+                Definition {
+                    mod_position: 1,
+                    file: "common/things/t.txt".into(),
+                },
+            ],
+        };
+        let report = Report {
+            files: vec![],
+            objects: vec![conflict("x"), conflict("y")],
+            errors: vec![],
+            skipped: vec![],
+            ..Default::default()
+        };
+        let simple = simple_conflicts(
+            &report,
+            &[Some(a), Some(b)],
+            &["A".into(), "B".into()],
+            Some(&game),
+        );
+        assert_eq!(
+            simple.get(&0).map(String::as_str),
+            Some("Only B changed it from the base game")
+        );
         assert!(!simple.contains_key(&1), "both changed y differently");
         std::fs::remove_dir_all(root).unwrap();
     }
@@ -185,8 +373,17 @@ mod tests {
         let user = crate::paradox::steam::stellaris_user_dir();
         let workshop = crate::paradox::steam::workshop_dirs(&home, 281990);
         let mods = crate::mods::discover(&user, &workshop).unwrap();
-        let enabled: Vec<_> = mods.iter().filter(|m| m.load_position.is_some() && !crate::merge::patch::is_patch(&m.id)).collect();
-        let mut inputs: Vec<_> = enabled.iter().map(|m| crate::merge::conflicts::ModInput { root: m.content.clone(), replace_path: m.descriptor.replace_path.clone() }).collect();
+        let enabled: Vec<_> = mods
+            .iter()
+            .filter(|m| m.load_position.is_some() && !crate::merge::patch::is_patch(&m.id))
+            .collect();
+        let mut inputs: Vec<_> = enabled
+            .iter()
+            .map(|m| crate::merge::conflicts::ModInput {
+                root: m.content.clone(),
+                replace_path: m.descriptor.replace_path.clone(),
+            })
+            .collect();
         // As the scan does: zipped mods are read from an unpacked copy.
         for input in &mut inputs {
             if let Some(root) = &input.root
@@ -197,25 +394,54 @@ mod tests {
         }
         let names: Vec<String> = enabled.iter().map(|m| m.descriptor.name.clone()).collect();
         let game = crate::paradox::game::find(&crate::paradox::steam::library_folders(&home));
-        let (dir, version) = (game.as_ref().map(|g| g.dir.clone()), game.and_then(|g| g.version));
-        let roots: Vec<_> = inputs.iter().map(|i| i.root.clone().filter(|r| r.is_dir())).collect();
+        let (dir, version) = (
+            game.as_ref().map(|g| g.dir.clone()),
+            game.and_then(|g| g.version),
+        );
+        let roots: Vec<_> = inputs
+            .iter()
+            .map(|i| i.root.clone().filter(|r| r.is_dir()))
+            .collect();
         // Cold, then again with what the first run cached.
         let mut cache = ScanCache::default();
         let mut results = Vec::new();
         for run in ["cold", "cached"] {
             let start = std::time::Instant::now();
             let report = crate::merge::conflicts::analyze_cached(&inputs, None, &mut cache);
-            println!("{run} scan: {:?}, {} object conflicts", start.elapsed(), report.objects.len());
+            println!(
+                "{run} scan: {:?}, {} object conflicts",
+                start.elapsed(),
+                report.objects.len()
+            );
             let start = std::time::Instant::now();
-            let simple = simple_conflicts_cached(&report, &roots, &names, dir.as_deref(), version.as_deref(), &mut cache);
-            println!("{run} simple check: {:?}, {} of {} simple", start.elapsed(), simple.len(), report.objects.len());
+            let simple = simple_conflicts_cached(
+                &report,
+                &roots,
+                &names,
+                dir.as_deref(),
+                version.as_deref(),
+                &mut cache,
+            );
+            println!(
+                "{run} simple check: {:?}, {} of {} simple",
+                start.elapsed(),
+                simple.len(),
+                report.objects.len()
+            );
             results.push((report.files, report.objects, report.errors, simple));
         }
         assert!(results[0] == results[1], "the cache changed what was found");
-        let path = std::env::temp_dir().join(format!("drukhal-scan-cache-size-{}.json", std::process::id()));
+        let path = std::env::temp_dir().join(format!(
+            "drukhal-scan-cache-size-{}.json",
+            std::process::id()
+        ));
         let start = std::time::Instant::now();
         cache.save(&path).unwrap();
-        println!("cache: {} KB, saved in {:?}", std::fs::metadata(&path).unwrap().len() / 1024, start.elapsed());
+        println!(
+            "cache: {} KB, saved in {:?}",
+            std::fs::metadata(&path).unwrap().len() / 1024,
+            start.elapsed()
+        );
         let start = std::time::Instant::now();
         ScanCache::load(&path);
         println!("loaded in {:?}", start.elapsed());
@@ -226,9 +452,65 @@ mod tests {
     fn takes_identical_versions() {
         let a = src("A", "x = { y = \"#1\" }");
         let b = src("B", "x = {\n y = \"#1\"\n}");
-        assert_eq!(resolve(None, &[a.clone(), b.clone()]).unwrap().reason, "Every mod ships the same version");
-        assert_eq!(resolve(Some(&a), &[a.clone(), b]).unwrap().reason, "Every mod's version matches the base game");
-        assert_eq!(resolve(None, &[a, src("C", "x = { y = \"#2\" }")]), None, "different without a base to compare");
+        assert_eq!(
+            resolve(None, &[a.clone(), b.clone()]).unwrap().reason,
+            "Every mod ships the same version"
+        );
+        assert_eq!(
+            resolve(Some(&a), &[a.clone(), b]).unwrap().reason,
+            "Every mod's version matches the base game"
+        );
+        assert_eq!(
+            resolve(None, &[a, src("C", "x = { y = \"#2\" }")]),
+            None,
+            "different without a base to compare"
+        );
         assert_eq!(resolve(None, &[]), None);
+    }
+
+    #[test]
+    fn resolves_strict_superset_without_ai() {
+        let v = src("Vanilla", "b = { cost = 100 tier = 1 }");
+        let a = src("A", "b = { cost = 50 tier = 1 }");
+        let b = src("B", "b = { cost = 50 tier = 2 }");
+        let r = resolve_for("common/buildings", Some(&v), &[a.clone(), b.clone()], false).unwrap();
+        assert_eq!(r.index, 1);
+        assert!(
+            r.reason.contains("B"),
+            "expected superset reason: {}",
+            r.reason
+        );
+
+        // Conflicting edits to the same key cannot be resolved as a superset.
+        let c = src("C", "b = { cost = 75 tier = 2 }");
+        assert_eq!(
+            resolve_for("common/buildings", Some(&v), &[a, c], false),
+            None
+        );
+    }
+
+    #[test]
+    fn resolves_localisation_as_last_override() {
+        let a = src("Mod A", "a:0 \"First\"");
+        let b = src("Mod B", "a:0 \"Second\"");
+        let r = resolve_for("localisation", None, &[a, b], false).unwrap();
+        assert_eq!(r.index, 1);
+        assert!(r.reason.contains("Mod B"), "{}", r.reason);
+    }
+
+    #[test]
+    fn replace_path_ignores_vanilla_base() {
+        let v = src("Vanilla", "b = { cost = 100 }");
+        let a = src("Mod A", "b = { cost = 100 }");
+        let b = src("Mod B", "b = { cost = 50 }");
+        // Without replace_path, A matches vanilla so only B changed it.
+        assert!(
+            resolve_for("common/buildings", Some(&v), &[a.clone(), b.clone()], false).is_some()
+        );
+        // With replace_path, vanilla is ignored so A vs B is a real conflict.
+        assert_eq!(
+            resolve_for("common/buildings", Some(&v), &[a, b], true),
+            None
+        );
     }
 }

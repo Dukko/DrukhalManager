@@ -56,6 +56,13 @@ pub fn category(path: &str) -> String {
     path.rsplit_once('/').map_or(String::new(), |(dir, _)| dir.to_owned())
 }
 
+/// Whether `category` is a scripted-variables folder, where each top-level
+/// `@variable` is an object rather than file preamble.
+fn is_scripted_variables(category: &str) -> bool {
+    let lower = category.to_ascii_lowercase();
+    lower == "common/scripted_variables" || lower.starts_with("common/scripted_variables/")
+}
+
 /// One mod's copy of the file.
 #[derive(Debug, Clone)]
 pub struct Version {
@@ -179,7 +186,13 @@ impl Plan {
         let mut defined = Vec::new();
         for entry in &entries {
             match entry {
-                Entry::Assign { key, .. } if key.starts_with('@') => {}
+                // A scripted-variable merge's object is the `@variable`
+                // itself; other `@variable` lines stay preamble.
+                Entry::Assign { key, .. } if key.starts_with('@') => {
+                    if key.as_str() == item.key {
+                        defined.push(key.clone());
+                    }
+                }
                 _ => defined.push(object_key(&self.category, &item.group, entry, &self.repeated)?),
             }
         }
@@ -222,7 +235,11 @@ struct Split {
 /// contents), each entry with its original text.
 type Lists = Vec<(Option<String>, Vec<(Entry, String)>)>;
 
-fn parse_lists(wrapped: bool, src: &str) -> Result<(Vec<(String, String)>, Lists), String> {
+fn parse_lists(
+    wrapped: bool,
+    scripted_variables: bool,
+    src: &str,
+) -> Result<(Vec<(String, String)>, Lists), String> {
     let entries = script::parse_with_spans(src).map_err(|e| format!("could not be read ({e})"))?;
     let mut preamble = Vec::new();
     let mut top = Vec::new();
@@ -230,7 +247,12 @@ fn parse_lists(wrapped: bool, src: &str) -> Result<(Vec<(String, String)>, Lists
     for (entry, range) in entries {
         let text = src[range.clone()].to_owned();
         match &entry {
-            Entry::Assign { key, .. } if key.eq_ignore_ascii_case("namespace") || key.starts_with('@') => preamble.push((key.clone(), text)),
+            Entry::Assign { key, .. }
+                if key.eq_ignore_ascii_case("namespace")
+                    || (key.starts_with('@') && !scripted_variables) =>
+            {
+                preamble.push((key.clone(), text))
+            }
             Entry::Assign { key, value, .. } if wrapped => {
                 let (Some(_), Some(open)) = (value.as_block(), text.find('{')) else {
                     return Err(format!("has `{key}` at the top level outside a block, which can't be merged object by object"));
@@ -323,7 +345,7 @@ fn split(category: &str, wrapped: bool, src: &str, repeated: &Repeated) -> Resul
         return check_unique(Split { preamble, objects });
     }
 
-    let (preamble, lists) = parse_lists(wrapped, src)?;
+    let (preamble, lists) = parse_lists(wrapped, is_scripted_variables(category), src)?;
     let mut objects = Vec::new();
     for (group, entries) in lists {
         for (entry, text) in entries {
@@ -372,16 +394,17 @@ fn normalized_value(v: &Value) -> Value {
 pub fn plan(path: &str, vanilla: Option<&str>, versions: &[Version]) -> Result<Plan, String> {
     let category = category(path);
     let wrapped = wrapped(path);
+    let scripted_variables = is_scripted_variables(&category);
 
     // Which type keywords repeat, across every copy, so that every copy
     // names an object the same way.
     let mut repeated = Repeated::new();
     if category != "localisation" {
         for v in versions {
-            let (_, lists) = parse_lists(wrapped, &v.text).map_err(|e| format!("{}'s copy {e}", v.label))?;
+            let (_, lists) = parse_lists(wrapped, scripted_variables, &v.text).map_err(|e| format!("{}'s copy {e}", v.label))?;
             repeated_in(&lists, &mut repeated);
         }
-        if let Some(Ok((_, lists))) = vanilla.map(|src| parse_lists(wrapped, src)) {
+        if let Some(Ok((_, lists))) = vanilla.map(|src| parse_lists(wrapped, scripted_variables, src)) {
             repeated_in(&lists, &mut repeated);
         }
     }
@@ -448,6 +471,9 @@ pub fn plan(path: &str, vanilla: Option<&str>, versions: &[Version]) -> Result<P
 /// Checks a merged script file parses before it's saved.
 pub fn validate(category: &str, text: &str) -> Result<(), String> {
     if category == "localisation" {
+        if let Some(problem) = super::validate::localisation_problems(text).into_iter().next() {
+            return Err(problem);
+        }
         return Ok(());
     }
     script::parse(text).map(|_| ()).map_err(|e| format!("The merged file has a syntax error at {e}"))?;
@@ -589,6 +615,20 @@ mod tests {
         assert!(can_split("interface/x.gui") && can_split("gfx/x.gfx") && can_split("common/governments/civics/x.txt") && can_split("localisation/english/x_l_english.yml") && can_split("events/x.txt"));
         assert!(!can_split("gfx/x.dds") && !can_split("common/x.csv") && !can_split("common/inline_scripts/a/b.txt"));
         assert!(mergeable("common/inline_scripts/a/b.txt") && !mergeable("gfx/x.dds") && !mergeable("common/x.csv"));
+    }
+
+    #[test]
+    fn scripted_variables_are_objects_not_preamble() {
+        let vanilla = "@my_cost = 100\n@shared = 1";
+        let a = "@my_cost = 100\n@shared = 1\n@only_a = 2";
+        let b = "@my_cost = 200\n@shared = 1\n@only_b = 3";
+        let plan = plan("common/scripted_variables/00_vars.txt", Some(vanilla), &[v("A", a), v("B", b)]).unwrap();
+        assert!(plan.items.iter().any(|i| i.key == "@my_cost" && matches!(&i.status, Status::OneChange(name) if name == "B")));
+        assert!(plan.items.iter().any(|i| i.key == "@only_a" && matches!(i.status, Status::Recovered(_))));
+        let idx = plan.items.iter().position(|i| i.key == "@only_a").unwrap();
+        assert_eq!(plan.validate_item(idx, "@only_a = 2").unwrap(), "@only_a = 2");
+        assert!(plan.validate_item(idx, "@only_b = 2").is_err());
+        validate(&plan.category, &plan.render()).unwrap();
     }
 
     fn plan_of(path: &str, texts: &[&str]) -> Plan {

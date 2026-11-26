@@ -9,7 +9,7 @@ use std::rc::{Rc, Weak};
 use adw::prelude::*;
 use gtk::{gio, glib};
 
-use super::{Item, Page, chip, arrow, diff_bar, note, object_key, option_toggle};
+use super::{Item, Page, arrow, chip, diff_bar, note, object_key, option_toggle};
 use crate::diff_view::{Card, Compare, Header, Pair};
 use crate::merge::ai;
 use crate::merge::conflicts::{self, ObjectConflict};
@@ -34,6 +34,10 @@ pub struct Steps {
     next: usize,
     /// The model's notes on its last merge.
     notes: String,
+    /// Inline scripts merged alongside the object.
+    scripts: Vec<ai::MergedScript>,
+    /// Whether the last AI merge rewrote the script set.
+    scripts_changed: bool,
     /// The right card's version as edited by hand, if it was.
     right_edit: Option<String>,
     /// The text in the final editor.
@@ -50,6 +54,8 @@ struct Snapshot {
     edited: bool,
     next: usize,
     notes: String,
+    scripts: Vec<ai::MergedScript>,
+    scripts_changed: bool,
     right_edit: Option<String>,
     final_text: Option<String>,
     from_saved: bool,
@@ -61,7 +67,21 @@ impl Steps {
         let result = first.map(|s| s.text.clone()).unwrap_or_default();
         let from = first.map(|s| vec![s.label.clone()]).unwrap_or_default();
         let n = loaded.sources.len();
-        let mut steps = Steps { loaded, positions, result, from, edited: false, next: 1, notes: String::new(), right_edit: None, final_text: None, from_saved: false, history: Vec::new() };
+        let mut steps = Steps {
+            loaded,
+            positions,
+            result,
+            from,
+            edited: false,
+            next: 1,
+            notes: String::new(),
+            scripts: Vec::new(),
+            scripts_changed: false,
+            right_edit: None,
+            final_text: None,
+            from_saved: false,
+            history: Vec::new(),
+        };
         if let Some(text) = saved {
             steps.next = n.max(1);
             steps.final_text = Some(text);
@@ -95,6 +115,8 @@ impl Steps {
             edited: self.edited,
             next: self.next,
             notes: self.notes.clone(),
+            scripts: self.scripts.clone(),
+            scripts_changed: self.scripts_changed,
             right_edit: self.right_edit.clone(),
             final_text: self.final_text.clone(),
             from_saved: self.from_saved,
@@ -106,7 +128,8 @@ impl Steps {
     fn winner(&self, c: &ObjectConflict) -> Option<usize> {
         let (w, _) = c.winner()?;
         let w = &c.definitions[w];
-        (0..self.loaded.sources.len()).find(|&i| self.positions[i] == w.mod_position && self.loaded.sources[i].file == w.file)
+        (0..self.loaded.sources.len())
+            .find(|&i| self.positions[i] == w.mod_position && self.loaded.sources[i].file == w.file)
     }
 
     fn left_is_first(&self) -> bool {
@@ -119,7 +142,11 @@ impl Steps {
         if self.left_is_first() {
             return first.clone();
         }
-        Source { label: tf!("Result so far ({names})", names = self.from.join(" + ")), file: first.file.clone(), text: self.result.clone() }
+        Source {
+            label: tf!("Result so far ({names})", names = self.from.join(" + ")),
+            file: first.file.clone(),
+            text: self.result.clone(),
+        }
     }
 
     fn right(&self) -> &Source {
@@ -147,6 +174,8 @@ impl Steps {
         self.snapshot();
         self.next += 1;
         self.notes.clear();
+        self.scripts.clear();
+        self.scripts_changed = false;
         self.right_edit = None;
     }
 
@@ -159,10 +188,12 @@ impl Steps {
         self.edited = self.right_edit.take().is_some();
         self.next += 1;
         self.notes.clear();
+        self.scripts.clear();
+        self.scripts_changed = false;
     }
 
     /// Takes the model's merge of the two cards and moves on.
-    fn merged(&mut self, script: String, notes: String) {
+    fn merged(&mut self, script: String, notes: String, scripts: Vec<ai::MergedScript>) {
         self.snapshot();
         let label = self.right().label.clone();
         self.result = script;
@@ -172,6 +203,31 @@ impl Steps {
         self.edited = false;
         self.next += 1;
         self.notes = notes;
+        self.scripts = scripts;
+        self.scripts_changed = true;
+        self.right_edit = None;
+    }
+
+    /// Takes the model's merge of all remaining versions at once.
+    fn merged_all(
+        &mut self,
+        script: String,
+        notes: String,
+        scripts: Vec<ai::MergedScript>,
+        merged_labels: &[String],
+    ) {
+        self.snapshot();
+        self.result = script;
+        for label in merged_labels {
+            if !self.from.contains(label) {
+                self.from.push(label.clone());
+            }
+        }
+        self.edited = false;
+        self.next = self.loaded.sources.len().max(1);
+        self.notes = notes;
+        self.scripts = scripts;
+        self.scripts_changed = true;
         self.right_edit = None;
     }
 
@@ -193,7 +249,29 @@ impl Steps {
 
     fn undo(&mut self) {
         if let Some(s) = self.history.pop() {
-            (self.result, self.from, self.edited, self.next, self.notes, self.right_edit, self.final_text, self.from_saved) = (s.result, s.from, s.edited, s.next, s.notes, s.right_edit, s.final_text, s.from_saved);
+            (
+                self.result,
+                self.from,
+                self.edited,
+                self.next,
+                self.notes,
+                self.scripts,
+                self.scripts_changed,
+                self.right_edit,
+                self.final_text,
+                self.from_saved,
+            ) = (
+                s.result,
+                s.from,
+                s.edited,
+                s.next,
+                s.notes,
+                s.scripts,
+                s.scripts_changed,
+                s.right_edit,
+                s.final_text,
+                s.from_saved,
+            );
         }
     }
 
@@ -203,13 +281,17 @@ impl Steps {
         self.from = vec![first.label.clone()];
         (self.edited, self.next, self.from_saved) = (false, 1, false);
         self.notes.clear();
+        self.scripts.clear();
+        self.scripts_changed = false;
         self.right_edit = None;
         self.final_text = None;
         self.history.clear();
     }
 
     fn final_text(&self) -> String {
-        self.final_text.clone().unwrap_or_else(|| self.result.clone())
+        self.final_text
+            .clone()
+            .unwrap_or_else(|| self.result.clone())
     }
 }
 
@@ -242,7 +324,11 @@ pub struct ObjectView {
 
 pub fn view(page: &Rc<Page>, index: usize) -> (gtk::Widget, Rc<dyn std::any::Any>) {
     let c = &page.analysis.report.objects[index];
-    let stack = gtk::Stack::builder().transition_duration(280).vexpand(true).hexpand(true).build();
+    let stack = gtk::Stack::builder()
+        .transition_duration(280)
+        .vexpand(true)
+        .hexpand(true)
+        .build();
     // Drops the cards that slid out.
     stack.connect_transition_running_notify(|stack| {
         if !stack.is_transition_running() {
@@ -250,9 +336,19 @@ pub fn view(page: &Rc<Page>, index: usize) -> (gtk::Widget, Rc<dyn std::any::Any
         }
     });
     let thinking = ThinkingView::new();
-    let root = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(12).margin_top(18).margin_bottom(18).margin_start(18).margin_end(18).build();
+    let root = gtk::Box::builder()
+        .orientation(gtk::Orientation::Vertical)
+        .spacing(12)
+        .margin_top(18)
+        .margin_bottom(18)
+        .margin_start(18)
+        .margin_end(18)
+        .build();
     let header = adw::Bin::new();
-    let notes = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(6).build();
+    let notes = gtk::Box::builder()
+        .orientation(gtk::Orientation::Vertical)
+        .spacing(6)
+        .build();
     root.append(&header);
     root.append(&notes);
     root.append(&thinking.widget);
@@ -278,9 +374,15 @@ pub fn view(page: &Rc<Page>, index: usize) -> (gtk::Widget, Rc<dyn std::any::Any
     if page.hooks.session.borrow().steps.contains_key(&view.key) {
         view.render(gtk::StackTransitionType::None);
     } else {
-        let header = page.detail_header(&c.key, &tf!("Object · {category}", category = &c.category));
+        let header =
+            page.detail_header(&c.key, &tf!("Object · {category}", category = &c.category));
         view.header.set_child(Some(&header.widget));
-        let spinner = adw::Spinner::builder().width_request(32).height_request(32).halign(gtk::Align::Center).valign(gtk::Align::Center).build();
+        let spinner = adw::Spinner::builder()
+            .width_request(32)
+            .height_request(32)
+            .halign(gtk::Align::Center)
+            .valign(gtk::Align::Center)
+            .build();
         view.push(&spinner.upcast(), gtk::StackTransitionType::None);
         view.load(page, index);
     }
@@ -313,19 +415,43 @@ impl ObjectView {
         let origins: Vec<(usize, String, String, PathBuf, String)> = c
             .definitions
             .iter()
-            .filter_map(|d| Some((d.mod_position, analysis.ids[d.mod_position].clone(), analysis.name(d.mod_position).to_owned(), analysis.roots[d.mod_position].clone()?, d.file.clone())))
+            .filter_map(|d| {
+                Some((
+                    d.mod_position,
+                    analysis.ids[d.mod_position].clone(),
+                    analysis.name(d.mod_position).to_owned(),
+                    analysis.roots[d.mod_position].clone()?,
+                    d.file.clone(),
+                ))
+            })
             .collect();
-        let (category, key, game_dir) = (c.category.clone(), c.key.clone(), page.hooks.game_dir.clone());
+        let (category, key, game_dir) = (
+            c.category.clone(),
+            c.key.clone(),
+            page.hooks.game_dir.clone(),
+        );
         let existing = (page.hooks.existing)(&category, &key);
         let stale = page.hooks.stale_object(&category, &key).is_some();
         let view = self.clone();
         glib::spawn_future_local(async move {
-            let for_load = origins.iter().map(|(_, id, name, root, file)| (id.clone(), name.clone(), root.clone(), file.clone())).collect();
-            let loaded = gio::spawn_blocking(move || merge_dialog::load(&category, &key, game_dir.as_deref(), for_load)).await;
-            let Some(page) = view.page.upgrade() else { return };
+            let for_load = origins
+                .iter()
+                .map(|(_, id, name, root, file)| {
+                    (id.clone(), name.clone(), root.clone(), file.clone())
+                })
+                .collect();
+            let loaded = gio::spawn_blocking(move || {
+                merge_dialog::load(&category, &key, game_dir.as_deref(), for_load)
+            })
+            .await;
+            let Some(page) = view.page.upgrade() else {
+                return;
+            };
             let Ok(loaded) = loaded else {
-                view.error.replace(Some(t!("Could not read the mods' files")));
-                view.header.set_child(Some(&page.detail_header(&view.name, &view.category).widget));
+                view.error
+                    .replace(Some(t!("Could not read the mods' files")));
+                view.header
+                    .set_child(Some(&page.detail_header(&view.name, &view.category).widget));
                 view.show_error_only();
                 return;
             };
@@ -333,13 +459,21 @@ impl ObjectView {
             let mut positions = Vec::new();
             let mut found = loaded.sources.iter().peekable();
             for (position, _, name, _, file) in &origins {
-                if found.peek().is_some_and(|s| &s.label == name && &s.file == file) {
+                if found
+                    .peek()
+                    .is_some_and(|s| &s.label == name && &s.file == file)
+                {
                     positions.push(*position);
                     found.next();
                 }
             }
             let saved = existing.filter(|_| !stale).map(|m| m.script);
-            page.hooks.session.borrow_mut().steps.entry(view.key.clone()).or_insert_with(|| Steps::new(loaded, positions, saved));
+            page.hooks
+                .session
+                .borrow_mut()
+                .steps
+                .entry(view.key.clone())
+                .or_insert_with(|| Steps::new(loaded, positions, saved));
             view.render(gtk::StackTransitionType::Crossfade);
         });
     }
@@ -353,7 +487,8 @@ impl ObjectView {
     /// Shows `widget` in place of the current cards.
     fn push(&self, widget: &gtk::Widget, transition: gtk::StackTransitionType) {
         self.pages.set(self.pages.get() + 1);
-        self.stack.add_named(widget, Some(&format!("step-{}", self.pages.get())));
+        self.stack
+            .add_named(widget, Some(&format!("step-{}", self.pages.get())));
         self.stack.set_transition_type(transition);
         self.stack.set_visible_child(widget);
         if transition == gtk::StackTransitionType::None || !self.stack.is_mapped() {
@@ -363,16 +498,24 @@ impl ObjectView {
 
     fn show_error_only(&self) {
         let message = self.error.borrow().clone().unwrap_or_default();
-        let status = adw::StatusPage::builder().icon_name("dialog-warning-symbolic").title(t!("Nothing to Compare")).description(message).build();
+        let status = adw::StatusPage::builder()
+            .icon_name("dialog-warning-symbolic")
+            .title(t!("Nothing to Compare"))
+            .description(message)
+            .build();
         self.push(&status.upcast(), gtk::StackTransitionType::None);
     }
 
     /// Rebuilds the header, notes and cards from the object's steps.
     fn render(self: &Rc<Self>, transition: gtk::StackTransitionType) {
-        let Some(page) = self.page.upgrade() else { return };
+        let Some(page) = self.page.upgrade() else {
+            return;
+        };
         let hooks = page.hooks.clone();
         let session = hooks.session.borrow();
-        let Some(steps) = session.steps.get(&self.key) else { return };
+        let Some(steps) = session.steps.get(&self.key) else {
+            return;
+        };
         let analysis = &page.analysis;
         let sources = &steps.loaded.sources;
         let vanilla = steps.loaded.vanilla.as_ref();
@@ -383,12 +526,29 @@ impl ObjectView {
             Item::Object(i) => &analysis.report.objects[i],
             _ => unreachable!(),
         };
-        let n_mods = c.definitions.iter().map(|d| d.mod_position).collect::<std::collections::BTreeSet<_>>().len();
-        let mods = tnf!("{count} mod defines this", "{count} mods define this", count = n_mods);
+        let n_mods = c
+            .definitions
+            .iter()
+            .map(|d| d.mod_position)
+            .collect::<std::collections::BTreeSet<_>>()
+            .len();
+        let mods = tnf!(
+            "{count} mod defines this",
+            "{count} mods define this",
+            count = n_mods
+        );
         let subtitle = if vanilla.is_some() {
-            tf!("Object · {category} · {mods}, and the base game", category = &self.category, mods = &mods)
+            tf!(
+                "Object · {category} · {mods}, and the base game",
+                category = &self.category,
+                mods = &mods
+            )
         } else {
-            tf!("Object · {category} · {mods}", category = &self.category, mods = &mods)
+            tf!(
+                "Object · {category} · {mods}",
+                category = &self.category,
+                mods = &mods
+            )
         };
         let header = page.detail_header(&self.name, &subtitle);
         let done = steps.done();
@@ -403,12 +563,19 @@ impl ObjectView {
             if i > 0 {
                 header.chips.insert(&arrow(), -1);
             }
-            header.chips.insert(&chip(&s.label, Some(steps.positions[i]), class), -1);
+            header
+                .chips
+                .insert(&chip(&s.label, Some(steps.positions[i]), class), -1);
         }
         header.chips.set_visible(sources.len() > 1);
         header.actions.append(&page.ignore_button(self.item));
         if !steps.history.is_empty() {
-            let undo = gtk::Button::builder().icon_name("edit-undo-symbolic").tooltip_text(t!("Undo Last Step")).sensitive(!busy).css_classes(["flat"]).build();
+            let undo = gtk::Button::builder()
+                .icon_name("edit-undo-symbolic")
+                .tooltip_text(t!("Undo Last Step"))
+                .sensitive(!busy)
+                .css_classes(["flat"])
+                .build();
             let weak = Rc::downgrade(self);
             undo.connect_clicked(move |_| {
                 if let Some(view) = weak.upgrade() {
@@ -419,7 +586,12 @@ impl ObjectView {
             header.actions.append(&undo);
         }
         if !steps.history.is_empty() || steps.from_saved {
-            let over = gtk::Button::builder().label(t!("Start Over")).tooltip_text(t!("Go through the versions again from the first")).sensitive(!busy).css_classes(["flat"]).build();
+            let over = gtk::Button::builder()
+                .label(t!("Start Over"))
+                .tooltip_text(t!("Go through the versions again from the first"))
+                .sensitive(!busy)
+                .css_classes(["flat"])
+                .build();
             let weak = Rc::downgrade(self);
             over.connect_clicked(move |_| {
                 if let Some(view) = weak.upgrade() {
@@ -431,9 +603,21 @@ impl ObjectView {
             header.actions.append(&over);
         }
         if !done && sources.len() > 1 {
-            let merge = gtk::Button::builder().child(&adw::ButtonContent::builder().icon_name(super::AI_ICON).label(t!("Merge with AI")).build()).css_classes(["suggested-action"]).sensitive(!busy).build();
+            let merge = gtk::Button::builder()
+                .child(
+                    &adw::ButtonContent::builder()
+                        .icon_name(super::AI_ICON)
+                        .label(t!("Merge with AI"))
+                        .build(),
+                )
+                .css_classes(["suggested-action"])
+                .sensitive(!busy)
+                .build();
             merge.set_tooltip_text(Some(&match (hooks.provider)() {
-                Some(p) => tf!("Ask {model} to combine these two versions", model = p.model_name()),
+                Some(p) => tf!(
+                    "Ask {model} to combine these two versions",
+                    model = p.model_name()
+                ),
                 None => t!("Set up an AI provider in Preferences first"),
             }));
             if busy {
@@ -454,36 +638,84 @@ impl ObjectView {
         while let Some(child) = self.notes.first_child() {
             self.notes.remove(&child);
         }
-        if let Some((w, reason)) = c.winner().filter(|_| !(hooks.is_merged)(&self.category, &self.name)) {
+        if let Some((w, reason)) = c
+            .winner()
+            .filter(|_| !(hooks.is_merged)(&self.category, &self.name))
+        {
             let name = analysis.name(c.definitions[w].mod_position);
-            self.notes.append(&note(&tf!("In game now, {name}'s version is used: {reason}.", name = name, reason = reason.explain(conflicts::is_fios(&self.category))), None));
+            self.notes.append(&note(
+                &tf!(
+                    "In game now, {name}'s version is used: {reason}.",
+                    name = name,
+                    reason = reason.explain(conflicts::is_fios(&self.category))
+                ),
+                None,
+            ));
         }
         if !steps.loaded.missing.is_empty() {
-            self.notes.append(&note(&tf!("Couldn't find the definition in: {mods}", mods = steps.loaded.missing.join(", ")), Some("warning")));
+            self.notes.append(&note(
+                &tf!(
+                    "Couldn't find the definition in: {mods}",
+                    mods = steps.loaded.missing.join(", ")
+                ),
+                Some("warning"),
+            ));
         }
         if let Some(reasons) = hooks.stale_object(&self.category, &self.name) {
             let stale_suffix = t!("no longer defines it");
             let filtered: Vec<_> = reasons
                 .into_iter()
                 .filter(|r| {
-                    !steps.loaded.sources.iter().any(|s| r.starts_with(&s.label) && r.ends_with(&stale_suffix))
+                    !steps
+                        .loaded
+                        .sources
+                        .iter()
+                        .any(|s| r.starts_with(&s.label) && r.ends_with(&stale_suffix))
                 })
                 .collect();
             if !filtered.is_empty() {
-                self.notes.append(&note(&tf!("The saved merge is out of date: {reasons}. Saving a new one replaces it.", reasons = filtered.join("; ")), Some("warning")));
+                self.notes.append(&note(
+                    &tf!(
+                        "The saved merge is out of date: {reasons}. Saving a new one replaces it.",
+                        reasons = filtered.join("; ")
+                    ),
+                    Some("warning"),
+                ));
             }
         }
         if steps.from_saved {
-            let sources = (hooks.existing)(&self.category, &self.name).map(|m| m.sources.join(", ")).unwrap_or_default();
+            let sources = (hooks.existing)(&self.category, &self.name)
+                .map(|m| m.sources.join(", "))
+                .unwrap_or_default();
             self.notes.append(&note(&tf!("This is the saved merge of {sources}. Edit and save it again, or start over to go through the versions again.", sources = sources), None));
         }
-        let suggestion = (!done && sources.len() > 1).then(|| trivial::resolve(vanilla, &[steps.left_source(), steps.right_source()])).flatten();
+        let suggestion = (!done && sources.len() > 1)
+            .then(|| trivial::resolve(vanilla, &[steps.left_source(), steps.right_source()]))
+            .flatten();
         if let Some(s) = &suggestion {
-            let which = if s.index == 0 { if steps.left_is_first() { sources[0].label.clone() } else { t!("the result so far") } } else { steps.right().label.clone() };
-            self.notes.append(&note(&tf!("{reason}, so {which} keeps every change. No AI needed.", reason = &s.reason, which = &which), Some("accent")));
+            let which = if s.index == 0 {
+                if steps.left_is_first() {
+                    sources[0].label.clone()
+                } else {
+                    t!("the result so far")
+                }
+            } else {
+                steps.right().label.clone()
+            };
+            self.notes.append(&note(
+                &tf!(
+                    "{reason}, so {which} keeps every change. No AI needed.",
+                    reason = &s.reason,
+                    which = &which
+                ),
+                Some("accent"),
+            ));
         }
         if !steps.notes.is_empty() {
-            self.notes.append(&note(&tf!("Notes from the model: {notes}", notes = &steps.notes), None));
+            self.notes.append(&note(
+                &tf!("Notes from the model: {notes}", notes = &steps.notes),
+                None,
+            ));
         }
         if let Some(error) = &*self.error.borrow() {
             self.notes.append(&note(error, Some("error")));
@@ -503,7 +735,12 @@ impl ObjectView {
     }
 
     /// Two versions side by side, with buttons to keep either one.
-    fn pair_body(self: &Rc<Self>, page: &Rc<Page>, steps: &Steps, suggested: Option<usize>) -> gtk::Widget {
+    fn pair_body(
+        self: &Rc<Self>,
+        page: &Rc<Page>,
+        steps: &Steps,
+        suggested: Option<usize>,
+    ) -> gtk::Widget {
         let analysis = &page.analysis;
         let busy = self.busy.get();
         let pair = Pair::new(true);
@@ -519,20 +756,44 @@ impl ObjectView {
         let left_button = gtk::Button::builder().sensitive(!busy).build();
         let left_header = if steps.left_is_first() {
             left_button.set_label(&t!("Use This Version"));
-            left_button.set_tooltip_text(Some(&tf!("Keep {name}'s version and leave out {other}'s changes", name = &left.label, other = &right.label)));
-            Header { title: left.label.clone(), subtitle: analysis.origin(steps.positions[0], &left.file), color: Some(steps.positions[0]), badge: (winner == Some(0)).then(in_game) }
+            left_button.set_tooltip_text(Some(&tf!(
+                "Keep {name}'s version and leave out {other}'s changes",
+                name = &left.label,
+                other = &right.label
+            )));
+            Header {
+                title: left.label.clone(),
+                subtitle: analysis.origin(steps.positions[0], &left.file),
+                color: Some(steps.positions[0]),
+                badge: (winner == Some(0)).then(in_game),
+            }
         } else {
             left_button.set_label(&t!("Keep This"));
-            left_button.set_tooltip_text(Some(&tf!("Keep the result so far and leave out {name}'s changes", name = &right.label)));
+            left_button.set_tooltip_text(Some(&tf!(
+                "Keep the result so far and leave out {name}'s changes",
+                name = &right.label
+            )));
             // Merged only once it holds more than one mod's changes.
             let badge = match (steps.edited, steps.from.len()) {
                 (true, _) => (t!("Edited"), Some("accent")),
                 (false, 1) => (t!("Kept"), None),
                 _ => (t!("Merged"), Some("success")),
             };
-            Header { title: t!("Result so far"), subtitle: steps.from.join(" + "), color: None, badge: Some(badge) }
+            Header {
+                title: t!("Result so far"),
+                subtitle: steps.from.join(" + "),
+                color: None,
+                badge: Some(badge),
+            }
         };
-        let right_button = gtk::Button::builder().label(t!("Use This Version")).tooltip_text(tf!("Use {name}'s version in place of the one on the left", name = &right.label)).sensitive(!busy).build();
+        let right_button = gtk::Button::builder()
+            .label(t!("Use This Version"))
+            .tooltip_text(tf!(
+                "Use {name}'s version in place of the one on the left",
+                name = &right.label
+            ))
+            .sensitive(!busy)
+            .build();
         match suggested {
             Some(0) => left_button.add_css_class("suggested-action"),
             Some(_) => right_button.add_css_class("suggested-action"),
@@ -542,15 +803,27 @@ impl ObjectView {
         page.bind_key("use-right", &right_button);
         pair.left.set_header(&left_header);
         pair.left.set_actions(&[left_button.clone().upcast()]);
-        let (right_title, right_origin) = (right.label.clone(), analysis.origin(right_position, &right.file));
+        let (right_title, right_origin) = (
+            right.label.clone(),
+            analysis.origin(right_position, &right.file),
+        );
         let right_header = move |edited: bool| Header {
             title: right_title.clone(),
             subtitle: right_origin.clone(),
             color: Some(right_position),
-            badge: if edited { Some((t!("Edited"), Some("accent"))) } else { right_wins.then(in_game) },
+            badge: if edited {
+                Some((t!("Edited"), Some("accent")))
+            } else {
+                right_wins.then(in_game)
+            },
         };
         pair.right.set_header(&right_header(right_edited));
-        let revert = gtk::Button::builder().icon_name("document-revert-symbolic").tooltip_text(t!("Undo your edits to this version")).sensitive(right_edited && !busy).css_classes(["flat"]).build();
+        let revert = gtk::Button::builder()
+            .icon_name("document-revert-symbolic")
+            .tooltip_text(t!("Undo your edits to this version"))
+            .sensitive(right_edited && !busy)
+            .css_classes(["flat"])
+            .build();
         {
             let weak = Rc::downgrade(self);
             revert.connect_clicked(move |_| {
@@ -560,11 +833,16 @@ impl ObjectView {
                 }
             });
         }
-        pair.right.set_actions(&[revert.clone().upcast(), right_button.clone().upcast()]);
+        pair.right
+            .set_actions(&[revert.clone().upcast(), right_button.clone().upcast()]);
         pair.right.code.set_editable(!busy);
         {
             // Edits are kept with the step, so they survive re-rendering.
-            let (weak, card, revert) = (Rc::downgrade(self), Rc::downgrade(&pair.right), revert.downgrade());
+            let (weak, card, revert) = (
+                Rc::downgrade(self),
+                Rc::downgrade(&pair.right),
+                revert.downgrade(),
+            );
             pair.connect_edit(move |text| {
                 let Some(view) = weak.upgrade() else { return };
                 let edited = view.with_steps(|s| {
@@ -585,14 +863,27 @@ impl ObjectView {
             button.connect_clicked(move |_| {
                 if let Some(view) = weak.upgrade() {
                     view.error.replace(None);
-                    view.with_steps(|s| if keep_left { s.keep_left() } else { s.use_right() });
+                    view.with_steps(|s| {
+                        if keep_left {
+                            s.keep_left()
+                        } else {
+                            s.use_right()
+                        }
+                    });
                     view.render(gtk::StackTransitionType::SlideLeft);
                 }
             });
         }
 
         let bar = diff_bar(&pair);
-        let take = gtk::Button::builder().label(t!("Take Change")).tooltip_text(t!("Copy the right card's side of the highlighted difference into the left card")).sensitive(false).css_classes(["flat"]).build();
+        let take = gtk::Button::builder()
+            .label(t!("Take Change"))
+            .tooltip_text(t!(
+                "Copy the right card's side of the highlighted difference into the left card"
+            ))
+            .sensitive(false)
+            .css_classes(["flat"])
+            .build();
         {
             let take_ref = take.downgrade();
             pair.connect_change(move |_, current, _| {
@@ -602,7 +893,9 @@ impl ObjectView {
             });
             let (weak, pair_ref) = (Rc::downgrade(self), Rc::downgrade(&pair));
             take.connect_clicked(move |_| {
-                let (Some(view), Some(pair)) = (weak.upgrade(), pair_ref.upgrade()) else { return };
+                let (Some(view), Some(pair)) = (weak.upgrade(), pair_ref.upgrade()) else {
+                    return;
+                };
                 if let Some(text) = pair.take_current() {
                     view.with_steps(|s| s.take(text));
                     view.render(gtk::StackTransitionType::None);
@@ -610,10 +903,21 @@ impl ObjectView {
             });
         }
         bar.extra.append(&take);
-        bar.extra.append(&self.merge_tool_button(page, &left.label, &left.text, &steps.right_source(), steps.loaded.vanilla.as_ref().map(|v| v.text.as_str()), busy));
+        bar.extra.append(&self.merge_tool_button(
+            page,
+            &left.label,
+            &left.text,
+            &steps.right_source(),
+            steps.loaded.vanilla.as_ref().map(|v| v.text.as_str()),
+            busy,
+        ));
         let inline_comparisons = self.inline_comparisons(page, &left.text, steps);
         if !inline_comparisons.is_empty() {
-            let label = tnf!("Inline Script ({count})", "Inline Scripts ({count})", count = inline_comparisons.len());
+            let label = tnf!(
+                "Inline Script ({count})",
+                "Inline Scripts ({count})",
+                count = inline_comparisons.len()
+            );
             let btn = gtk::Button::builder()
                 .label(label)
                 .tooltip_text(t!("Compare the inline script files that differ or were replaced between these two versions"))
@@ -621,9 +925,16 @@ impl ObjectView {
                 .build();
             let page_ref = Rc::downgrade(page);
             btn.connect_clicked(move |b| {
-                let Some(page) = page_ref.upgrade() else { return };
+                let Some(page) = page_ref.upgrade() else {
+                    return;
+                };
                 let session = page.hooks.session.borrow();
-                super::show_inline_scripts(b, inline_comparisons.clone(), session.fold_unchanged, session.ignore_whitespace);
+                super::show_inline_scripts(
+                    b,
+                    inline_comparisons.clone(),
+                    session.fold_unchanged,
+                    session.ignore_whitespace,
+                );
             });
             bar.extra.append(&btn);
         }
@@ -635,9 +946,17 @@ impl ObjectView {
             _ => Compare::Each,
         };
         pair.set_fold(session.fold_unchanged);
-        pair.show(&left.text, &steps.right_source().text, &compare, session.ignore_whitespace);
+        pair.show(
+            &left.text,
+            &steps.right_source().text,
+            &compare,
+            session.ignore_whitespace,
+        );
         drop(session);
-        let body = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(8).build();
+        let body = gtk::Box::builder()
+            .orientation(gtk::Orientation::Vertical)
+            .spacing(8)
+            .build();
         body.append(&bar.widget);
         body.append(&pair.widget);
         // The pair lives as long as its widgets.
@@ -645,7 +964,12 @@ impl ObjectView {
         body.upcast()
     }
 
-    fn inline_comparisons(&self, page: &Rc<Page>, left_text: &str, steps: &Steps) -> Vec<crate::merge::inline_scripts::InlineScriptComparison> {
+    fn inline_comparisons(
+        &self,
+        page: &Rc<Page>,
+        left_text: &str,
+        steps: &Steps,
+    ) -> Vec<crate::merge::inline_scripts::InlineScriptComparison> {
         let mut left_roots: Vec<(&str, &std::path::Path)> = Vec::new();
         for name in steps.from.iter().rev() {
             if let Some(pos) = page.analysis.names.iter().position(|n| n == name)
@@ -672,36 +996,73 @@ impl ObjectView {
             left_roots.push(("Vanilla", game_dir));
             right_roots.push(("Vanilla", game_dir));
         }
-        crate::merge::inline_scripts::find_comparisons(left_text, &left_roots, &steps.right_source().text, &right_roots)
+        crate::merge::inline_scripts::find_comparisons(
+            left_text,
+            &left_roots,
+            &steps.right_source().text,
+            &right_roots,
+        )
     }
 
     /// Opens both versions in the external merge tool; what it saves
     /// replaces the right card's version, to keep or edit further.
-    fn merge_tool_button(self: &Rc<Self>, page: &Rc<Page>, left_label: &str, left: &str, right: &Source, base: Option<&str>, busy: bool) -> gtk::Button {
+    fn merge_tool_button(
+        self: &Rc<Self>,
+        page: &Rc<Page>,
+        left_label: &str,
+        left: &str,
+        right: &Source,
+        base: Option<&str>,
+        busy: bool,
+    ) -> gtk::Button {
         let button = gtk::Button::builder().label(t!("Merge Tool…")).tooltip_text(t!("Merge these two versions in your merge tool; what you save there replaces the right one")).sensitive(!busy).css_classes(["flat"]).build();
         let (weak, page_ref) = (Rc::downgrade(self), Rc::downgrade(page));
-        let (left_label, left, right_label, right, base) = (left_label.to_owned(), left.to_owned(), right.label.clone(), right.text.clone(), base.map(str::to_owned));
+        let (left_label, left, right_label, right, base) = (
+            left_label.to_owned(),
+            left.to_owned(),
+            right.label.clone(),
+            right.text.clone(),
+            base.map(str::to_owned),
+        );
         button.connect_clicked(move |button| {
-            let (Some(view), Some(page)) = (weak.upgrade(), page_ref.upgrade()) else { return };
+            let (Some(view), Some(page)) = (weak.upgrade(), page_ref.upgrade()) else {
+                return;
+            };
             let command = (page.hooks.merge_tool)();
             if command.is_empty() {
                 (page.hooks.toast)(&t!("Choose a merge tool in Preferences first"));
                 return (page.hooks.open_merge_tool_settings)();
             }
             let tool = super::merge_tool_name(&command);
-            let (left, right) = (super::ToolSide { label: left_label.clone(), text: left.clone() }, super::ToolSide { label: right_label.clone(), text: right.clone() });
+            let (left, right) = (
+                super::ToolSide {
+                    label: left_label.clone(),
+                    text: left.clone(),
+                },
+                super::ToolSide {
+                    label: right_label.clone(),
+                    text: right.clone(),
+                },
+            );
             let weak = Rc::downgrade(&view);
             super::run_merge_tool(button, command, left, right, base.clone(), move |result| {
                 let Some(view) = weak.upgrade() else { return };
-                let Some(page) = view.page.upgrade() else { return };
+                let Some(page) = view.page.upgrade() else {
+                    return;
+                };
                 match result {
                     Ok(Some(merged)) => {
                         view.error.replace(None);
                         view.with_steps(|s| s.edit_right(&merged));
                         view.render(gtk::StackTransitionType::None);
-                        (page.hooks.toast)(&t!("The merge tool's result is on the right; keep it with Use This Version"));
+                        (page.hooks.toast)(&t!(
+                            "The merge tool's result is on the right; keep it with Use This Version"
+                        ));
                     }
-                    Ok(None) => (page.hooks.toast)(&tf!("{tool} was closed without saving, so nothing changed", tool = tool)),
+                    Ok(None) => (page.hooks.toast)(&tf!(
+                        "{tool} was closed without saving, so nothing changed",
+                        tool = tool
+                    )),
                     Err(message) => {
                         view.error.replace(Some(message));
                         view.render(gtk::StackTransitionType::None);
@@ -726,7 +1087,14 @@ impl ObjectView {
             into.append(&option_toggle(&page.hooks, &t!("Base Game"), &t!("Mark what each version changed from the base game, instead of the differences between the two"), |s| s.compare_base, |s, v| s.compare_base = v, rerender.clone()));
         }
         into.append(&option_toggle(&page.hooks, &t!("Changed Lines Only"), &t!("Fold runs of lines that are the same in both, keeping a few around each difference. Click a fold to open it"), |s| s.fold_unchanged, |s, v| s.fold_unchanged = v, rerender.clone()));
-        into.append(&option_toggle(&page.hooks, &t!("Ignore Spacing"), &t!("Don't count lines that only differ in spacing or indentation"), |s| s.ignore_whitespace, |s, v| s.ignore_whitespace = v, rerender));
+        into.append(&option_toggle(
+            &page.hooks,
+            &t!("Ignore Spacing"),
+            &t!("Don't count lines that only differ in spacing or indentation"),
+            |s| s.ignore_whitespace,
+            |s, v| s.ignore_whitespace = v,
+            rerender,
+        ));
     }
 
     /// The final step: the result in an editor, or compared with a version.
@@ -734,7 +1102,9 @@ impl ObjectView {
         let hooks = &page.hooks;
         let analysis = &page.analysis;
         let text = steps.final_text();
-        let saved = (hooks.is_merged)(&self.category, &self.name) && hooks.stale_object(&self.category, &self.name).is_none() && steps.from_saved;
+        let saved = (hooks.is_merged)(&self.category, &self.name)
+            && hooks.stale_object(&self.category, &self.name).is_none()
+            && steps.from_saved;
 
         // What to show: the editor, or the result next to another version.
         let mut choices = vec![(Final::Edit, t!("Edit the Result"))];
@@ -742,11 +1112,17 @@ impl ObjectView {
             choices.push((Final::Base, t!("Compare with the Base Game")));
         }
         for (i, s) in steps.loaded.sources.iter().enumerate() {
-            choices.push((Final::Source(i), tf!("Compare with {name}", name = &s.label)));
+            choices.push((
+                Final::Source(i),
+                tf!("Compare with {name}", name = &s.label),
+            ));
         }
         let labels: Vec<&str> = choices.iter().map(|(_, l)| l.as_str()).collect();
         let dropdown = gtk::DropDown::from_strings(&labels);
-        let showing = choices.iter().position(|(c, _)| *c == self.showing.get()).unwrap_or(0);
+        let showing = choices
+            .iter()
+            .position(|(c, _)| *c == self.showing.get())
+            .unwrap_or(0);
         dropdown.set_selected(showing as u32);
         {
             let weak = Rc::downgrade(self);
@@ -756,7 +1132,9 @@ impl ObjectView {
                     view.showing.set(choices[d.selected() as usize]);
                     // After the dropdown's popover closes, since this
                     // replaces the dropdown.
-                    glib::idle_add_local_once(move || view.render(gtk::StackTransitionType::Crossfade));
+                    glib::idle_add_local_once(move || {
+                        view.render(gtk::StackTransitionType::Crossfade)
+                    });
                 }
             });
         }
@@ -765,33 +1143,65 @@ impl ObjectView {
 
         let result_header = Header {
             title: t!("Merged Result"),
-            subtitle: if steps.from_saved { t!("Saved merge") } else { steps.from.join(" + ") },
+            subtitle: if steps.from_saved {
+                t!("Saved merge")
+            } else {
+                steps.from.join(" + ")
+            },
             color: None,
-            badge: Some(if saved { (t!("Saved"), Some("success")) } else { (t!("Not saved yet"), None) }),
+            badge: Some(if saved {
+                (t!("Saved"), Some("success"))
+            } else {
+                (t!("Not saved yet"), None)
+            }),
         };
-        let body = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(8).build();
+        let body = gtk::Box::builder()
+            .orientation(gtk::Orientation::Vertical)
+            .spacing(8)
+            .build();
         body.append(&toolbar);
         match choices[showing].0 {
             Final::Edit => {
                 let card = Card::new(true);
                 card.set_header(&result_header);
-                let save = gtk::Button::builder().label(t!("Save to Patch")).css_classes(["suggested-action"]).tooltip_text(t!("Save to the merged patch")).build();
+                let save = gtk::Button::builder()
+                    .label(t!("Save to Patch"))
+                    .css_classes(["suggested-action"])
+                    .tooltip_text(t!("Save to the merged patch"))
+                    .build();
                 card.set_actions(&[save.clone().upcast()]);
 
                 if let Some(vanilla) = &steps.loaded.vanilla {
                     let whitespace = page.hooks.session.borrow().ignore_whitespace;
-                    let (hunk_count, change_lines) = card.show_ai_changes(&text, &vanilla.text, whitespace);
+                    let (hunk_count, change_lines) =
+                        card.show_ai_changes(&text, &vanilla.text, whitespace);
                     if hunk_count > 0 {
-                        let change_badge = gtk::Box::builder().spacing(4).css_classes(["change-badge-box"]).valign(gtk::Align::Center).build();
+                        let change_badge = gtk::Box::builder()
+                            .spacing(4)
+                            .css_classes(["change-badge-box"])
+                            .valign(gtk::Align::Center)
+                            .build();
                         let badge_label = gtk::Label::builder()
-                            .label(&tnf!("{count} change from base game", "{count} changes from base game", count = hunk_count))
+                            .label(&tnf!(
+                                "{count} change from base game",
+                                "{count} changes from base game",
+                                count = hunk_count
+                            ))
                             .css_classes(["badge", "accent"])
                             .build();
                         change_badge.append(&badge_label);
 
                         let current_idx = Rc::new(Cell::new(0usize));
-                        let prev_btn = gtk::Button::builder().icon_name("go-up-symbolic").tooltip_text(t!("Previous change")).css_classes(["flat"]).build();
-                        let next_btn = gtk::Button::builder().icon_name("go-down-symbolic").tooltip_text(t!("Next change")).css_classes(["flat"]).build();
+                        let prev_btn = gtk::Button::builder()
+                            .icon_name("go-up-symbolic")
+                            .tooltip_text(t!("Previous change"))
+                            .css_classes(["flat"])
+                            .build();
+                        let next_btn = gtk::Button::builder()
+                            .icon_name("go-down-symbolic")
+                            .tooltip_text(t!("Next change"))
+                            .css_classes(["flat"])
+                            .build();
                         let nav = gtk::Box::builder().css_classes(["linked"]).build();
                         nav.append(&prev_btn);
                         nav.append(&next_btn);
@@ -810,7 +1220,9 @@ impl ObjectView {
                             let lines = change_lines.clone();
                             let idx = current_idx.clone();
                             prev_btn.connect_clicked(move |_| {
-                                if lines.is_empty() { return; }
+                                if lines.is_empty() {
+                                    return;
+                                }
                                 let i = idx.get();
                                 let prev = if i == 0 { lines.len() - 1 } else { i - 1 };
                                 idx.set(prev);
@@ -824,7 +1236,9 @@ impl ObjectView {
                             let lines = change_lines.clone();
                             let idx = current_idx.clone();
                             next_btn.connect_clicked(move |_| {
-                                if lines.is_empty() { return; }
+                                if lines.is_empty() {
+                                    return;
+                                }
                                 let next = (idx.get() + 1) % lines.len();
                                 idx.set(next);
                                 if let Some(card) = card_weak.upgrade() {
@@ -838,7 +1252,11 @@ impl ObjectView {
                             toggle_btn.connect_toggled(move |btn| {
                                 if let Some(card) = card_weak.upgrade() {
                                     if btn.is_active() {
-                                        card.show_ai_changes(&card.text(), &vanilla_text, whitespace);
+                                        card.show_ai_changes(
+                                            &card.text(),
+                                            &vanilla_text,
+                                            whitespace,
+                                        );
                                     } else {
                                         card.set_text(&card.text());
                                     }
@@ -855,7 +1273,9 @@ impl ObjectView {
                     let weak = Rc::downgrade(self);
                     card.code.buffer().connect_changed(move |buffer| {
                         if let Some(view) = weak.upgrade() {
-                            let text = buffer.text(&buffer.start_iter(), &buffer.end_iter(), false).to_string();
+                            let text = buffer
+                                .text(&buffer.start_iter(), &buffer.end_iter(), false)
+                                .to_string();
                             view.with_steps(|s| s.final_text = Some(text));
                         }
                     });
@@ -883,14 +1303,28 @@ impl ObjectView {
                         subtitle: analysis.origin(steps.positions[i], &theirs.file),
                         color: Some(steps.positions[i]),
                         badge: match self.item {
-                            Item::Object(o) => (steps.winner(&analysis.report.objects[o]) == Some(i)).then(in_game),
+                            Item::Object(o) => {
+                                (steps.winner(&analysis.report.objects[o]) == Some(i)).then(in_game)
+                            }
                             _ => None,
                         },
                     },
-                    _ => Header { title: t!("Base Game"), subtitle: theirs.file.clone(), color: None, badge: None },
+                    _ => Header {
+                        title: t!("Base Game"),
+                        subtitle: theirs.file.clone(),
+                        color: None,
+                        badge: None,
+                    },
                 });
                 let bar = diff_bar(&pair);
-                let take = gtk::Button::builder().label(t!("Take Change")).tooltip_text(t!("Copy the right card's side of the highlighted difference into the result")).sensitive(false).css_classes(["flat"]).build();
+                let take = gtk::Button::builder()
+                    .label(t!("Take Change"))
+                    .tooltip_text(t!(
+                        "Copy the right card's side of the highlighted difference into the result"
+                    ))
+                    .sensitive(false)
+                    .css_classes(["flat"])
+                    .build();
                 let take_ref = take.downgrade();
                 pair.connect_change(move |_, current, _| {
                     if let Some(t) = take_ref.upgrade() {
@@ -899,7 +1333,9 @@ impl ObjectView {
                 });
                 let (weak, pair_ref) = (Rc::downgrade(self), Rc::downgrade(&pair));
                 take.connect_clicked(move |_| {
-                    let (Some(view), Some(pair)) = (weak.upgrade(), pair_ref.upgrade()) else { return };
+                    let (Some(view), Some(pair)) = (weak.upgrade(), pair_ref.upgrade()) else {
+                        return;
+                    };
                     if let Some(text) = pair.take_current() {
                         view.with_steps(|s| s.take_final(text));
                         view.render(gtk::StackTransitionType::None);
@@ -914,7 +1350,12 @@ impl ObjectView {
                 }));
                 let whitespace = page.hooks.session.borrow().ignore_whitespace;
                 pair.set_fold(page.hooks.session.borrow().fold_unchanged);
-                pair.show(&text, &theirs.text, &crate::diff_view::Compare::Each, whitespace);
+                pair.show(
+                    &text,
+                    &theirs.text,
+                    &crate::diff_view::Compare::Each,
+                    whitespace,
+                );
                 toolbar.append(&bar.widget);
                 bar.widget.set_hexpand(true);
                 body.append(&pair.widget);
@@ -925,22 +1366,123 @@ impl ObjectView {
     }
 
     fn merge_with_ai(self: &Rc<Self>) {
-        let Some(page) = self.page.upgrade() else { return };
+        let Some(page) = self.page.upgrade() else {
+            return;
+        };
         let hooks = page.hooks.clone();
         let Some(provider) = (hooks.provider)() else {
             (hooks.toast)(&t!("Set up an AI provider in Preferences first"));
             (hooks.open_preferences)();
             return;
         };
-        let Some((vanilla, sources)) = self.with_steps(|s| (s.loaded.vanilla.clone(), vec![s.left_source(), s.right_source()])) else { return };
+        let winner = match self.item {
+            Item::Object(o) => page.analysis.report.objects.get(o).and_then(|c| {
+                let (idx, reason) = c.winner()?;
+                let pos = c.definitions[idx].mod_position;
+                let load = page.analysis.load_positions.get(pos).copied().unwrap_or(pos);
+                Some((load, page.analysis.name(pos).to_owned(), reason))
+            }),
+            _ => None,
+        };
+        let replace_path_mods: Vec<String> = page
+            .analysis
+            .report
+            .replace_path_mods(&self.category)
+            .into_iter()
+            .map(|pos| page.analysis.name(pos).to_owned())
+            .collect();
+        let roots: Vec<crate::merge::inline_scripts::ScriptRoot> = page
+            .analysis
+            .roots
+            .iter()
+            .enumerate()
+            .filter_map(|(pos, root)| {
+                Some(crate::merge::inline_scripts::ScriptRoot {
+                    id: page.analysis.ids.get(pos)?.clone(),
+                    label: page.analysis.name(pos).to_owned(),
+                    root: root.clone()?,
+                })
+            })
+            .collect();
+        let game_dir = page.hooks.game_dir.clone();
+        let Some((vanilla, sources, ctx, all_at_once, merged_labels)) = self.with_steps(|s| {
+            let fresh = s.next == 1 && !s.edited;
+            let (candidate_sources, candidate_positions, working) = if fresh {
+                (s.loaded.sources.clone(), s.positions.clone(), None)
+            } else {
+                let mut rest = vec![s.right_source()];
+                rest.extend(s.loaded.sources[s.next + 1..].iter().cloned());
+                (rest, s.positions[s.next..].to_vec(), Some(s.left_source()))
+            };
+            let versions: Vec<(String, String)> = s
+                .loaded
+                .sources
+                .iter()
+                .map(|src| (src.label.clone(), src.text.clone()))
+                .collect();
+            let inline = crate::merge::inline_scripts::replacement_groups(
+                s.loaded.vanilla.as_ref().map(|v| v.text.as_str()),
+                &versions,
+                &roots,
+                game_dir.as_deref(),
+            );
+            let base_vanilla = if replace_path_mods.is_empty() {
+                s.loaded.vanilla.clone()
+            } else {
+                None
+            };
+            let full_ctx = ai::MergeContext {
+                category: self.category.clone(),
+                key: self.name.clone(),
+                game_version: page.analysis.game_version.clone(),
+                is_fios: conflicts::is_fios(&self.category),
+                winner: winner.clone(),
+                load_positions: candidate_positions,
+                replace_path_mods: replace_path_mods.clone(),
+                working_result: working.clone(),
+                max_attempts: None,
+                prints: s.loaded.prints.clone(),
+                inline,
+            };
+            // Fall back to pairwise if the combined input would exceed a safe budget,
+            // keeping the working result tagged as <result> rather than a mod.
+            if candidate_sources.len() > 1
+                && ai::estimate(&full_ctx, base_vanilla.as_ref(), &candidate_sources).input
+                    > 120_000
+            {
+                let pair_ctx = ai::MergeContext {
+                    load_positions: vec![s.positions[s.next]],
+                    working_result: Some(s.left_source()),
+                    ..full_ctx
+                };
+                let right = s.right_source();
+                let label = right.label.clone();
+                (base_vanilla, vec![right], pair_ctx, false, vec![label])
+            } else {
+                let labels: Vec<String> = candidate_sources
+                    .iter()
+                    .map(|src| src.label.clone())
+                    .collect();
+                (base_vanilla, candidate_sources, full_ctx, true, labels)
+            }
+        }) else {
+            return;
+        };
         self.busy.set(true);
         self.error.replace(None);
         self.render(gtk::StackTransitionType::None);
-        let (category, key, view) = (self.category.clone(), self.name.clone(), self.clone());
+        let view = self.clone();
         glib::spawn_future_local(async move {
-            let result = thinking_view::run(&view.thinking, None, move |on| {
-                let check = |text: &str| merge_dialog::validate(&category, &key, text);
-                ai::merge_checked(&provider, &category, &key, vanilla.as_ref(), &sources, &check, on)
+            let result = thinking_view::run_cancellable(&view.thinking, None, move |cancel, on| {
+                ai::merge_checked_cancellable(
+                    &provider,
+                    &ctx,
+                    vanilla.as_ref(),
+                    &sources,
+                    None,
+                    Some(cancel),
+                    on,
+                )
             })
             .await;
             view.busy.set(false);
@@ -948,7 +1490,27 @@ impl ObjectView {
                 Some(Ok(checked)) => {
                     // Kept even when still rejected, to fix by hand.
                     let problem = checked.script.err();
-                    view.with_steps(|s| s.merged(checked.merged.script, checked.merged.notes));
+                    let scripts = checked.scripts;
+                    let mut notes = checked.merged.notes;
+                    if !scripts.is_empty() {
+                        notes.push_str(&tnf!(
+                            " · {count} replaced inline script merged",
+                            " · {count} replaced inline scripts merged",
+                            count = scripts.len()
+                        ));
+                    }
+                    view.with_steps(|s| {
+                        if all_at_once {
+                            s.merged_all(
+                                checked.merged.script,
+                                notes,
+                                scripts,
+                                &merged_labels,
+                            );
+                        } else {
+                            s.merged(checked.merged.script, notes, scripts);
+                        }
+                    });
                     if let Some(problem) = problem {
                         view.error.replace(Some(tf!("The model's result still has a problem after a correction: {problem}. Fix it by hand, or undo and try again.", problem = problem)));
                     }
@@ -959,7 +1521,8 @@ impl ObjectView {
                     view.render(gtk::StackTransitionType::None);
                 }
                 None => {
-                    view.error.replace(Some(t!("The merge failed unexpectedly")));
+                    view.error
+                        .replace(Some(t!("The merge failed unexpectedly")));
                     view.render(gtk::StackTransitionType::None);
                 }
             }
@@ -967,7 +1530,9 @@ impl ObjectView {
     }
 
     fn save(self: &Rc<Self>, text: &str) {
-        let Some(page) = self.page.upgrade() else { return };
+        let Some(page) = self.page.upgrade() else {
+            return;
+        };
         let script = match merge_dialog::validate(&self.category, &self.name, text) {
             Ok(script) => script,
             Err(message) => {
@@ -976,9 +1541,50 @@ impl ObjectView {
                 return;
             }
         };
-        let prints = self.with_steps(|s| s.loaded.prints.clone()).unwrap_or_default();
+        let (prints, scripts, scripts_changed) = self
+            .with_steps(|s| {
+                (
+                    s.loaded.prints.clone(),
+                    s.scripts.clone(),
+                    s.scripts_changed,
+                )
+            })
+            .unwrap_or_default();
+        let script_names: Vec<String> = scripts.iter().map(|s| s.name.clone()).collect();
+        for script in scripts {
+            let Some(path) = crate::merge::inline_scripts::file_path(&script.name) else {
+                self.error.replace(Some(tf!(
+                    "The merged inline script `{name}` has an unsafe path",
+                    name = &script.name
+                )));
+                self.render(gtk::StackTransitionType::None);
+                return;
+            };
+            if let Err(message) =
+                (page.hooks.save_file)(&path, script.script.as_bytes(), script.prints)
+            {
+                self.error.replace(Some(tf!(
+                    "The merged inline script `{name}` could not be saved: {error}",
+                    name = &script.name,
+                    error = message
+                )));
+                self.render(gtk::StackTransitionType::None);
+                return;
+            }
+        }
         match (page.hooks.save_object)(&self.category, &self.name, &script, prints) {
             Ok(()) => {
+                if scripts_changed
+                    && let Err(message) =
+                        (page.hooks.set_scripts)(&self.category, &self.name, script_names)
+                {
+                    self.error.replace(Some(tf!(
+                        "The merge was saved, but its inline scripts could not be recorded: {error}",
+                        error = message
+                    )));
+                    self.render(gtk::StackTransitionType::None);
+                    return;
+                }
                 page.hooks.session.borrow_mut().steps.remove(&self.key);
                 page.hooks.saved();
                 page.update_status(self.item);
@@ -1003,26 +1609,49 @@ mod tests {
     use super::*;
 
     fn source(label: &str, text: &str) -> Source {
-        Source { label: label.into(), file: format!("common/buildings/{label}.txt"), text: text.into() }
+        Source {
+            label: label.into(),
+            file: format!("common/buildings/{label}.txt"),
+            text: text.into(),
+        }
     }
 
     fn steps(texts: &[&str]) -> Steps {
-        let sources: Vec<Source> = texts.iter().enumerate().map(|(i, t)| source(&format!("M{i}"), t)).collect();
-        let loaded = Loaded { vanilla: None, sources, missing: Vec::new(), prints: Vec::new() };
+        let sources: Vec<Source> = texts
+            .iter()
+            .enumerate()
+            .map(|(i, t)| source(&format!("M{i}"), t))
+            .collect();
+        let loaded = Loaded {
+            vanilla: None,
+            sources,
+            missing: Vec::new(),
+            prints: Vec::new(),
+        };
         Steps::new(loaded, (0..texts.len()).collect(), None)
     }
 
     #[test]
     fn steps_through_each_version() {
         let mut s = steps(&["a", "b", "c"]);
-        assert_eq!((s.total(), s.next, s.done(), s.progress()), (2, 1, false, None));
+        assert_eq!(
+            (s.total(), s.next, s.done(), s.progress()),
+            (2, 1, false, None)
+        );
         assert!(s.left_is_first());
         s.use_right();
-        assert_eq!((s.result.as_str(), s.next, s.progress()), ("b", 2, Some((2, 2))));
+        assert_eq!(
+            (s.result.as_str(), s.next, s.progress()),
+            ("b", 2, Some((2, 2)))
+        );
         assert_eq!(s.left_source().label, "Result so far (M1)");
-        s.merged("bc".into(), "combined".into());
+        s.merged("bc".into(), "combined".into(), Vec::new());
         assert!(s.done());
-        assert_eq!(s.progress(), Some((3, 2)), "past the last step: ready to save");
+        assert_eq!(
+            s.progress(),
+            Some((3, 2)),
+            "past the last step: ready to save"
+        );
         assert_eq!(s.final_text(), "bc");
         assert_eq!(s.from, ["M1", "M2"]);
         s.undo();
@@ -1036,7 +1665,10 @@ mod tests {
         let mut s = steps(&["a", "b"]);
         s.take("a2".into());
         assert!(!s.left_is_first());
-        assert_eq!((s.result.as_str(), s.next, s.from.clone()), ("a2", 1, vec!["M0".to_owned(), "M1".to_owned()]));
+        assert_eq!(
+            (s.result.as_str(), s.next, s.from.clone()),
+            ("a2", 1, vec!["M0".to_owned(), "M1".to_owned()])
+        );
         s.keep_left();
         assert!(s.done());
         assert_eq!(s.final_text(), "a2");
@@ -1046,16 +1678,26 @@ mod tests {
     fn edits_to_the_right_version_are_used_and_undone() {
         let mut s = steps(&["a", "b\nc", "d"]);
         s.edit_right("b\nc\n");
-        assert_eq!(s.right_edit, None, "the same text, give or take a newline, isn't an edit");
+        assert_eq!(
+            s.right_edit, None,
+            "the same text, give or take a newline, isn't an edit"
+        );
         s.edit_right("b\nC");
         assert_eq!(s.right_source().text, "b\nC");
         assert_eq!(s.right_source().label, "M1");
         s.use_right();
-        assert_eq!((s.result.as_str(), s.edited, s.right_edit.clone()), ("b\nC", true, None));
+        assert_eq!(
+            (s.result.as_str(), s.edited, s.right_edit.clone()),
+            ("b\nC", true, None)
+        );
         // The next pair starts from the mod's own version again.
         assert_eq!(s.right_source().text, "d");
         s.undo();
-        assert_eq!((s.next, s.right_edit.as_deref()), (1, Some("b\nC")), "undo brings the edit back");
+        assert_eq!(
+            (s.next, s.right_edit.as_deref()),
+            (1, Some("b\nC")),
+            "undo brings the edit back"
+        );
         s.keep_left();
         assert_eq!((s.result.as_str(), s.right_edit.clone()), ("a", None));
     }
@@ -1063,7 +1705,12 @@ mod tests {
     #[test]
     fn a_saved_merge_opens_at_the_end() {
         let sources = vec![source("A", "a"), source("B", "b")];
-        let loaded = Loaded { vanilla: None, sources, missing: Vec::new(), prints: Vec::new() };
+        let loaded = Loaded {
+            vanilla: None,
+            sources,
+            missing: Vec::new(),
+            prints: Vec::new(),
+        };
         let s = Steps::new(loaded, vec![0, 1], Some("saved".into()));
         assert!(s.done());
         assert_eq!((s.final_text(), s.progress()), ("saved".to_owned(), None));

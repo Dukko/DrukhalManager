@@ -1,10 +1,12 @@
-//! Finding and pairing `inline_script` references when comparing objects,
-//! so a mod replacing a vanilla inline script with its own can be diffed
-//! side by side.
+//! Finding and pairing `inline_script` references when comparing objects, so
+//! a mod replacing a vanilla inline script with its own can be diffed side by
+//! side and merged into the patch alongside the object.
 
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 use std::path::{Path, PathBuf};
 
+use super::patch::{Print, VANILLA};
+use super::source::Source;
 use crate::paradox::script::{self, Entry, Value};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -17,6 +19,47 @@ pub struct InlineScriptFile {
     pub source_label: String,
     pub text: String,
 }
+
+/// A mod folder scripts can be read from, with the descriptor id used for
+/// fingerprints.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ScriptRoot {
+    pub id: String,
+    pub label: String,
+    pub root: PathBuf,
+}
+
+/// One logical inline script several object versions call under different
+/// names, ready to merge into `target`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InlineGroup {
+    /// The name the base game calls, e.g. `pop_faction_types/demands/imperialist`.
+    pub vanilla_name: String,
+    /// The name the merged object should call, e.g. `MECR/factions/imperialist_460`.
+    pub target: String,
+    pub vanilla: Option<Source>,
+    pub sources: Vec<Source>,
+    /// Fingerprints of every version, for the patch and the AI cache.
+    pub prints: Vec<Print>,
+    /// Every name this group is called by, each mapping to `target`.
+    pub names: Vec<(String, String)>,
+}
+
+impl InlineGroup {
+    /// Whether the versions actually differ, so the script needs an AI merge.
+    pub fn needs_merge(&self) -> bool {
+        let normalize = |text: &str| text.split_whitespace().collect::<Vec<_>>().join(" ");
+        let mut seen = HashSet::new();
+        if let Some(v) = &self.vanilla {
+            seen.insert(normalize(&v.text));
+        }
+        for s in &self.sources {
+            seen.insert(normalize(&s.text));
+        }
+        seen.len() > 1
+    }
+}
+
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InlineScriptComparison {
@@ -133,9 +176,7 @@ fn resolve_case_insensitive(root: &Path, parts: &[&str]) -> Option<PathBuf> {
 /// root in `roots` (in priority order).
 pub fn read_inline_script(roots: &[(&str, &Path)], script_name: &str) -> Option<InlineScriptFile> {
     let name = normalize_name(script_name);
-    if name.is_empty() {
-        return None;
-    }
+    let _ = file_path(&name)?;
     let rel_file = format!("common/inline_scripts/{name}.txt");
     let mut parts = vec!["common", "inline_scripts"];
     let file_part = format!("{name}.txt");
@@ -147,7 +188,11 @@ pub fn read_inline_script(roots: &[(&str, &Path)], script_name: &str) -> Option<
             && let Ok(bytes) = std::fs::read(&path)
         {
             let text = String::from_utf8_lossy(&bytes).trim_start_matches('\u{feff}').to_owned();
-            return Some(InlineScriptFile { name, path: rel_file, source_label: label.to_owned(), text });
+            let path = path
+                .strip_prefix(root)
+                .map(crate::platform::game_path)
+                .unwrap_or(rel_file);
+            return Some(InlineScriptFile { name, path, source_label: label.to_owned(), text });
         }
     }
     None
@@ -176,7 +221,6 @@ fn pair_score(left: &str, right: &str, li: usize, ri: usize) -> usize {
 pub fn find_comparisons(left_text: &str, left_roots: &[(&str, &Path)], right_text: &str, right_roots: &[(&str, &Path)]) -> Vec<InlineScriptComparison> {
     let left_calls = extract_calls(left_text);
     let right_calls = extract_calls(right_text);
-    let left_set: HashSet<String> = left_calls.iter().map(|s| s.to_ascii_lowercase()).collect();
     let right_set: HashSet<String> = right_calls.iter().map(|s| s.to_ascii_lowercase()).collect();
 
     let mut comparisons = Vec::new();
@@ -191,38 +235,293 @@ pub fn find_comparisons(left_text: &str, left_roots: &[(&str, &Path)], right_tex
         }
     }
 
-    // 2. Replaced scripts: scripts present only on left vs only on right.
-    let left_only: Vec<&str> = left_calls.iter().filter(|s| !right_set.contains(&s.to_ascii_lowercase())).map(String::as_str).collect();
-    let right_only: Vec<&str> = right_calls.iter().filter(|s| !left_set.contains(&s.to_ascii_lowercase())).map(String::as_str).collect();
-
-    if !left_only.is_empty() && !right_only.is_empty() {
-        let mut used_right = vec![false; right_only.len()];
-        let mut pairs: Vec<(usize, usize, usize)> = Vec::new();
-        for (li, l) in left_only.iter().enumerate() {
-            for (ri, r) in right_only.iter().enumerate() {
-                pairs.push((pair_score(l, r, li, ri), li, ri));
-            }
-        }
-        // Highest similarity first, breaking ties by left-then-right order.
-        pairs.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)).then_with(|| a.2.cmp(&b.2)));
-        let mut matched: Vec<(usize, &str, &str)> = Vec::new();
-        let mut used_left = vec![false; left_only.len()];
-        for (_, li, ri) in pairs {
-            if !used_left[li] && !used_right[ri] {
-                used_left[li] = true;
-                used_right[ri] = true;
-                matched.push((li, left_only[li], right_only[ri]));
-            }
-        }
-        matched.sort_by_key(|&(li, _, _)| li);
-        for (_, l_name, r_name) in matched {
-            if let (Some(l), Some(r)) = (read_inline_script(left_roots, l_name), read_inline_script(right_roots, r_name)) {
-                comparisons.push(InlineScriptComparison { left: l, right: r });
-            }
+    // 2. Replaced scripts.
+    for (l_name, r_name) in replaced_call_pairs(left_text, right_text) {
+        if let (Some(l), Some(r)) = (
+            read_inline_script(left_roots, &l_name),
+            read_inline_script(right_roots, &r_name),
+        ) {
+            comparisons.push(InlineScriptComparison { left: l, right: r });
         }
     }
 
     comparisons
+}
+
+/// Calls present on only one side, paired by name similarity and position.
+/// These are scripts one side replaced with its own copy.
+pub fn replaced_call_pairs(left_text: &str, right_text: &str) -> Vec<(String, String)> {
+    let left_calls = extract_calls(left_text);
+    let right_calls = extract_calls(right_text);
+    let left_set: HashSet<String> = left_calls.iter().map(|s| s.to_ascii_lowercase()).collect();
+    let right_set: HashSet<String> = right_calls.iter().map(|s| s.to_ascii_lowercase()).collect();
+    let left_only: Vec<&str> = left_calls
+        .iter()
+        .filter(|s| !right_set.contains(&s.to_ascii_lowercase()))
+        .map(String::as_str)
+        .collect();
+    let right_only: Vec<&str> = right_calls
+        .iter()
+        .filter(|s| !left_set.contains(&s.to_ascii_lowercase()))
+        .map(String::as_str)
+        .collect();
+    if left_only.is_empty() || right_only.is_empty() {
+        return Vec::new();
+    }
+    let mut pairs: Vec<(usize, usize, usize)> = Vec::new();
+    for (li, l) in left_only.iter().enumerate() {
+        for (ri, r) in right_only.iter().enumerate() {
+            pairs.push((pair_score(l, r, li, ri), li, ri));
+        }
+    }
+    pairs.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)).then_with(|| a.2.cmp(&b.2)));
+    let mut used_left = vec![false; left_only.len()];
+    let mut used_right = vec![false; right_only.len()];
+    let mut matched = Vec::new();
+    for (_, li, ri) in pairs {
+        if !used_left[li] && !used_right[ri] {
+            used_left[li] = true;
+            used_right[ri] = true;
+            matched.push((li, left_only[li].to_owned(), right_only[ri].to_owned()));
+        }
+    }
+    matched.sort_by_key(|(li, _, _)| *li);
+    matched
+        .into_iter()
+        .map(|(_, left, right)| (left, right))
+        .collect()
+}
+
+/// The relative file a script name is stored att name is stored at, refusing names that could
+/// leave `common/inline_scripts`.
+pub fn file_path(name: &str) -> Option<String> {
+    let name = normalize_name(name);
+    if name.is_empty()
+        || name
+            .split('/')
+            .any(|part| part.is_empty() || part == "." || part == "..")
+    {
+        return None;
+    }
+    Some(format!("common/inline_scripts/{name}.txt"))
+}
+
+/// One logical script a mod replaced in an object, with every version of it.
+struct GroupDraft {
+    vanilla_name: String,
+    target: String,
+    replacement_names: Vec<String>,
+}
+
+/// Finds inline scripts that a mod calls under a new name in place of a base
+/// game script, and every version of each such script. `versions` are the
+/// mods' object versions in load order; `roots` are all mod folders in load
+/// order.
+pub fn replacement_groups(
+    vanilla_object: Option<&str>,
+    versions: &[(String, String)],
+    roots: &[ScriptRoot],
+    game_dir: Option<&Path>,
+) -> Vec<InlineGroup> {
+    let Some(vanilla_object) = vanilla_object else {
+        return Vec::new();
+    };
+    let Some(game_dir) = game_dir else {
+        return Vec::new();
+    };
+    let game_roots = [("Vanilla", game_dir)];
+
+    // A vanilla call paired with the mod call that replaced it, by base name.
+    let mut drafts: BTreeMap<String, GroupDraft> = BTreeMap::new();
+    for (label, text) in versions {
+        let Some(root) = roots.iter().find(|r| &r.label == label) else {
+            continue;
+        };
+        let right_roots = [
+            (root.label.as_str(), root.root.as_path()),
+            ("Vanilla", game_dir),
+        ];
+        for pair in find_comparisons(vanilla_object, &game_roots, text, &right_roots) {
+            if pair.left.name.eq_ignore_ascii_case(&pair.right.name) {
+                continue;
+            }
+            let key = pair.left.name.to_ascii_lowercase();
+            let draft = drafts.entry(key).or_insert_with(|| GroupDraft {
+                vanilla_name: pair.left.name.clone(),
+                target: pair.right.name.clone(),
+                replacement_names: Vec::new(),
+            });
+            // The highest load-order replacement names the merged script.
+            draft.target = pair.right.name.clone();
+            if !draft
+                .replacement_names
+                .iter()
+                .any(|n| n.eq_ignore_ascii_case(&pair.right.name))
+            {
+                draft.replacement_names.push(pair.right.name.clone());
+            }
+        }
+    }
+
+    let mut groups = Vec::new();
+    for draft in drafts.into_values() {
+        let vanilla_file = read_inline_script(&game_roots, &draft.vanilla_name);
+        let vanilla = vanilla_file.as_ref().map(|v| Source {
+            label: "Vanilla".into(),
+            file: v.path.clone(),
+            text: v.text.clone(),
+        });
+        let mut names = vec![draft.vanilla_name.clone()];
+        for name in &draft.replacement_names {
+            if !names.iter().any(|n| n.eq_ignore_ascii_case(name)) {
+                names.push(name.clone());
+            }
+        }
+
+        let mut sources: Vec<Source> = Vec::new();
+        let mut prints: Vec<Print> = Vec::new();
+        if let Some(v) = &vanilla_file {
+            prints.push(Print::new(VANILLA, "Vanilla", &v.path, &v.text));
+        }
+        for root in roots {
+            for name in &names {
+                let Some(found) =
+                    read_inline_script(&[(root.label.as_str(), root.root.as_path())], name)
+                else {
+                    continue;
+                };
+                let duplicate = sources
+                    .iter()
+                    .any(|s| s.label == root.label && s.file == found.path && s.text == found.text);
+                if duplicate {
+                    continue;
+                }
+                sources.push(Source {
+                    label: root.label.clone(),
+                    file: found.path.clone(),
+                    text: found.text.clone(),
+                });
+                prints.push(Print::new(&root.id, &root.label, &found.path, &found.text));
+            }
+        }
+
+        if sources.is_empty() && vanilla.is_none() {
+            continue;
+        }
+        let group = InlineGroup {
+            names: names
+                .into_iter()
+                .map(|name| (name, draft.target.clone()))
+                .collect(),
+            vanilla_name: draft.vanilla_name,
+            target: draft.target,
+            vanilla,
+            sources,
+            prints,
+        };
+        if group.needs_merge() {
+            groups.push(group);
+        }
+    }
+    groups
+}
+
+/// Splits a line into its code and its `#` comment, ignoring `#` in quotes.
+fn split_comment(line: &str) -> (&str, &str) {
+    let mut quoted = false;
+    for (i, c) in line.char_indices() {
+        match c {
+            '"' => quoted = !quoted,
+            '#' if !quoted => return (&line[..i], &line[i..]),
+            _ => {}
+        }
+    }
+    (line, "")
+}
+
+/// Whether `at` is inside a quoted string in `text`.
+fn inside_quotes(text: &str, at: usize) -> bool {
+    let mut quoted = false;
+    let mut escaped = false;
+    for c in text[..at].chars() {
+        if escaped {
+            escaped = false;
+        } else if c == '\\' {
+            escaped = true;
+        } else if c == '"' {
+            quoted = !quoted;
+        }
+    }
+    quoted
+}
+
+/// Rewrites `script = <old>` values whose name is in `names` to the new name.
+/// Only the value changes; indentation, spacing and comments stay.
+pub fn rewrite_calls(text: &str, names: &[(String, String)]) -> String {
+    if names.is_empty() {
+        return text.to_owned();
+    }
+    let word = |c: char| c.is_alphanumeric() || c == '_' || c == '-';
+    let mut out = String::with_capacity(text.len());
+    for line in text.split_inclusive('\n') {
+        let (body, newline) = match line.strip_suffix('\n') {
+            Some(body) => (body, "\n"),
+            None => (line, ""),
+        };
+        let (code, comment) = split_comment(body);
+        let mut rewritten = String::with_capacity(code.len());
+        let mut last = 0;
+        for (at, _) in code.match_indices("script") {
+            if inside_quotes(code, at)
+                || (at > 0 && code[..at].chars().next_back().is_some_and(word))
+            {
+                continue;
+            }
+            let after = at + "script".len();
+            if code[after..].chars().next().is_some_and(word) {
+                continue;
+            }
+            let rest = code[after..].trim_start();
+            let spaces = code[after..].len() - rest.len();
+            let Some(rest) = rest.strip_prefix('=') else {
+                continue;
+            };
+            let value_spaces = rest.len() - rest.trim_start().len();
+            let value_start = after + spaces + 1 + value_spaces;
+            let value = &code[value_start..];
+            let (value_len, quoted) = if let Some(text) = value.strip_prefix('"') {
+                let Some(end) = text.find('"') else { continue };
+                (end + 2, true)
+            } else {
+                let end = value
+                    .find(|c: char| c.is_whitespace() || c == '}' || c == ',')
+                    .unwrap_or(value.len());
+                (end, false)
+            };
+            if value_len == 0 {
+                continue;
+            }
+            let raw = &value[..value_len];
+            let name = normalize_name(raw);
+            let Some((_, target)) = names.iter().find(|(n, _)| n.eq_ignore_ascii_case(&name)) else {
+                continue;
+            };
+            rewritten.push_str(&code[last..value_start]);
+            if quoted {
+                rewritten.push('"');
+                rewritten.push_str(target);
+                rewritten.push('"');
+            } else {
+                rewritten.push_str(target);
+            }
+            last = value_start + value_len;
+        }
+        rewritten.push_str(&code[last..]);
+        rewritten.push_str(comment);
+        rewritten.push_str(newline);
+        out.push_str(&rewritten);
+    }
+    out
 }
 
 #[cfg(test)]
@@ -302,6 +601,66 @@ imperialist = {
         assert_eq!(found.len(), 1);
         assert_eq!(found[0].left.text, "cost = 200");
         assert_eq!(found[0].right.text, "cost = 100");
+
+        let _ = std::fs::remove_dir_all(&mod_dir);
+        let _ = std::fs::remove_dir_all(&game_dir);
+    }
+
+    #[test]
+    fn groups_replaced_vanilla_scripts_and_rewrites_calls() {
+        let mod_dir = temp("group_mod");
+        let game_dir = temp("group_game");
+        write(
+            &game_dir,
+            "common/inline_scripts/pop_faction_types/demands/imperialist.txt",
+            "demand = { trigger = { always = yes } }",
+        );
+        write(
+            &mod_dir,
+            "common/inline_scripts/MECR/factions/imperialist_460.txt",
+            "demand = { trigger = { has_ethic = ethic_militarist } }",
+        );
+        let roots = [ScriptRoot {
+            id: "mod/mecr.mod".into(),
+            label: "MECR".into(),
+            root: mod_dir.clone(),
+        }];
+        let vanilla = "imperialist = { inline_script = { script = pop_faction_types/demands/imperialist } }";
+        let versions = [(
+            "MECR".to_owned(),
+            "imperialist = {\n\tinline_script = {\n\t\tscript = MECR/factions/imperialist_460\n\t}\n}"
+                .to_owned(),
+        )];
+        let groups = replacement_groups(Some(vanilla), &versions, &roots, Some(&game_dir));
+        assert_eq!(groups.len(), 1);
+        let group = &groups[0];
+        assert_eq!(group.vanilla_name, "pop_faction_types/demands/imperialist");
+        assert_eq!(group.target, "MECR/factions/imperialist_460");
+        assert!(group.needs_merge());
+        assert!(group.vanilla.is_some());
+        assert_eq!(group.sources.len(), 1);
+        assert_eq!(group.prints.len(), 2);
+
+        let rewritten = rewrite_calls(vanilla, &group.names);
+        assert!(
+            rewritten.contains("script = MECR/factions/imperialist_460"),
+            "{rewritten}"
+        );
+        assert_eq!(
+            rewrite_calls(
+                "x = {\n\tscript = \"pop_faction_types/demands/imperialist\" # keep\n}",
+                &group.names
+            ),
+            "x = {\n\tscript = \"MECR/factions/imperialist_460\" # keep\n}"
+        );
+        // Text that merely mentions the name isn't a call.
+        assert_eq!(
+            rewrite_calls(
+                "x = { desc = \"script = pop_faction_types/demands/imperialist\" }",
+                &group.names
+            ),
+            "x = { desc = \"script = pop_faction_types/demands/imperialist\" }"
+        );
 
         let _ = std::fs::remove_dir_all(&mod_dir);
         let _ = std::fs::remove_dir_all(&game_dir);

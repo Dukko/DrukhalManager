@@ -50,6 +50,8 @@ pub struct Report {
     /// Whether each scanned mod, by scanned position, declares a `replace_path`.
     /// Such a mod hides base-game files even if all it ships is replaced.
     pub has_replace_path: Vec<bool>,
+    /// `replace_path` entries per scanned mod position.
+    pub replace_paths: Vec<Vec<String>>,
     /// Each key of `defined`, in its order, lowercased whole and without a
     /// localisation key's language, made on the first look-up. Left to
     /// `look_up`; `pub(crate)` only so tests can build a `Report` with
@@ -70,21 +72,35 @@ impl Report {
         let lowered = self.lowered.get_or_init(|| {
             self.defined
                 .keys()
-                .map(|(_, key)| (key.to_lowercase(), key.split_once(':').map_or(key.as_str(), |(_, name)| name).to_lowercase()))
+                .map(|(_, key)| {
+                    (
+                        key.to_lowercase(),
+                        key.split_once(':')
+                            .map_or(key.as_str(), |(_, name)| name)
+                            .to_lowercase(),
+                    )
+                })
                 .collect()
         });
         let mut found: Vec<(bool, &(String, String))> = self
             .defined
             .keys()
             .zip(lowered)
-            .filter_map(|(id, (whole, part))| (whole.contains(&query) || part.contains(&query)).then_some((*whole == query || *part == query, id)))
+            .filter_map(|(id, (whole, part))| {
+                (whole.contains(&query) || part.contains(&query))
+                    .then_some((*whole == query || *part == query, id))
+            })
             .collect();
         // Stable sort keeps the map's (category, key) order within each group.
-        found.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1 .1.cmp(&b.1 .1)));
+        found.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.1.cmp(&b.1.1)));
         found
             .into_iter()
             .take(limit)
-            .map(|(_, id)| ObjectConflict { category: id.0.clone(), key: id.1.clone(), definitions: self.defined[id].clone() })
+            .map(|(_, id)| ObjectConflict {
+                category: id.0.clone(),
+                key: id.1.clone(),
+                definitions: self.defined[id].clone(),
+            })
             .collect()
     }
 }
@@ -134,53 +150,93 @@ impl Reason {
     /// Why it wins, to follow "<mod>'s version is used: ".
     pub fn explain(self, fios: bool) -> &'static str {
         match self {
-            Reason::LastFile => "its file name sorts last, and in this folder later files override earlier ones",
-            Reason::FirstFile => "its file name sorts first, and this folder keeps the first definition it reads",
-            Reason::LoadOrder if fios => "its file has the same name as another mod's, and this mod loads first",
-            Reason::LoadOrder => "its file has the same name as another mod's, and this mod loads later",
+            Reason::LastFile => {
+                "its file name sorts last, and in this folder later files override earlier ones"
+            }
+            Reason::FirstFile => {
+                "its file name sorts first, and this folder keeps the first definition it reads"
+            }
+            Reason::LoadOrder if fios => {
+                "its file has the same name as another mod's, and this mod loads first"
+            }
+            Reason::LoadOrder => {
+                "its file has the same name as another mod's, and this mod loads later"
+            }
             Reason::Replace => "it's in a localisation replace folder, which overrides the others",
         }
     }
 }
 
 /// Folders where the game keeps the first definition of an object it
-/// reads rather than the last, from Irony Mod Manager's Stellaris rules.
-const FIOS_FOLDERS: &[&str] = &[
-    "common/component_sets",
-    "common/component_templates",
-    "common/event_chains",
-    "common/global_ship_designs",
-    "common/scripted_variables",
-    "common/section_templates",
-    "common/ship_behaviors",
-    "common/special_projects",
-    "common/strategic_resources",
-    "events",
-    "common/solar_system_initializers",
-    "common/traits",
-    "common/governments/authorities",
+/// reads rather than the last (FIOS = first in, only served), tagged
+/// with the Stellaris version verified against.
+/// Source: Irony Mod Manager Stellaris rules, verified against Stellaris 4.6.0.
+const FIOS_RULES: &[(&str, &str)] = &[
+    ("4.6", "common/component_sets"),
+    ("4.6", "common/component_templates"),
+    ("4.6", "common/event_chains"),
+    ("4.6", "common/global_ship_designs"),
+    ("4.6", "common/scripted_variables"),
+    ("4.6", "common/section_templates"),
+    ("4.6", "common/ship_behaviors"),
+    ("4.6", "common/special_projects"),
+    ("4.6", "common/strategic_resources"),
+    ("4.6", "events"),
+    ("4.6", "common/solar_system_initializers"),
+    ("4.6", "common/traits"),
+    ("4.6", "common/governments/authorities"),
 ];
 
 /// Whether objects in `category` follow first-in-only-served rules.
 pub fn is_fios(category: &str) -> bool {
-    FIOS_FOLDERS.iter().any(|f| category.eq_ignore_ascii_case(f) || is_under(category, f))
+    FIOS_RULES
+        .iter()
+        .any(|(_, f)| category.eq_ignore_ascii_case(f) || is_under(category, f))
+}
+
+impl Report {
+    /// Load positions of mods whose `replace_path` covers `category`.
+    pub fn replace_path_mods(&self, category: &str) -> Vec<usize> {
+        self.replace_paths
+            .iter()
+            .enumerate()
+            .filter(|(_, paths)| {
+                paths.iter().any(|r| {
+                    r.trim_matches('/').eq_ignore_ascii_case(category) || is_under(category, r)
+                })
+            })
+            .map(|(pos, _)| pos)
+            .collect()
+    }
 }
 
 impl ObjectConflict {
     /// The definition the game uses, as an index into `definitions`, and
-    /// why. The game reads a folder's files sorted by name, whichever mod
-    /// they come from; same-named files are read in load order.
+    /// why. The game reads a folder's files sorted by name (case-insensitively),
+    /// whichever mod they come from; same-named files are read in load order.
     pub fn winner(&self) -> Option<(usize, Reason)> {
         let fios = is_fios(&self.category);
-        fn stem(d: &Definition) -> &str {
+        fn stem(d: &Definition) -> String {
             let name = d.file.rsplit('/').next().unwrap_or(&d.file);
-            name.rsplit_once('.').map_or(name, |(stem, _)| stem)
+            name.rsplit_once('.')
+                .map_or(name, |(stem, _)| stem)
+                .to_ascii_lowercase()
         }
         let mut candidates: Vec<usize> = (0..self.definitions.len()).collect();
         let mut replaced = false;
         if self.category == "localisation" {
-            let in_replace = |d: &Definition| d.file.split('/').rev().skip(1).any(|part| part.eq_ignore_ascii_case("replace"));
-            let replacing: Vec<usize> = candidates.iter().copied().filter(|&i| in_replace(&self.definitions[i])).collect();
+            let in_replace = |d: &Definition| {
+                d.file
+                    .split('/')
+                    .rev()
+                    .skip(1)
+                    .any(|part| part.eq_ignore_ascii_case("replace"))
+            };
+            let replacing: Vec<usize> = candidates
+                .iter()
+                .copied()
+                .filter(|&i| in_replace(&self.definitions[i]))
+                .collect();
             if !replacing.is_empty() && replacing.len() < candidates.len() {
                 candidates = replacing;
                 replaced = true;
@@ -189,9 +245,15 @@ impl ObjectConflict {
         // By file name, then load position.
         let key = |i: usize| (stem(&self.definitions[i]), self.definitions[i].mod_position);
         let best = if fios {
-            candidates.iter().copied().min_by(|&a, &b| key(a).cmp(&key(b)))?
+            candidates
+                .iter()
+                .copied()
+                .min_by(|&a, &b| key(a).cmp(&key(b)))?
         } else {
-            candidates.iter().copied().max_by(|&a, &b| key(a).cmp(&key(b)))?
+            candidates
+                .iter()
+                .copied()
+                .max_by(|&a, &b| key(a).cmp(&key(b)))?
         };
         let w = &self.definitions[best];
         let tied = candidates.iter().any(|&i| {
@@ -229,7 +291,12 @@ impl Report {
     }
 
     /// Like `counts_by_mod`, counting only the conflicts the filters keep.
-    pub fn counts_by_mod_where(&self, mod_count: usize, keep_file: impl Fn(&FileConflict) -> bool, keep_object: impl Fn(&ObjectConflict) -> bool) -> Vec<usize> {
+    pub fn counts_by_mod_where(
+        &self,
+        mod_count: usize,
+        keep_file: impl Fn(&FileConflict) -> bool,
+        keep_object: impl Fn(&ObjectConflict) -> bool,
+    ) -> Vec<usize> {
         let mut counts = vec![0; mod_count];
         for c in self.files.iter().filter(|c| keep_file(c)) {
             c.mods.iter().for_each(|&m| counts[m] += 1);
@@ -246,11 +313,20 @@ impl Report {
 /// through other dependencies. `dependencies` are each mod's descriptor
 /// dependencies, which name other mods; `names` are the mods' names.
 pub fn depends_on(names: &[String], dependencies: &[Vec<String>]) -> Vec<BTreeSet<usize>> {
-    let by_name: std::collections::HashMap<String, usize> = names.iter().enumerate().map(|(i, n)| (n.trim().to_lowercase(), i)).collect();
+    let by_name: std::collections::HashMap<String, usize> = names
+        .iter()
+        .enumerate()
+        .map(|(i, n)| (n.trim().to_lowercase(), i))
+        .collect();
     let direct: Vec<Vec<usize>> = dependencies
         .iter()
         .enumerate()
-        .map(|(i, deps)| deps.iter().filter_map(|d| by_name.get(&d.trim().to_lowercase()).copied()).filter(|&d| d != i).collect())
+        .map(|(i, deps)| {
+            deps.iter()
+                .filter_map(|d| by_name.get(&d.trim().to_lowercase()).copied())
+                .filter(|&d| d != i)
+                .collect()
+        })
         .collect();
     (0..names.len())
         .map(|start| {
@@ -269,9 +345,21 @@ pub fn depends_on(names: &[String], dependencies: &[Vec<String>]) -> Vec<BTreeSe
 /// Whether every mod among `mods` (load positions) depends on all those
 /// loading before it, as a patch or submod does: the later ones are meant
 /// to override the earlier.
-pub fn builds_on_dependencies(mods: impl IntoIterator<Item = usize>, depends: &[BTreeSet<usize>]) -> bool {
-    let mods: Vec<usize> = mods.into_iter().collect::<BTreeSet<_>>().into_iter().collect();
-    mods.len() > 1 && mods.iter().enumerate().skip(1).all(|(at, later)| mods[..at].iter().all(|earlier| depends.get(*later).is_some_and(|d| d.contains(earlier))))
+pub fn builds_on_dependencies(
+    mods: impl IntoIterator<Item = usize>,
+    depends: &[BTreeSet<usize>],
+) -> bool {
+    let mods: Vec<usize> = mods
+        .into_iter()
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect();
+    mods.len() > 1
+        && mods.iter().enumerate().skip(1).all(|(at, later)| {
+            mods[..at]
+                .iter()
+                .all(|earlier| depends.get(*later).is_some_and(|d| d.contains(earlier)))
+        })
 }
 
 impl FileConflict {
@@ -306,13 +394,18 @@ pub const LANGUAGES: &[(&str, &str)] = &[
 pub fn file_language(path: &str) -> Option<&'static str> {
     let name = path.rsplit('/').next()?.to_lowercase();
     let stem = name.strip_suffix(".yml")?;
-    LANGUAGES.iter().map(|(id, _)| *id).find(|id| stem.strip_suffix(id).is_some_and(|rest| rest.ends_with("l_")))
+    LANGUAGES.iter().map(|(id, _)| *id).find(|id| {
+        stem.strip_suffix(id)
+            .is_some_and(|rest| rest.ends_with("l_"))
+    })
 }
 
 /// Whether the scan reads `path`, given the languages it reads (`None` for
 /// all). Files of languages the game doesn't know are always read.
 fn reads(path: &str, languages: Option<&BTreeSet<String>>) -> bool {
-    let Some(languages) = languages else { return true };
+    let Some(languages) = languages else {
+        return true;
+    };
     let lower = path.to_lowercase();
     if !(lower.starts_with("localisation/") || lower.starts_with("localization/")) {
         return true;
@@ -330,12 +423,17 @@ const MERGED_FOLDERS: &[&str] = &[
 
 /// Blocks the game adds to an existing object instead of replacing it,
 /// by folder: an object holding nothing but these blocks is an addition.
-pub const ADDITIVE_BLOCKS: &[(&str, &str)] = &[("common/governments/authorities", "advanced_authority_swap")];
+pub const ADDITIVE_BLOCKS: &[(&str, &str)] =
+    &[("common/governments/authorities", "advanced_authority_swap")];
 
 /// Whether an object of `category` with this `body` only adds blocks to an
 /// object defined elsewhere, so it defines nothing itself.
 pub fn is_addition(category: &str, body: &[Entry]) -> bool {
-    let blocks: Vec<&str> = ADDITIVE_BLOCKS.iter().filter(|(f, _)| category.eq_ignore_ascii_case(f) || is_under(category, f)).map(|(_, b)| *b).collect();
+    let blocks: Vec<&str> = ADDITIVE_BLOCKS
+        .iter()
+        .filter(|(f, _)| category.eq_ignore_ascii_case(f) || is_under(category, f))
+        .map(|(_, b)| *b)
+        .collect();
     !body.is_empty() && !blocks.is_empty() && body.iter().all(|e| matches!(e, Entry::Assign { key, .. } if blocks.iter().any(|b| key.eq_ignore_ascii_case(b))))
 }
 
@@ -351,8 +449,18 @@ pub fn analyze(mods: &[ModInput], languages: Option<&BTreeSet<String>>) -> Repor
 }
 
 /// Like `analyze`, parsing only the files `cache` doesn't know as they are.
-pub fn analyze_cached(mods: &[ModInput], languages: Option<&BTreeSet<String>>, cache: &mut ScanCache) -> Report {
-    let mut report = Report { shipped: vec![0; mods.len()], replaced_by: vec![BTreeMap::new(); mods.len()], has_replace_path: mods.iter().map(|m| !m.replace_path.is_empty()).collect(), ..Report::default() };
+pub fn analyze_cached(
+    mods: &[ModInput],
+    languages: Option<&BTreeSet<String>>,
+    cache: &mut ScanCache,
+) -> Report {
+    let mut report = Report {
+        shipped: vec![0; mods.len()],
+        replaced_by: vec![BTreeMap::new(); mods.len()],
+        has_replace_path: mods.iter().map(|m| !m.replace_path.is_empty()).collect(),
+        replace_paths: mods.iter().map(|m| m.replace_path.clone()).collect(),
+        ..Report::default()
+    };
 
     // Lowercased relative path -> (load position, path as spelled in that
     // mod) for every mod shipping it.
@@ -364,12 +472,17 @@ pub fn analyze_cached(mods: &[ModInput], languages: Option<&BTreeSet<String>>, c
         };
         if root.is_file() {
             // Zips are unpacked before scanning; this one couldn't be.
-            report.skipped.push((position, t!("Could not unpack this zipped mod")));
+            report
+                .skipped
+                .push((position, t!("Could not unpack this zipped mod")));
             continue;
         }
         let mut found = Vec::new();
         if let Err(e) = walk(root, root, &mut found) {
-            report.skipped.push((position, tf!("Could not read mod files: {error}", error = e)));
+            report.skipped.push((
+                position,
+                tf!("Could not read mod files: {error}", error = e),
+            ));
             continue;
         }
         // A later `replace_path` makes the game ignore earlier mods' files in
@@ -387,7 +500,10 @@ pub fn analyze_cached(mods: &[ModInput], languages: Option<&BTreeSet<String>>, c
         }
         for path in found.into_iter().filter(|p| reads(p, languages)) {
             report.shipped[position] += 1;
-            files.entry(path.to_lowercase()).or_default().push((position, path));
+            files
+                .entry(path.to_lowercase())
+                .or_default()
+                .push((position, path));
         }
     }
 
@@ -400,31 +516,60 @@ pub fn analyze_cached(mods: &[ModInput], languages: Option<&BTreeSet<String>>, c
         for (m, _) in shipped.iter().filter(|(m, _)| m != winner) {
             *report.replaced_by[*m].entry(*winner).or_default() += 1;
         }
-        if shipped.len() > 1 {
-            report.files.push(FileConflict { path: path.clone(), mods: shipped.iter().map(|(m, _)| *m).collect() });
+        if shipped.len() > 1 && !MERGED_FOLDERS.iter().any(|m| is_under(path, m)) {
+            report.files.push(FileConflict {
+                path: path.clone(),
+                mods: shipped.iter().map(|(m, _)| *m).collect(),
+            });
         }
         if let Some(category) = object_category(path) {
             to_read.push((*winner, path, category));
         }
     }
-    let full: Vec<(PathBuf, String)> = to_read.iter().map(|(winner, path, category)| (mods[*winner].root.as_ref().unwrap().join(path), category.clone())).collect();
+    let full: Vec<(PathBuf, String)> = to_read
+        .iter()
+        .map(|(winner, path, category)| {
+            (
+                mods[*winner].root.as_ref().unwrap().join(path),
+                category.clone(),
+            )
+        })
+        .collect();
     let all_keys = cache.keys_many(&full, object_keys);
     let mut objects: BTreeMap<(String, String), Vec<Definition>> = BTreeMap::new();
     for ((winner, path, category), keys) in to_read.into_iter().zip(all_keys) {
         let keys = match keys {
             Ok(keys) => keys,
             Err(e) => {
-                report.errors.push(FileError { mod_position: winner, file: path.clone(), message: e.message, line: e.line });
+                report.errors.push(FileError {
+                    mod_position: winner,
+                    file: path.clone(),
+                    message: e.message,
+                    line: e.line,
+                });
                 continue;
             }
         };
         // Entries under another language's header, in a file named for one
         // that's read, are left out too.
         let keys = keys.into_iter().filter(|k| {
-            category != "localisation" || languages.is_none_or(|l| k.split_once(':').is_none_or(|(lang, _)| lang.strip_prefix("l_").is_none_or(|lang| !LANGUAGES.iter().any(|(id, _)| *id == lang) || l.contains(lang))))
+            category != "localisation"
+                || languages.is_none_or(|l| {
+                    k.split_once(':').is_none_or(|(lang, _)| {
+                        lang.strip_prefix("l_").is_none_or(|lang| {
+                            !LANGUAGES.iter().any(|(id, _)| *id == lang) || l.contains(lang)
+                        })
+                    })
+                })
         });
         for key in keys {
-            objects.entry((category.clone(), key)).or_default().push(Definition { mod_position: winner, file: path.clone() });
+            objects
+                .entry((category.clone(), key))
+                .or_default()
+                .push(Definition {
+                    mod_position: winner,
+                    file: path.clone(),
+                });
         }
     }
 
@@ -432,7 +577,11 @@ pub fn analyze_cached(mods: &[ModInput], languages: Option<&BTreeSet<String>>, c
         definitions.sort_by(|a, b| (a.mod_position, &a.file).cmp(&(b.mod_position, &b.file)));
         let distinct: BTreeSet<usize> = definitions.iter().map(|d| d.mod_position).collect();
         if distinct.len() > 1 {
-            report.objects.push(ObjectConflict { category: category.clone(), key: key.clone(), definitions: definitions.clone() });
+            report.objects.push(ObjectConflict {
+                category: category.clone(),
+                key: key.clone(),
+                definitions: definitions.clone(),
+            });
         }
     }
     report.defined = objects;
@@ -465,7 +614,9 @@ pub(crate) fn is_under(path: &str, folder: &str) -> bool {
     let folder = folder.trim_matches('/');
     // By bytes: paths can hold any characters, and slicing a `str` inside one panics.
     let (path, folder) = (path.as_bytes(), folder.as_bytes());
-    path.len() > folder.len() && path[..folder.len()].eq_ignore_ascii_case(folder) && path[folder.len()] == b'/'
+    path.len() > folder.len()
+        && path[..folder.len()].eq_ignore_ascii_case(folder)
+        && path[folder.len()] == b'/'
 }
 
 /// The folder whose objects share a namespace, if the file defines objects
@@ -482,9 +633,16 @@ pub(crate) fn object_category(path: &str) -> Option<String> {
     if dir == "events" {
         return Some("events".to_owned());
     }
-    if dir.starts_with("common/") && !MERGED_FOLDERS.iter().chain(FRAGMENT_FOLDERS).any(|m| dir == *m || is_under(dir, m)) {
+    if dir.starts_with("common/")
+        && !MERGED_FOLDERS
+            .iter()
+            .chain(FRAGMENT_FOLDERS)
+            .any(|m| dir == *m || is_under(dir, m))
+    {
         // The original spelling: lowercasing can change a name's length.
-        return path.rsplit_once('/').map(|(original, _)| original.to_owned());
+        return path
+            .rsplit_once('/')
+            .map(|(original, _)| original.to_owned());
     }
     None
 }
@@ -502,24 +660,42 @@ pub(crate) fn object_category(path: &str) -> Option<String> {
 ///    - `common/ship_behaviors`: `ship_behavior = { name = "..." }`
 ///    - `common/global_ship_designs`: `ship_design = { name = "..." }`
 pub fn object_key_for_entry(category: &str, entry: &Entry) -> Option<String> {
-    let Entry::Assign { key, value, .. } = entry else { return None };
-    if key.starts_with('@') || key.eq_ignore_ascii_case("namespace") || key.eq_ignore_ascii_case("inline_script") {
+    let Entry::Assign { key, value, .. } = entry else {
+        return None;
+    };
+    if key.eq_ignore_ascii_case("namespace") || key.eq_ignore_ascii_case("inline_script") {
         return None;
     }
+    if key.starts_with('@') {
+        return (category.eq_ignore_ascii_case("common/scripted_variables")
+            || is_under(category, "common/scripted_variables"))
+        .then(|| key.clone());
+    }
     let block = value.as_block();
-    if let Some(b) = block && is_addition(category, b) {
+    if let Some(b) = block
+        && is_addition(category, b)
+    {
         return None;
     }
     if category == "events" || key.ends_with("_event") {
         return block.and_then(|b| b.scalar("id")).map(str::to_owned);
     }
-    if category.eq_ignore_ascii_case("common/ambient_objects") || is_under(category, "common/ambient_objects") || key.eq_ignore_ascii_case("ambient_object") {
+    if category.eq_ignore_ascii_case("common/ambient_objects")
+        || is_under(category, "common/ambient_objects")
+        || key.eq_ignore_ascii_case("ambient_object")
+    {
         return block.and_then(|b| b.scalar("name")).map(str::to_owned);
     }
-    if category.eq_ignore_ascii_case("common/ship_behaviors") || is_under(category, "common/ship_behaviors") || key.eq_ignore_ascii_case("ship_behavior") {
+    if category.eq_ignore_ascii_case("common/ship_behaviors")
+        || is_under(category, "common/ship_behaviors")
+        || key.eq_ignore_ascii_case("ship_behavior")
+    {
         return block.and_then(|b| b.scalar("name")).map(str::to_owned);
     }
-    if category.eq_ignore_ascii_case("common/global_ship_designs") || is_under(category, "common/global_ship_designs") || key.eq_ignore_ascii_case("ship_design") {
+    if category.eq_ignore_ascii_case("common/global_ship_designs")
+        || is_under(category, "common/global_ship_designs")
+        || key.eq_ignore_ascii_case("ship_design")
+    {
         return block.and_then(|b| b.scalar("name")).map(str::to_owned);
     }
     if key.eq_ignore_ascii_case("random_list") {
@@ -538,7 +714,10 @@ fn object_keys(category: &str, src: &str) -> Result<Vec<String>, ScanError> {
     if category == "localisation" {
         return Ok(localisation_keys(src));
     }
-    let entries = script::parse(src).map_err(|e| ScanError { message: e.message, line: Some(e.line) })?;
+    let entries = script::parse(src).map_err(|e| ScanError {
+        message: e.message,
+        line: Some(e.line),
+    })?;
     let mut keys = Vec::new();
     let mut seen = BTreeSet::new();
     for entry in &entries {
@@ -554,7 +733,9 @@ fn object_keys(category: &str, src: &str) -> Result<Vec<String>, ScanError> {
 /// Whether `header` is a language header (`l_english`, `l_simp_chinese`).
 /// It ends up in a file name, so nothing else is accepted.
 pub fn is_language_header(header: &str) -> bool {
-    header.strip_prefix("l_").is_some_and(|l| !l.is_empty() && l.bytes().all(|b| b.is_ascii_lowercase() || b == b'_'))
+    header
+        .strip_prefix("l_")
+        .is_some_and(|l| !l.is_empty() && l.bytes().all(|b| b.is_ascii_lowercase() || b == b'_'))
 }
 
 /// Keys of a Paradox YAML-ish localisation file, prefixed by language so
@@ -568,9 +749,15 @@ fn localisation_keys(src: &str) -> Vec<String> {
         if trimmed.is_empty() || trimmed.starts_with('#') {
             continue;
         }
-        let Some((key, rest)) = trimmed.split_once(':') else { continue };
+        let Some((key, rest)) = trimmed.split_once(':') else {
+            continue;
+        };
         if !line.starts_with([' ', '\t']) && rest.trim().is_empty() {
-            language = if is_language_header(key) { key.to_owned() } else { String::new() };
+            language = if is_language_header(key) {
+                key.to_owned()
+            } else {
+                String::new()
+            };
             continue;
         }
         if !language.is_empty() && !key.is_empty() && !key.contains([' ', '"']) {
@@ -593,7 +780,10 @@ mod tests {
     }
 
     fn input(root: &Path, name: &str, replace_path: &[&str]) -> ModInput {
-        ModInput { root: Some(root.join(name)), replace_path: replace_path.iter().map(|s| s.to_string()).collect() }
+        ModInput {
+            root: Some(root.join(name)),
+            replace_path: replace_path.iter().map(|s| s.to_string()).collect(),
+        }
     }
 
     #[test]
@@ -619,23 +809,42 @@ mod tests {
                     body.push_str("l_english:\n");
                     for l in 0..100 {
                         // Some keys are shared between mods.
-                        let k = if l % 10 == 0 { format!("shared_{}", l / 10) } else { format!("m{m}_f{f}_l{l}") };
+                        let k = if l % 10 == 0 {
+                            format!("shared_{}", l / 10)
+                        } else {
+                            format!("m{m}_f{f}_l{l}")
+                        };
                         body.push_str(&format!(" {k}:0 \"Text {l}\"\n"));
                         object_count += 1;
                     }
                 } else {
                     for o in 0..30 {
-                        let k = if o % 10 == 0 { format!("shared_{f}_{o}") } else { format!("m{m}_f{f}_o{o}") };
-                        let head = if folder == "events" { format!("country_event = {{ id = {k}") } else { format!("{k} = {{") };
+                        let k = if o % 10 == 0 {
+                            format!("shared_{f}_{o}")
+                        } else {
+                            format!("m{m}_f{f}_o{o}")
+                        };
+                        let head = if folder == "events" {
+                            format!("country_event = {{ id = {k}")
+                        } else {
+                            format!("{k} = {{")
+                        };
                         body.push_str(&format!("{head}\n\tcost = {{ energy = {o} }}\n\tmodifier = {{ a = 1 b = 2 }}\n}}\n"));
                         object_count += 1;
                     }
                 }
-                let path = if ext == "yml" { format!("{folder}/m{m}_f{f}_l_english.yml") } else { format!("{folder}/m{m}_f{f}.txt") };
+                let path = if ext == "yml" {
+                    format!("{folder}/m{m}_f{f}_l_english.yml")
+                } else {
+                    format!("{folder}/m{m}_f{f}.txt")
+                };
                 files.push((path, body));
                 file_count += 1;
             }
-            let refs: Vec<(&str, &str)> = files.iter().map(|(a, b)| (a.as_str(), b.as_str())).collect();
+            let refs: Vec<(&str, &str)> = files
+                .iter()
+                .map(|(a, b)| (a.as_str(), b.as_str()))
+                .collect();
             write(&root.join(&name), &refs);
             inputs.push(input(&root, &name, &[]));
         }
@@ -665,34 +874,99 @@ mod tests {
     #[test]
     fn finds_file_and_object_conflicts() {
         let root = std::env::temp_dir().join(format!("drukhal-conflicts-{}", std::process::id()));
-        write(&root.join("a"), &[
-            ("descriptor.mod", "name=a"),
-            ("common/buildings/a_buildings.txt", "@cost = 10\nbuilding_lab = { cost = @cost }\nbuilding_a = {}"),
-            ("common/buildings/shared.txt", "building_shared = {}"),
-            ("common/ambient_objects/a.txt", "ambient_object = { name = x }"),
-            (".git/config", "[core]"),
-            ("common/on_actions/a.txt", "on_game_start = { events = { a.1 } }"),
-            ("events/a.txt", "namespace = a\ncountry_event = { id = a.1 }\ncountry_event = { id = shared.1 }"),
-            ("localisation/english/a_l_english.yml", "\u{feff}l_english:\n building_lab:0 \"Lab\"\n only_a: \"A\"\n"),
-        ]);
-        write(&root.join("b"), &[
-            ("descriptor.mod", "name=b"),
-            ("common/buildings/b_buildings.txt", "building_lab = { cost = 20 }"),
-            ("common/buildings/Shared.txt", "building_shared = { b = yes }"),
-            ("common/ambient_objects/b.txt", "ambient_object = { name = z }"),
-            (".git/config", "[core]"),
-            ("common/on_actions/b.txt", "on_game_start = { events = { b.1 } }"),
-            ("events/b.txt", "namespace = b\nship_event = { id = shared.1 }"),
-            ("localisation/b_l_english.yml", "l_english:\n building_lab:0 \"Better Lab\"\n"),
-            ("localisation/b_l_german.yml", "l_german:\n only_a:0 \"A\"\n"),
-        ]);
+        write(
+            &root.join("a"),
+            &[
+                ("descriptor.mod", "name=a"),
+                (
+                    "common/buildings/a_buildings.txt",
+                    "@cost = 10\nbuilding_lab = { cost = @cost }\nbuilding_a = {}",
+                ),
+                ("common/buildings/shared.txt", "building_shared = {}"),
+                (
+                    "common/ambient_objects/a.txt",
+                    "ambient_object = { name = x }",
+                ),
+                (".git/config", "[core]"),
+                (
+                    "common/on_actions/a.txt",
+                    "on_game_start = { events = { a.1 } }",
+                ),
+                (
+                    "events/a.txt",
+                    "namespace = a\ncountry_event = { id = a.1 }\ncountry_event = { id = shared.1 }",
+                ),
+                (
+                    "localisation/english/a_l_english.yml",
+                    "\u{feff}l_english:\n building_lab:0 \"Lab\"\n only_a: \"A\"\n",
+                ),
+            ],
+        );
+        write(
+            &root.join("b"),
+            &[
+                ("descriptor.mod", "name=b"),
+                (
+                    "common/buildings/b_buildings.txt",
+                    "building_lab = { cost = 20 }",
+                ),
+                (
+                    "common/buildings/Shared.txt",
+                    "building_shared = { b = yes }",
+                ),
+                (
+                    "common/ambient_objects/b.txt",
+                    "ambient_object = { name = z }",
+                ),
+                (".git/config", "[core]"),
+                (
+                    "common/on_actions/b.txt",
+                    "on_game_start = { events = { b.1 } }",
+                ),
+                (
+                    "events/b.txt",
+                    "namespace = b\nship_event = { id = shared.1 }",
+                ),
+                (
+                    "localisation/b_l_english.yml",
+                    "l_english:\n building_lab:0 \"Better Lab\"\n",
+                ),
+                (
+                    "localisation/b_l_german.yml",
+                    "l_german:\n only_a:0 \"A\"\n",
+                ),
+            ],
+        );
 
         let report = analyze(&[input(&root, "a", &[]), input(&root, "b", &[])], None);
 
-        assert_eq!(report.files, [FileConflict { path: "common/buildings/Shared.txt".into(), mods: vec![0, 1] }]);
-        let objects: Vec<(&str, &str)> = report.objects.iter().map(|c| (c.category.as_str(), c.key.as_str())).collect();
-        assert_eq!(objects, [("common/buildings", "building_lab"), ("events", "shared.1"), ("localisation", "l_english:building_lab")]);
-        assert_eq!(report.objects[0].definitions[1], Definition { mod_position: 1, file: "common/buildings/b_buildings.txt".into() });
+        assert_eq!(
+            report.files,
+            [FileConflict {
+                path: "common/buildings/Shared.txt".into(),
+                mods: vec![0, 1]
+            }]
+        );
+        let objects: Vec<(&str, &str)> = report
+            .objects
+            .iter()
+            .map(|c| (c.category.as_str(), c.key.as_str()))
+            .collect();
+        assert_eq!(
+            objects,
+            [
+                ("common/buildings", "building_lab"),
+                ("events", "shared.1"),
+                ("localisation", "l_english:building_lab")
+            ]
+        );
+        assert_eq!(
+            report.objects[0].definitions[1],
+            Definition {
+                mod_position: 1,
+                file: "common/buildings/b_buildings.txt".into()
+            }
+        );
         assert!(report.errors.is_empty(), "{:?}", report.errors);
         assert_eq!(report.counts_by_mod(2), [4, 4]);
 
@@ -709,12 +983,21 @@ mod tests {
     fn inline_script_survey() {
         use crate::paradox::script::{Entries, Value};
 
-        let (Some(workshop), Some(game)) = (std::env::var_os("DRUKHAL_WORKSHOP"), std::env::var_os("DRUKHAL_GAME")) else {
+        let (Some(workshop), Some(game)) = (
+            std::env::var_os("DRUKHAL_WORKSHOP"),
+            std::env::var_os("DRUKHAL_GAME"),
+        ) else {
             println!("SURVEY skipped: set DRUKHAL_WORKSHOP and DRUKHAL_GAME");
             return;
         };
         let (workshop, game) = (PathBuf::from(workshop), PathBuf::from(game));
-        let read = |path: &Path| std::fs::read(path).ok().map(|b| String::from_utf8_lossy(&b).trim_start_matches('\u{feff}').to_owned());
+        let read = |path: &Path| {
+            std::fs::read(path).ok().map(|b| {
+                String::from_utf8_lossy(&b)
+                    .trim_start_matches('\u{feff}')
+                    .to_owned()
+            })
+        };
 
         // Every mod: its id, root and files.
         let mut mods: Vec<(String, PathBuf, Vec<String>)> = Vec::new();
@@ -722,7 +1005,11 @@ mod tests {
             if entry.file_type().is_ok_and(|k| k.is_dir()) {
                 let mut files = Vec::new();
                 let _ = walk(&entry.path(), &entry.path(), &mut files);
-                mods.push((entry.file_name().to_string_lossy().into_owned(), entry.path(), files));
+                mods.push((
+                    entry.file_name().to_string_lossy().into_owned(),
+                    entry.path(),
+                    files,
+                ));
             }
         }
         mods.sort();
@@ -730,11 +1017,21 @@ mod tests {
         let script_dir = "common/inline_scripts/";
         let index: Vec<BTreeMap<String, String>> = mods
             .iter()
-            .map(|(_, _, files)| files.iter().filter(|f| f.to_lowercase().starts_with(script_dir)).map(|f| (f.to_lowercase(), f.clone())).collect())
+            .map(|(_, _, files)| {
+                files
+                    .iter()
+                    .filter(|f| f.to_lowercase().starts_with(script_dir))
+                    .map(|f| (f.to_lowercase(), f.clone()))
+                    .collect()
+            })
             .collect();
         let mut game_files = Vec::new();
         let _ = walk(&game, &game, &mut game_files);
-        let game_index: BTreeMap<String, String> = game_files.iter().filter(|f| f.to_lowercase().starts_with(script_dir)).map(|f| (f.to_lowercase(), f.clone())).collect();
+        let game_index: BTreeMap<String, String> = game_files
+            .iter()
+            .filter(|f| f.to_lowercase().starts_with(script_dir))
+            .map(|f| (f.to_lowercase(), f.clone()))
+            .collect();
 
         // Top-level keys that name objects: the rules of `object_keys`, but
         // counting nested calls instead of dropping them silently.
@@ -750,13 +1047,27 @@ mod tests {
                     }
                 }
             }
-            (seen.into_iter().filter(|&(_, n)| n == 1).map(|(k, _)| k.to_owned()).collect(), nested)
+            (
+                seen.into_iter()
+                    .filter(|&(_, n)| n == 1)
+                    .map(|(k, _)| k.to_owned())
+                    .collect(),
+                nested,
+            )
         };
 
         let mut normal: BTreeMap<(String, String), BTreeSet<usize>> = BTreeMap::new();
         let mut expanded: BTreeMap<(String, String), BTreeSet<usize>> = BTreeMap::new();
         let (mut shipping, mut calling) = (0, 0);
-        let (mut scalar, mut block, mut unresolved, mut nested, mut with_conditionals, mut parse_failures, mut calls) = (0, 0, 0, 0, 0, 0, 0);
+        let (
+            mut scalar,
+            mut block,
+            mut unresolved,
+            mut nested,
+            mut with_conditionals,
+            mut parse_failures,
+            mut calls,
+        ) = (0, 0, 0, 0, 0, 0, 0);
         let mut bogus = 0;
         let mut event_calls = 0;
         let (mut source_parse_failures, mut source_failure_examples) = (0, Vec::new());
@@ -769,8 +1080,12 @@ mod tests {
             }
             let mut mod_calls = 0;
             for file in files {
-                let Some(category) = object_category(file) else { continue };
-                let Some(src) = read(&root.join(file)) else { continue };
+                let Some(category) = object_category(file) else {
+                    continue;
+                };
+                let Some(src) = read(&root.join(file)) else {
+                    continue;
+                };
                 if let Ok(keys) = object_keys(&category, &src) {
                     for key in keys {
                         normal.entry((category.clone(), key)).or_default().insert(m);
@@ -811,7 +1126,11 @@ mod tests {
                             let params = b
                                 .iter()
                                 .filter_map(|e| match e {
-                                    Entry::Assign { key, value: Value::Scalar(v), .. } if key != "script" => Some((key.clone(), v.clone())),
+                                    Entry::Assign {
+                                        key,
+                                        value: Value::Scalar(v),
+                                        ..
+                                    } if key != "script" => Some((key.clone(), v.clone())),
                                     _ => None,
                                 })
                                 .collect();
@@ -822,7 +1141,12 @@ mod tests {
                     let text = index[m]
                         .get(&wanted)
                         .map(|f| root.join(f))
-                        .or_else(|| index.iter().enumerate().find_map(|(o, i)| i.get(&wanted).map(|f| mods[o].1.join(f))))
+                        .or_else(|| {
+                            index
+                                .iter()
+                                .enumerate()
+                                .find_map(|(o, i)| i.get(&wanted).map(|f| mods[o].1.join(f)))
+                        })
                         .or_else(|| game_index.get(&wanted).map(|f| game.join(f)))
                         .and_then(|path| read(&path));
                     let Some(mut text) = text else {
@@ -842,9 +1166,15 @@ mod tests {
                         Ok(parsed) => {
                             let (_, n) = top_keys(&parsed);
                             nested += n;
-                            let keys: Vec<String> = parsed.iter().filter_map(|e| object_key_for_entry(&category, e)).collect();
+                            let keys: Vec<String> = parsed
+                                .iter()
+                                .filter_map(|e| object_key_for_entry(&category, e))
+                                .collect();
                             for key in keys {
-                                expanded.entry((category.clone(), key)).or_default().insert(m);
+                                expanded
+                                    .entry((category.clone(), key))
+                                    .or_default()
+                                    .insert(m);
                             }
                         }
                         Err(e) => {
@@ -864,7 +1194,10 @@ mod tests {
         // (objects only from expansions, new conflicts, conflicts gaining a mod) over
         // the categories `wanted` accepts.
         let stats = |wanted: &dyn Fn(&str) -> bool| {
-            let from_expansions = expanded.keys().filter(|k| wanted(&k.0) && !normal.contains_key(*k)).count();
+            let from_expansions = expanded
+                .keys()
+                .filter(|k| wanted(&k.0) && !normal.contains_key(*k))
+                .count();
             let mut new_conflicts = Vec::new();
             let mut gaining = 0;
             for (key, via) in expanded.iter().filter(|(k, _)| wanted(&k.0)) {
@@ -889,10 +1222,21 @@ mod tests {
         let mut categories: Vec<_> = categories.into_iter().collect();
         categories.sort_by_key(|&(c, n)| (std::cmp::Reverse(n), c));
 
-        println!("SURVEY mods={} mods_shipping_inline_scripts={shipping} mods_calling_inline_scripts={calling}", mods.len());
-        println!("SURVEY calls={calls} scalar={scalar} block={block} unresolved={unresolved} nested={nested} with_conditionals={with_conditionals} parse_failures={parse_failures}");
-        println!("SURVEY objects_from_expansions={from_expansions} new_conflicts={} conflicts_gaining_a_mod={gaining}", new_conflicts.len());
-        println!("SURVEY events calls={event_calls} objects_from_expansions={event_objects} new_conflicts={} conflicts_gaining_a_mod={event_gaining}", event_new.len());
+        println!(
+            "SURVEY mods={} mods_shipping_inline_scripts={shipping} mods_calling_inline_scripts={calling}",
+            mods.len()
+        );
+        println!(
+            "SURVEY calls={calls} scalar={scalar} block={block} unresolved={unresolved} nested={nested} with_conditionals={with_conditionals} parse_failures={parse_failures}"
+        );
+        println!(
+            "SURVEY objects_from_expansions={from_expansions} new_conflicts={} conflicts_gaining_a_mod={gaining}",
+            new_conflicts.len()
+        );
+        println!(
+            "SURVEY events calls={event_calls} objects_from_expansions={event_objects} new_conflicts={} conflicts_gaining_a_mod={event_gaining}",
+            event_new.len()
+        );
         println!("SURVEY bogus_inline_script_objects_before_fix={bogus}");
         for ((category, key), all) in new_conflicts.iter().take(15) {
             let ids: Vec<&str> = all.iter().map(|&m| mods[m].0.as_str()).collect();
@@ -917,14 +1261,33 @@ mod tests {
     fn inline_script_calls_are_not_objects() {
         let root = std::env::temp_dir().join(format!("drukhal-inline-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
-        write(&root.join("a"), &[
-            ("common/technology/a.txt", "inline_script = \"tech/shared\"\ntech_a = { cost = 1 }"),
-            ("common/inline_scripts/tech/shared.txt", "tech_from_script = { cost = 3 }"),
-        ]);
-        write(&root.join("b"), &[("common/technology/b.txt", "inline_script = { script = tech/shared NAME = b }\ntech_b = { cost = 2 }")]);
+        write(
+            &root.join("a"),
+            &[
+                (
+                    "common/technology/a.txt",
+                    "inline_script = \"tech/shared\"\ntech_a = { cost = 1 }",
+                ),
+                (
+                    "common/inline_scripts/tech/shared.txt",
+                    "tech_from_script = { cost = 3 }",
+                ),
+            ],
+        );
+        write(
+            &root.join("b"),
+            &[(
+                "common/technology/b.txt",
+                "inline_script = { script = tech/shared NAME = b }\ntech_b = { cost = 2 }",
+            )],
+        );
 
         let report = analyze(&[input(&root, "a", &[]), input(&root, "b", &[])], None);
-        assert!(report.objects.iter().all(|c| c.key != "inline_script"), "{:?}", report.objects);
+        assert!(
+            report.objects.iter().all(|c| c.key != "inline_script"),
+            "{:?}",
+            report.objects
+        );
         assert!(report.objects.is_empty(), "{:?}", report.objects);
 
         std::fs::remove_dir_all(root).unwrap();
@@ -933,24 +1296,51 @@ mod tests {
     #[test]
     fn looks_up_objects_defined_by_one_mod_or_more() {
         let root = std::env::temp_dir().join(format!("drukhal-lookup-{}", std::process::id()));
-        write(&root.join("a"), &[
-            ("common/buildings/a.txt", "building_lab = {}\nbuilding_only_a = {}"),
-            ("localisation/english/a_l_english.yml", "l_english:\n only_a: \"A\"\n"),
-        ]);
-        write(&root.join("b"), &[("common/buildings/b.txt", "building_lab = {}")]);
+        write(
+            &root.join("a"),
+            &[
+                (
+                    "common/buildings/a.txt",
+                    "building_lab = {}\nbuilding_only_a = {}",
+                ),
+                (
+                    "localisation/english/a_l_english.yml",
+                    "l_english:\n only_a: \"A\"\n",
+                ),
+            ],
+        );
+        write(
+            &root.join("b"),
+            &[("common/buildings/b.txt", "building_lab = {}")],
+        );
 
         let report = analyze(&[input(&root, "a", &[]), input(&root, "b", &[])], None);
 
         let one = report.look_up("building_only_a", 10);
         assert_eq!(one.len(), 1);
-        assert_eq!(one[0].definitions.iter().map(|d| d.mod_position).collect::<Vec<_>>(), [0]);
+        assert_eq!(
+            one[0]
+                .definitions
+                .iter()
+                .map(|d| d.mod_position)
+                .collect::<Vec<_>>(),
+            [0]
+        );
         assert!(one[0].winner().is_some());
         let both = report.look_up("BUILDING", 10);
-        assert_eq!(both.iter().map(|c| c.key.as_str()).collect::<Vec<_>>(), ["building_lab", "building_only_a"]);
+        assert_eq!(
+            both.iter().map(|c| c.key.as_str()).collect::<Vec<_>>(),
+            ["building_lab", "building_only_a"]
+        );
         let exact = report.look_up("building_lab", 10);
         assert_eq!(exact[0].key, "building_lab");
         assert_eq!(exact[0].definitions.len(), 2);
-        assert!(report.look_up("only_a", 10).iter().any(|c| c.category == "localisation" && c.key == "l_english:only_a"));
+        assert!(
+            report
+                .look_up("only_a", 10)
+                .iter()
+                .any(|c| c.category == "localisation" && c.key == "l_english:only_a")
+        );
         assert!(report.look_up("  ", 10).is_empty());
         assert_eq!(report.look_up("building", 1).len(), 1);
         assert!(report.objects.iter().any(|c| c.key == "building_lab"));
@@ -962,10 +1352,26 @@ mod tests {
     #[test]
     fn replace_path_hides_earlier_files() {
         let root = std::env::temp_dir().join(format!("drukhal-replace-{}", std::process::id()));
-        write(&root.join("a"), &[("common/ethics/x.txt", "ethic_a = {}"), ("events/broken.txt", "country_event = {")]);
+        write(
+            &root.join("a"),
+            &[
+                ("common/ethics/x.txt", "ethic_a = {}"),
+                ("events/broken.txt", "country_event = {"),
+            ],
+        );
         write(&root.join("b"), &[("common/ethics/x.txt", "ethic_a = {}")]);
 
-        let report = analyze(&[input(&root, "a", &[]), input(&root, "b", &["common/ethics"]), ModInput { root: None, replace_path: vec![] }], None);
+        let report = analyze(
+            &[
+                input(&root, "a", &[]),
+                input(&root, "b", &["common/ethics"]),
+                ModInput {
+                    root: None,
+                    replace_path: vec![],
+                },
+            ],
+            None,
+        );
         assert!(report.files.is_empty());
         assert!(report.objects.is_empty());
         assert_eq!(report.errors.len(), 1);
@@ -980,7 +1386,10 @@ mod tests {
         let root = std::env::temp_dir().join(format!("dm-shipped-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         write(&root.join("a"), &[("gfx/1.dds", "1"), ("gfx/2.dds", "2")]);
-        write(&root.join("b"), &[("gfx/1.dds", "x"), ("gfx/3.dds", "3"), ("gfx/4.dds", "4")]);
+        write(
+            &root.join("b"),
+            &[("gfx/1.dds", "x"), ("gfx/3.dds", "3"), ("gfx/4.dds", "4")],
+        );
         let report = analyze(&[input(&root, "a", &[]), input(&root, "b", &[])], None);
         assert_eq!(report.shipped, vec![2, 3]);
         std::fs::remove_dir_all(root).unwrap();
@@ -992,7 +1401,8 @@ mod tests {
         let full = "auth_corporate = { cost = 1 }\n";
         let file = "common/governments/authorities/x.txt";
         let run = |tag: &str, a: (&str, &str), b: (&str, &str)| {
-            let root = std::env::temp_dir().join(format!("dm-additions-{tag}-{}", std::process::id()));
+            let root =
+                std::env::temp_dir().join(format!("dm-additions-{tag}-{}", std::process::id()));
             let _ = std::fs::remove_dir_all(&root);
             write(&root.join("a"), &[a]);
             write(&root.join("b"), &[b]);
@@ -1000,27 +1410,56 @@ mod tests {
             std::fs::remove_dir_all(&root).unwrap();
             report
         };
-        let both_swaps = run("1", (file, swap), ("common/governments/authorities/y.txt", swap));
+        let both_swaps = run(
+            "1",
+            (file, swap),
+            ("common/governments/authorities/y.txt", swap),
+        );
         assert!(both_swaps.objects.is_empty());
         assert!(both_swaps.defined.is_empty());
-        let mixed = run("2", (file, full), ("common/governments/authorities/y.txt", swap));
+        let mixed = run(
+            "2",
+            (file, full),
+            ("common/governments/authorities/y.txt", swap),
+        );
         assert!(mixed.objects.is_empty());
         assert_eq!(mixed.defined.len(), 1);
-        let both_full = run("3", (file, full), ("common/governments/authorities/y.txt", full));
+        let both_full = run(
+            "3",
+            (file, full),
+            ("common/governments/authorities/y.txt", full),
+        );
         assert_eq!(both_full.objects.len(), 1);
         let with_other = "auth_corporate = { advanced_authority_swap = { } has_heir = yes }\n";
-        let not_only = run("4", (file, with_other), ("common/governments/authorities/y.txt", with_other));
+        let not_only = run(
+            "4",
+            (file, with_other),
+            ("common/governments/authorities/y.txt", with_other),
+        );
         assert_eq!(not_only.objects.len(), 1);
-        let elsewhere = run("5", ("common/governments/civics/x.txt", swap), ("common/governments/civics/y.txt", swap));
+        let elsewhere = run(
+            "5",
+            ("common/governments/civics/x.txt", swap),
+            ("common/governments/civics/y.txt", swap),
+        );
         assert_eq!(elsewhere.objects.len(), 1);
-        assert!(is_addition("Common/Governments/Authorities", &script::parse("ADVANCED_AUTHORITY_SWAP = {}").unwrap()));
+        assert!(is_addition(
+            "Common/Governments/Authorities",
+            &script::parse("ADVANCED_AUTHORITY_SWAP = {}").unwrap()
+        ));
         assert!(!is_addition("common/governments/authorities", &[]));
     }
 
     #[test]
     fn reads_only_the_chosen_languages() {
-        assert_eq!(file_language("localisation/english/mod_l_english.yml"), Some("english"));
-        assert_eq!(file_language("localisation/replace/x_L_SIMP_CHINESE.yml"), Some("simp_chinese"));
+        assert_eq!(
+            file_language("localisation/english/mod_l_english.yml"),
+            Some("english")
+        );
+        assert_eq!(
+            file_language("localisation/replace/x_L_SIMP_CHINESE.yml"),
+            Some("simp_chinese")
+        );
         assert_eq!(file_language("localisation/notes.yml"), None);
         assert_eq!(file_language("localisation/l_german.yml"), Some("german"));
 
@@ -1030,9 +1469,18 @@ mod tests {
         // objects; both also ship one shared German file.
         for name in ["a", "b"] {
             for (path, src) in [
-                (format!("localisation/{name}_l_english.yml"), "l_english:\n key:0 \"x\"\nl_german:\n stray:0 \"x\"\n"),
-                (format!("localisation/{name}_l_german.yml"), "l_german:\n key:0 \"x\"\n"),
-                ("localisation/shared_l_german.yml".to_owned(), "l_german:\n shared:0 \"x\"\n"),
+                (
+                    format!("localisation/{name}_l_english.yml"),
+                    "l_english:\n key:0 \"x\"\nl_german:\n stray:0 \"x\"\n",
+                ),
+                (
+                    format!("localisation/{name}_l_german.yml"),
+                    "l_german:\n key:0 \"x\"\n",
+                ),
+                (
+                    "localisation/shared_l_german.yml".to_owned(),
+                    "l_german:\n shared:0 \"x\"\n",
+                ),
                 ("common/buildings/b.txt".to_owned(), "b = {}\n"),
             ] {
                 let file = root.join(name).join(path);
@@ -1048,31 +1496,87 @@ mod tests {
             found.sort();
             found
         };
-        assert_eq!(found(None), ["common/buildings/b.txt", "l_english:key", "l_german:key", "l_german:stray", "localisation/shared_l_german.yml"]);
+        assert_eq!(
+            found(None),
+            [
+                "common/buildings/b.txt",
+                "l_english:key",
+                "l_german:key",
+                "l_german:stray",
+                "localisation/shared_l_german.yml"
+            ]
+        );
         let english = BTreeSet::from(["english".to_owned()]);
-        assert_eq!(found(Some(&english)), ["common/buildings/b.txt", "l_english:key"], "German files and the stray German entries are left out");
-        assert_eq!(found(Some(&BTreeSet::new())), ["common/buildings/b.txt"], "no localisation at all");
+        assert_eq!(
+            found(Some(&english)),
+            ["common/buildings/b.txt", "l_english:key"],
+            "German files and the stray German entries are left out"
+        );
+        assert_eq!(
+            found(Some(&BTreeSet::new())),
+            ["common/buildings/b.txt"],
+            "no localisation at all"
+        );
         std::fs::remove_dir_all(&root).unwrap();
     }
 
     #[test]
     fn finds_conflicts_meant_by_dependencies() {
-        let names: Vec<String> = ["Base", "Patch", "Sub-patch", "Other"].map(String::from).into();
-        let deps = vec![vec![], vec!["base".to_owned()], vec!["Patch".to_owned(), "Missing".to_owned()], vec![]];
+        let names: Vec<String> = ["Base", "Patch", "Sub-patch", "Other"]
+            .map(String::from)
+            .into();
+        let deps = vec![
+            vec![],
+            vec!["base".to_owned()],
+            vec!["Patch".to_owned(), "Missing".to_owned()],
+            vec![],
+        ];
         let depends = depends_on(&names, &deps);
         assert_eq!(depends[2], BTreeSet::from([0, 1]), "through the patch, too");
         assert!(depends[0].is_empty() && depends[3].is_empty());
-        let file = |mods: Vec<usize>| FileConflict { path: "x".into(), mods };
+        let file = |mods: Vec<usize>| FileConflict {
+            path: "x".into(),
+            mods,
+        };
         assert!(file(vec![0, 1]).builds_on_dependencies(&depends));
         assert!(file(vec![0, 1, 2]).builds_on_dependencies(&depends));
-        assert!(!file(vec![0, 3]).builds_on_dependencies(&depends), "unrelated mods");
-        assert!(!file(vec![0, 1, 3]).builds_on_dependencies(&depends), "one doesn't build on the rest");
-        let object = ObjectConflict { category: "c".into(), key: "k".into(), definitions: vec![Definition { mod_position: 1, file: "a".into() }, Definition { mod_position: 1, file: "b".into() }] };
+        assert!(
+            !file(vec![0, 3]).builds_on_dependencies(&depends),
+            "unrelated mods"
+        );
+        assert!(
+            !file(vec![0, 1, 3]).builds_on_dependencies(&depends),
+            "one doesn't build on the rest"
+        );
+        let object = ObjectConflict {
+            category: "c".into(),
+            key: "k".into(),
+            definitions: vec![
+                Definition {
+                    mod_position: 1,
+                    file: "a".into(),
+                },
+                Definition {
+                    mod_position: 1,
+                    file: "b".into(),
+                },
+            ],
+        };
         assert!(!object.builds_on_dependencies(&depends), "one mod alone");
         // A dependency that loads later doesn't count: the patch loses then.
-        let late = depends_on(&["Patch".into(), "Base".into()], &[vec!["Base".into()], vec![]]);
+        let late = depends_on(
+            &["Patch".into(), "Base".into()],
+            &[vec!["Base".into()], vec![]],
+        );
         assert!(!builds_on_dependencies([0, 1], &late));
-        assert_eq!(depends_on(&["A".into(), "B".into()], &[vec!["B".into()], vec!["A".into()]]), vec![BTreeSet::from([1]), BTreeSet::from([0])], "cycles end");
+        assert_eq!(
+            depends_on(
+                &["A".into(), "B".into()],
+                &[vec!["B".into()], vec!["A".into()]]
+            ),
+            vec![BTreeSet::from([1]), BTreeSet::from([0])],
+            "cycles end"
+        );
     }
 
     #[test]
@@ -1080,141 +1584,356 @@ mod tests {
         let conflict = |category: &str, defs: &[(usize, &str)]| ObjectConflict {
             category: category.into(),
             key: "x".into(),
-            definitions: defs.iter().map(|&(m, f)| Definition { mod_position: m, file: f.into() }).collect(),
+            definitions: defs
+                .iter()
+                .map(|&(m, f)| Definition {
+                    mod_position: m,
+                    file: f.into(),
+                })
+                .collect(),
         };
         // Later file names override earlier ones, whatever the load order.
-        let c = conflict("common/buildings", &[(0, "common/buildings/zz_mine.txt"), (1, "common/buildings/00_theirs.txt")]);
+        let c = conflict(
+            "common/buildings",
+            &[
+                (0, "common/buildings/zz_mine.txt"),
+                (1, "common/buildings/00_theirs.txt"),
+            ],
+        );
         assert_eq!(c.winner(), Some((0, Reason::LastFile)));
         // Names compare without the extension, case-sensitively like the game.
-        let c = conflict("common/buildings", &[(0, "common/buildings/a_x.txt"), (1, "common/buildings/a.txt"), (2, "common/buildings/B.txt")]);
-        assert_eq!(c.winner(), Some((0, Reason::LastFile)));
+        // Names compare without the extension, case-insensitively.
+        let c = conflict(
+            "common/buildings",
+            &[
+                (0, "common/buildings/a_x.txt"),
+                (1, "common/buildings/a.txt"),
+                (2, "common/buildings/B.txt"),
+            ],
+        );
+        assert_eq!(c.winner(), Some((2, Reason::LastFile)));
         // Events keep the first definition read.
         let c = conflict("events", &[(0, "events/zz.txt"), (1, "events/aa.txt")]);
         assert_eq!(c.winner(), Some((1, Reason::FirstFile)));
-        assert!(is_fios("common/governments/authorities") && is_fios("common/traits") && !is_fios("common/species_traits"));
+        assert!(
+            is_fios("common/governments/authorities")
+                && is_fios("common/traits")
+                && !is_fios("common/species_traits")
+        );
         // Same names: the load order decides, either way round.
-        let c = conflict("common/buildings", &[(0, "common/buildings/sub/x.txt"), (3, "common/buildings/x.txt")]);
+        let c = conflict(
+            "common/buildings",
+            &[
+                (0, "common/buildings/sub/x.txt"),
+                (3, "common/buildings/x.txt"),
+            ],
+        );
         assert_eq!(c.winner(), Some((1, Reason::LoadOrder)));
         let c = conflict("events", &[(0, "events/a/x.txt"), (3, "events/x.txt")]);
         assert_eq!(c.winner(), Some((0, Reason::LoadOrder)));
         // Localisation in a replace folder beats the rest.
-        let c = conflict("localisation", &[(0, "localisation/replace/a_l_english.yml"), (1, "localisation/english/z_l_english.yml")]);
+        let c = conflict(
+            "localisation",
+            &[
+                (0, "localisation/replace/a_l_english.yml"),
+                (1, "localisation/english/z_l_english.yml"),
+            ],
+        );
         assert_eq!(c.winner(), Some((0, Reason::Replace)));
-        let c = conflict("localisation", &[(0, "localisation/replace/z_l_english.yml"), (1, "localisation/english/replace/a_l_english.yml")]);
+        let c = conflict(
+            "localisation",
+            &[
+                (0, "localisation/replace/z_l_english.yml"),
+                (1, "localisation/english/replace/a_l_english.yml"),
+            ],
+        );
         assert_eq!(c.winner(), Some((0, Reason::LastFile)));
     }
 
     #[test]
     fn categorises_paths() {
-        assert_eq!(object_category("common/governments/civics/x.txt").as_deref(), Some("common/governments/civics"));
+        assert_eq!(
+            object_category("common/governments/civics/x.txt").as_deref(),
+            Some("common/governments/civics")
+        );
         assert_eq!(object_category("common/on_actions/x.txt"), None);
         assert_eq!(object_category("common/random_names/x.txt"), None);
         assert_eq!(object_category("common/start_screen_messages/x.txt"), None);
-        assert_eq!(object_category("common/ambient_objects/x.txt").as_deref(), Some("common/ambient_objects"));
+        assert_eq!(
+            object_category("common/ambient_objects/x.txt").as_deref(),
+            Some("common/ambient_objects")
+        );
         assert_eq!(object_category("events/x.txt").as_deref(), Some("events"));
         assert_eq!(object_category("common/inline_scripts/x/y.txt"), None);
-        assert_eq!(object_category("localisation/replace/x_l_english.yml").as_deref(), Some("localisation"));
+        assert_eq!(
+            object_category("localisation/replace/x_l_english.yml").as_deref(),
+            Some("localisation")
+        );
         assert_eq!(object_category("gfx/x.dds"), None);
         assert!(is_under("Common/Ethics/x.txt", "common/ethics/"));
         assert!(!is_under("common/ethics_extra/x.txt", "common/ethics"));
         // Non-ASCII names, where byte offsets fall inside characters.
         assert!(!is_under("common/需要的/x.txt", "common/ethics"));
         assert!(!is_under("需要/x.txt", "common/a"));
-        assert_eq!(object_category("common/需要的/x.txt").as_deref(), Some("common/需要的"));
-        assert_eq!(object_category("common/İtems/x.txt").as_deref(), Some("common/İtems"));
+        assert_eq!(
+            object_category("common/需要的/x.txt").as_deref(),
+            Some("common/需要的")
+        );
+        assert_eq!(
+            object_category("common/İtems/x.txt").as_deref(),
+            Some("common/İtems")
+        );
     }
 
     #[test]
     fn localisation_headers_that_are_not_languages_yield_no_keys() {
         let src = "l_english:\n a:0 \"x\"\n../../evil:\n b:0 \"y\"\nl_simp_chinese:\n c:0 \"z\"\nl_braz_por:\n d:0 \"w\"\n";
 
-        assert_eq!(localisation_keys(src), ["l_english:a", "l_simp_chinese:c", "l_braz_por:d"]);
+        assert_eq!(
+            localisation_keys(src),
+            ["l_english:a", "l_simp_chinese:c", "l_braz_por:d"]
+        );
     }
 
     #[test]
     fn inner_key_categories_use_unique_identifiers_not_wrapper_keywords() {
         let set_a = "component_set = { key = \"SET_A\" icon = \"GFX_a\" }\n";
         let set_b = "component_set = { key = \"SET_B\" icon = \"GFX_b\" }\n";
-        assert_eq!(object_keys("common/component_sets", set_a).unwrap(), vec!["SET_A"]);
-        assert_eq!(object_keys("common/component_sets", set_b).unwrap(), vec!["SET_B"]);
+        assert_eq!(
+            object_keys("common/component_sets", set_a).unwrap(),
+            vec!["SET_A"]
+        );
+        assert_eq!(
+            object_keys("common/component_sets", set_b).unwrap(),
+            vec!["SET_B"]
+        );
 
         let tmpl_1 = "@p = 10\nutility_component_template = { key = \"UTILITY_1\" size = aux }\n";
         let tmpl_2 = "utility_component_template = { key = \"UTILITY_2\" size = aux }\n";
-        assert_eq!(object_keys("common/component_templates", tmpl_1).unwrap(), vec!["UTILITY_1"]);
-        assert_eq!(object_keys("common/component_templates", tmpl_2).unwrap(), vec!["UTILITY_2"]);
+        assert_eq!(
+            object_keys("common/component_templates", tmpl_1).unwrap(),
+            vec!["UTILITY_1"]
+        );
+        assert_eq!(
+            object_keys("common/component_templates", tmpl_2).unwrap(),
+            vec!["UTILITY_2"]
+        );
 
         let amb_1 = "ambient_object = { name = \"amb_1\" entity = \"ent_1\" }\n";
         let amb_2 = "ambient_object = { name = \"amb_2\" entity = \"ent_2\" }\n";
-        assert_eq!(object_keys("common/ambient_objects", amb_1).unwrap(), vec!["amb_1"]);
-        assert_eq!(object_keys("common/ambient_objects", amb_2).unwrap(), vec!["amb_2"]);
+        assert_eq!(
+            object_keys("common/ambient_objects", amb_1).unwrap(),
+            vec!["amb_1"]
+        );
+        assert_eq!(
+            object_keys("common/ambient_objects", amb_2).unwrap(),
+            vec!["amb_2"]
+        );
 
         let msg_1 = "message_type = { key = \"MSG_1\" icon = \"GFX_1\" }\n";
         let msg_2 = "message_type = { key = \"MSG_2\" icon = \"GFX_2\" }\n";
-        assert_eq!(object_keys("common/message_types", msg_1).unwrap(), vec!["MSG_1"]);
-        assert_eq!(object_keys("common/message_types", msg_2).unwrap(), vec!["MSG_2"]);
+        assert_eq!(
+            object_keys("common/message_types", msg_1).unwrap(),
+            vec!["MSG_1"]
+        );
+        assert_eq!(
+            object_keys("common/message_types", msg_2).unwrap(),
+            vec!["MSG_2"]
+        );
 
         let ship_1 = "ship_design = { name = \"DESIGN_1\" ship_size = corvette }\n";
         let ship_2 = "ship_design = { name = \"DESIGN_2\" ship_size = corvette }\n";
-        assert_eq!(object_keys("common/global_ship_designs", ship_1).unwrap(), vec!["DESIGN_1"]);
-        assert_eq!(object_keys("common/global_ship_designs", ship_2).unwrap(), vec!["DESIGN_2"]);
+        assert_eq!(
+            object_keys("common/global_ship_designs", ship_1).unwrap(),
+            vec!["DESIGN_1"]
+        );
+        assert_eq!(
+            object_keys("common/global_ship_designs", ship_2).unwrap(),
+            vec!["DESIGN_2"]
+        );
 
         let proj_1 = "special_project = { key = \"PROJ_1\" days_to_research = 180 }\n";
         let proj_2 = "special_project = { key = \"PROJ_2\" days_to_research = 180 }\n";
-        assert_eq!(object_keys("common/special_projects", proj_1).unwrap(), vec!["PROJ_1"]);
-        assert_eq!(object_keys("common/special_projects", proj_2).unwrap(), vec!["PROJ_2"]);
+        assert_eq!(
+            object_keys("common/special_projects", proj_1).unwrap(),
+            vec!["PROJ_1"]
+        );
+        assert_eq!(
+            object_keys("common/special_projects", proj_2).unwrap(),
+            vec!["PROJ_2"]
+        );
 
-        let rl_1 = "random_list = {\n\tname = \"rl_habitable_normal\"\n\tplanets = { pc_desert }\n}\n";
-        let rl_2 = "random_list = {\n\tname = rl_mem_forested_planets\n\tplanets = { pc_gaia }\n}\n";
-        assert_eq!(object_keys("common/planet_classes", rl_1).unwrap(), vec!["rl_habitable_normal"]);
-        assert_eq!(object_keys("common/planet_classes", rl_2).unwrap(), vec!["rl_mem_forested_planets"]);
+        let rl_1 =
+            "random_list = {\n\tname = \"rl_habitable_normal\"\n\tplanets = { pc_desert }\n}\n";
+        let rl_2 =
+            "random_list = {\n\tname = rl_mem_forested_planets\n\tplanets = { pc_gaia }\n}\n";
+        assert_eq!(
+            object_keys("common/planet_classes", rl_1).unwrap(),
+            vec!["rl_habitable_normal"]
+        );
+        assert_eq!(
+            object_keys("common/planet_classes", rl_2).unwrap(),
+            vec!["rl_mem_forested_planets"]
+        );
 
         let tf_1 = "terraform_link = {\n\tfrom = pc_barren\n\tto = pc_desert\n}\n";
         let tf_2 = "terraform_link = {\n\tfrom = pc_toxic\n\tto = pc_gaia\n}\n";
-        assert_eq!(object_keys("common/terraform", tf_1).unwrap(), vec!["pc_barren → pc_desert"]);
-        assert_eq!(object_keys("common/terraform", tf_2).unwrap(), vec!["pc_toxic → pc_gaia"]);
+        assert_eq!(
+            object_keys("common/terraform", tf_1).unwrap(),
+            vec!["pc_barren → pc_desert"]
+        );
+        assert_eq!(
+            object_keys("common/terraform", tf_2).unwrap(),
+            vec!["pc_toxic → pc_gaia"]
+        );
 
         let root = std::env::temp_dir().join(format!("dm-inner-keys-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
-        write(&root.join("mod1"), &[
-            ("common/component_sets/a.txt", set_a),
-            ("common/component_templates/t1.txt", tmpl_1),
-            ("common/ambient_objects/m1.txt", amb_1),
-            ("common/message_types/msg1.txt", msg_1),
-            ("common/global_ship_designs/s1.txt", ship_1),
-            ("common/special_projects/p1.txt", proj_1),
-            ("common/planet_classes/p1.txt", rl_1),
-            ("common/terraform/t1.txt", tf_1),
-        ]);
-        write(&root.join("mod2"), &[
-            ("common/component_sets/b.txt", set_b),
-            ("common/component_templates/t2.txt", tmpl_2),
-            ("common/ambient_objects/m2.txt", amb_2),
-            ("common/message_types/msg2.txt", msg_2),
-            ("common/global_ship_designs/s2.txt", ship_2),
-            ("common/special_projects/p2.txt", proj_2),
-            ("common/planet_classes/p2.txt", rl_2),
-            ("common/terraform/t2.txt", tf_2),
-        ]);
+        write(
+            &root.join("mod1"),
+            &[
+                ("common/component_sets/a.txt", set_a),
+                ("common/component_templates/t1.txt", tmpl_1),
+                ("common/ambient_objects/m1.txt", amb_1),
+                ("common/message_types/msg1.txt", msg_1),
+                ("common/global_ship_designs/s1.txt", ship_1),
+                ("common/special_projects/p1.txt", proj_1),
+                ("common/planet_classes/p1.txt", rl_1),
+                ("common/terraform/t1.txt", tf_1),
+            ],
+        );
+        write(
+            &root.join("mod2"),
+            &[
+                ("common/component_sets/b.txt", set_b),
+                ("common/component_templates/t2.txt", tmpl_2),
+                ("common/ambient_objects/m2.txt", amb_2),
+                ("common/message_types/msg2.txt", msg_2),
+                ("common/global_ship_designs/s2.txt", ship_2),
+                ("common/special_projects/p2.txt", proj_2),
+                ("common/planet_classes/p2.txt", rl_2),
+                ("common/terraform/t2.txt", tf_2),
+            ],
+        );
 
-        let report = analyze(&[input(&root, "mod1", &[]), input(&root, "mod2", &[])], None);
-        assert!(report.objects.is_empty(), "different keys and names do not conflict: {:?}", report.objects);
+        let report = analyze(
+            &[input(&root, "mod1", &[]), input(&root, "mod2", &[])],
+            None,
+        );
+        assert!(
+            report.objects.is_empty(),
+            "different keys and names do not conflict: {:?}",
+            report.objects
+        );
 
-        write(&root.join("mod2"), &[
-            ("common/component_sets/b.txt", set_a),
-            ("common/component_templates/t2.txt", tmpl_1),
-            ("common/ambient_objects/m2.txt", amb_1),
-            ("common/message_types/msg2.txt", msg_1),
-            ("common/global_ship_designs/s2.txt", ship_1),
-            ("common/special_projects/p2.txt", proj_1),
-            ("common/planet_classes/p2.txt", rl_1),
-            ("common/terraform/t2.txt", tf_1),
-        ]);
-        let report_conflict = analyze(&[input(&root, "mod1", &[]), input(&root, "mod2", &[])], None);
-        assert_eq!(report_conflict.objects.len(), 8, "same keys and names do conflict");
+        write(
+            &root.join("mod2"),
+            &[
+                ("common/component_sets/b.txt", set_a),
+                ("common/component_templates/t2.txt", tmpl_1),
+                ("common/ambient_objects/m2.txt", amb_1),
+                ("common/message_types/msg2.txt", msg_1),
+                ("common/global_ship_designs/s2.txt", ship_1),
+                ("common/special_projects/p2.txt", proj_1),
+                ("common/planet_classes/p2.txt", rl_1),
+                ("common/terraform/t2.txt", tf_1),
+            ],
+        );
+        let report_conflict = analyze(
+            &[input(&root, "mod1", &[]), input(&root, "mod2", &[])],
+            None,
+        );
+        assert_eq!(
+            report_conflict.objects.len(),
+            8,
+            "same keys and names do conflict"
+        );
         let mut keys: Vec<String> = report_conflict.objects.into_iter().map(|o| o.key).collect();
         keys.sort();
-        assert_eq!(keys, vec!["DESIGN_1", "MSG_1", "PROJ_1", "SET_A", "UTILITY_1", "amb_1", "pc_barren → pc_desert", "rl_habitable_normal"]);
+        assert_eq!(
+            keys,
+            vec![
+                "DESIGN_1",
+                "MSG_1",
+                "PROJ_1",
+                "SET_A",
+                "UTILITY_1",
+                "amb_1",
+                "pc_barren → pc_desert",
+                "rl_habitable_normal"
+            ]
+        );
 
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn ignores_merged_folders_in_file_conflicts() {
+        let root = std::env::temp_dir().join(format!("dm-merged-folders-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        write(
+            &root.join("m1"),
+            &[("common/on_actions/a.txt", "on_yearly_pulse = {}")],
+        );
+        write(
+            &root.join("m2"),
+            &[("common/on_actions/a.txt", "on_monthly_pulse = {}")],
+        );
+
+        let report = analyze(&[input(&root, "m1", &[]), input(&root, "m2", &[])], None);
+        assert!(
+            report.files.is_empty(),
+            "MERGED_FOLDERS should not emit FileConflict: {:?}",
+            report.files
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn scripted_variables_conflict_as_first_wins_objects() {
+        let root = std::env::temp_dir().join(format!("dm-scripted-vars-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        write(
+            &root.join("m1"),
+            &[(
+                "common/scripted_variables/01_vars.txt",
+                "@my_cost = 100\n@unique_a = 1",
+            )],
+        );
+        write(
+            &root.join("m2"),
+            &[(
+                "common/scripted_variables/02_vars.txt",
+                "@my_cost = 200\n@unique_b = 2",
+            )],
+        );
+
+        let report = analyze(&[input(&root, "m1", &[]), input(&root, "m2", &[])], None);
+        assert_eq!(report.objects.len(), 1);
+        let c = &report.objects[0];
+        assert_eq!(c.category, "common/scripted_variables");
+        assert_eq!(c.key, "@my_cost");
+        assert!(is_fios(&c.category));
+        assert_eq!(c.winner(), Some((0, Reason::FirstFile)));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn compares_file_stems_case_insensitively() {
+        let c = ObjectConflict {
+            category: "common/buildings".into(),
+            key: "x".into(),
+            definitions: vec![
+                Definition {
+                    mod_position: 0,
+                    file: "common/buildings/Foo.txt".into(),
+                },
+                Definition {
+                    mod_position: 1,
+                    file: "common/buildings/foo.txt".into(),
+                },
+            ],
+        };
+        assert_eq!(c.winner(), Some((1, Reason::LoadOrder)));
     }
 }

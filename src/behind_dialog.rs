@@ -34,6 +34,8 @@ pub struct BehindState {
     pub warnings: Vec<String>,
     pub error: Option<String>,
     pub show_game_changes: bool,
+    /// Inline scripts updated with this object.
+    pub scripts: Vec<ai::MergedScript>,
 }
 
 /// The mod's copy of the object as it is on disk now.
@@ -56,6 +58,9 @@ struct Job {
     after: Source,
     mod_copy: Source,
     game_dir: Option<PathBuf>,
+    /// The mod's folder and descriptor id, for replaced inline scripts.
+    mod_root: PathBuf,
+    mod_id: String,
     /// The game's current version.
     version: String,
 }
@@ -70,6 +75,8 @@ impl Job {
             after: source(tf!("Stellaris {version}", version = new), &now.file, &now.text),
             mod_copy: source(analysis.name(b.mod_position).to_owned(), &b.file, mod_text),
             game_dir: hooks.game_dir.clone(),
+            mod_root: analysis.roots[b.mod_position].clone().unwrap_or_default(),
+            mod_id: analysis.ids[b.mod_position].clone(),
             version: new.to_owned(),
         }
     }
@@ -80,7 +87,8 @@ impl Job {
 
     fn run(&self, provider: &Provider, on: &mut dyn FnMut(Progress)) -> Result<(Checked, Vec<String>), String> {
         let check = |text: &str| merge_dialog::validate(&self.category, &self.key, text);
-        let checked = ai::update_checked(provider, &self.category, &self.key, &self.versions(), &check, on)?;
+        let mut checked = ai::update_checked(provider, &self.category, &self.key, &self.versions(), &check, on)?;
+        checked.scripts = self.update_replaced_scripts(provider, on)?;
         let text = match &checked.script {
             Ok(script) => script.clone(),
             Err(_) => checked.merged.script.clone(),
@@ -90,14 +98,143 @@ impl Job {
         let warnings = vocabulary::unknown(&text, known);
         Ok((checked, warnings))
     }
+
+    /// Updates each mod script that replaced a vanilla inline script the game
+    /// changed, using the old and new vanilla script as the base.
+    fn update_replaced_scripts(
+        &self,
+        provider: &Provider,
+        on: &mut dyn FnMut(Progress),
+    ) -> Result<Vec<ai::MergedScript>, String> {
+        let Some(game_dir) = self.game_dir.as_deref() else {
+            return Ok(Vec::new());
+        };
+        let pairs = crate::merge::inline_scripts::replaced_call_pairs(
+            &self.before.text,
+            &self.mod_copy.text,
+        );
+        if pairs.is_empty() {
+            return Ok(Vec::new());
+        }
+        let Some(old_snapshot) = base_game::previous(&base_game::dir(), &self.version) else {
+            return Ok(Vec::new());
+        };
+        let mut updated = Vec::new();
+        for (old_name, mod_name) in pairs {
+            let Some(old) = old_snapshot.script(&old_name) else {
+                continue;
+            };
+            let Some(new) = crate::merge::inline_scripts::read_inline_script(
+                &[("Vanilla", game_dir)],
+                &old_name,
+            ) else {
+                continue;
+            };
+            if old.text.trim() == new.text.trim() {
+                continue;
+            }
+            let Some(mod_script) = crate::merge::inline_scripts::read_inline_script(
+                &[(&self.mod_copy.label, &self.mod_root)],
+                &mod_name,
+            ) else {
+                continue;
+            };
+            let Some(path) = crate::merge::inline_scripts::file_path(&mod_name) else {
+                return Err(tf!(
+                    "The replaced inline script `{name}` has an unsafe path",
+                    name = &mod_name
+                ));
+            };
+            let before = Source {
+                label: old_snapshot.version.clone(),
+                file: old.file.clone(),
+                text: old.text.clone(),
+            };
+            let after = Source {
+                label: self.version.clone(),
+                file: new.path.clone(),
+                text: new.text.clone(),
+            };
+            let mod_copy = Source {
+                label: self.mod_copy.label.clone(),
+                file: mod_script.path.clone(),
+                text: mod_script.text.clone(),
+            };
+            let check = |text: &str| {
+                let value = crate::merge::validate::validate_file(
+                    &path,
+                    text,
+                    Some(&before),
+                    std::slice::from_ref(&mod_copy),
+                    None,
+                );
+                if value.is_ok() {
+                    Ok(value.normalized)
+                } else {
+                    Err(value
+                        .error_summary()
+                        .unwrap_or_else(|| "Invalid inline script".into()))
+                }
+            };
+            let checked = ai::update_file_checked(
+                provider,
+                "common/inline_scripts",
+                &mod_name,
+                &Versions {
+                    before: &before,
+                    after: &after,
+                    mod_copy: &mod_copy,
+                },
+                &check,
+                on,
+            )?;
+            let script = checked.script.map_err(|problem| {
+                tf!(
+                    "The replaced inline script `{name}` was rejected: {problem}",
+                    name = &mod_name,
+                    problem = problem
+                )
+            })?;
+            updated.push(ai::MergedScript {
+                name: mod_name,
+                script,
+                prints: vec![
+                    Print::new(VANILLA, "Vanilla", &new.path, &new.text),
+                    Print::new(&self.mod_id, &self.mod_copy.label, &mod_script.path, &mod_script.text),
+                ],
+            });
+        }
+        Ok(updated)
+    }
 }
 
 /// Saves `text` as the updated copy of `b` to the merged patch.
-fn save_update(analysis: &Analysis, hooks: &MergeHooks, b: &Behind, now: &Saved, mod_text: &str, text: &str) -> Result<(), String> {
+fn save_update(
+    analysis: &Analysis,
+    hooks: &MergeHooks,
+    b: &Behind,
+    now: &Saved,
+    mod_text: &str,
+    text: &str,
+    scripts: &[ai::MergedScript],
+) -> Result<(), String> {
     let script = merge_dialog::validate(&b.category, &b.key, text)?;
+    for merged in scripts {
+        let path = crate::merge::inline_scripts::file_path(&merged.name)
+            .ok_or_else(|| tf!("The updated inline script `{name}` has an unsafe path", name = &merged.name))?;
+        (hooks.save_file)(&path, merged.script.as_bytes(), merged.prints.clone())?;
+    }
     let position = b.mod_position;
     let prints = vec![Print::new(VANILLA, "Vanilla", &now.file, &now.text), Print::new(&analysis.ids[position], analysis.name(position), &b.file, mod_text)];
-    (hooks.save_object)(&b.category, &b.key, &script, prints)
+    (hooks.save_object)(&b.category, &b.key, &script, prints)?;
+    if !scripts.is_empty() {
+        (hooks.set_scripts)(
+            &b.category,
+            &b.key,
+            scripts.iter().map(|s| s.name.clone()).collect(),
+        )?;
+    }
+    Ok(())
 }
 
 /// The view for one game-update conflict embedded directly in the Conflicts page.
@@ -160,6 +297,7 @@ impl BehindView {
                         warnings: Vec::new(),
                         error: None,
                         show_game_changes: false,
+                        scripts: Vec::new(),
                     },
                 );
             }
@@ -543,10 +681,19 @@ impl BehindView {
                         Ok(s) => s,
                         Err(_) => checked.merged.script,
                     };
+                    let mut notes = checked.merged.notes;
+                    if !checked.scripts.is_empty() {
+                        notes.push_str(&tnf!(
+                            " · {count} inline script updated",
+                            " · {count} inline scripts updated",
+                            count = checked.scripts.len()
+                        ));
+                    }
                     view.with_state(|s| {
-                        s.notes = checked.merged.notes;
+                        s.notes = notes;
                         s.warnings = warnings;
                         s.current_text = script.clone();
+                        s.scripts = checked.scripts.clone();
                     });
                     view.pair.right.replace_text(&script);
                     view.render();
@@ -569,7 +716,10 @@ impl BehindView {
         let Some(ref now) = b.now else { return };
         let Some(mod_text) = read_mod_copy(&page.analysis, b) else { return };
         let text = self.pair.right.text();
-        match save_update(&page.analysis, &page.hooks, b, now, &mod_text, &text) {
+        let scripts = self
+            .with_state(|s| s.scripts.clone())
+            .unwrap_or_default();
+        match save_update(&page.analysis, &page.hooks, b, now, &mod_text, &text, &scripts) {
             Ok(()) => {
                 self.with_state(|s| {
                     s.initial_text = text.clone();
@@ -817,7 +967,13 @@ impl RunDialog {
         self.title.set_title(&b.key);
         self.title.set_subtitle(&tf!("{n} of {total}", n = self.reviewed.get(), total = self.to_review.get()));
 
-        let Review { body, pair, error, buttons } = review_parts(&self.page.analysis, b, &q.mod_text, &self.new, checked, &warnings);
+        let Review {
+            body,
+            pair,
+            error,
+            buttons,
+            scripts,
+        } = review_parts(&self.page.analysis, b, &q.mod_text, &self.new, checked, &warnings);
         let skip = gtk::Button::builder().label(t!("Skip")).build();
         let save = gtk::Button::builder().label(t!("Save to Merged Patch")).css_classes(["suggested-action"]).build();
         buttons.append(&skip);
@@ -830,7 +986,7 @@ impl RunDialog {
         let (run, weak) = (self.clone(), Rc::downgrade(&pair));
         save.connect_clicked(move |_| {
             if let Some(pair) = weak.upgrade() {
-                run.save(position, &pair.right.text(), &error);
+                run.save(position, &pair.right.text(), &error, &scripts);
             }
         });
         if let Some(old) = self.stack.child_by_name("review") {
@@ -840,7 +996,13 @@ impl RunDialog {
         self.stack.set_visible_child_name("review");
     }
 
-    fn save(self: &Rc<Self>, position: usize, text: &str, error: &gtk::Label) {
+    fn save(
+        self: &Rc<Self>,
+        position: usize,
+        text: &str,
+        error: &gtk::Label,
+        scripts: &[ai::MergedScript],
+    ) {
         let hooks = &self.page.hooks;
         if !self.backed_up.get() {
             if let Err(message) = (hooks.backup)(snapshot::BEFORE_UPDATING_ALL) {
@@ -851,7 +1013,15 @@ impl RunDialog {
             self.backed_up.set(true);
         }
         let q = &self.items[position];
-        match save_update(&self.page.analysis, hooks, &self.page.analysis.behind[q.index], &q.now, &q.mod_text, text) {
+        match save_update(
+            &self.page.analysis,
+            hooks,
+            &self.page.analysis.behind[q.index],
+            &q.now,
+            &q.mod_text,
+            text,
+            scripts,
+        ) {
             Ok(()) => {
                 hooks.saved();
                 self.saved.set(self.saved.get() + 1);
@@ -912,9 +1082,11 @@ struct Review {
     pair: Rc<Pair>,
     error: gtk::Label,
     buttons: gtk::Box,
+    scripts: Vec<ai::MergedScript>,
 }
 
 fn review_parts(analysis: &Analysis, b: &Behind, mod_text: &str, version: &str, checked: Checked, warnings: &[String]) -> Review {
+    let scripts = checked.scripts.clone();
     let (script, problem) = match checked.script {
         Ok(script) => (script, None),
         Err(problem) => (checked.merged.script, Some(problem)),
@@ -927,8 +1099,16 @@ fn review_parts(analysis: &Analysis, b: &Behind, mod_text: &str, version: &str, 
 
     let body = gtk::Box::new(gtk::Orientation::Vertical, 0);
     body.append(&pair.widget);
-    if !checked.merged.notes.trim().is_empty() {
-        body.append(&note(&checked.merged.notes, None));
+    let mut notes = checked.merged.notes.clone();
+    if !scripts.is_empty() {
+        notes.push_str(&tnf!(
+            " · {count} inline script updated",
+            " · {count} inline scripts updated",
+            count = scripts.len()
+        ));
+    }
+    if !notes.trim().is_empty() {
+        body.append(&note(&notes, None));
     }
     if !warnings.is_empty() {
         let warning = note(&tf!("Not found in Stellaris {version} or the mod's copy: {keys}. Check these before saving.", version = version, keys = warnings.join(", ")), Some("warning"));
@@ -942,5 +1122,11 @@ fn review_parts(analysis: &Analysis, b: &Behind, mod_text: &str, version: &str, 
     body.append(&error);
     let buttons = gtk::Box::builder().spacing(6).halign(gtk::Align::End).margin_start(12).margin_end(12).margin_bottom(12).build();
     body.append(&buttons);
-    Review { body, pair, error, buttons }
+    Review {
+        body,
+        pair,
+        error,
+        buttons,
+        scripts,
+    }
 }
