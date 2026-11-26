@@ -21,6 +21,7 @@ pub enum ProblemKind {
     Structure,
     ScriptedEffectBlock,
     DuplicateScalarKey,
+    DuplicateNamedBlock,
     DroppedAddition,
     UnknownScriptName,
 }
@@ -187,6 +188,7 @@ pub fn validate_object_since(
     }
 
     check_duplicate_single_valued_keys(category, &entries, &mut problems);
+    check_duplicate_named_blocks(&entries, &mut problems);
     if !sources.is_empty() && objects == 1 {
         check_source_coverage(&entries, vanilla, previous, sources, &mut problems);
     }
@@ -328,6 +330,7 @@ fn check_script_text(
                 ));
             }
             check_duplicate_single_valued_keys(category, &entries, problems);
+            check_duplicate_named_blocks(&entries, problems);
             if !sources.is_empty() {
                 check_source_coverage(&entries, vanilla, &[], sources, problems);
             }
@@ -567,6 +570,70 @@ fn check_duplicate_single_valued_keys(
             Entry::Item(Value::Block(inner)) => {
                 check_duplicate_single_valued_keys(category, inner, problems)
             }
+            Entry::Item(Value::Scalar(_)) => {}
+        }
+    }
+}
+
+fn name_of(value: &Value) -> Option<&str> {
+    let Value::Block(inner) = value else {
+        return None;
+    };
+    inner.iter().find_map(|entry| match entry {
+        Entry::Assign { key, value: Value::Scalar(name), .. } if key.eq_ignore_ascii_case("name") => {
+            Some(name.as_str())
+        }
+        _ => None,
+    })
+}
+
+fn named_block_guard(value: &Value) -> Option<&Value> {
+    let Value::Block(inner) = value else {
+        return None;
+    };
+    inner.iter().find_map(|entry| match entry {
+        Entry::Assign { key, value: guard @ Value::Block(_), .. }
+            if ["limit", "potential", "allow"].iter().any(|g| key.eq_ignore_ascii_case(g))
+                || key.to_ascii_lowercase().ends_with("trigger") =>
+        {
+            Some(guard)
+        }
+        _ => None,
+    })
+}
+
+/// Sibling `option` blocks that share a `name` are a merge that duplicated an
+/// entry instead of combining it (the game lists both, e.g. a policy option
+/// twice). Variants under different guards are the game's own choice and stay
+/// allowed. Other keys are not checked: effect blocks like `create_fleet`
+/// reuse `name` freely.
+fn check_duplicate_named_blocks(entries: &[Entry], problems: &mut Vec<Problem>) {
+    let mut seen: HashMap<&str, Vec<Option<&Value>>> = HashMap::new();
+    let mut reported: HashSet<&str> = HashSet::new();
+    for entry in entries {
+        match entry {
+            Entry::Assign { key, value, .. } => {
+                let name = if key.eq_ignore_ascii_case("option") { name_of(value) } else { None };
+                if let Some(name) = name {
+                    let guards = seen.entry(name).or_default();
+                    let guard = named_block_guard(value);
+                    if guards.contains(&guard) && reported.insert(name) {
+                        problems.push(Problem::error(
+                            ProblemKind::DuplicateNamedBlock,
+                            tf!(
+                                "Two `{key}` blocks are both named {name}",
+                                key = key,
+                                name = name
+                            ),
+                        ));
+                    }
+                    guards.push(guard);
+                }
+                if let Value::Block(inner) = value {
+                    check_duplicate_named_blocks(inner, problems);
+                }
+            }
+            Entry::Item(Value::Block(inner)) => check_duplicate_named_blocks(inner, problems),
             Entry::Item(Value::Scalar(_)) => {}
         }
     }
@@ -967,6 +1034,27 @@ mod tests {
                 res.problems
             );
         }
+    }
+
+    #[test]
+    fn reports_two_policy_options_with_the_same_name() {
+        let bad = "economic_policy = { option = { name = balanced ai_weight = { weight = 1 } } \
+                   option = { name = balanced AI_weight = { factor = 5 } } }";
+        let res = validate_object("common/policies", "economic_policy", bad, None, &[], None);
+        assert!(
+            res.problems.iter().any(|p| p.kind == ProblemKind::DuplicateNamedBlock),
+            "{:?}",
+            res.problems
+        );
+    }
+
+    #[test]
+    fn allows_event_options_sharing_a_name_under_different_triggers() {
+        let ok = "country_event = { id = ns.1 \
+                  option = { name = ns.1.a trigger = { has_x = yes } } \
+                  option = { name = ns.1.a trigger = { has_y = yes } } }";
+        let res = validate_object("events", "ns.1", ok, None, &[], None);
+        assert!(res.is_ok(), "{:?}", res.problems);
     }
 
     #[test]
