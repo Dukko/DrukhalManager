@@ -36,6 +36,16 @@
     <control>keyboard</control>
   </supports>
   <releases>
+    <release version="2.7.31" date="2026-11-26">
+      <description>
+        <p>Extends the saved-merge audit's equivalence rules so rewriting trigger blocks as flat conditions doesn't look like a dropped addition:</p>
+        <ul>
+          <li>Treats is_xenophobe = no and is_militarist = no as the same as NOR = { is_xenophobe = yes is_militarist = yes }</li>
+          <li>Ignores NOR/NOT block markers when comparing additions; their child conditions carry the meaning</li>
+          <li>Clears old audit warnings for merges that only changed how a negation is written</li>
+        </ul>
+      </description>
+    </release>
     <release version="2.7.30" date="2026-11-26">
       <description>
         <p>Stops the saved-merge audit from reporting equivalent ethic conditions as dropped additions:</p>

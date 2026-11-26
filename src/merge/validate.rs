@@ -619,6 +619,35 @@ fn normalize_ethics(leaves: &mut Vec<String>) {
     }
 }
 
+/// Rewrites the boolean leaves of `NOR = { is_x = yes }` and
+/// `NOT = { is_x = yes }` as `is_x = no` at the parent path. Merges often
+/// rewrite the block form as the flat one, which is equivalent.
+fn normalize_negations(leaves: &mut Vec<String>) {
+    // The block marker itself isn't a change; its leaves carry the meaning.
+    leaves.retain(|leaf| {
+        !matches!(
+            leaf.rsplit_once('='),
+            Some((path, "{}")) if path == "nor" || path == "not" || path.ends_with("/nor") || path.ends_with("/not")
+        )
+    });
+    for leaf in leaves {
+        let Some((path, value)) = leaf.split_once('=') else { continue };
+        if value != "yes" && value != "no" {
+            continue;
+        }
+        let Some((block, key)) = path.rsplit_once('/') else { continue };
+        if !block.ends_with("/nor") && !block.ends_with("/not") {
+            continue;
+        }
+        if !key.starts_with("is_") {
+            continue;
+        }
+        let Some((parent, _)) = block.rsplit_once('/') else { continue };
+        let flipped = if value == "yes" { "no" } else { "yes" };
+        *leaf = format!("{parent}/{key}={flipped}");
+    }
+}
+
 /// Checks that additions each source made relative to `vanilla` survive in `result`.
 fn check_source_coverage(
     result_entries: &[Entry],
@@ -629,12 +658,14 @@ fn check_source_coverage(
     let mut result_leaves = Vec::new();
     leaf_signatures(result_entries, &mut result_leaves);
     normalize_ethics(&mut result_leaves);
+    normalize_negations(&mut result_leaves);
     let result_set: HashSet<String> = result_leaves.iter().cloned().collect();
     let mut result_values: HashMap<String, HashSet<String>> = HashMap::new();
     values_by_path(&result_leaves, &mut result_values);
 
     let mut vanilla_leaves = vanilla.and_then(|v| leaves_of(&v.text)).unwrap_or_default();
     normalize_ethics(&mut vanilla_leaves);
+    normalize_negations(&mut vanilla_leaves);
     let vanilla_set: HashSet<String> = vanilla_leaves.iter().cloned().collect();
     let mut vanilla_values: HashMap<String, HashSet<String>> = HashMap::new();
     values_by_path(&vanilla_leaves, &mut vanilla_values);
@@ -646,6 +677,7 @@ fn check_source_coverage(
     for s in sources {
         let mut leaves = leaves_of(&s.text).unwrap_or_default();
         normalize_ethics(&mut leaves);
+        normalize_negations(&mut leaves);
         for leaf in &leaves {
             if vanilla_set.contains(leaf) {
                 continue;
@@ -981,6 +1013,28 @@ mod tests {
         let res = validate_object(
             "common/policies",
             "interference",
+            merged,
+            Some(&v),
+            &[m],
+            None,
+        );
+        assert!(res.is_ok(), "{:?}", res.problems);
+    }
+
+    #[test]
+    fn treats_flat_negations_as_a_nor_block() {
+        let v = src(
+            "Vanilla",
+            "policy = { option = { ai_weight = { modifier = { is_ai = yes } } } }",
+        );
+        let m = src(
+            "Mod",
+            "policy = { option = { ai_weight = { modifier = { is_ai = yes NOR = { is_militarist = yes is_xenophobe = yes } } } } }",
+        );
+        let merged = "policy = { option = { ai_weight = { modifier = { is_ai = yes is_militarist = no is_xenophobe = no } } } }";
+        let res = validate_object(
+            "common/policies",
+            "policy",
             merged,
             Some(&v),
             &[m],
