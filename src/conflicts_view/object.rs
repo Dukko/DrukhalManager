@@ -1439,6 +1439,10 @@ impl ObjectView {
             })
             .collect();
         let game_dir = page.hooks.game_dir.clone();
+        let previous_game = page.analysis.game_version.as_deref().and_then(|version| {
+            let saved = crate::merge::base_game::previous(&crate::merge::base_game::dir(), version)?.get(&self.category, &self.name).cloned()?;
+            Some(Source { label: "Previous game version".to_owned(), file: saved.file, text: saved.text })
+        });
         let Some((vanilla, sources, ctx, all_at_once, merged_labels)) = self.with_steps(|s| {
             let fresh = s.next == 1 && !s.edited;
             let (candidate_sources, candidate_positions, working) = if fresh {
@@ -1477,6 +1481,7 @@ impl ObjectView {
                 max_attempts: None,
                 prints: s.loaded.prints.clone(),
                 inline,
+                previous_game: previous_game.clone(),
             };
             // Fall back to pairwise if the combined input would exceed a safe budget,
             // keeping the working result tagged as <result> rather than a mod.

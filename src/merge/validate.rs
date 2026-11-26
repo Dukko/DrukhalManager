@@ -83,11 +83,27 @@ impl Validation {
 
 /// Validates a merged single object against syntax, key uniqueness, and
 /// per-source addition coverage.
+#[cfg(test)]
 pub fn validate_object(
     category: &str,
     key: &str,
     text: &str,
     vanilla: Option<&Source>,
+    sources: &[Source],
+    script_ctx: Option<(&ScriptContext, &Known)>,
+) -> Validation {
+    validate_object_since(category, key, text, vanilla, None, sources, script_ctx)
+}
+
+/// As [`validate_object`]. `previous` is the object in the game version
+/// before `vanilla`: a source line that equals it is the game's old value,
+/// not that source's addition, so the merge need not keep it.
+pub fn validate_object_since(
+    category: &str,
+    key: &str,
+    text: &str,
+    vanilla: Option<&Source>,
+    previous: Option<&Source>,
     sources: &[Source],
     script_ctx: Option<(&ScriptContext, &Known)>,
 ) -> Validation {
@@ -172,7 +188,7 @@ pub fn validate_object(
 
     check_duplicate_single_valued_keys(category, &entries, &mut problems);
     if !sources.is_empty() && objects == 1 {
-        check_source_coverage(&entries, vanilla, sources, &mut problems);
+        check_source_coverage(&entries, vanilla, previous, sources, &mut problems);
     }
     if let Some((ctx, known)) = script_ctx {
         check_unknown_script_names(ctx, known, category, text, vanilla, sources, &mut problems);
@@ -291,7 +307,7 @@ pub fn validate_file(
                 }
                 check_duplicate_single_valued_keys(&category, &entries, &mut problems);
                 if !sources.is_empty() {
-                    check_source_coverage(&entries, vanilla, sources, &mut problems);
+                    check_source_coverage(&entries, vanilla, None, sources, &mut problems);
                 }
                 if let Some((ctx, known)) = script_ctx {
                     check_unknown_script_names(
@@ -652,6 +668,7 @@ fn normalize_negations(leaves: &mut Vec<String>) {
 fn check_source_coverage(
     result_entries: &[Entry],
     vanilla: Option<&Source>,
+    previous: Option<&Source>,
     sources: &[Source],
     problems: &mut Vec<Problem>,
 ) {
@@ -670,6 +687,11 @@ fn check_source_coverage(
     let mut vanilla_values: HashMap<String, HashSet<String>> = HashMap::new();
     values_by_path(&vanilla_leaves, &mut vanilla_values);
 
+    let mut previous_leaves = previous.and_then(|p| leaves_of(&p.text)).unwrap_or_default();
+    normalize_ethics(&mut previous_leaves);
+    normalize_negations(&mut previous_leaves);
+    let previous_set: HashSet<String> = previous_leaves.into_iter().collect();
+
     // Values each source *changed* at a path. A source that keeps the base
     // game's value doesn't take part in a priority decision.
     let mut changed_values: HashMap<String, HashSet<String>> = HashMap::new();
@@ -679,7 +701,7 @@ fn check_source_coverage(
         normalize_ethics(&mut leaves);
         normalize_negations(&mut leaves);
         for leaf in &leaves {
-            if vanilla_set.contains(leaf) {
+            if vanilla_set.contains(leaf) || previous_set.contains(leaf) {
                 continue;
             }
             if let Some((path, value)) = leaf.split_once('=')
@@ -705,6 +727,7 @@ fn check_source_coverage(
         for leaf in leaves {
             if !seen.insert(leaf.clone())
                 || vanilla_set.contains(&leaf)
+                || previous_set.contains(&leaf)
                 || result_set.contains(&leaf)
             {
                 continue;

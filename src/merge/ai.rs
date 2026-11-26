@@ -241,6 +241,9 @@ pub struct MergeContext {
     pub prints: Vec<super::patch::Print>,
     /// Inline scripts whose call was replaced, to merge with the object.
     pub inline: Vec<super::inline_scripts::InlineGroup>,
+    /// The object as the previous game version had it, so a mod's leftover
+    /// copy of that version isn't counted as its addition.
+    pub previous_game: Option<Source>,
 }
 
 /// A merged inline script to save next to the object.
@@ -549,11 +552,12 @@ pub fn merge_checked_cancellable(
         } else {
             super::inline_scripts::rewrite_calls(text, &inline_names)
         };
-        super::validate::validate_object(
+        super::validate::validate_object_since(
             &ctx.category,
             &ctx.key,
             &text,
             vanilla,
+            ctx.previous_game.as_ref(),
             &all_sources,
             script_ctx,
         )
