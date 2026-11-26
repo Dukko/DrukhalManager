@@ -95,4 +95,69 @@ mod tests {
         assert!(validate("common/scripted_variables", "@my_cost", "@helper = 2\n@my_cost = 100").is_ok());
         assert!(validate("common/scripted_variables", "@my_cost", "@other = 100").is_err());
     }
+
+    #[test]
+    fn manual_save_allows_conditional_and_identical_repeats() {
+        let guarded_costs = "building_gaia = { resources = { category = planet_buildings cost = { trigger = { has_trait = a } energy = 1 } cost = { trigger = { has_trait = b } energy = 2 } cost = { energy = 5 } } }";
+        assert!(validate("common/buildings", "building_gaia", guarded_costs).is_ok());
+        let guarded_pictures = "country_event = { id = ns.1 picture = { trigger = { a = b } picture = GFX_a } picture = { trigger = { c = d } picture = GFX_b } picture = GFX_c }";
+        assert!(validate("events", "ns.1", guarded_pictures).is_ok());
+        assert!(validate("common/technology", "tech_a", "tech_a = { start_tech = yes start_tech = yes }").is_ok());
+        assert!(validate("common/buildings", "building_lab", "building_lab = { cost = { a = 1 } cost = { a = 1 } }").is_ok());
+    }
+
+    #[test]
+    fn manual_save_rejects_unguarded_conflicting_repeats() {
+        assert!(validate("common/technology", "tech_a", "tech_a = { cost = 100 cost = 200 }").is_err());
+        assert!(validate("common/buildings", "building_lab", "building_lab = { cost = { a = 1 } cost = { a = 2 } }").is_err());
+    }
+
+    fn script_files(dir: &std::path::Path, out: &mut Vec<PathBuf>) {
+        let Ok(read) = std::fs::read_dir(dir) else { return };
+        let mut paths: Vec<_> = read.flatten().map(|e| e.path()).collect();
+        paths.sort();
+        for path in paths {
+            if path.is_dir() {
+                script_files(&path, out);
+            } else if path.extension().is_some_and(|e| e == "txt") {
+                out.push(path);
+            }
+        }
+    }
+
+    /// Runs both save validators over the base game's own scripts, which are
+    /// valid, and prints what they reject.
+    /// `DRUKHAL_STELLARIS_GAME=<game folder> cargo test save_validation_survey -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn save_validation_survey() {
+        let Some(game) = std::env::var_os("DRUKHAL_STELLARIS_GAME").map(PathBuf::from) else {
+            println!("SURVEY skipped: set DRUKHAL_STELLARIS_GAME");
+            return;
+        };
+        let mut files = Vec::new();
+        script_files(&game.join("common"), &mut files);
+        script_files(&game.join("events"), &mut files);
+        let (mut objects, mut object_rejects, mut file_rejects) = (0, 0, 0);
+        for path in &files {
+            let relative = path.strip_prefix(&game).unwrap().to_string_lossy().replace('\\', "/");
+            if relative == "common/HOW_TO_MAKE_NEW_SHIPS.txt" {
+                continue;
+            }
+            let text = String::from_utf8_lossy(&std::fs::read(path).unwrap()).into_owned();
+            let category = crate::merge::file_merge::category(&relative);
+            if let Err(e) = crate::merge::file_merge::validate(&category, &text) {
+                file_rejects += 1;
+                println!("FILE {relative}: {e}");
+            }
+            for (key, object) in source::index(&category, &text) {
+                objects += 1;
+                if let Err(e) = validate(&category, &key, &object) {
+                    object_rejects += 1;
+                    println!("OBJECT {relative} {key}: {e}");
+                }
+            }
+        }
+        println!("SURVEY {} files ({file_rejects} rejected), {objects} objects ({object_rejects} rejected)", files.len());
+    }
 }

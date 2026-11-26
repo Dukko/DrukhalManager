@@ -501,27 +501,41 @@ fn is_single_valued_key(category: &str, key: &str) -> bool {
     false
 }
 
+fn is_conditional_variant(value: &Value) -> bool {
+    let Value::Block(inner) = value else {
+        return false;
+    };
+    inner.iter().any(|entry| {
+        matches!(entry, Entry::Assign { key, value: Value::Block(_), .. }
+            if ["trigger", "limit", "potential"].iter().any(|guard| key.eq_ignore_ascii_case(guard)))
+    })
+}
+
 fn check_duplicate_single_valued_keys(
     category: &str,
     entries: &[Entry],
     problems: &mut Vec<Problem>,
 ) {
-    let mut counts: HashMap<String, usize> = HashMap::new();
+    // A repeat only conflicts when it sets different values outright: a copy
+    // equal to an earlier one is harmless, and a block guarded by a
+    // `trigger`/`limit`/`potential` is a variant the game picks by condition.
+    let mut seen: HashMap<String, Vec<&Value>> = HashMap::new();
     for entry in entries {
         match entry {
             Entry::Assign { key, value, .. } => {
-                if is_single_valued_key(category, key) {
-                    let k = key.to_ascii_lowercase();
-                    let n = counts.entry(k).or_insert(0);
-                    *n += 1;
-                    if *n == 2 {
-                        problems.push(Problem::error(
-                            ProblemKind::DuplicateScalarKey,
-                            tf!(
-                                "Single-valued key `{key}` appears more than once in the same block",
-                                key = key
-                            ),
-                        ));
+                if is_single_valued_key(category, key) && !is_conditional_variant(value) {
+                    let distinct = seen.entry(key.to_ascii_lowercase()).or_default();
+                    if !distinct.contains(&value) {
+                        distinct.push(value);
+                        if distinct.len() == 2 {
+                            problems.push(Problem::error(
+                                ProblemKind::DuplicateScalarKey,
+                                tf!(
+                                    "Single-valued key `{key}` appears more than once in the same block",
+                                    key = key
+                                ),
+                            ));
+                        }
                     }
                 }
                 if let Value::Block(inner) = value {
