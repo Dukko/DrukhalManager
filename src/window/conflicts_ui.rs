@@ -325,6 +325,9 @@ impl Window {
             Ok(()) => {
                 self.check_stale();
                 self.refresh();
+                // After the handler returns, since this replaces the page the button is on.
+                let ui = self.clone();
+                glib::idle_add_local_once(move || ui.render_conflicts());
                 self.add_toast(
                     adw::Toast::builder()
                         .title(tf!("Updated {what} to the new version", what = what))
@@ -439,7 +442,8 @@ impl Window {
             match self.with_patch(|patch, _, _| patch.accept(category, key)) {
                 Ok(()) => {
                     self.check_stale();
-                    self.render_conflicts();
+                    let ui = self.clone();
+                    glib::idle_add_local_once(move || ui.render_conflicts());
                     self.add_toast(adw::Toast::new(&tf!(
                         "Kept {what}; changes to its sources will be noticed from now on",
                         what = &what

@@ -440,7 +440,9 @@ impl BehindView {
             self.notes.append(&note(&t!("The mod's copy couldn't be read, so it can't be updated here."), Some("warning")));
         } else {
             self.notes.append(&note(&tf!("{mod_name} still uses its own copy, from {file}.", mod_name = mod_name, file = &b.file), None));
-            if is_merged {
+            if let Some(entry) = page.hooks.stale_entry(&b.category, &b.key) {
+                self.notes.append(&conflicts_view::stale_note(&page.hooks, &entry, &entry.reasons));
+            } else if is_merged {
                 self.notes.append(&note(&t!("Updated in the merged patch. Saving again replaces it."), Some("success")));
             }
             if !state.notes.is_empty() {

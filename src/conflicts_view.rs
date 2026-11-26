@@ -191,6 +191,10 @@ impl MergeHooks {
         self.stale.object(category, key)
     }
 
+    pub(crate) fn stale_entry(&self, category: &str, key: &str) -> Option<Stale> {
+        self.stale.object_entry(category, key)
+    }
+
     fn stale_file(&self, path: &str) -> Option<Vec<String>> {
         self.stale.file(path)
     }
@@ -209,8 +213,8 @@ pub struct StaleSet(RefCell<StaleIndex>);
 #[derive(Default)]
 struct StaleIndex {
     list: Vec<Stale>,
-    objects: HashMap<(String, String), Vec<String>>,
-    files: HashMap<String, Vec<String>>,
+    objects: HashMap<(String, String), usize>,
+    files: HashMap<String, usize>,
 }
 
 impl StaleSet {
@@ -223,13 +227,13 @@ impl StaleSet {
     pub fn replace(&self, list: Vec<Stale>) {
         let mut objects = HashMap::new();
         let mut files = HashMap::new();
-        for s in list.iter().filter(|s| !s.untracked) {
+        for (at, s) in list.iter().enumerate().filter(|(_, s)| !s.untracked) {
             match &s.object {
                 Some(object) => {
-                    objects.entry(object.clone()).or_insert_with(|| s.reasons.clone());
+                    objects.entry(object.clone()).or_insert(at);
                 }
                 None => {
-                    files.entry(s.path.to_ascii_lowercase()).or_insert_with(|| s.reasons.clone());
+                    files.entry(s.path.to_ascii_lowercase()).or_insert(at);
                 }
             }
         }
@@ -240,12 +244,18 @@ impl StaleSet {
         std::cell::Ref::map(self.0.borrow(), |i| &i.list)
     }
 
+    fn object_entry(&self, category: &str, key: &str) -> Option<Stale> {
+        let index = self.0.borrow();
+        index.objects.get(&(category.to_owned(), key.to_owned())).map(|&at| index.list[at].clone())
+    }
+
     fn object(&self, category: &str, key: &str) -> Option<Vec<String>> {
-        self.0.borrow().objects.get(&(category.to_owned(), key.to_owned())).cloned()
+        self.object_entry(category, key).map(|s| s.reasons)
     }
 
     fn file(&self, path: &str) -> Option<Vec<String>> {
-        self.0.borrow().files.get(&path.to_ascii_lowercase()).cloned()
+        let index = self.0.borrow();
+        index.files.get(&path.to_ascii_lowercase()).map(|&at| index.list[at].reasons.clone())
     }
 }
 
@@ -365,6 +375,9 @@ struct Group {
     folder: Option<String>,
     /// Whether "Merge All with AI" is offered for it.
     merge_all: bool,
+    /// The group of items that need attention, listed from the current
+    /// state at each [`Page::fill`] rather than from `items`.
+    attention: bool,
     items: Vec<Item>,
 }
 
@@ -428,6 +441,7 @@ pub struct Page {
     behind: Vec<usize>,
     involved: usize,
     n_ignored: usize,
+    has_errors: bool,
     /// The items listed under Resolved at the last [`Page::fill`].
     resolved: RefCell<HashSet<Item>>,
     /// Set while a refill is waiting, after an item was resolved or reopened.
@@ -480,19 +494,7 @@ pub fn build(analysis: &Rc<Analysis>, rescan: gtk::Button, hooks: Rc<MergeHooks>
     let has_errors = report.errors.iter().any(|e| filter.is_none_or(|p| e.mod_position == p)) || report.skipped.iter().any(|(p, _)| filter.is_none_or(|f| *p == f));
 
     let mut groups = Vec::new();
-    let mut attention = Vec::new();
-    if hooks.stale.borrow().iter().any(|s| !s.untracked) {
-        attention.push(Item::Outdated);
-    }
-    if hooks.stale.borrow().iter().any(|s| s.untracked) {
-        attention.push(Item::Untracked);
-    }
-    if has_errors {
-        attention.push(Item::Problems);
-    }
-    if !attention.is_empty() {
-        groups.push(Group { title: t!("Needs Attention"), folder_key: None, folder: None, merge_all: false, items: attention });
-    }
+    groups.push(Group { title: t!("Needs Attention"), folder_key: None, folder: None, merge_all: false, attention: true, items: Vec::new() });
     if let Some((old, new)) = &analysis.behind_versions {
         let behind_items: Vec<Item> = behind.iter().copied().map(Item::Behind).collect();
         if !behind_items.is_empty() {
@@ -501,6 +503,7 @@ pub fn build(analysis: &Rc<Analysis>, rescan: gtk::Button, hooks: Rc<MergeHooks>
                 folder_key: None,
                 folder: None,
                 merge_all: true,
+                attention: false,
                 items: behind_items,
             });
         }
@@ -510,7 +513,7 @@ pub fn build(analysis: &Rc<Analysis>, rescan: gtk::Button, hooks: Rc<MergeHooks>
         by_category.entry(&report.objects[i].category).or_default().push(Item::Object(i));
     }
     for (category, items) in by_category {
-        groups.push(Group { title: category.to_owned(), folder_key: Some(objects_folder_key(category)), folder: Some(category.to_owned()), merge_all: true, items });
+        groups.push(Group { title: category.to_owned(), folder_key: Some(objects_folder_key(category)), folder: Some(category.to_owned()), merge_all: true, attention: false, items });
     }
     let mut by_folder: BTreeMap<&str, Vec<Item>> = BTreeMap::new();
     for &i in &files {
@@ -519,7 +522,7 @@ pub fn build(analysis: &Rc<Analysis>, rescan: gtk::Button, hooks: Rc<MergeHooks>
     for (folder, items) in by_folder {
         let title = if folder.is_empty() { t!("Overridden Files") } else { tf!("Overridden Files · {folder}", folder = folder) };
         let merge_all = items.iter().any(|i| matches!(i, Item::File(f) if file_merge::mergeable(&report.files[*f].path)));
-        groups.push(Group { title, folder_key: Some(files_folder_key(folder)), folder: (!folder.is_empty()).then(|| folder.to_owned()), merge_all, items });
+        groups.push(Group { title, folder_key: Some(files_folder_key(folder)), folder: (!folder.is_empty()).then(|| folder.to_owned()), merge_all, attention: false, items });
     }
 
     // The sidebar.
@@ -638,6 +641,7 @@ pub fn build(analysis: &Rc<Analysis>, rescan: gtk::Button, hooks: Rc<MergeHooks>
         behind,
         involved: involved.len(),
         n_ignored,
+        has_errors,
         resolved: RefCell::default(),
         refill_pending: Cell::new(false),
     });
@@ -793,7 +797,8 @@ impl Page {
                 format!("{} {} {}", b.key, b.category, self.analysis.name(b.mod_position))
             }
             Item::File(i) => self.analysis.report.files[i].path.clone(),
-            _ => self.title_of(item),
+            Item::Outdated | Item::Untracked => return stale_matches(&self.hooks.stale.borrow(), item == Item::Untracked, query) || self.title_of(item).to_lowercase().contains(query),
+            Item::Problems => self.title_of(item),
         };
         text.to_lowercase().contains(query)
     }
@@ -998,7 +1003,8 @@ impl Page {
         };
         let mut resolved = Vec::new();
         for group in &self.groups {
-            let (done, items): (Vec<Item>, Vec<Item>) = group.items.iter().copied().filter(|&i| self.matches(i, &query)).partition(|&i| self.is_resolved(i));
+            let listed = if group.attention { attention_items(&self.hooks.stale.borrow(), self.has_errors) } else { group.items.clone() };
+            let (done, items): (Vec<Item>, Vec<Item>) = listed.iter().copied().filter(|&i| self.matches(i, &query)).partition(|&i| self.is_resolved(i));
             resolved.extend(done);
             if items.is_empty() {
                 continue;
@@ -1593,22 +1599,8 @@ impl Page {
                 });
                 r.add_suffix(&open);
             }
-            if let Some(name) = &s.pick {
-                let update = gtk::Button::builder().label(t!("Use New Version")).tooltip_text(&tf!("Replace the picked version with {name}'s new one. The patch is backed up first", name = name)).valign(gtk::Align::Center).css_classes(["flat"]).build();
-                let (hooks, stale) = (hooks.clone(), (*s).clone());
-                update.connect_clicked(move |_| (hooks.update_picks)(Some(&stale)));
-                r.add_suffix(&update);
-            }
-            if s.untracked || s.content {
-                let tooltip = if s.content {
-                    t!("Accept the saved merge as it is. Changes to its sources will still be noticed")
-                } else {
-                    t!("Track changes to its mods from their current versions")
-                };
-                let keep = gtk::Button::builder().label(t!("Keep As Is")).tooltip_text(tooltip).valign(gtk::Align::Center).css_classes(["flat"]).build();
-                let (hooks, stale) = (hooks.clone(), (*s).clone());
-                keep.connect_clicked(move |_| (hooks.keep_merge)(&stale));
-                r.add_suffix(&keep);
+            for button in stale_buttons(hooks, s) {
+                r.add_suffix(&button);
             }
             let remove = gtk::Button::builder().label(t!("Remove from Patch")).valign(gtk::Align::Center).css_classes(["flat"]).build();
             let (hooks, stale, row_ref) = (hooks.clone(), (*s).clone(), r.downgrade());
@@ -1623,6 +1615,43 @@ impl Page {
         }
         list
     }
+}
+
+/// The buttons that settle one out-of-date merge in place: take a picked
+/// mod's new version, or accept the saved merge as it is.
+pub(crate) fn stale_buttons(hooks: &Rc<MergeHooks>, s: &Stale) -> Vec<gtk::Button> {
+    let mut buttons = Vec::new();
+    if let Some(name) = &s.pick {
+        let update = gtk::Button::builder().label(t!("Use New Version")).tooltip_text(&tf!("Replace the picked version with {name}'s new one. The patch is backed up first", name = name)).valign(gtk::Align::Center).css_classes(["flat"]).build();
+        let (hooks, stale) = (hooks.clone(), s.clone());
+        update.connect_clicked(move |_| (hooks.update_picks)(Some(&stale)));
+        buttons.push(update);
+    }
+    if s.untracked || s.content {
+        let tooltip = if s.content {
+            t!("Accept the saved merge as it is. Changes to its sources will still be noticed")
+        } else {
+            t!("Track changes to its mods from their current versions")
+        };
+        let keep = gtk::Button::builder().label(t!("Keep As Is")).tooltip_text(tooltip).valign(gtk::Align::Center).css_classes(["flat"]).build();
+        let (hooks, stale) = (hooks.clone(), s.clone());
+        keep.connect_clicked(move |_| (hooks.keep_merge)(&stale));
+        buttons.push(keep);
+    }
+    buttons
+}
+
+/// Why the saved merge of an object is out of date, with the buttons to
+/// settle it.
+pub(crate) fn stale_note(hooks: &Rc<MergeHooks>, entry: &Stale, reasons: &[String]) -> gtk::Box {
+    let row = gtk::Box::builder().spacing(12).build();
+    let text = note(&tf!("The saved merge is out of date: {reasons}. Saving a new one replaces it.", reasons = reasons.join("; ")), Some("warning"));
+    text.set_hexpand(true);
+    row.append(&text);
+    for button in stale_buttons(hooks, entry) {
+        row.append(&button);
+    }
+    row
 }
 
 pub struct DetailHeader {
@@ -1732,6 +1761,30 @@ fn scrolled_detail(children: &[gtk::Widget]) -> gtk::Widget {
 /// The merged-state icon and the merge button for a row. An out-of-date
 /// merge shows a warning with the reasons instead of a check mark.
 /// What changed since the outdated merges were saved.
+/// What the Needs Attention group lists, given the out-of-date merges.
+fn attention_items(stale: &[Stale], has_errors: bool) -> Vec<Item> {
+    let mut items = Vec::new();
+    if stale.iter().any(|s| !s.untracked) {
+        items.push(Item::Outdated);
+    }
+    if stale.iter().any(|s| s.untracked) {
+        items.push(Item::Untracked);
+    }
+    if has_errors {
+        items.push(Item::Problems);
+    }
+    items
+}
+
+/// Whether a search (lowercase) names one of the merges an Outdated or
+/// Untracked entry stands for, so searching for an object finds its entry.
+fn stale_matches(stale: &[Stale], untracked: bool, query: &str) -> bool {
+    stale.iter().filter(|s| s.untracked == untracked).any(|s| {
+        let name = s.object.as_ref().map_or(s.path.as_str(), |(_, key)| key.as_str());
+        name.to_lowercase().contains(query) || s.path.to_lowercase().contains(query)
+    })
+}
+
 fn outdated_summary(stale: &[Stale]) -> String {
     let outdated = || stale.iter().filter(|s| !s.untracked);
     match (outdated().any(|s| s.base_game), outdated().all(|s| s.base_game)) {
@@ -2145,6 +2198,33 @@ mod tests {
 
         assert_eq!(result, Ok(()));
         assert_eq!(*saved.borrow(), vec![("my_script".to_owned(), "add_resource = { energy = 1 }\n".to_owned())]);
+    }
+
+    #[test]
+    fn attention_group_follows_the_current_out_of_date_merges() {
+        let outdated = stale(Some(("c", "k")), "p", "mod changed", false);
+        let untracked = stale(Some(("c", "u")), "p", "", true);
+        assert_eq!(attention_items(&[outdated.clone(), untracked.clone()], true), vec![Item::Outdated, Item::Untracked, Item::Problems]);
+        assert_eq!(attention_items(&[untracked], false), vec![Item::Untracked]);
+        assert_eq!(attention_items(&[], false), Vec::<Item>::new());
+    }
+
+    #[test]
+    fn searching_an_object_finds_the_outdated_entry_listing_it() {
+        let list = [stale(Some(("common/traits", "trait_machine_unit")), "common/traits/x.txt", "mod changed", false)];
+        assert!(stale_matches(&list, false, "machine_unit"));
+        assert!(!stale_matches(&list, true, "machine_unit"));
+        assert!(!stale_matches(&list, false, "edict"));
+    }
+
+    #[test]
+    fn stale_set_returns_the_whole_entry_for_an_object() {
+        let mut entry = stale(Some(("c", "k")), "p", "mod changed", false);
+        entry.pick = Some("Mod A".to_owned());
+        let set = StaleSet::new(vec![stale(Some(("c", "other")), "p", "x", false), entry]);
+        let found = set.object_entry("c", "k").unwrap();
+        assert_eq!(found.pick.as_deref(), Some("Mod A"));
+        assert!(set.object_entry("c", "missing").is_none());
     }
 
     #[test]

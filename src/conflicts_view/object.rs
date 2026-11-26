@@ -662,7 +662,8 @@ impl ObjectView {
                 Some("warning"),
             ));
         }
-        if let Some(reasons) = hooks.stale_object(&self.category, &self.name) {
+        if let Some(entry) = hooks.stale_entry(&self.category, &self.name) {
+            let reasons = entry.reasons.clone();
             let stale_suffix = t!("no longer defines it");
             let filtered: Vec<_> = reasons
                 .into_iter()
@@ -675,13 +676,7 @@ impl ObjectView {
                 })
                 .collect();
             if !filtered.is_empty() {
-                self.notes.append(&note(
-                    &tf!(
-                        "The saved merge is out of date: {reasons}. Saving a new one replaces it.",
-                        reasons = filtered.join("; ")
-                    ),
-                    Some("warning"),
-                ));
+                self.notes.append(&super::stale_note(&hooks, &entry, &filtered));
             }
         }
         if steps.from_saved {
