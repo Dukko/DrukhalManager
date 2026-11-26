@@ -36,6 +36,15 @@
     <control>keyboard</control>
   </supports>
   <releases>
+    <release version="2.7.35" date="2026-11-26">
+      <description>
+        <p>Stops flagging a merge as out of date when you kept one mod's version whole:</p>
+        <ul>
+          <li>Choosing Use This Version on a mod's copy no longer reports the other mods' additions as missing</li>
+          <li>Changes to the picked mod are still noticed, and Use New Version still offers them</li>
+        </ul>
+      </description>
+    </release>
     <release version="2.7.34" date="2026-11-26">
       <description>
         <p>Makes out-of-date merges easier to act on, reworks Fix with AI, and checks hand-made saves like AI merges:</p>
