@@ -430,6 +430,25 @@ impl Window {
             .object
             .as_ref()
             .map_or(stale.path.clone(), |(_, k)| k.clone());
+        if stale.content
+            && !stale.untracked
+            && let Some((category, key)) = &stale.object
+        {
+            // The sources haven't changed; only the saved script did, so
+            // accept it as it is without looking the conflict up again.
+            match self.with_patch(|patch, _, _| patch.accept(category, key)) {
+                Ok(()) => {
+                    self.check_stale();
+                    self.render_conflicts();
+                    self.add_toast(adw::Toast::new(&tf!(
+                        "Kept {what}; changes to its sources will be noticed from now on",
+                        what = &what
+                    )));
+                }
+                Err(e) => self.toast_error_message(&e),
+            }
+            return;
+        }
         let Some(analysis) = self.analysis.borrow().clone() else {
             return;
         };
@@ -1276,8 +1295,9 @@ impl Window {
         script: &str,
         prints: Vec<patch::Print>,
     ) -> Result<(), String> {
+        let game_dir = self.game.as_ref().map(|g| g.dir.clone());
         self.with_patch(|patch, user_dir, version| {
-            patch.save(user_dir, version, category, key, script, prints)
+            patch.save_for_game(user_dir, version, game_dir.as_deref(), category, key, script, prints)
         })
     }
 

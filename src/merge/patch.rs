@@ -16,7 +16,8 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use super::conflicts;
-use super::source::Files as Sources;
+use super::source::{Files as Sources, Source};
+use crate::paradox::script::{self, Entry, Value};
 
 /// The folder of the one patch older versions shared between every
 /// collection; it becomes the active collection's.
@@ -108,6 +109,11 @@ pub struct Merge {
     /// script name. Removing the merge removes them too.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub scripts: Vec<String>,
+    /// Fingerprint of `script` when the user last kept it after a content
+    /// check, so an intentional edit is not reported again. `None` for
+    /// merges saved before content checks existed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub accepted: Option<String>,
 }
 
 /// A fingerprint of one source of a merge, to notice when it changes.
@@ -155,6 +161,9 @@ pub struct Stale {
     pub untracked: bool,
     /// Whether the base game changed it, rather than only its mods.
     pub base_game: bool,
+    /// Whether the saved script itself no longer matches its sources, as
+    /// opposed to a source having changed since it was merged.
+    pub content: bool,
     /// For a "Use This Version" choice where only the picked mod changed,
     /// that mod's name: its new version can replace the old one.
     pub pick: Option<String>,
@@ -310,11 +319,40 @@ impl Patch {
     }
 
     /// Moves merges saved under a name that no longer sorts where it must,
-    /// as older versions did for some first-wins folders.
+    /// as older versions did for some first-wins folders. Events using
+    /// `base =` are left to [`Patch::relocate_base_events`], which knows
+    /// where the event they inherit from is defined.
     fn rename_misplaced(&mut self) -> io::Result<()> {
         let mut moved = false;
         for merge in &mut self.manifest.merges {
+            if merge.category == "events" && merge.script.contains("base") && event_base(&merge.script).is_some() {
+                continue;
+            }
             let wanted = file_for(&merge.category, &merge.key);
+            if merge.file == wanted {
+                continue;
+            }
+            let (from, to) = (self.root.join(&merge.file), self.root.join(&wanted));
+            if from.is_file() {
+                std::fs::create_dir_all(to.parent().unwrap())?;
+                crate::platform::rename(&from, &to)?;
+            }
+            merge.file = wanted;
+            moved = true;
+        }
+        if moved { self.write_manifest() } else { Ok(()) }
+    }
+
+    /// Moves merged events that inherit with `base =` to a file that loads
+    /// after the event they inherit from. Existing patches saved before
+    /// this rule get fixed here, without merging them again.
+    fn relocate_base_events(&mut self, game_dir: &Path) -> io::Result<()> {
+        let mut moved = false;
+        for merge in &mut self.manifest.merges {
+            if merge.category != "events" || merge.prints.is_empty() || !merge.script.contains("base") {
+                continue;
+            }
+            let wanted = file_for_script(&merge.category, &merge.key, &merge.script, &merge.prints, Some(game_dir));
             if merge.file == wanted {
                 continue;
             }
@@ -606,6 +644,11 @@ impl Patch {
     /// [`Patch::check`], reading source files through `sources`.
     fn recheck_with(&mut self, roots: &HashMap<String, PathBuf>, game_version: Option<&str>, sources: &Sources) -> Vec<Stale> {
         let game_dir = roots.get(VANILLA).map(PathBuf::as_path);
+        if let Some(dir) = game_dir
+            && let Err(e) = self.relocate_base_events(dir)
+        {
+            crate::diagnostics::log!("patch", "Could not move an event that inherits with base =: {e}");
+        }
         let updated = |checked: Option<&str>| matches!((checked, game_version), (Some(was), Some(now)) if was != now);
         let changed_in = |checked: Option<&str>| match (updated(checked), game_version) {
             (true, Some(now)) => tf!("The base game changed it in {version}", version = now),
@@ -633,7 +676,7 @@ impl Patch {
         for m in &mut self.manifest.merges {
             let (category, key) = (m.category.clone(), m.key.clone());
             if m.prints.is_empty() {
-                stale.push(Stale { object: Some((category, key)), path: m.file.clone(), reasons: vec![UNTRACKED.to_owned()], untracked: true, base_game: false, pick: None });
+                stale.push(Stale { object: Some((category, key)), path: m.file.clone(), reasons: vec![UNTRACKED.to_owned()], untracked: true, base_game: false, content: false, pick: None });
                 continue;
             }
             let read = |root: &Path, file: &str| sources.object(root, file, &category, &key);
@@ -694,13 +737,33 @@ impl Patch {
                 check.base_game(tf!("The base game added it in {version}", version = game_version.unwrap_or_default()));
             }
             dirty |= check.confirm(&mut m.game_version, game_dir, game_version);
+            let mut content = false;
+            if check.reasons.is_empty() {
+                let hash = fingerprint(&m.script);
+                if m.accepted.as_deref() != Some(hash.as_str()) {
+                    match merge_content(m, roots, sources) {
+                        MergeContent::Problems(problems) => {
+                            check.reasons.push(tf!(
+                                "The saved merge no longer combines its sources cleanly: {problems}",
+                                problems = problems.join("; ")
+                            ));
+                            content = true;
+                        }
+                        MergeContent::Clean => {
+                            m.accepted = Some(hash);
+                            dirty = true;
+                        }
+                        MergeContent::Unavailable => {}
+                    }
+                }
+            }
             if !check.reasons.is_empty() {
-                stale.push(Stale { object: Some((category, key)), path: m.file.clone(), base_game: check.base_game, reasons: check.reasons, untracked: false, pick: None });
+                stale.push(Stale { object: Some((category, key)), path: m.file.clone(), base_game: check.base_game, reasons: check.reasons, untracked: false, content, pick: None });
             }
         }
         for f in &mut self.manifest.files {
             if f.prints.is_empty() {
-                stale.push(Stale { object: None, path: f.path.clone(), reasons: vec![UNTRACKED.to_owned()], untracked: true, base_game: false, pick: None });
+                stale.push(Stale { object: None, path: f.path.clone(), reasons: vec![UNTRACKED.to_owned()], untracked: true, base_game: false, content: false, pick: None });
                 continue;
             }
             let read = |root: &Path, file: &str| sources.text(root, file).map(|t| t.as_str().to_owned());
@@ -726,7 +789,7 @@ impl Patch {
             }
             dirty |= check.confirm(&mut f.game_version, game_dir, game_version);
             if !check.reasons.is_empty() {
-                stale.push(Stale { object: None, path: f.path.clone(), base_game: check.base_game, reasons: check.reasons, untracked: false, pick: None });
+                stale.push(Stale { object: None, path: f.path.clone(), base_game: check.base_game, reasons: check.reasons, untracked: false, content: false, pick: None });
             }
         }
         if dirty && let Err(e) = self.write_manifest() {
@@ -748,14 +811,34 @@ impl Patch {
     /// Records `prints` as what a merge's sources look like in game version
     /// `game_version`, so later changes to them are noticed. For merges
     /// saved before fingerprints.
-    pub fn track(&mut self, object: Option<&(String, String)>, path: &str, prints: Vec<Print>, game_version: Option<&str>) -> io::Result<()> {
-        let slot = match object {
-            Some((category, key)) => self.manifest.merges.iter_mut().find(|m| &m.category == category && &m.key == key).map(|m| (&mut m.prints, &mut m.game_version)),
-            None => self.manifest.files.iter_mut().find(|f| f.path.eq_ignore_ascii_case(path)).map(|f| (&mut f.prints, &mut f.game_version)),
+    /// Accepts a saved merge's script as it is, so the content check does
+    /// not report it again until the script or a source changes.
+    pub fn accept(&mut self, category: &str, key: &str) -> io::Result<()> {
+        let Some(merge) = self.manifest.merges.iter_mut().find(|m| m.category == category && m.key == key) else {
+            return Err(io::Error::new(io::ErrorKind::NotFound, t!("It is no longer in the patch")));
         };
-        let Some((slot, version)) = slot else { return Err(io::Error::new(io::ErrorKind::NotFound, t!("It is no longer in the patch"))) };
-        *slot = prints;
-        *version = game_version.map(str::to_owned);
+        merge.accepted = Some(fingerprint(&merge.script));
+        self.write_manifest()
+    }
+
+    pub fn track(&mut self, object: Option<&(String, String)>, path: &str, prints: Vec<Print>, game_version: Option<&str>) -> io::Result<()> {
+        match object {
+            Some((category, key)) => {
+                let Some(merge) = self.manifest.merges.iter_mut().find(|m| &m.category == category && &m.key == key) else {
+                    return Err(io::Error::new(io::ErrorKind::NotFound, t!("It is no longer in the patch")));
+                };
+                merge.prints = prints;
+                merge.game_version = game_version.map(str::to_owned);
+                merge.accepted = Some(fingerprint(&merge.script));
+            }
+            None => {
+                let Some(merge) = self.manifest.files.iter_mut().find(|f| f.path.eq_ignore_ascii_case(path)) else {
+                    return Err(io::Error::new(io::ErrorKind::NotFound, t!("It is no longer in the patch")));
+                };
+                merge.prints = prints;
+                merge.game_version = game_version.map(str::to_owned);
+            }
+        }
         self.write_manifest()
     }
 
@@ -767,15 +850,40 @@ impl Patch {
     /// Adds or replaces a merged object and writes it to disk, creating the
     /// mod's descriptors if needed. `game_version` (e.g. `v4.5.3`) sets the
     /// version the launcher shows the patch as supporting.
+    #[allow(clippy::too_many_arguments)]
     pub fn save(&mut self, user_dir: &Path, game_version: Option<&str>, category: &str, key: &str, script: &str, prints: Vec<Print>) -> io::Result<()> {
-        let result = self.save_unlogged(user_dir, game_version, category, key, script, prints);
+        let file = file_for(category, key);
+        self.save_at(user_dir, game_version, category, key, &file, script, prints)
+    }
+
+    /// Like [`Patch::save`], placing an event after the event it inherits
+    /// from with `base =`, so the inheritance is defined when it is read.
+    #[allow(clippy::too_many_arguments)]
+    pub fn save_for_game(
+        &mut self,
+        user_dir: &Path,
+        game_version: Option<&str>,
+        game_dir: Option<&Path>,
+        category: &str,
+        key: &str,
+        script: &str,
+        prints: Vec<Print>,
+    ) -> io::Result<()> {
+        let file = file_for_script(category, key, script, &prints, game_dir);
+        self.save_at(user_dir, game_version, category, key, &file, script, prints)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn save_at(&mut self, user_dir: &Path, game_version: Option<&str>, category: &str, key: &str, file: &str, script: &str, prints: Vec<Print>) -> io::Result<()> {
+        let result = self.save_unlogged(user_dir, game_version, category, key, file, script, prints);
         crate::diagnostics::outcome("patch", || format!("Saved {category}/{key} to {}", self.target.name), result)
     }
 
-    fn save_unlogged(&mut self, user_dir: &Path, game_version: Option<&str>, category: &str, key: &str, script: &str, prints: Vec<Print>) -> io::Result<()> {
+    #[allow(clippy::too_many_arguments)]
+    fn save_unlogged(&mut self, user_dir: &Path, game_version: Option<&str>, category: &str, key: &str, file: &str, script: &str, prints: Vec<Print>) -> io::Result<()> {
         let sources = prints.iter().filter(|p| p.mod_id != VANILLA).map(|p| p.name.clone()).collect();
         self.write_descriptors(user_dir, game_version)?;
-        let file = file_for(category, key);
+        let file = file.to_owned();
         let path = self.root.join(&file);
         std::fs::create_dir_all(path.parent().unwrap())?;
         write_atomic(&path, render(category, key, script).as_bytes())?;
@@ -787,7 +895,13 @@ impl Patch {
             .find(|m| m.category == category && m.key == key)
             .map(|m| m.scripts.clone())
             .unwrap_or_default();
-        let merge = Merge { category: category.into(), key: key.into(), script: script.into(), sources, file, prints, game_version: game_version.map(str::to_owned), scripts };
+        let accepted = self
+            .manifest
+            .merges
+            .iter()
+            .find(|m| m.category == category && m.key == key && m.script == script)
+            .and_then(|m| m.accepted.clone());
+        let merge = Merge { category: category.into(), key: key.into(), script: script.into(), sources, file, prints, game_version: game_version.map(str::to_owned), scripts, accepted };
         match self.manifest.merges.iter_mut().find(|m| m.category == category && m.key == key) {
             Some(existing) => {
                 if existing.file != merge.file {
@@ -966,8 +1080,12 @@ pub fn supported_version(game_version: Option<&str>) -> String {
     game_version.and_then(|v| v.rsplit_once('.')).map_or("*".to_owned(), |(major_minor, _)| format!("{major_minor}.*"))
 }
 
+fn safe_name(key: &str) -> String {
+    key.chars().map(|c| if c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.') { c } else { '_' }).collect()
+}
+
 fn file_for(category: &str, key: &str) -> String {
-    let safe: String = key.chars().map(|c| if c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.') { c } else { '_' }).collect();
+    let safe = safe_name(key);
     if category == "localisation" {
         // `l_english:key` goes to `localisation/replace/english/…_l_english.yml`;
         // the game requires the language suffix in the file name.
@@ -980,6 +1098,128 @@ fn file_for(category: &str, key: &str) -> String {
     let prefix = if conflicts::is_fios(category) { SORT_FIRST } else { SORT_LAST };
     format!("{category}/{prefix}{safe}.txt")
 }
+
+/// The event a merged event inherits from with `base =`, if it has one.
+/// `base` is only read from the event's own top level, not from blocks
+/// inside its options or effects.
+fn event_base(script: &str) -> Option<String> {
+    let scalar = |value: &Value| match value {
+        Value::Scalar(text) => {
+            let text = text.trim().trim_matches('"');
+            (!text.is_empty()).then(|| text.to_owned())
+        }
+        Value::Block(_) => None,
+    };
+    let entries = script::parse(script).ok()?;
+    for entry in &entries {
+        if let Entry::Assign { key, value, .. } = entry {
+            if key.eq_ignore_ascii_case("base") {
+                return scalar(value);
+            }
+            if let Value::Block(inner) = value {
+                for entry in inner {
+                    if let Entry::Assign { key, value, .. } = entry
+                        && key.eq_ignore_ascii_case("base")
+                    {
+                        return scalar(value);
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
+/// The path a merged object is written to. Events are normally written
+/// first so they win the game's first-in-only-serve load order, but an
+/// event using `base = X` must load *after* `X` is defined. When `X` is in
+/// an earlier file and the merged copy still has to sort before the event
+/// it replaces, put it directly after `X`'s file instead of at the very
+/// front. `prints` say which files currently define the event.
+fn file_for_script(category: &str, key: &str, script: &str, prints: &[Print], game_dir: Option<&Path>) -> String {
+    let default = file_for(category, key);
+    if category != "events" {
+        return default;
+    }
+    let Some(base) = event_base(script) else { return default };
+    let Some(game_dir) = game_dir else { return default };
+    let Some(base_source) = super::source::vanilla(game_dir, "events", &base) else { return default };
+    // The copy has to sort before every definition it replaces.
+    let Some(target) = prints.iter().map(|p| p.file.as_str()).min_by_key(|f| f.to_ascii_lowercase()) else {
+        return default;
+    };
+    let base_file = base_source.file;
+    if base_file.to_ascii_lowercase() >= target.to_ascii_lowercase() {
+        // The inherited event is defined at or after the event being
+        // replaced, so no name can be both after the base and before it.
+        return default;
+    }
+    let stem = base_file
+        .rsplit_once('/')
+        .map_or(base_file.as_str(), |(_, name)| name)
+        .strip_suffix(".txt")
+        .unwrap_or(base_file.rsplit_once('/').map_or(base_file.as_str(), |(_, name)| name));
+    let candidate = format!("events/{stem}_drukhal_{}.txt", safe_name(key));
+    let (candidate_lower, target_lower) = (candidate.to_ascii_lowercase(), target.to_ascii_lowercase());
+    if candidate_lower > base_file.to_ascii_lowercase() && candidate_lower < target_lower {
+        candidate
+    } else {
+        default
+    }
+}
+
+/// The outcome of checking a saved merge against the sources it was made
+/// from.
+enum MergeContent {
+    /// The sources aren't all available, so there is nothing to compare.
+    Unavailable,
+    /// The merge still covers every source's additions.
+    Clean,
+    /// The merge no longer matches its sources, with what is missing.
+    Problems(Vec<String>),
+}
+
+/// Rechecks a saved merge against its sources. The fingerprint check only
+/// notices when a source changes; this notices when the saved merge itself
+/// dropped or broke something, such as a rebuild from an older version or
+/// a manual edit.
+fn merge_content(merge: &Merge, roots: &HashMap<String, PathBuf>, sources: &Sources) -> MergeContent {
+    if merge.prints.is_empty() {
+        return MergeContent::Unavailable;
+    }
+    let mut vanilla = None;
+    let mut mods = Vec::new();
+    for print in &merge.prints {
+        let Some(root) = roots.get(&print.mod_id) else { return MergeContent::Unavailable };
+        let Some(text) = sources.object(root, &print.file, &merge.category, &merge.key) else {
+            return MergeContent::Unavailable;
+        };
+        let source = Source {
+            label: if print.mod_id == VANILLA { "Vanilla".to_owned() } else { print.name.clone() },
+            file: print.file.clone(),
+            text,
+        };
+        if print.mod_id == VANILLA {
+            vanilla = Some(source);
+        } else {
+            mods.push(source);
+        }
+    }
+    let validation = super::validate::validate_object(&merge.category, &merge.key, &merge.script, vanilla.as_ref(), &mods, None);
+    let problems: Vec<String> = validation
+        .problems
+        .iter()
+        .filter(|p| p.severity == super::validate::Severity::Error)
+        .filter(|p| p.kind != super::validate::ProblemKind::UnknownScriptName)
+        .map(|p| p.message.clone())
+        .collect();
+    if problems.is_empty() {
+        MergeContent::Clean
+    } else {
+        MergeContent::Problems(problems)
+    }
+}
+
 
 fn render(category: &str, key: &str, script: &str) -> String {
     let script = script.trim();
@@ -1049,6 +1289,78 @@ mod tests {
         std::fs::remove_dir_all(user).unwrap();
     }
 
+    #[test]
+    fn notices_a_saved_merge_that_dropped_a_source_addition() {
+        let root = std::env::temp_dir().join(format!("drukhal-merge-content-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let (user, a, game) = (root.join("user"), root.join("a"), root.join("game"));
+        for dir in [&a, &game] {
+            std::fs::create_dir_all(dir.join("common/buildings")).unwrap();
+        }
+        std::fs::write(game.join("common/buildings/00.txt"), "lab = { cost = { minerals = 100 } }\n").unwrap();
+        std::fs::write(a.join("common/buildings/a.txt"), "lab = { cost = { minerals = 50 } planet_modifier = { job_researcher_add = 1 } }\n").unwrap();
+        std::fs::create_dir_all(user.join("mod")).unwrap();
+
+        let prints = object_prints(
+            "common/buildings",
+            "lab",
+            Some(&game),
+            &[(
+                ("mod/a.mod".to_owned(), "A".to_owned(), a.clone()),
+                "common/buildings/a.txt".to_owned(),
+            )],
+        );
+        let mut patch = Patch::open(&user, &test_target()).unwrap();
+        // The mod's planet_modifier is missing.
+        patch.save(&user, Some("v4.5.3"), "common/buildings", "lab", "lab = { cost = { minerals = 50 } }", prints.clone()).unwrap();
+        let roots: std::collections::HashMap<String, PathBuf> = [("mod/a.mod".to_owned(), a), (VANILLA.to_owned(), game)].into();
+        let stale = patch.check(&roots, Some("v4.5.3"));
+        assert_eq!(stale.len(), 1, "{stale:?}");
+        assert!(stale[0].reasons.iter().any(|r| r.contains("Missing additions from A")), "{:?}", stale[0].reasons);
+        assert_eq!(patch.get("common/buildings", "lab").unwrap().accepted, None);
+
+        // Accepting the merge keeps its current content without re-merging.
+        patch.accept("common/buildings", "lab").unwrap();
+        assert!(patch.check(&roots, Some("v4.5.3")).is_empty());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn places_events_after_the_event_they_inherit_from() {
+        let root = std::env::temp_dir().join(format!("drukhal-base-event-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let (user, game) = (root.join("user"), root.join("game"));
+        std::fs::create_dir_all(game.join("events")).unwrap();
+        std::fs::create_dir_all(user.join("mod")).unwrap();
+        std::fs::write(game.join("events/overlord_enclaves_events.txt"), "country_event = { id = enclave.405 is_triggered_only = yes }\n").unwrap();
+        std::fs::write(game.join("events/shroud_events.txt"), "country_event = { id = shroud.5310 base = enclave.405 }\n").unwrap();
+
+        let script = "country_event = {\n\tid = shroud.5310\n\tbase = enclave.405\n}\n";
+        let prints = vec![
+            Print::new(VANILLA, "Vanilla", "events/shroud_events.txt", "country_event = { id = shroud.5310 base = enclave.405 }"),
+            Print::new("mod/bts.mod", "BTS", "events/p_bts_shroudwalker_attunement_override.txt", "country_event = { id = shroud.5310 base = enclave.405 }"),
+        ];
+        let mut patch = Patch::open(&user, &test_target()).unwrap();
+        patch.save_for_game(&user, None, Some(&game), "events", "shroud.5310", script, prints).unwrap();
+        let wanted = patch.get("events", "shroud.5310").unwrap().file.clone();
+        // After the base's file, but still before the event it replaces.
+        assert!(wanted.as_str() > "events/overlord_enclaves_events.txt", "{wanted}");
+        assert!(wanted.as_str() < "events/shroud_events.txt", "{wanted}");
+        assert!(test_target().root(&user).join(&wanted).is_file());
+
+        // A patch saved before this rule is moved on the next check.
+        let old = "events/!!!!!!_drukhal_shroud.5310.txt";
+        let patch_root = test_target().root(&user);
+        std::fs::rename(patch_root.join(&wanted), patch_root.join(old)).unwrap();
+        patch.manifest.merges[0].file = old.into();
+        patch.write_manifest().unwrap();
+        let roots: std::collections::HashMap<String, PathBuf> = [(VANILLA.to_owned(), game.clone())].into();
+        let _ = patch.recheck(&roots, None);
+        assert_eq!(patch.get("events", "shroud.5310").unwrap().file, wanted);
+        assert!(patch_root.join(&wanted).is_file() && !patch_root.join(old).exists());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
     /// Times checking a patch of many merges after each save, as every
     /// resolved conflict does. `cargo test checks_many_merges -- --ignored --nocapture`
     #[test]
@@ -1104,7 +1416,11 @@ mod tests {
             Print::new("mod/a.mod", "A", "common/buildings/a.txt", "lab = {\n\tcost = 1\n}"),
             Print::new("mod/b.mod", "B", "common/buildings/b.txt", "lab = { cost = 2 }"),
         ];
-        patch.save(&user, None, "common/buildings", "lab", "lab = { cost = 3 }", prints).unwrap();
+        patch.save(&user, None, "common/buildings", "lab", "lab = { cost = 3 }", prints.clone()).unwrap();
+        // The test merge deliberately chooses a value neither mod ships;
+        // keep it so the change detection below is what's under test.
+        let file = patch.get("common/buildings", "lab").unwrap().file.clone();
+        patch.track(Some(&("common/buildings".to_owned(), "lab".to_owned())), &file, prints, None).unwrap();
         let mut roots: std::collections::HashMap<String, PathBuf> = [("mod/a.mod".to_owned(), a.clone()), ("mod/b.mod".to_owned(), b.clone()), (VANILLA.to_owned(), game.clone())].into();
         assert!(patch.recheck(&roots, None).is_empty(), "reformatting and unrelated objects don't count");
 

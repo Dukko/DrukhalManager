@@ -36,6 +36,17 @@
     <control>keyboard</control>
   </supports>
   <releases>
+    <release version="2.7.29" date="2026-11-26">
+      <description>
+        <p>Fixes merged events that inherit from another event and audits saved merges against their sources:</p>
+        <ul>
+          <li>Writes a merged event after the event it inherits from with base =, so the inheritance resolves and the event keeps is_triggered_only instead of firing every day</li>
+          <li>Moves existing patches saved with the old file name into place on the next check, without re-merging</li>
+          <li>Revalidates saved merges against their current sources and lists ones that dropped an addition, duplicated a single-valued key, or broke the script</li>
+          <li>Adds Keep As Is for those merges, so intentional edits are not reported again</li>
+        </ul>
+      </description>
+    </release>
     <release version="2.7.28" date="2026-11-25">
       <description>
         <p>Adds keyboard shortcuts across conflict resolution and dialogs, and fixes two inline-script merge bugs:</p>

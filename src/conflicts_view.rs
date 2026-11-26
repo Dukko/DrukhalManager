@@ -1552,8 +1552,13 @@ impl Page {
                 update.connect_clicked(move |_| (hooks.update_picks)(Some(&stale)));
                 r.add_suffix(&update);
             }
-            if s.untracked {
-                let keep = gtk::Button::builder().label(t!("Keep As Is")).tooltip_text(t!("Track changes to its mods from their current versions")).valign(gtk::Align::Center).css_classes(["flat"]).build();
+            if s.untracked || s.content {
+                let tooltip = if s.content {
+                    t!("Accept the saved merge as it is. Changes to its sources will still be noticed")
+                } else {
+                    t!("Track changes to its mods from their current versions")
+                };
+                let keep = gtk::Button::builder().label(t!("Keep As Is")).tooltip_text(tooltip).valign(gtk::Align::Center).css_classes(["flat"]).build();
                 let (hooks, stale) = (hooks.clone(), (*s).clone());
                 keep.connect_clicked(move |_| (hooks.keep_merge)(&stale));
                 r.add_suffix(&keep);

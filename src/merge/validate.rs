@@ -918,4 +918,22 @@ mod tests {
         );
         assert!(res.is_ok(), "{:?}", res.problems);
     }
+
+    #[test]
+    fn reports_a_dropped_event_option() {
+        let v = src("Vanilla", "country_event = { id = x.1 option = { name = a } }");
+        let m = src(
+            "Mod",
+            "country_event = { id = x.1 option = { name = a } option = { name = extra } }",
+        );
+        let bad = "country_event = { id = x.1 option = { name = a } }";
+        let res = validate_object("events", "x.1", bad, Some(&v), &[m], None);
+        assert!(
+            res.problems
+                .iter()
+                .any(|p| p.kind == ProblemKind::DroppedAddition),
+            "{:?}",
+            res.problems
+        );
+    }
 }

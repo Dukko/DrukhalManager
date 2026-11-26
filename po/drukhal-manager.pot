@@ -6,9 +6,9 @@
 #, fuzzy
 msgid ""
 msgstr ""
-"Project-Id-Version: DrukhalManager 2.7.27\n"
+"Project-Id-Version: DrukhalManager 2.7.29\n"
 "Report-Msgid-Bugs-To: https://github.com/Dukko/DrukhalManager/issues\n"
-"POT-Creation-Date: 2026-11-26 03:48+0000\n"
+"POT-Creation-Date: 2026-11-26 15:49+0000\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -1154,11 +1154,15 @@ msgid "Replace the picked version with {name}'s new one. The patch is backed up 
 msgstr ""
 
 #: src/conflicts_view.rs
-msgid "Keep As Is"
+msgid "Accept the saved merge as it is. Changes to its sources will still be noticed"
 msgstr ""
 
 #: src/conflicts_view.rs
 msgid "Track changes to its mods from their current versions"
+msgstr ""
+
+#: src/conflicts_view.rs
+msgid "Keep As Is"
 msgstr ""
 
 #: src/conflicts_view.rs
@@ -2091,6 +2095,10 @@ msgid "The base game added it in {version}"
 msgstr ""
 
 #: src/merge/patch.rs
+msgid "The saved merge no longer combines its sources cleanly: {problems}"
+msgstr ""
+
+#: src/merge/patch.rs
 msgid "no longer ships this file"
 msgstr ""
 
@@ -2102,7 +2110,7 @@ msgstr ""
 msgid "The base game added this file in {version}"
 msgstr ""
 
-#: src/merge/patch.rs
+#: src/merge/patch.rs src/merge/patch.rs src/merge/patch.rs
 msgid "It is no longer in the patch"
 msgstr ""
 
@@ -4018,6 +4026,10 @@ msgid "Removed {done} of {count}, then could not remove {what}: {error}"
 msgid_plural "Removed {done} of {count}, then could not remove {what}: {error}"
 msgstr[0] ""
 msgstr[1] ""
+
+#: src/window/conflicts_ui.rs
+msgid "Kept {what}; changes to its sources will be noticed from now on"
+msgstr ""
 
 #: src/window/conflicts_ui.rs
 msgid "The mods {what} was merged from no longer conflict over it. Remove it from the patch, or enable them and rescan."
