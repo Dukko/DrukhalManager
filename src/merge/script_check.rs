@@ -14,6 +14,7 @@ use std::collections::{HashMap, HashSet};
 use std::io::{Read, Write};
 use std::ops::Range;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, RwLock};
 
 use flate2::read::GzDecoder;
@@ -1050,7 +1051,9 @@ fn vanilla_events(game_dir: &Path) -> (HashSet<String>, HashMap<String, Vec<Stri
 /// A file's top-level entries with their spans, parsed on the first lookup
 /// of an object in it.
 #[derive(Default)]
-struct Objects(Option<Option<Vec<(Entry, Range<usize>)>>>);
+struct Objects(Option<Option<Spans>>);
+
+type Spans = Vec<(Entry, Range<usize>)>;
 
 impl Objects {
     /// The key of the top-level object whose definition covers 1-based `line`
@@ -1086,6 +1089,44 @@ fn used_object(report: &Report, position: usize, file: &str, text: &str, line: u
     Some(object)
 }
 
+/// What one file of a mod adds to the check.
+struct Checked {
+    used: HashSet<String>,
+    events: HashSet<String>,
+    inline: Vec<InlineUse>,
+    /// An inline script's event id parameters, by script name.
+    template: Option<(String, Vec<String>)>,
+    fires: Vec<(usize, String)>,
+    found: Vec<Finding>,
+}
+
+/// Parses a file once, for the check and for what it calls. `None` when it
+/// can't be read or parsed.
+fn check_file(context: &Context, known: &Known, report: &Report, position: usize, root: &Path, file: &str) -> Option<Checked> {
+    let text = read_text(&root.join(file))?;
+    let nodes = script::parse_lines(&text).ok()?;
+    let mut used = HashSet::new();
+    collect_used(known, file, &nodes, &mut used);
+    let mut events = HashSet::new();
+    let mut inline = Vec::new();
+    event_definitions(file, &nodes, &mut events, &mut inline);
+    // A mod's copy replaces the game's, even without an event.
+    let template = inline_script_name(file).map(|name| {
+        let mut params = Vec::new();
+        id_parameters(&nodes, &mut params);
+        (name, params)
+    });
+    let mut fires = Vec::new();
+    event_references(file, &nodes, &mut fires);
+    let mut found = Vec::new();
+    let mut objects = Objects::default();
+    for (line, name, ctx, problem, call) in check_shaped(context, known, file, &nodes) {
+        let Some(object) = used_object(report, position, file, &text, line, &mut objects) else { continue };
+        found.push(Finding { mod_position: position, file: file.to_owned(), line, name, ctx, problem, object, unused: false, call, siblings: Vec::new() });
+    }
+    Some(Checked { used, events, inline, template, fires, found })
+}
+
 pub fn check_mods(context: &Context, known: &Known, roots: &[Option<PathBuf>], report: &Report) -> Vec<Finding> {
     let files: Vec<Vec<String>> = roots.iter().map(|root| root.as_deref().map(all_files).unwrap_or_default()).collect();
     let mut last: HashMap<String, usize> = HashMap::new();
@@ -1094,8 +1135,35 @@ pub fn check_mods(context: &Context, known: &Known, roots: &[Option<PathBuf>], r
             last.insert(file.to_lowercase(), position);
         }
     }
+    let mut work: Vec<(usize, &Path, &str)> = Vec::new();
+    for (position, (root, files)) in roots.iter().zip(&files).enumerate() {
+        let Some(root) = root else { continue };
+        work.extend(files.iter().filter(|file| last.get(&file.to_lowercase()) == Some(&position)).map(|file| (position, root.as_path(), file.as_str())));
+    }
+    // Files are checked on several threads and merged in the order of `work`,
+    // so a later mod's inline script still replaces an earlier one's.
+    let next = AtomicUsize::new(0);
+    let threads = std::thread::available_parallelism().map_or(1, |n| n.get()).min(work.len()).max(1);
+    let mut checked: Vec<(usize, Checked)> = std::thread::scope(|scope| {
+        let workers: Vec<_> = (0..threads)
+            .map(|_| {
+                scope.spawn(|| {
+                    let mut done = Vec::new();
+                    loop {
+                        let index = next.fetch_add(1, Ordering::Relaxed);
+                        let Some(&(position, root, file)) = work.get(index) else { break };
+                        if let Some(result) = check_file(context, known, report, position, root, file) {
+                            done.push((index, result));
+                        }
+                    }
+                    done
+                })
+            })
+            .collect();
+        workers.into_iter().flat_map(|w| w.join().unwrap_or_else(|e| std::panic::resume_unwind(e))).collect()
+    });
+    checked.sort_by_key(|(index, _)| *index);
     let mut found = Vec::new();
-    // Each file is parsed once, for the check and for what it calls.
     let mut used = context.used.clone();
     let mut events = context.events.clone();
     let mut inline = Vec::new();
@@ -1103,35 +1171,14 @@ pub fn check_mods(context: &Context, known: &Known, roots: &[Option<PathBuf>], r
     // The events each file fires: (position, file, line, id). Most exist,
     // so the object each is in is only looked up for those that don't.
     let mut fired: Vec<(usize, String, usize, String)> = Vec::new();
-    for (position, (root, files)) in roots.iter().zip(&files).enumerate() {
-        let Some(root) = root else { continue };
-        for file in files {
-            if last.get(&file.to_lowercase()) != Some(&position) {
-                continue;
-            }
-            let Some(text) = read_text(&root.join(file)) else { continue };
-            let Ok(nodes) = script::parse_lines(&text) else { continue };
-            collect_used(known, file, &nodes, &mut used);
-            event_definitions(file, &nodes, &mut events, &mut inline);
-            if let Some(name) = inline_script_name(file) {
-                let mut params = Vec::new();
-                id_parameters(&nodes, &mut params);
-                // A mod's copy replaces the game's, even without an event.
-                templates.insert(name, params);
-            }
-            let mut fires = Vec::new();
-            event_references(file, &nodes, &mut fires);
-            fired.extend(fires.into_iter().map(|(line, id)| (position, file.clone(), line, id)));
-            let problems = check_shaped(context, known, file, &nodes);
-            if problems.is_empty() {
-                continue;
-            }
-            let mut objects = Objects::default();
-            for (line, name, ctx, problem, call) in problems {
-                let Some(object) = used_object(report, position, file, &text, line, &mut objects) else { continue };
-                found.push(Finding { mod_position: position, file: file.clone(), line, name, ctx, problem, object, unused: false, call, siblings: Vec::new() });
-            }
-        }
+    for (index, result) in checked {
+        let (position, _, file) = work[index];
+        used.extend(result.used);
+        events.extend(result.events);
+        inline.extend(result.inline);
+        templates.extend(result.template);
+        fired.extend(result.fires.into_iter().map(|(line, id)| (position, file.to_owned(), line, id)));
+        found.extend(result.found);
     }
     // A name only ever used like a call, that nothing defines, probably
     // comes from a mod that isn't installed.
@@ -1728,8 +1775,7 @@ mod tests {
         let timed = std::time::Instant::now();
         let roots: Vec<Option<PathBuf>> = mods.iter().map(|(_, root)| Some(root.clone())).collect();
         let found = check_mods(&context, &known, &roots, &Report::default());
-        println!("check_mods took {} ms", timed.elapsed().as_millis());
-        for (position, (name, _)) in mods.iter().enumerate() {
+        println!("check_mods took {} ms", timed.elapsed().as_millis());        for (position, (name, _)) in mods.iter().enumerate() {
             let here: Vec<&Finding> = found.iter().filter(|f| f.mod_position == position).collect();
             if here.is_empty() {
                 continue;
