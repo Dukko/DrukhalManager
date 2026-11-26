@@ -1748,11 +1748,82 @@ const MAX_STREAM_BYTES: u64 = 32 * 1024 * 1024;
 const MAX_LINE_BYTES: usize = 4 * 1024 * 1024;
 /// The most reasoning text one reply may stream.
 const MAX_THINKING_BYTES: usize = 8 * 1024 * 1024;
+/// How often a waiting stream read looks at the cancel token.
+const CANCEL_POLL: Duration = Duration::from_millis(50);
+
+/// Reads a reply body on its own thread, so a read that is waiting on a
+/// silent server can still be cancelled. The thread ends when the body does,
+/// when the server closes the connection, or when the request times out.
+struct CancellableReader {
+    chunks: std::sync::mpsc::Receiver<std::io::Result<Vec<u8>>>,
+    pending: Vec<u8>,
+    taken: usize,
+    cancel: CancelToken,
+}
+
+impl CancellableReader {
+    fn spawn(mut source: impl Read + Send + 'static, cancel: CancelToken) -> Self {
+        let (sender, chunks) = std::sync::mpsc::sync_channel(8);
+        std::thread::spawn(move || {
+            let mut buf = vec![0; 16 * 1024];
+            loop {
+                let chunk = match source.read(&mut buf) {
+                    Ok(0) => return,
+                    Ok(n) => Ok(buf[..n].to_vec()),
+                    Err(e) => Err(e),
+                };
+                let failed = chunk.is_err();
+                if sender.send(chunk).is_err() || failed {
+                    return;
+                }
+            }
+        });
+        Self {
+            chunks,
+            pending: Vec::new(),
+            taken: 0,
+            cancel,
+        }
+    }
+}
+
+impl Read for CancellableReader {
+    fn read(&mut self, out: &mut [u8]) -> std::io::Result<usize> {
+        use std::sync::mpsc::RecvTimeoutError;
+        while self.taken == self.pending.len() {
+            if self.cancel.is_cancelled() {
+                return Err(std::io::Error::other("Cancelled"));
+            }
+            match self.chunks.recv_timeout(CANCEL_POLL) {
+                Ok(chunk) => {
+                    self.pending = chunk?;
+                    self.taken = 0;
+                }
+                Err(RecvTimeoutError::Timeout) => {}
+                Err(RecvTimeoutError::Disconnected) => return Ok(0),
+            }
+        }
+        let n = out.len().min(self.pending.len() - self.taken);
+        out[..n].copy_from_slice(&self.pending[self.taken..self.taken + n]);
+        self.taken += n;
+        Ok(n)
+    }
+}
+
 /// A reply body to read as it streams: capped at [`MAX_STREAM_BYTES`], and
 /// stopping promptly when `cancel` is set.
-fn stream_reader(body: ureq::Body, _cancel: Option<&CancelToken>) -> Box<dyn BufRead> {
-    let reader = body.into_with_config().limit(MAX_STREAM_BYTES).reader();
-    Box::new(std::io::BufReader::new(reader))
+fn stream_reader(body: ureq::Body, cancel: Option<&CancelToken>) -> Box<dyn BufRead> {
+    let reader = body
+        .into_with_config()
+        .limit(MAX_STREAM_BYTES)
+        .reader();
+    match cancel {
+        Some(cancel) => Box::new(std::io::BufReader::new(CancellableReader::spawn(
+            reader,
+            cancel.clone(),
+        ))),
+        None => Box::new(std::io::BufReader::new(reader)),
+    }
 }
 
 fn read_error(e: &std::io::Error, cancel: Option<&CancelToken>) -> String {
@@ -3876,5 +3947,50 @@ mod tests {
         .unwrap();
 
         assert_eq!(events, ["one", "two"]);
+    }
+
+    #[test]
+    fn cancelling_a_stalled_stream_returns_promptly_and_reads_nothing_more() {
+        use std::io::Write;
+        let (url, _) = serve(|mut stream| {
+            if !read_request(&mut stream) {
+                return;
+            }
+            let event = json!({"choices": [{"delta": {"reasoning": "first"}}]});
+            write!(
+                stream,
+                "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\nconnection: close\r\n\r\ndata: {event}\n\n"
+            )
+            .unwrap();
+            stream.flush().unwrap();
+            // Silent until the client hangs up.
+            let _ = stream.read(&mut [0u8; 1]);
+        });
+        let token = CancelToken::new();
+        let (seen, first_event) = std::sync::mpsc::channel();
+        let cancelled_at = Arc::new(std::sync::Mutex::new(None));
+        let canceller = {
+            let (token, cancelled_at) = (token.clone(), cancelled_at.clone());
+            std::thread::spawn(move || {
+                first_event.recv().unwrap();
+                *cancelled_at.lock().unwrap() = Some(std::time::Instant::now());
+                token.cancel();
+            })
+        };
+        let mut thinking = Vec::new();
+
+        let err = merge_openai(&url, "m", "", "sys", "prompt", 1000, Some(&token), &mut |p| {
+            if let Progress::Thinking(t) = p {
+                thinking.push(t);
+                seen.send(()).unwrap();
+            }
+        })
+        .unwrap_err();
+
+        let waited = cancelled_at.lock().unwrap().unwrap().elapsed();
+        canceller.join().unwrap();
+        assert_eq!(err, "Cancelled");
+        assert!(waited < Duration::from_millis(500), "returned {waited:?} after the cancel");
+        assert_eq!(thinking, ["first"]);
     }
 }
