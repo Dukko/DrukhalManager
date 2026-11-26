@@ -6,9 +6,9 @@
 #, fuzzy
 msgid ""
 msgstr ""
-"Project-Id-Version: DrukhalManager 2.7.33\n"
+"Project-Id-Version: DrukhalManager 2.7.34\n"
 "Report-Msgid-Bugs-To: https://github.com/Dukko/DrukhalManager/issues\n"
-"POT-Creation-Date: 2026-11-26 17:37+0000\n"
+"POT-Creation-Date: 2026-11-26 18:09+0000\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -300,7 +300,7 @@ msgstr ""
 msgid " · {count} not started"
 msgstr ""
 
-#: src/behind_dialog.rs src/folder_merge_dialog.rs
+#: src/behind_dialog.rs src/fix_dialog.rs src/folder_merge_dialog.rs
 msgid "Done"
 msgstr ""
 
@@ -508,10 +508,6 @@ msgstr ""
 
 #: src/conflicts_view/object.rs
 msgid "no longer defines it"
-msgstr ""
-
-#: src/conflicts_view/object.rs
-msgid "The saved merge is out of date: {reasons}. Saving a new one replaces it."
 msgstr ""
 
 #: src/conflicts_view/object.rs
@@ -1146,6 +1142,10 @@ msgid "Re-merge…"
 msgstr ""
 
 #: src/conflicts_view.rs
+msgid "Remove from Patch"
+msgstr ""
+
+#: src/conflicts_view.rs
 msgid "Use New Version"
 msgstr ""
 
@@ -1166,7 +1166,7 @@ msgid "Keep As Is"
 msgstr ""
 
 #: src/conflicts_view.rs
-msgid "Remove from Patch"
+msgid "The saved merge is out of date: {reasons}. Saving a new one replaces it."
 msgstr ""
 
 #: src/conflicts_view.rs
@@ -1644,18 +1644,6 @@ msgstr[1] ""
 msgid "Could not read {label}'s copy: {error}"
 msgstr ""
 
-#: src/file_merge_dialog.rs src/merge/validate.rs
-msgid "The merged script is empty"
-msgstr ""
-
-#: src/file_merge_dialog.rs src/merge/validate.rs
-msgid "The merged script has an unexpected closing brace `}` before an opening brace"
-msgstr ""
-
-#: src/file_merge_dialog.rs src/merge/validate.rs
-msgid "The merged script is missing {depth} closing brace `}}`"
-msgstr ""
-
 #: src/file_merge_dialog.rs
 msgid "{count} object kept as is"
 msgid_plural "{count} objects kept as is"
@@ -1741,6 +1729,14 @@ msgid "Review and edit before saving. It replaces the mod's copy through the mer
 msgstr ""
 
 #: src/fix_dialog.rs
+msgid "Review AI Fixes"
+msgstr ""
+
+#: src/fix_dialog.rs
+msgid "Nothing changes in the file below until you apply a fix."
+msgstr ""
+
+#: src/fix_dialog.rs
 msgid "Could not read the mod's file"
 msgstr ""
 
@@ -1772,11 +1768,23 @@ msgid_plural "Fix {count} Objects with AI"
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/fix_dialog.rs src/fix_dialog.rs src/fix_dialog.rs
+#: src/fix_dialog.rs src/fix_dialog.rs
 msgid "Fixed"
 msgstr ""
 
-#: src/fix_dialog.rs
+#: src/fix_dialog.rs src/fix_dialog.rs
+msgid "Unchanged"
+msgstr ""
+
+#: src/fix_dialog.rs src/fix_dialog.rs
+msgid "Kept original"
+msgstr ""
+
+#: src/fix_dialog.rs src/fix_dialog.rs src/fix_dialog.rs
+msgid "Review below"
+msgstr ""
+
+#: src/fix_dialog.rs src/fix_dialog.rs
 msgid "Not found in the file"
 msgstr ""
 
@@ -1789,25 +1797,69 @@ msgid "failed unexpectedly"
 msgstr ""
 
 #: src/fix_dialog.rs
-msgid "could not place the fix"
-msgstr ""
-
-#: src/fix_dialog.rs
-msgid "Not fixed; check it by hand"
+msgid "The AI found nothing to change"
 msgstr ""
 
 #: src/fix_dialog.rs src/fix_dialog.rs
+msgid "Not fixed; check it by hand"
+msgstr ""
+
+#: src/fix_dialog.rs src/fix_dialog.rs src/fix_dialog.rs
 msgid "Retry"
 msgstr ""
 
 #: src/fix_dialog.rs
-msgid "{count} object couldn't be fixed by AI; hover the row for the reason"
-msgid_plural "{count} objects couldn't be fixed by AI; hover the row for the reason"
+msgid "{count} object couldn't be fixed by AI; see the row for the reason"
+msgid_plural "{count} objects couldn't be fixed by AI; see the rows for the reasons"
 msgstr[0] ""
 msgstr[1] ""
 
 #: src/fix_dialog.rs
 msgid "The file still has a syntax error at {error}"
+msgstr ""
+
+#: src/fix_dialog.rs
+msgid "Keep original"
+msgstr ""
+
+#: src/fix_dialog.rs
+msgid "Leave the object as the mechanical repair made it"
+msgstr ""
+
+#: src/fix_dialog.rs
+msgid "Removes: {lines}"
+msgstr ""
+
+#: src/fix_dialog.rs
+msgid "The result is shorter and the AI didn't say what it dropped"
+msgstr ""
+
+#: src/fix_dialog.rs
+msgid "Apply the fix"
+msgstr ""
+
+#: src/fix_dialog.rs
+msgid "Option {number}"
+msgstr ""
+
+#: src/fix_dialog.rs
+msgid "Before"
+msgstr ""
+
+#: src/fix_dialog.rs
+msgid "The object now"
+msgstr ""
+
+#: src/fix_dialog.rs
+msgid "After"
+msgstr ""
+
+#: src/fix_dialog.rs src/window/smart_sort_ui.rs
+msgid "Apply"
+msgstr ""
+
+#: src/fix_dialog.rs
+msgid "The object changed after this fix was made. Use Retry so the AI sees the current text."
 msgstr ""
 
 #: src/folder_merge_dialog.rs src/folder_merge_dialog.rs
@@ -2062,6 +2114,22 @@ msgstr ""
 msgid "No merge tool is set"
 msgstr ""
 
+#: src/merge/file_merge.rs src/merge/validate.rs
+msgid "A localisation merge must be a single line starting with `{name}:`"
+msgstr ""
+
+#: src/merge/file_merge.rs src/merge/validate.rs src/merge/validate.rs
+msgid "The merged script has a syntax error at {error}"
+msgstr ""
+
+#: src/merge/file_merge.rs src/merge/validate.rs
+msgid "The merged script must define `{key}` and nothing else"
+msgstr ""
+
+#: src/merge/file_merge.rs
+msgid "This file has a syntax error at {error}"
+msgstr ""
+
 #: src/merge/lint.rs
 msgid "Closed {count} block left open before line {line}"
 msgid_plural "Closed {count} blocks left open before line {line}"
@@ -2158,24 +2226,24 @@ msgstr ""
 msgid "{name} includes all changes from the other mods"
 msgstr ""
 
-#: src/merge/validate.rs src/merge_dialog.rs
-msgid "A localisation merge must be a single line starting with `{name}:`"
-msgstr ""
-
-#: src/merge/validate.rs src/merge_dialog.rs
-msgid "The merged script has a syntax error at {error}"
-msgstr ""
-
-#: src/merge/validate.rs src/merge_dialog.rs
-msgid "The merged script must define `{key}` and nothing else"
-msgstr ""
-
-#: src/merge/validate.rs src/merge_dialog.rs
+#: src/merge/validate.rs
 msgid "The merged script must define `{key}`"
 msgstr ""
 
 #: src/merge/validate.rs src/merge/validate.rs
 msgid "Invalid child block `{param} = {{ ... }}` inside scripted effect/trigger `{effect}` near line {line}"
+msgstr ""
+
+#: src/merge/validate.rs
+msgid "The merged script is empty"
+msgstr ""
+
+#: src/merge/validate.rs
+msgid "The merged script has an unexpected closing brace `}` before an opening brace"
+msgstr ""
+
+#: src/merge/validate.rs
+msgid "The merged script is missing {depth} closing brace `}}`"
 msgstr ""
 
 #: src/merge/validate.rs
@@ -2188,10 +2256,6 @@ msgstr ""
 
 #: src/merge/validate.rs
 msgid "Unknown or misplaced script names introduced: {names}"
-msgstr ""
-
-#: src/merge_dialog.rs
-msgid "The merged script contains invalid child block `{param} = {{ ... }}` inside scripted effect/trigger `{effect}` near line {line}"
 msgstr ""
 
 #. Mods also list optional compatibility targets here, so a
@@ -5716,10 +5780,6 @@ msgstr ""
 
 #: src/window/shortcuts.rs
 msgid "Previous Difference"
-msgstr ""
-
-#: src/window/smart_sort_ui.rs
-msgid "Apply"
 msgstr ""
 
 #: src/window/smart_sort_ui.rs

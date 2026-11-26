@@ -36,6 +36,19 @@
     <control>keyboard</control>
   </supports>
   <releases>
+    <release version="2.7.34" date="2026-11-26">
+      <description>
+        <p>Makes out-of-date merges easier to act on, reworks Fix with AI, and checks hand-made saves like AI merges:</p>
+        <ul>
+          <li>The object and game-update pages say why a saved merge is out of date and offer Keep As Is or Use New Version right there</li>
+          <li>The Needs Attention group stays current after saves and is found by searching for the merges it lists</li>
+          <li>Fix with AI can answer that an object is fine, offer alternatives, or list the lines it removed, and shows a before/after view to apply or keep</li>
+          <li>Fix with AI accepts replies from providers that send empty fields as null</li>
+          <li>Manual and whole-file saves get the same syntax, structure and duplicate-key checks as AI merges, without requiring every mod addition</li>
+          <li>The duplicate-key check allows repeats guarded by different conditions and identical copies, so valid game content isn't rejected</li>
+        </ul>
+      </description>
+    </release>
     <release version="2.7.33" date="2026-11-26">
       <description>
         <p>Fixes false "merge out of date" warnings after game updates, and hardens saving and AI requests:</p>
