@@ -28,8 +28,21 @@ pub struct Repair {
     pub fixes: Vec<String>,
     /// Classification of each change in `fixes`.
     pub kinds: Vec<FixKind>,
-    /// Keys of top-level objects with ambiguous nesting (`ClosedBeforeNextObject`).
-    pub damaged: Vec<String>,
+    /// Top-level objects with ambiguous nesting (`ClosedBeforeNextObject`).
+    pub damaged: Vec<Damage>,
+}
+
+/// A top-level object whose missing braces were added where only its author
+/// can say they belonged.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Damage {
+    pub key: String,
+    /// The object as it was in the file, before any brace was added.
+    pub original: String,
+    /// How many `}` were added after the last line of `original`.
+    pub added: usize,
+    /// The lines of `original` (1-based) whose `{` was still open at that point.
+    pub open_lines: Vec<usize>,
 }
 
 /// Repairs `src` if it doesn't parse because of brace mistakes. `None` if it
@@ -42,26 +55,27 @@ pub fn repair(category: &str, src: &str) -> Option<Repair> {
     let mut out = String::with_capacity(src.len() + 16);
     let mut fixes = Vec::new();
     let mut kinds = Vec::new();
-    let mut damaged: Vec<String> = Vec::new();
+    let mut damaged: Vec<Damage> = Vec::new();
     let mut depth = 0usize;
+    let mut open_lines: Vec<usize> = Vec::new();
+    let src_lines: Vec<&str> = src.split_inclusive('\n').collect();
     let mut in_string = false;
     // The top-level object currently open, by its first line.
     let mut current: Option<(usize, String)> = None;
-
-    let mark = |damaged: &mut Vec<String>, current: &Option<(usize, String)>| {
-        if let Some((_, key)) = current
-            && !damaged.contains(key)
-        {
-            damaged.push(key.clone());
-        }
-    };
 
     for (n, line) in src.split_inclusive('\n').enumerate() {
         let number = n + 1;
         if !in_string && depth > 0 && starts_top_level_object(line) {
             fixes.push(tnf!("Closed {count} block left open before line {line}", "Closed {count} blocks left open before line {line}", count = depth, line = number));
             kinds.push(FixKind::ClosedBeforeNextObject);
-            mark(&mut damaged, &current);
+            if let Some((first, key)) = &current
+                && !damaged.iter().any(|d| d.key == *key)
+            {
+                let original = src_lines[first - 1..number - 1].concat().trim_end().to_owned();
+                let open_lines = open_lines.iter().filter(|&&l| l >= *first).map(|l| l - first + 1).collect();
+                damaged.push(Damage { key: key.clone(), original, added: depth, open_lines });
+            }
+            open_lines.clear();
             out.push_str(&"}".repeat(depth));
             out.push('\n');
             depth = 0;
@@ -95,7 +109,10 @@ pub fn repair(category: &str, src: &str) -> Option<Repair> {
                     break;
                 }
                 '"' => in_string = true,
-                '{' => depth += 1,
+                '{' => {
+                    depth += 1;
+                    open_lines.push(number);
+                }
                 '}' if depth == 0 => {
                     fixes.push(tf!("Removed a '}}' that closed nothing on line {line}", line = number));
                     kinds.push(FixKind::RemovedStray);
@@ -103,6 +120,7 @@ pub fn repair(category: &str, src: &str) -> Option<Repair> {
                 }
                 '}' => {
                     depth -= 1;
+                    open_lines.pop();
                     if depth == 0 {
                         current = None;
                     }
@@ -127,18 +145,15 @@ pub fn repair(category: &str, src: &str) -> Option<Repair> {
     script::parse(&out).ok()?;
 
     let entries = script::parse(&out).ok()?;
-    damaged = damaged
-        .into_iter()
-        .map(|key| {
-            entries
-                .iter()
-                .find_map(|e| match e {
-                    Entry::Assign { key: k, .. } if *k == key => crate::merge::conflicts::object_key_for_entry(category, e),
-                    _ => None,
-                })
-                .unwrap_or(key)
-        })
-        .collect();
+    for d in &mut damaged {
+        let key = entries.iter().find_map(|e| match e {
+            Entry::Assign { key: k, .. } if *k == d.key => crate::merge::conflicts::object_key_for_entry(category, e),
+            _ => None,
+        });
+        if let Some(key) = key {
+            d.key = key;
+        }
+    }
     Some(Repair { text: out, fixes, kinds, damaged })
 }
 
@@ -250,6 +265,29 @@ pub fn verify_brace_repair(original: &str, repaired: &str) -> Result<(), String>
     Err(format!(
         "The repair dropped or changed this content. Restore it exactly:\n{sample}{extra}"
     ))
+}
+
+/// [`verify_brace_repair`] for a repair that also dropped the lines in
+/// `removed`, each of which must be a whole line of `original`.
+pub fn verify_repair_removing(original: &str, repaired: &str, removed: &[String]) -> Result<(), String> {
+    let mut kept: Vec<&str> = original.lines().collect();
+    for line in removed.iter().map(|r| r.trim()).filter(|r| !r.is_empty()) {
+        match kept.iter().position(|l| l.trim() == line) {
+            Some(at) => {
+                kept.remove(at);
+            }
+            None => {
+                return Err(format!("`{line}` is listed as removed but is not a line of the object. List only lines that are in the original."));
+            }
+        }
+    }
+    verify_brace_repair(&kept.join("\n"), repaired)
+}
+
+/// Whether `repaired` holds less than `original` apart from braces and whitespace.
+pub fn shrank(original: &str, repaired: &str) -> bool {
+    let size = |text: &str| text.chars().filter(|c| !c.is_whitespace() && !matches!(c, '{' | '}')).count();
+    size(repaired) < size(original)
 }
 
 /// `key = {` at column 0, the convention for top-level objects.
@@ -585,13 +623,17 @@ pub fn clean_up_snippet(src: &str, initial_depth: usize) -> String {
 mod tests {
     use super::*;
 
+    fn damaged_keys(r: &Repair) -> Vec<&str> {
+        r.damaged.iter().map(|d| d.key.as_str()).collect()
+    }
+
     #[test]
     fn closes_blocks_before_the_next_object() {
         // Shaped like Better Origins' b_origins_buildings.txt.
         let src = "a = {\n\tpotential = {\n\t\towner = { OR = { x = yes }\n\t}\n}\n\nb = {\n\tcost = 1\n}\n\nc = {\n}\n";
         let r = repair("common/buildings", src).unwrap();
         assert_eq!(r.fixes, ["Closed 1 block left open before line 7"]);
-        assert_eq!(r.damaged, ["a"]);
+        assert_eq!(damaged_keys(&r), ["a"]);
         let entries = script::parse(&r.text).unwrap();
         let keys: Vec<&str> = entries.iter().filter_map(|e| if let Entry::Assign { key, .. } = e { Some(key.as_str()) } else { None }).collect();
         assert_eq!(keys, ["a", "b", "c"], "later objects are top level again");
@@ -610,7 +652,7 @@ mod tests {
     #[test]
     fn reports_event_ids_and_skips_valid_files() {
         let r = repair("events", "namespace = ns\ncountry_event = {\n\tid = ns.1\n\ttrigger = {\n\ncountry_event = {\n\tid = ns.2\n}\n").unwrap();
-        assert_eq!(r.damaged, ["ns.1"]);
+        assert_eq!(damaged_keys(&r), ["ns.1"]);
         assert_eq!(r.kinds, [FixKind::ClosedBeforeNextObject]);
         assert_eq!(repair("common/x", "a = { }"), None);
         let fixed = replace_object("events", "ns.1", &r.text, "country_event = {\n\tid = ns.1\n\ttrigger = { }\n}").unwrap();
@@ -641,7 +683,10 @@ mod tests {
         let src = "ok_first = {\n\tcost = 1\n}\nbroken = {\n\tpotential = {\n\t\tis_ai = no\n\nok_last = {\n\tcost = 2\n}\n";
         let r = repair("common/buildings", src).unwrap();
         assert_eq!(r.kinds, [FixKind::ClosedBeforeNextObject]);
-        assert_eq!(r.damaged, ["broken"]);
+        assert_eq!(damaged_keys(&r), ["broken"]);
+        let d = &r.damaged[0];
+        assert_eq!(d.original, "broken = {\n\tpotential = {\n\t\tis_ai = no");
+        assert_eq!((d.added, d.open_lines.as_slice()), (2, [1, 2].as_slice()));
     }
 
     #[test]
@@ -752,6 +797,23 @@ foo = {  # comment next to open
         let altered = orig.replace("mult = 2", "mult = 3");
         let err = verify_brace_repair(orig, &altered).unwrap_err();
         assert!(err.contains("mult = 2"), "{err}");
+    }
+
+    #[test]
+    fn repair_removing_allows_only_the_listed_lines() {
+        let orig = "sv = {\n\tbase = 0\n\tmult = 2\n\tadd = 1\n}";
+        let stub = "sv = {\n\tbase = 0\n\tadd = 1\n}";
+        assert!(verify_repair_removing(orig, stub, &["mult = 2".to_owned()]).is_ok());
+        assert!(verify_repair_removing(orig, stub, &[]).is_err());
+        assert!(verify_repair_removing(orig, stub, &["add = 1".to_owned()]).is_err());
+        let invented = verify_repair_removing(orig, stub, &["mult = 3".to_owned()]).unwrap_err();
+        assert!(invented.contains("not a line of the object"), "{invented}");
+    }
+
+    #[test]
+    fn shrank_ignores_braces_and_whitespace() {
+        assert!(!shrank("a = {\n\tb = 1\n}", "a = { b = 1 }"));
+        assert!(shrank("a = {\n\tb = 1\n\tc = 2\n}", "a = { b = 1 }"));
     }
 
     #[test]

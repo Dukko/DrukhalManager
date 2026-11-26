@@ -9,7 +9,8 @@ use std::rc::Rc;
 use adw::prelude::*;
 use gtk::{gio, glib};
 
-use crate::merge::ai::{self, Provider};
+use crate::diff_view::{Compare, Header, Pair};
+use crate::merge::ai::{self, FixOutcome, Provider};
 use crate::merge::{file_merge, lint};
 use crate::merge::patch::Print;
 use crate::merge_dialog;
@@ -32,8 +33,11 @@ pub struct Request {
 
 struct State {
     category: String,
-    fixes: Vec<String>,
+    damage: Vec<lint::Damage>,
 }
+
+/// An object's key, its status label and its row.
+type Row = (String, gtk::Label, adw::ActionRow);
 
 pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
     let request = Rc::new(request);
@@ -66,6 +70,12 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
     crate::diff_view::attach_clean_up_menu(&editor);
     let editor_scroll = gtk::ScrolledWindow::builder().child(&editor).min_content_height(320).css_classes(["card"]).build();
     let result = adw::PreferencesGroup::builder().title(t!("Fixed File")).description(t!("Review and edit before saving. It replaces the mod's copy through the merged patch.")).build();
+    let review = adw::PreferencesGroup::builder()
+        .title(t!("Review AI Fixes"))
+        .description(t!("Nothing changes in the file below until you apply a fix."))
+        .visible(false)
+        .build();
+    let pending: Rc<Cell<usize>> = Rc::default();
     let thinking = ThinkingView::new();
     let result_box = gtk::Box::new(gtk::Orientation::Vertical, 8);
     result_box.append(&thinking.widget);
@@ -75,6 +85,7 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
     let page = adw::PreferencesPage::new();
     page.add(&problem);
     page.add(&repairs);
+    page.add(&review);
     page.add(&result);
     let toolbar = adw::ToolbarView::new();
     toolbar.add_top_bar(&header);
@@ -83,7 +94,7 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
     let dialog = adw::Dialog::builder().content_width(960).content_height(800).child(&toolbar).build();
     crate::diff_view::bind_button_shortcuts(&dialog, &[("<Alt>m", &ai_button), ("<Control>s", &save_button)]);
 
-    let labels: Rc<RefCell<Vec<(String, gtk::Label)>>> = Rc::default();
+    let labels: Rc<RefCell<Vec<Row>>> = Rc::default();
     let print: Rc<RefCell<Option<Print>>> = Rc::default();
     let (path, root) = (request.path.clone(), request.root.clone());
     glib::spawn_future_local(glib::clone!(
@@ -123,7 +134,7 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
             let Some(repair) = repair else {
                 repairs.set_description(Some(&t!("This can't be repaired automatically. Fix it by hand below; the file is checked before saving.")));
                 editor.buffer().set_text(&src);
-                state.replace(Some(State { category, fixes: Vec::new() }));
+                state.replace(Some(State { category, damage: Vec::new() }));
                 return;
             };
 
@@ -140,18 +151,18 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
             for fix in &repair.fixes {
                 repairs.add(&adw::ActionRow::builder().title(fix).use_markup(false).build());
             }
-            for key in &repair.damaged {
-                let row = adw::ActionRow::builder().title(key).subtitle(t!("Braces changed; check its nesting")).use_markup(false).build();
+            for damage in &repair.damaged {
+                let row = adw::ActionRow::builder().title(&damage.key).subtitle(t!("Braces changed; check its nesting")).use_markup(false).build();
                 row.add_prefix(&gtk::Image::builder().icon_name("dialog-warning-symbolic").css_classes(["warning"]).build());
                 let label = gtk::Label::builder().label(t!("Not reviewed")).css_classes(["dim-label", "caption"]).build();
                 row.add_suffix(&label);
-                labels.borrow_mut().push((key.clone(), label));
+                labels.borrow_mut().push((damage.key.clone(), label, row.clone()));
                 repairs.add(&row);
             }
             editor.buffer().set_text(&repair.text);
             ai_button.set_label(&tnf!("Fix {count} Object with AI", "Fix {count} Objects with AI", count = repair.damaged.len()));
             ai_button.set_visible(!repair.damaged.is_empty());
-            state.replace(Some(State { category, fixes: repair.fixes }));
+            state.replace(Some(State { category, damage: repair.damaged }));
         }
     ));
 
@@ -189,6 +200,8 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
         labels,
         #[strong]
         cancelled,
+        #[strong]
+        pending,
         #[weak]
         dialog,
         #[weak]
@@ -199,13 +212,15 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
         stop_button,
         #[weak]
         banner,
+        #[weak]
+        review,
         move |button| {
             let Some(provider) = request.provider.clone() else {
                 dialog.close();
                 (request.open_preferences)();
                 return;
             };
-            let Some((category, fixes)) = state.borrow().as_ref().map(|s| (s.category.clone(), s.fixes.clone())) else { return };
+            let Some((category, damage)) = state.borrow().as_ref().map(|s| (s.category.clone(), s.damage.clone())) else { return };
             banner.set_revealed(false);
             button.set_visible(false);
             stop_button.set_visible(true);
@@ -221,6 +236,10 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
                 labels,
                 #[strong]
                 cancelled,
+                #[strong]
+                pending,
+                #[weak]
+                review,
                 #[weak]
                 button,
                 #[weak]
@@ -233,14 +252,15 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
                 banner,
                 async move {
                     let mut failures = 0;
-                    let pending = labels.borrow().clone();
-                    for (key, label) in pending {
+                    let rows = labels.borrow().clone();
+                    for (key, label, row) in rows {
                         if cancelled.get() || thinking.is_stopped() {
                             break;
                         }
-                        if label.text() == t!("Fixed") {
+                        if [t!("Fixed"), t!("Unchanged"), t!("Kept original"), t!("Review below")].contains(&label.text().to_string()) {
                             continue;
                         }
+                        let Some(damage) = damage.iter().find(|d| d.key == key).cloned() else { continue };
                         let buffer = editor.buffer();
                         let text = buffer.text(&buffer.start_iter(), &buffer.end_iter(), false).to_string();
                         let Some(range) = lint::object_span(&category, &key, &text) else {
@@ -249,24 +269,12 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
                             continue;
                         };
                         label.set_label(&t!("Fixing…"));
-                        let (provider, c, k, object, fixes, m) = (provider.clone(), category.clone(), key.clone(), text[range].to_owned(), fixes.clone(), mod_name.clone());
+                        let object = text[range].to_owned();
+                        let (provider, c, m, d, o) = (provider.clone(), category.clone(), mod_name.clone(), damage, object.clone());
                         let heading = key.clone();
                         let result = thinking_view::run_cancellable(&thinking, Some(&heading), move |cancel, on| {
-                            ai::fix_checked(
-                                &provider,
-                                &c,
-                                &k,
-                                &object,
-                                &fixes,
-                                &m,
-                                &|candidate| {
-                                    let script = merge_dialog::validate(&c, &k, candidate)?;
-                                    lint::verify_brace_repair(&object, &script)?;
-                                    Ok(script)
-                                },
-                                Some(cancel),
-                                on,
-                            )
+                            let validate = |candidate: &str| merge_dialog::validate(&c, &d.key, candidate);
+                            ai::fix_checked(&provider, &c, &d, &o, &m, &validate, Some(cancel), on)
                         })
                         .await;
                         if cancelled.get() || thinking.is_stopped() {
@@ -274,23 +282,24 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
                             label.set_css_classes(&["dim-label", "caption"]);
                             break;
                         }
-                        let fixed = match result {
-                            Some(Ok(checked)) => checked.script.map(|script| (script, checked.merged.notes)),
-                            Some(Err(e)) => Err(e),
-                            None => Err(t!("failed unexpectedly")),
-                        };
-                        match fixed.and_then(|(script, notes)| lint::replace_object(&category, &key, &text, &script).map(|t| (t, notes)).ok_or_else(|| t!("could not place the fix"))) {
-                            Ok((new_text, notes)) => {
-                                buffer.set_text(&new_text);
-                                label.set_label(&t!("Fixed"));
-                                label.set_tooltip_text(Some(&notes));
+                        match result.unwrap_or_else(|| Err(t!("failed unexpectedly"))) {
+                            Ok(FixOutcome::Unchanged { notes }) => {
+                                label.set_label(&t!("Unchanged"));
                                 label.set_css_classes(&["success", "caption"]);
+                                row.set_subtitle(&if notes.is_empty() { t!("The AI found nothing to change") } else { notes });
+                            }
+                            Ok(outcome) => {
+                                label.set_label(&t!("Review below"));
+                                label.set_css_classes(&["warning", "caption"]);
+                                row.set_subtitle(&outcome_notes(&outcome));
+                                let proposal = Proposal { key: key.clone(), category: category.clone(), original: object, outcome };
+                                add_review(&review, &pending, &editor, &label, proposal);
                             }
                             Err(e) => {
                                 failures += 1;
                                 label.set_label(&t!("Not fixed; check it by hand"));
-                                label.set_tooltip_text(Some(&e));
                                 label.set_css_classes(&["error", "caption"]);
+                                row.set_subtitle(&e);
                             }
                         }
                     }
@@ -305,9 +314,15 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
                         show(&banner, &t!("Fix stopped"));
                     } else {
                         button.set_sensitive(failures > 0);
-                        button.set_label(&if failures > 0 { t!("Retry") } else { t!("Fixed") });
+                        button.set_label(&if failures > 0 {
+                            t!("Retry")
+                        } else if pending.get() > 0 {
+                            t!("Review below")
+                        } else {
+                            t!("Done")
+                        });
                         if failures > 0 {
-                            show(&banner, &tnf!("{count} object couldn't be fixed by AI; hover the row for the reason", "{count} objects couldn't be fixed by AI; hover the row for the reason", count = failures));
+                            show(&banner, &tnf!("{count} object couldn't be fixed by AI; see the row for the reason", "{count} objects couldn't be fixed by AI; see the rows for the reasons", count = failures));
                         }
                     }
                 }
@@ -344,6 +359,137 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
     ));
 
     dialog.present(Some(parent));
+}
+
+struct Proposal {
+    key: String,
+    category: String,
+    /// The object as it is in the editor.
+    original: String,
+    outcome: FixOutcome,
+}
+
+fn outcome_notes(outcome: &FixOutcome) -> String {
+    match outcome {
+        FixOutcome::Unchanged { notes } | FixOutcome::Options { notes, .. } | FixOutcome::Fixed { notes, .. } => notes.clone(),
+    }
+}
+
+/// What each choice in a review puts in the object, `None` for keeping the
+/// original, with a title and an explanation.
+fn choices(proposal: &Proposal) -> Vec<(String, String, Option<String>)> {
+    let mut choices = vec![(t!("Keep original"), t!("Leave the object as the mechanical repair made it"), None)];
+    match &proposal.outcome {
+        FixOutcome::Fixed { script, notes, removed, shrank } => {
+            let mut about = notes.clone();
+            if !removed.is_empty() {
+                about = format!("{about}\n{}", tf!("Removes: {lines}", lines = removed.join(" | ")));
+            }
+            if *shrank {
+                about = format!("{about}\n{}", t!("The result is shorter and the AI didn't say what it dropped"));
+            }
+            choices.push((t!("Apply the fix"), about.trim().to_owned(), Some(script.clone())));
+        }
+        FixOutcome::Options { options, .. } => {
+            for (n, option) in options.iter().enumerate() {
+                choices.push((tf!("Option {number}", number = n + 1), option.notes.clone(), Some(option.script.clone())));
+            }
+        }
+        FixOutcome::Unchanged { .. } => {}
+    }
+    choices
+}
+
+/// Shows what the AI proposes for one object as a before/after diff, and
+/// puts the chosen version into the editor only when the user applies it.
+fn add_review(review: &adw::PreferencesGroup, pending: &Rc<Cell<usize>>, editor: &gtk::TextView, label: &gtk::Label, proposal: Proposal) {
+    let choices = choices(&proposal);
+    let panel = gtk::Box::new(gtk::Orientation::Vertical, 8);
+    let heading = gtk::Label::builder().label(&proposal.key).xalign(0.0).css_classes(["heading"]).build();
+    let notes = gtk::Label::builder().label(outcome_notes(&proposal.outcome)).xalign(0.0).wrap(true).selectable(true).build();
+    panel.append(&heading);
+    panel.append(&notes);
+
+    let list = gtk::ListBox::builder().selection_mode(gtk::SelectionMode::None).css_classes(["boxed-list"]).build();
+    let pair = Pair::new(false);
+    pair.left.set_header(&Header { title: t!("Before"), subtitle: t!("The object now"), ..Header::default() });
+    pair.right.set_header(&Header { title: t!("After"), ..Header::default() });
+    for card in [&pair.left, &pair.right] {
+        card.scroll.set_min_content_height(240);
+    }
+    let apply = gtk::Button::builder().css_classes(["suggested-action"]).halign(gtk::Align::End).build();
+    let selected: Rc<RefCell<Option<String>>> = Rc::default();
+    let mut first: Option<gtk::CheckButton> = None;
+    for (n, (title, about, script)) in choices.iter().enumerate() {
+        let row = adw::ActionRow::builder().title(title).subtitle(about).use_markup(false).build();
+        let radio = gtk::CheckButton::new();
+        match &first {
+            Some(group) => radio.set_group(Some(group)),
+            None => first = Some(radio.clone()),
+        }
+        row.add_prefix(&radio);
+        row.set_activatable_widget(Some(&radio));
+        list.append(&row);
+        let preselected = if matches!(&proposal.outcome, FixOutcome::Fixed { shrank: true, .. }) { n == 0 } else { n == 1 };
+        let (pair, apply, selected) = (pair.clone(), apply.clone(), selected.clone());
+        let (original, script, title) = (proposal.original.clone(), script.clone(), title.clone());
+        let show = move || {
+            pair.show(&original, script.as_deref().unwrap_or(&original), &Compare::Each, false);
+            apply.set_label(&if script.is_some() { t!("Apply") } else { title.clone() });
+            selected.replace(script.clone());
+        };
+        radio.connect_toggled(move |radio| {
+            if radio.is_active() {
+                show();
+            }
+        });
+        radio.set_active(preselected);
+    }
+    panel.append(&list);
+    pair.widget.set_vexpand(false);
+    panel.append(&pair.widget);
+    panel.append(&apply);
+    review.add(&panel);
+    review.set_visible(true);
+    pending.set(pending.get() + 1);
+
+    apply.connect_clicked(glib::clone!(
+        #[weak]
+        review,
+        #[weak]
+        panel,
+        #[weak]
+        editor,
+        #[weak]
+        label,
+        #[strong]
+        pending,
+        #[strong]
+        selected,
+        move |_| {
+            match selected.borrow().as_deref() {
+                None => {
+                    label.set_label(&t!("Kept original"));
+                    label.set_css_classes(&["dim-label", "caption"]);
+                }
+                Some(script) => {
+                    let buffer = editor.buffer();
+                    let text = buffer.text(&buffer.start_iter(), &buffer.end_iter(), false).to_string();
+                    let Some(new_text) = lint::replace_object(&proposal.category, &proposal.key, &text, script) else {
+                        label.set_label(&t!("Not found in the file"));
+                        label.set_css_classes(&["error", "caption"]);
+                        return;
+                    };
+                    buffer.set_text(&new_text);
+                    label.set_label(&t!("Fixed"));
+                    label.set_css_classes(&["success", "caption"]);
+                }
+            }
+            review.remove(&panel);
+            pending.set(pending.get().saturating_sub(1));
+            review.set_visible(pending.get() > 0);
+        }
+    ));
 }
 
 fn show(banner: &adw::Banner, message: &str) {
