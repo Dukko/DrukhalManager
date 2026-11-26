@@ -1814,6 +1814,17 @@ pub fn run_merge_tool(button: &impl IsA<gtk::Widget>, command: String, left: Too
 pub(crate) type SaveInlineScript =
     Rc<dyn Fn(&str, &str, Vec<Print>) -> Result<(), String>>;
 
+/// Saves the edited script only if it parses and passes the script checks.
+fn validate_then_save(
+    save: &SaveInlineScript,
+    name: &str,
+    text: &str,
+    prints: Vec<Print>,
+) -> Result<(), String> {
+    file_merge::validate("common/inline_scripts", text)?;
+    save(name, text, prints)
+}
+
 /// Opens a dialog comparing inline scripts that differ or were replaced
 /// between two object versions. The right side is editable; it can also be
 /// merged with AI and saved to the patch.
@@ -2017,7 +2028,7 @@ pub(crate) fn show_inline_scripts(
             let Some(c) = comparisons.get(index) else { return };
             let name = target.text().trim().to_owned();
             let prints = vec![print_for(&c.left), print_for(&c.right)];
-            match save(&name, &pair.right.text(), prints) {
+            match validate_then_save(&save, &name, &pair.right.text(), prints) {
                 Ok(()) => {
                     banner.set_label(&tf!("Saved {name} to the merged patch", name = &name));
                     banner.remove_css_class("error");
@@ -2104,6 +2115,36 @@ mod tests {
         assert_eq!(set.file("common/edicts/e.TXT"), Some(vec!["file changed".to_owned()]));
         assert_eq!(set.file("common/other.txt"), None);
         assert_eq!(set.file("common/buildings/x.txt"), None, "an object's generated file is not a file merge");
+    }
+
+    #[test]
+    fn inline_script_with_syntax_error_is_rejected_without_saving() {
+        let saved = Rc::new(RefCell::new(Vec::new()));
+        let log = saved.clone();
+        let save: SaveInlineScript = Rc::new(move |name, text, _| {
+            log.borrow_mut().push((name.to_owned(), text.to_owned()));
+            Ok(())
+        });
+
+        let result = validate_then_save(&save, "my_script", "effect = {\n  add_resource = { energy = 1 }\n", Vec::new());
+
+        assert!(result.is_err_and(|e| e.contains("syntax error")));
+        assert!(saved.borrow().is_empty(), "nothing is saved");
+    }
+
+    #[test]
+    fn valid_inline_script_is_saved() {
+        let saved = Rc::new(RefCell::new(Vec::new()));
+        let log = saved.clone();
+        let save: SaveInlineScript = Rc::new(move |name, text, _| {
+            log.borrow_mut().push((name.to_owned(), text.to_owned()));
+            Ok(())
+        });
+
+        let result = validate_then_save(&save, "my_script", "add_resource = { energy = 1 }\n", Vec::new());
+
+        assert_eq!(result, Ok(()));
+        assert_eq!(*saved.borrow(), vec![("my_script".to_owned(), "add_resource = { energy = 1 }\n".to_owned())]);
     }
 
     #[test]
