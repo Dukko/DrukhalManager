@@ -809,7 +809,7 @@ impl Window {
             toggle_show_ignored,
             filter,
             set_filter,
-            stale: std::cell::RefCell::new(self.stale.borrow().clone()),
+            stale: crate::conflicts_view::StaleSet::new(self.stale.borrow().clone()),
             reload_stale,
             remove_merge,
             keep_merge,

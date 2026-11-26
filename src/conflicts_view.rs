@@ -156,7 +156,7 @@ pub struct MergeHooks {
     pub filter: Option<usize>,
     pub set_filter: Box<dyn Fn(Option<usize>)>,
     /// Merges and fixes whose sources changed since they were saved.
-    pub stale: RefCell<Vec<Stale>>,
+    pub stale: StaleSet,
     /// Checks the patch for out-of-date merges again, after a save.
     pub reload_stale: Box<dyn Fn() -> Vec<Stale>>,
     /// Removes an out-of-date merge or fix from the patch.
@@ -188,17 +188,64 @@ pub struct MergeHooks {
 
 impl MergeHooks {
     fn stale_object(&self, category: &str, key: &str) -> Option<Vec<String>> {
-        self.stale.borrow().iter().find(|s| !s.untracked && s.object.as_ref().is_some_and(|(c, k)| c == category && k == key)).map(|s| s.reasons.clone())
+        self.stale.object(category, key)
     }
 
     fn stale_file(&self, path: &str) -> Option<Vec<String>> {
-        self.stale.borrow().iter().find(|s| !s.untracked && s.object.is_none() && s.path.eq_ignore_ascii_case(path)).map(|s| s.reasons.clone())
+        self.stale.file(path)
     }
 
     /// Notes that something was saved to the patch.
     pub(crate) fn saved(&self) {
         (self.patch_saved)();
         self.stale.replace((self.reload_stale)());
+    }
+}
+
+/// Out-of-date merges, indexed so each row's lookup is constant time.
+#[derive(Default)]
+pub struct StaleSet(RefCell<StaleIndex>);
+
+#[derive(Default)]
+struct StaleIndex {
+    list: Vec<Stale>,
+    objects: HashMap<(String, String), Vec<String>>,
+    files: HashMap<String, Vec<String>>,
+}
+
+impl StaleSet {
+    pub fn new(list: Vec<Stale>) -> Self {
+        let set = Self::default();
+        set.replace(list);
+        set
+    }
+
+    pub fn replace(&self, list: Vec<Stale>) {
+        let mut objects = HashMap::new();
+        let mut files = HashMap::new();
+        for s in list.iter().filter(|s| !s.untracked) {
+            match &s.object {
+                Some(object) => {
+                    objects.entry(object.clone()).or_insert_with(|| s.reasons.clone());
+                }
+                None => {
+                    files.entry(s.path.to_ascii_lowercase()).or_insert_with(|| s.reasons.clone());
+                }
+            }
+        }
+        *self.0.borrow_mut() = StaleIndex { list, objects, files };
+    }
+
+    pub fn borrow(&self) -> std::cell::Ref<'_, Vec<Stale>> {
+        std::cell::Ref::map(self.0.borrow(), |i| &i.list)
+    }
+
+    fn object(&self, category: &str, key: &str) -> Option<Vec<String>> {
+        self.0.borrow().objects.get(&(category.to_owned(), key.to_owned())).cloned()
+    }
+
+    fn file(&self, path: &str) -> Option<Vec<String>> {
+        self.0.borrow().files.get(&path.to_ascii_lowercase()).cloned()
     }
 }
 
@@ -1478,7 +1525,7 @@ impl Page {
     }
 
     fn stale_view(self: &Rc<Self>, untracked: bool) -> gtk::Widget {
-        let all = self.hooks.stale.borrow().clone();
+        let all = self.hooks.stale.borrow();
         let (title, subtitle, description) = if untracked {
             (t!("Merges to Check"), t!("Saved by an older version"), t!("These were merged by an older version of DrukhalManager, which didn't record what the mods looked like, so their updates can't be noticed. If one still looks right, keep it to track changes from now on; otherwise re-merge it from the list, or remove it."))
         } else {
@@ -2029,6 +2076,54 @@ fn print_for(file: &crate::merge::inline_scripts::InlineScriptFile) -> Print {
 mod tests {
     use super::*;
     use crate::merge::conflicts::{Definition, FileConflict, ObjectConflict};
+
+    fn stale(object: Option<(&str, &str)>, path: &str, reason: &str, untracked: bool) -> Stale {
+        Stale {
+            object: object.map(|(c, k)| (c.to_owned(), k.to_owned())),
+            path: path.to_owned(),
+            reasons: vec![reason.to_owned()],
+            untracked,
+            base_game: false,
+            content: false,
+            pick: None,
+        }
+    }
+
+    #[test]
+    fn stale_set_finds_objects_and_files_but_skips_untracked() {
+        let set = StaleSet::new(vec![
+            stale(Some(("common/buildings", "b1")), "common/buildings/x.txt", "mod changed", false),
+            stale(Some(("common/buildings", "b2")), "common/buildings/x.txt", "untracked one", true),
+            stale(None, "Common/Edicts/E.txt", "file changed", false),
+            stale(None, "common/other.txt", "untracked file", true),
+        ]);
+
+        assert_eq!(set.object("common/buildings", "b1"), Some(vec!["mod changed".to_owned()]));
+        assert_eq!(set.object("common/buildings", "b2"), None);
+        assert_eq!(set.object("common/edicts", "b1"), None);
+        assert_eq!(set.file("common/edicts/e.TXT"), Some(vec!["file changed".to_owned()]));
+        assert_eq!(set.file("common/other.txt"), None);
+        assert_eq!(set.file("common/buildings/x.txt"), None, "an object's generated file is not a file merge");
+    }
+
+    #[test]
+    fn stale_set_replace_drops_old_entries() {
+        let set = StaleSet::new(vec![stale(Some(("c", "k")), "p", "old", false)]);
+        set.replace(vec![stale(None, "q", "new", false)]);
+
+        assert_eq!(set.object("c", "k"), None);
+        assert_eq!(set.file("q"), Some(vec!["new".to_owned()]));
+        assert_eq!(set.borrow().len(), 1);
+    }
+
+    #[test]
+    fn stale_set_lookups_scale_to_thousands_of_entries() {
+        let list: Vec<Stale> = (0..5000).map(|i| stale(Some(("c", &format!("k{i}"))), "p", "r", false)).collect();
+        let set = StaleSet::new(list);
+
+        assert_eq!(set.object("c", "k4999"), Some(vec!["r".to_owned()]));
+        assert_eq!(set.object("c", "k5000"), None);
+    }
 
     #[test]
     fn ignores_directly_by_folder_or_by_rule() {
