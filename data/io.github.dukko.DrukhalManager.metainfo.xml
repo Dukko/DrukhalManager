@@ -36,6 +36,16 @@
     <control>keyboard</control>
   </supports>
   <releases>
+    <release version="2.7.30" date="2026-11-26">
+      <description>
+        <p>Stops the saved-merge audit from reporting equivalent ethic conditions as dropped additions:</p>
+        <ul>
+          <li>Treats is_pacifist, is_xenophile, is_xenophobe, and the other is_* ethic triggers as the same condition as the matching has_ethic pair</li>
+          <li>Treats a lone fanatic ethic as the matching is_fanatic_* trigger</li>
+          <li>Clears old audit warnings for merges that only rewrote one form as the other, without re-merging</li>
+        </ul>
+      </description>
+    </release>
     <release version="2.7.29" date="2026-11-26">
       <description>
         <p>Fixes merged events that inherit from another event and audits saved merges against their sources:</p>

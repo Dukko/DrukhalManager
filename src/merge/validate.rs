@@ -3,7 +3,7 @@
 //! single-valued keys, per-source addition coverage, and optional script-doc
 //! name checks.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 use super::script_check::{self, Context as ScriptContext, Known};
 use super::source::{self, Source};
@@ -574,6 +574,51 @@ fn leaves_of(text: &str) -> Option<Vec<String>> {
     Some(leaves)
 }
 
+/// Collapses the two ways Stellaris spells the same ethic condition.
+/// `has_ethic = ethic_pacifist` together with
+/// `has_ethic = ethic_fanatic_pacifist` means the same as
+/// `is_pacifist = yes`; the xenophile and xenophobe pairs work the same
+/// way, and a fanatic ethic alone matches its `is_fanatic_*` trigger.
+/// Without this, a merge that rewrites one form as the other looks like it
+/// dropped an addition.
+fn normalize_ethics(leaves: &mut Vec<String>) {
+    let mut ethics: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    leaves.retain(|leaf| {
+        let Some((path, value)) = leaf.split_once('=') else { return true };
+        let Some(parent) = path.strip_suffix("/has_ethic") else { return true };
+        ethics.entry(parent.to_owned()).or_default().insert(value.to_owned());
+        false
+    });
+    for (parent, values) in ethics {
+        let mut rest = values;
+        let mut normalized = Vec::new();
+        for base in [
+            "materialist",
+            "spiritualist",
+            "militarist",
+            "pacifist",
+            "xenophile",
+            "xenophobe",
+            "authoritarian",
+            "egalitarian",
+        ] {
+            let ethic = format!("ethic_{base}");
+            let fanatic = format!("ethic_fanatic_{base}");
+            if rest.contains(&ethic) && rest.contains(&fanatic) {
+                rest.remove(&ethic);
+                rest.remove(&fanatic);
+                normalized.push(format!("{parent}/is_{base}=yes"));
+            } else if rest.remove(&fanatic) {
+                normalized.push(format!("{parent}/is_fanatic_{base}=yes"));
+            }
+        }
+        for value in rest {
+            normalized.push(format!("{parent}/has_ethic={value}"));
+        }
+        leaves.extend(normalized);
+    }
+}
+
 /// Checks that additions each source made relative to `vanilla` survive in `result`.
 fn check_source_coverage(
     result_entries: &[Entry],
@@ -583,11 +628,13 @@ fn check_source_coverage(
 ) {
     let mut result_leaves = Vec::new();
     leaf_signatures(result_entries, &mut result_leaves);
+    normalize_ethics(&mut result_leaves);
     let result_set: HashSet<String> = result_leaves.iter().cloned().collect();
     let mut result_values: HashMap<String, HashSet<String>> = HashMap::new();
     values_by_path(&result_leaves, &mut result_values);
 
-    let vanilla_leaves = vanilla.and_then(|v| leaves_of(&v.text)).unwrap_or_default();
+    let mut vanilla_leaves = vanilla.and_then(|v| leaves_of(&v.text)).unwrap_or_default();
+    normalize_ethics(&mut vanilla_leaves);
     let vanilla_set: HashSet<String> = vanilla_leaves.iter().cloned().collect();
     let mut vanilla_values: HashMap<String, HashSet<String>> = HashMap::new();
     values_by_path(&vanilla_leaves, &mut vanilla_values);
@@ -597,7 +644,8 @@ fn check_source_coverage(
     let mut changed_values: HashMap<String, HashSet<String>> = HashMap::new();
     let mut by_source: Vec<Vec<String>> = Vec::new();
     for s in sources {
-        let leaves = leaves_of(&s.text).unwrap_or_default();
+        let mut leaves = leaves_of(&s.text).unwrap_or_default();
+        normalize_ethics(&mut leaves);
         for leaf in &leaves {
             if vanilla_set.contains(leaf) {
                 continue;
@@ -914,6 +962,28 @@ mod tests {
             merged,
             Some(&v),
             &[a, b],
+            None,
+        );
+        assert!(res.is_ok(), "{:?}", res.problems);
+    }
+
+    #[test]
+    fn treats_ethic_spellings_as_equivalent() {
+        let v = src(
+            "Vanilla",
+            "interference = { option = { valid = { NOR = { is_pacifist = yes is_xenophile = yes is_fanatic_xenophobe = yes } } } }",
+        );
+        let m = src(
+            "Mod",
+            "interference = { option = { valid = { NOR = { has_ethic = ethic_pacifist has_ethic = ethic_fanatic_pacifist has_ethic = ethic_xenophile has_ethic = ethic_fanatic_xenophile has_ethic = ethic_fanatic_xenophobe } } } }",
+        );
+        let merged = "interference = { option = { valid = { NOR = { is_pacifist = yes is_xenophile = yes is_fanatic_xenophobe = yes } } } }";
+        let res = validate_object(
+            "common/policies",
+            "interference",
+            merged,
+            Some(&v),
+            &[m],
             None,
         );
         assert!(res.is_ok(), "{:?}", res.problems);
