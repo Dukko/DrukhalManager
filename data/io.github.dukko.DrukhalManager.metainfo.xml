@@ -36,6 +36,15 @@
     <control>keyboard</control>
   </supports>
   <releases>
+    <release version="2.7.36" date="2026-11-26">
+      <description>
+        <p>Makes Script Check much faster:</p>
+        <ul>
+          <li>Each mod file is parsed once instead of once per line it checks</li>
+          <li>Files are checked on several threads; with 158 mods the check went from about 1.5 s to 0.2 s with identical results</li>
+        </ul>
+      </description>
+    </release>
     <release version="2.7.35" date="2026-11-26">
       <description>
         <p>Stops flagging a merge as out of date when you kept one mod's version whole:</p>
