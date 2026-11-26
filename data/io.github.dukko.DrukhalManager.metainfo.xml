@@ -36,6 +36,21 @@
     <control>keyboard</control>
   </supports>
   <releases>
+    <release version="2.7.33" date="2026-11-26">
+      <description>
+        <p>Fixes false "merge out of date" warnings after game updates, and hardens saving and AI requests:</p>
+        <ul>
+          <li>The saved-merge audit no longer counts values a mod copied from an older game version as dropped additions, so merges that keep the new game's values stay up to date</li>
+          <li>Base-game snapshots are ordered by game version, and the installed version's snapshot is never deleted after a rollback</li>
+          <li>Error-log fixes that fail validation are shown as rejected drafts and need "Use It Anyway" before saving</li>
+          <li>Hand-edited inline scripts are checked before they are saved</li>
+          <li>Patch files are never written outside the patch folder, and keys that clean up to the same name get separate files (8 terraform merges are renamed once)</li>
+          <li>The brace check handles escaped quotes, and localisation headers with a trailing comment are recognised</li>
+          <li>AI prompts tag mod text with a per-request marker, replies are size-capped, connections are reused, and Cancel stops a stalled reply at once</li>
+          <li>The out-of-date merge list is faster with large patches</li>
+        </ul>
+      </description>
+    </release>
     <release version="2.7.32" date="2026-11-26">
       <description>
         <p>Stops the saved-merge audit from flagging a script-value priority choice as a dropped addition:</p>
