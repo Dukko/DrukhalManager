@@ -1290,12 +1290,30 @@ impl ObjectView {
                         }
                     });
                 }
-                let (weak, card_ref) = (Rc::downgrade(self), Rc::downgrade(&card));
-                save.connect_clicked(move |_| {
-                    if let (Some(view), Some(card)) = (weak.upgrade(), card_ref.upgrade()) {
-                        view.save(&card.text());
-                    }
-                });
+                let do_save: Rc<dyn Fn()> = {
+                    let (weak, card_ref) = (Rc::downgrade(self), Rc::downgrade(&card));
+                    Rc::new(move || {
+                        crate::diagnostics::log!("save", "Save to Patch clicked");
+                        match (weak.upgrade(), card_ref.upgrade()) {
+                            (Some(view), Some(card)) => view.save(&card.text()),
+                            _ => crate::diagnostics::log!("save", "The result view was closed"),
+                        }
+                    })
+                };
+                {
+                    let do_save = do_save.clone();
+                    save.connect_clicked(move |_| do_save());
+                }
+                let toolbar_save = gtk::Button::builder()
+                    .label(t!("Save to Patch"))
+                    .css_classes(["suggested-action"])
+                    .tooltip_text(t!("Save to the merged patch"))
+                    .build();
+                {
+                    let do_save = do_save.clone();
+                    toolbar_save.connect_clicked(move |_| do_save());
+                }
+                toolbar.append(&toolbar_save);
                 body.append(&card.widget);
                 keep_alive(&body, card);
             }
@@ -1540,12 +1558,21 @@ impl ObjectView {
     }
 
     fn save(self: &Rc<Self>, text: &str) {
+        crate::diagnostics::log!(
+            "save",
+            "Saving object merge {}/{}",
+            self.category,
+            self.name
+        );
         let Some(page) = self.page.upgrade() else {
+            crate::diagnostics::log!("save", "The conflict page was closed before saving");
             return;
         };
         let script = match merge_dialog::validate(&self.category, &self.name, text) {
             Ok(script) => script,
             Err(message) => {
+                crate::diagnostics::log!("save", "Rejected {}: {}", self.name, message);
+                (page.hooks.toast)(&message);
                 self.error.replace(Some(message));
                 self.render(gtk::StackTransitionType::None);
                 return;
@@ -1573,6 +1600,12 @@ impl ObjectView {
             if let Err(message) =
                 (page.hooks.save_file)(&path, script.script.as_bytes(), script.prints)
             {
+                crate::diagnostics::log!("save", "Could not save {}: {message}", path);
+                (page.hooks.toast)(&tf!(
+                    "The merged inline script `{name}` could not be saved: {error}",
+                    name = &script.name,
+                    error = &message
+                ));
                 self.error.replace(Some(tf!(
                     "The merged inline script `{name}` could not be saved: {error}",
                     name = &script.name,
@@ -1598,9 +1631,15 @@ impl ObjectView {
                 page.hooks.session.borrow_mut().steps.remove(&self.key);
                 page.hooks.saved();
                 page.update_status(self.item);
+                (page.hooks.toast)(&tf!(
+                    "Saved {name} to the merged patch",
+                    name = &self.name
+                ));
                 page.advance(self.item);
             }
             Err(message) => {
+                crate::diagnostics::log!("save", "Could not save {}: {message}", self.name);
+                (page.hooks.toast)(&message);
                 self.error.replace(Some(message));
                 self.render(gtk::StackTransitionType::None);
             }

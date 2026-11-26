@@ -6,9 +6,9 @@
 #, fuzzy
 msgid ""
 msgstr ""
-"Project-Id-Version: DrukhalManager 2.7.24\n"
+"Project-Id-Version: DrukhalManager 2.7.25\n"
 "Report-Msgid-Bugs-To: https://github.com/Dukko/DrukhalManager/issues\n"
-"POT-Creation-Date: 2026-11-26 02:26+0000\n"
+"POT-Creation-Date: 2026-11-26 02:41+0000\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -615,11 +615,11 @@ msgstr ""
 msgid "Not saved yet"
 msgstr ""
 
-#: src/conflicts_view/object.rs src/conflicts_view.rs src/file_merge_dialog.rs src/fix_dialog.rs
+#: src/conflicts_view/object.rs src/conflicts_view/object.rs src/conflicts_view.rs src/file_merge_dialog.rs src/fix_dialog.rs
 msgid "Save to Patch"
 msgstr ""
 
-#: src/conflicts_view/object.rs
+#: src/conflicts_view/object.rs src/conflicts_view/object.rs
 msgid "Save to the merged patch"
 msgstr ""
 
@@ -655,12 +655,16 @@ msgstr[1] ""
 msgid "The merged inline script `{name}` has an unsafe path"
 msgstr ""
 
-#: src/conflicts_view/object.rs
+#: src/conflicts_view/object.rs src/conflicts_view/object.rs
 msgid "The merged inline script `{name}` could not be saved: {error}"
 msgstr ""
 
 #: src/conflicts_view/object.rs
 msgid "The merge was saved, but its inline scripts could not be recorded: {error}"
+msgstr ""
+
+#: src/conflicts_view/object.rs src/conflicts_view.rs
+msgid "Saved {name} to the merged patch"
 msgstr ""
 
 #: src/conflicts_view.rs
@@ -1237,10 +1241,6 @@ msgstr ""
 
 #: src/conflicts_view.rs
 msgid "The merge was stopped"
-msgstr ""
-
-#: src/conflicts_view.rs
-msgid "Saved {name} to the merged patch"
 msgstr ""
 
 #: src/diff_view.rs

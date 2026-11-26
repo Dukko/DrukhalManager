@@ -36,6 +36,15 @@
     <control>keyboard</control>
   </supports>
   <releases>
+    <release version="2.7.25" date="2026-11-25">
+      <description>
+        <p>Fixes saving a merged object when the result was opened after Merge All:</p>
+        <ul>
+          <li>Adds a Save to Patch button to the final result toolbar as well as the result card</li>
+          <li>Shows a toast and logs the save attempt, so a rejected or failed save is visible</li>
+        </ul>
+      </description>
+    </release>
     <release version="2.7.24" date="2026-11-25">
       <description>
         <p>Lets replaced inline scripts be merged or edited by hand, and trims API keys before use:</p>
