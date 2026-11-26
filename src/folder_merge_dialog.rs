@@ -214,6 +214,7 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
         .content_height(700)
         .child(&toolbar)
         .build();
+    crate::diff_view::bind_button_shortcuts(&dialog, &[("<Alt>m", &start)]);
 
     let rows: Rc<RefCell<Vec<Row>>> = Rc::default();
     let units: Rc<RefCell<Vec<Unit>>> = Rc::default();

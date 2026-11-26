@@ -910,10 +910,21 @@ pub fn build(
         }
     });
     window.add_action(&lookup);
+    app.set_accels_for_action("win.object-lookup", &["<Control>l"]);
     let find = gio::SimpleAction::new("find", None);
     let weak = Rc::downgrade(&ui);
     find.connect_activate(move |_, _| {
         if let Some(ui) = weak.upgrade() {
+            if ui.stack.visible_child_name().as_deref() == Some("conflicts")
+                && let Some(page) = ui
+                    .conflicts_view
+                    .borrow()
+                    .as_ref()
+                    .and_then(|v| v.clone().downcast::<crate::conflicts_view::Page>().ok())
+            {
+                page.focus_search();
+                return;
+            }
             ui.stack.set_visible_child_name("load-order");
             ui.search.set_visible(true);
             ui.search.grab_focus();

@@ -65,6 +65,7 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
         .build();
     let save_button = gtk::Button::builder()
         .label(t!("Save to Patch"))
+        .tooltip_text(t!("Save to the merged patch"))
         .sensitive(false)
         .build();
     let file_name = request
@@ -125,6 +126,10 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
         .content_height(800)
         .child(&toolbar)
         .build();
+    crate::diff_view::bind_button_shortcuts(
+        &dialog,
+        &[("<Alt>m", &merge_button), ("<Control>s", &save_button)],
+    );
 
     if request.merged_before {
         show(

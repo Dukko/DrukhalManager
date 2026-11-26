@@ -36,6 +36,18 @@
     <control>keyboard</control>
   </supports>
   <releases>
+    <release version="2.7.28" date="2026-11-25">
+      <description>
+        <p>Adds keyboard shortcuts across conflict resolution and dialogs, and fixes two inline-script merge bugs:</p>
+        <ul>
+          <li>Adds Alt+C for Copy This Over (copying the selection, highlighted difference, or cursor difference to the editable card) and Ctrl+Shift+F for Clean Up the Code</li>
+          <li>Adds Alt+S (Save to Patch), Alt+T (Take Change), Alt+Z (Undo Last Step), Alt+E (Open in Merge Tool), Ctrl+L (Look Up Objects), and lets Ctrl+F search Conflicts when on the Conflicts page</li>
+          <li>Adds Alt+M and Ctrl+S shortcuts to the File Merge, Fix, Folder Merge, and Inline Scripts dialogs, and lists all new shortcuts in the Keyboard Shortcuts window</li>
+          <li>Rewrites scalar inline_script = name calls alongside block calls when merging replaced inline scripts</li>
+          <li>Stages merged inline scripts in memory inside the File Merge dialog until Save is clicked, writing nothing on cancel</li>
+        </ul>
+      </description>
+    </release>
     <release version="2.7.27" date="2026-11-25">
       <description>
         <p>Avoids asking AI to rewrite objects when brace repairs are already unambiguous:</p>

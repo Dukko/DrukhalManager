@@ -41,7 +41,11 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
 
     let ai_button = gtk::Button::builder().label(t!("Fix with AI")).css_classes(["suggested-action"]).visible(false).build();
     let stop_button = gtk::Button::builder().label(t!("Stop")).visible(false).build();
-    let save_button = gtk::Button::builder().label(t!("Save to Patch")).sensitive(false).build();
+    let save_button = gtk::Button::builder()
+        .label(t!("Save to Patch"))
+        .tooltip_text(t!("Save to the merged patch"))
+        .sensitive(false)
+        .build();
     let file_name = request.path.rsplit_once('/').map_or(request.path.as_str(), |(_, f)| f);
     let header = adw::HeaderBar::new();
     header.set_title_widget(Some(&adw::WindowTitle::new(&tf!("Fix {file}", file = file_name), &request.mod_name)));
@@ -77,6 +81,7 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
     toolbar.add_top_bar(&banner);
     toolbar.set_content(Some(&page));
     let dialog = adw::Dialog::builder().content_width(960).content_height(800).child(&toolbar).build();
+    crate::diff_view::bind_button_shortcuts(&dialog, &[("<Alt>m", &ai_button), ("<Control>s", &save_button)]);
 
     let labels: Rc<RefCell<Vec<(String, gtk::Label)>>> = Rc::default();
     let print: Rc<RefCell<Option<Print>>> = Rc::default();

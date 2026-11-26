@@ -689,8 +689,9 @@ impl Pair {
         pair
     }
 
-    /// Adds Copy This Over to the view-only card's right-click menu: it
-    /// copies the selection (or difference under the pointer) into the editable card.
+    /// Adds Copy This Over to the view-only card's right-click menu and binds
+    /// `Alt+C`: copies the selection, highlighted difference, or cursor
+    /// difference from the left card into the editable right card.
     fn add_copy_over_menu(self: &Rc<Self>) {
         let action = gio::SimpleAction::new("copy-over", None);
         action.set_enabled(false);
@@ -707,10 +708,26 @@ impl Pair {
         });
         let group = gio::SimpleActionGroup::new();
         group.add_action(&action);
-        self.left.code.insert_action_group("diff", Some(&group));
+        self.widget.insert_action_group("diff", Some(&group));
         let menu = gio::Menu::new();
-        menu.append(Some(&t!("Copy This Over")), Some("diff.copy-over"));
+        let item = gio::MenuItem::new(Some(&t!("Copy This Over")), Some("diff.copy-over"));
+        item.set_attribute_value("accel", Some(&"<Alt>c".to_variant()));
+        menu.append_item(&item);
         self.left.code.set_extra_menu(Some(&menu));
+
+        let keys = gtk::ShortcutController::new();
+        keys.set_scope(gtk::ShortcutScope::Managed);
+        let weak = Rc::downgrade(self);
+        keys.add_shortcut(gtk::Shortcut::new(
+            gtk::ShortcutTrigger::parse_string("<Alt>c"),
+            Some(gtk::CallbackAction::new(move |_, _| {
+                if let Some(pair) = weak.upgrade() {
+                    pair.copy_over(None);
+                }
+                glib::Propagation::Stop
+            })),
+        ));
+        self.widget.add_controller(keys);
 
         // Before the text view opens its menu, note what's under the pointer.
         let click = gtk::GestureClick::builder().button(gtk::gdk::BUTTON_SECONDARY).propagation_phase(gtk::PropagationPhase::Capture).build();
@@ -737,9 +754,38 @@ impl Pair {
         self.left.code.add_controller(click);
     }
 
+    /// Difference under the cursor in whichever card currently has focus.
+    fn cursor_hunk(&self) -> Option<usize> {
+        let cursor_line = |code: &gtk::TextView| -> usize {
+            let buf = code.buffer();
+            buf.iter_at_offset(buf.cursor_position()).line() as usize
+        };
+        let diff = self.diff.borrow();
+        let find = |line: usize, range: fn(&Hunk) -> &std::ops::Range<usize>| {
+            diff.hunks.iter().position(|h| {
+                let r = range(h);
+                if r.is_empty() {
+                    line == r.start || line + 1 == r.start
+                } else {
+                    r.contains(&line)
+                }
+            })
+        };
+        if self.right.code.has_focus() {
+            find(cursor_line(&self.right.code), |h| &h.right)
+        } else if self.left.code.has_focus() {
+            find(cursor_line(&self.left.code), |h| &h.left)
+        } else {
+            None
+        }
+    }
+
     /// Copies over the differences touched by the left card's selection,
-    /// or difference `hunk` if there is no selection.
+    /// or `hunk`, the highlighted difference, or the cursor's difference.
     pub fn copy_over(&self, hunk: Option<usize>) {
+        if !self.right.code.is_editable() {
+            return;
+        }
         self.catch_up();
         if let Some((start, end)) = self.left.code.buffer().selection_bounds() {
             let first = start.line() as usize;
@@ -750,7 +796,7 @@ impl Pair {
                 return;
             }
         }
-        if let Some(h) = hunk.or_else(|| self.current.get()) {
+        if let Some(h) = hunk.or_else(|| self.current.get()).or_else(|| self.cursor_hunk()) {
             self.put_in(h);
         }
     }
@@ -1050,7 +1096,44 @@ fn numbers_text(lines: usize) -> String {
     (1..=lines).map(|n| n.to_string()).collect::<Vec<_>>().join("\n")
 }
 
-/// Adds "Clean Up the Code" to an editable text view's right-click context menu.
+/// Appends the formatted `accel` key label (e.g. `(Alt+C)`) to `widget`'s
+/// existing tooltip, if it has one.
+pub fn append_shortcut_tooltip(widget: &impl IsA<gtk::Widget>, accel: &str) {
+    if let Some((key, modifiers)) = gtk::accelerator_parse(accel)
+        && let Some(tooltip) = widget.tooltip_text()
+    {
+        widget.set_tooltip_text(Some(&tf!(
+            "{tooltip} ({keys})",
+            tooltip = &tooltip,
+            keys = gtk::accelerator_get_label(key, modifiers)
+        )));
+    }
+}
+
+/// Adds keyboard shortcuts to `widget` (such as a dialog) that click each
+/// button when mapped and sensitive, and appends the keys to each button's
+/// tooltip.
+pub fn bind_button_shortcuts(widget: &impl IsA<gtk::Widget>, bindings: &[(&str, &gtk::Button)]) {
+    let keys = gtk::ShortcutController::new();
+    keys.set_scope(gtk::ShortcutScope::Managed);
+    for &(accel, button) in bindings {
+        append_shortcut_tooltip(button, accel);
+        let weak = button.downgrade();
+        keys.add_shortcut(gtk::Shortcut::new(
+            gtk::ShortcutTrigger::parse_string(accel),
+            Some(gtk::CallbackAction::new(move |_, _| {
+                if let Some(btn) = weak.upgrade().filter(|b| b.is_mapped() && b.is_sensitive()) {
+                    btn.emit_clicked();
+                }
+                glib::Propagation::Stop
+            })),
+        ));
+    }
+    widget.add_controller(keys);
+}
+
+/// Adds "Clean Up the Code" to an editable text view's right-click context
+/// menu and binds `Ctrl+Shift+F`.
 pub fn attach_clean_up_menu(view: &gtk::TextView) {
     let action = gio::SimpleAction::new("clean-up-code", None);
     let weak = view.downgrade();
@@ -1063,8 +1146,26 @@ pub fn attach_clean_up_menu(view: &gtk::TextView) {
     group.add_action(&action);
     view.insert_action_group("linter", Some(&group));
     let menu = gio::Menu::new();
-    menu.append(Some(&t!("Clean Up the Code")), Some("linter.clean-up-code"));
+    let item = gio::MenuItem::new(Some(&t!("Clean Up the Code")), Some("linter.clean-up-code"));
+    item.set_attribute_value("accel", Some(&"<Control><Shift>f".to_variant()));
+    menu.append_item(&item);
     view.set_extra_menu(Some(&menu));
+
+    let keys = gtk::ShortcutController::new();
+    let weak = view.downgrade();
+    keys.add_shortcut(gtk::Shortcut::new(
+        gtk::ShortcutTrigger::parse_string("<Control><Shift>f"),
+        Some(gtk::CallbackAction::new(move |_, _| {
+            if let Some(view) = weak.upgrade()
+                && view.is_editable()
+            {
+                clean_up_text_view(&view);
+                return glib::Propagation::Stop;
+            }
+            glib::Propagation::Proceed
+        })),
+    ));
+    view.add_controller(keys);
 }
 
 /// Cleans up the script code in `view` (the selection if any, or the whole buffer).

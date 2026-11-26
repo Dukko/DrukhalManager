@@ -373,6 +373,7 @@ impl FileView {
     /// saved there to the patch.
     fn merge_tool_button(self: &Rc<Self>, page: &Rc<Page>, left: &Version, right: &Version, base: Option<String>) -> gtk::Button {
         let button = gtk::Button::builder().label(t!("Merge Tool…")).tooltip_text(t!("Merge these two copies in your merge tool; what you save there goes into the merged patch")).css_classes(["flat"]).build();
+        page.bind_key("merge-tool", &button);
         let (left, right) = ((left.label.clone(), left.text.clone().unwrap_or_default()), (right.label.clone(), right.text.clone().unwrap_or_default()));
         let (weak, page_ref) = (Rc::downgrade(self), Rc::downgrade(page));
         button.connect_clicked(move |button| {

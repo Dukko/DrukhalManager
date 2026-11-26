@@ -6,9 +6,9 @@
 #, fuzzy
 msgid ""
 msgstr ""
-"Project-Id-Version: DrukhalManager 2.7.26\n"
+"Project-Id-Version: DrukhalManager 2.7.27\n"
 "Report-Msgid-Bugs-To: https://github.com/Dukko/DrukhalManager/issues\n"
-"POT-Creation-Date: 2026-11-26 03:19+0000\n"
+"POT-Creation-Date: 2026-11-26 03:48+0000\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -140,7 +140,7 @@ msgstr ""
 msgid "Reset editor to the new base game version"
 msgstr ""
 
-#: src/behind_dialog.rs src/conflicts_view/object.rs src/conflicts_view/object.rs
+#: src/behind_dialog.rs src/conflicts_view/object.rs src/conflicts_view/object.rs src/conflicts_view.rs
 msgid "Take Change"
 msgstr ""
 
@@ -477,7 +477,7 @@ msgstr ""
 msgid "Object · {category} · {mods}"
 msgstr ""
 
-#: src/conflicts_view/object.rs
+#: src/conflicts_view/object.rs src/conflicts_view.rs
 msgid "Undo Last Step"
 msgstr ""
 
@@ -615,11 +615,11 @@ msgstr ""
 msgid "Not saved yet"
 msgstr ""
 
-#: src/conflicts_view/object.rs src/conflicts_view/object.rs src/conflicts_view.rs src/file_merge_dialog.rs src/fix_dialog.rs
+#: src/conflicts_view/object.rs src/conflicts_view/object.rs src/conflicts_view.rs src/conflicts_view.rs src/file_merge_dialog.rs src/fix_dialog.rs
 msgid "Save to Patch"
 msgstr ""
 
-#: src/conflicts_view/object.rs src/conflicts_view/object.rs
+#: src/conflicts_view/object.rs src/conflicts_view/object.rs src/conflicts_view.rs src/file_merge_dialog.rs src/fix_dialog.rs
 msgid "Save to the merged patch"
 msgstr ""
 
@@ -696,6 +696,10 @@ msgid "Use the Right Version"
 msgstr ""
 
 #: src/conflicts_view.rs
+msgid "Open in Merge Tool…"
+msgstr ""
+
+#: src/conflicts_view.rs
 msgid "Ignore the Conflict, or Stop Ignoring It"
 msgstr ""
 
@@ -727,6 +731,10 @@ msgstr[1] ""
 
 #: src/conflicts_view.rs
 msgid "Search conflicts"
+msgstr ""
+
+#: src/conflicts_view.rs
+msgid "Search conflicts (Ctrl+F)"
 msgstr ""
 
 #: src/conflicts_view.rs
@@ -1006,10 +1014,6 @@ msgid " · {count} ignored"
 msgstr ""
 
 #: src/conflicts_view.rs
-msgid "{tooltip} ({keys})"
-msgstr ""
-
-#: src/conflicts_view.rs
 msgid "Back to the list"
 msgstr ""
 
@@ -1228,6 +1232,10 @@ msgid "Save as script name"
 msgstr ""
 
 #: src/conflicts_view.rs
+msgid "Merge these two versions with AI"
+msgstr ""
+
+#: src/conflicts_view.rs
 msgid "That script name is not a safe path"
 msgstr ""
 
@@ -1271,11 +1279,15 @@ msgstr ""
 msgid "✦ Removed {count} lines from base"
 msgstr ""
 
-#: src/diff_view.rs
+#: src/diff_view.rs src/window/shortcuts.rs
 msgid "Copy This Over"
 msgstr ""
 
 #: src/diff_view.rs
+msgid "{tooltip} ({keys})"
+msgstr ""
+
+#: src/diff_view.rs src/window/shortcuts.rs
 msgid "Clean Up the Code"
 msgstr ""
 
@@ -2660,7 +2672,7 @@ msgstr ""
 msgid "Object name, event ID or localisation key"
 msgstr ""
 
-#: src/object_lookup_dialog.rs
+#: src/object_lookup_dialog.rs src/window/shortcuts.rs
 msgid "Look Up Objects"
 msgstr ""
 
@@ -5669,7 +5681,11 @@ msgstr ""
 msgid "Pages"
 msgstr ""
 
-#. These belong to the comparison, not to an action.
+#: src/window/shortcuts.rs
+msgid "Search Conflicts"
+msgstr ""
+
+#. These belong to the comparison cards or editor, not a window action.
 #: src/window/shortcuts.rs
 msgid "Next Difference"
 msgstr ""

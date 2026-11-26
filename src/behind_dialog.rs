@@ -400,6 +400,7 @@ impl BehindView {
                 });
             }
             header.actions.append(&merge_tool_btn);
+            page.bind_key("merge-tool", &merge_tool_btn);
 
             let ai_btn = gtk::Button::builder()
                 .child(&adw::ButtonContent::builder().icon_name(conflicts_view::AI_ICON).label(t!("Update with AI")).build())
@@ -423,6 +424,7 @@ impl BehindView {
                 });
             }
             header.actions.append(&save_btn);
+            page.bind_key("save", &save_btn);
             header.actions.append(&page.ignore_button(conflicts_view::Item::Behind(self.index)));
         }
 

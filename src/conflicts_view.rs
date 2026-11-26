@@ -344,7 +344,11 @@ pub fn shortcuts() -> Vec<(&'static str, &'static str, String)> {
         ("previous", "<Alt>Page_Up", t!("Previous Conflict")),
         ("use-left", "<Alt>Left", t!("Use the Left Version")),
         ("use-right", "<Alt>Right", t!("Use the Right Version")),
+        ("take-change", "<Alt>t", t!("Take Change")),
         ("merge-ai", "<Alt>m", t!("Merge with AI")),
+        ("merge-tool", "<Alt>e", t!("Open in Merge Tool…")),
+        ("undo-step", "<Alt>z", t!("Undo Last Step")),
+        ("save", "<Alt>s", t!("Save to Patch")),
         ("ignore", "<Alt>i", t!("Ignore the Conflict, or Stop Ignoring It")),
     ]
 }
@@ -354,6 +358,7 @@ pub struct Page {
     pub hooks: Rc<MergeHooks>,
     pub split: adw::NavigationSplitView,
     list: gtk::ListBox,
+    search: gtk::SearchEntry,
     content: adw::Bin,
     summary: gtk::Label,
     details: gtk::Label,
@@ -502,7 +507,11 @@ pub fn build(analysis: &Rc<Analysis>, rescan: gtk::Button, hooks: Rc<MergeHooks>
         dropdown.set_margin_top(6);
         top.append(&dropdown);
     }
-    let search = gtk::SearchEntry::builder().placeholder_text(t!("Search conflicts")).text(hooks.session.borrow().search.as_str()).build();
+    let search = gtk::SearchEntry::builder()
+        .placeholder_text(t!("Search conflicts"))
+        .tooltip_text(t!("Search conflicts (Ctrl+F)"))
+        .text(hooks.session.borrow().search.as_str())
+        .build();
     top.append(&search);
 
     let list = gtk::ListBox::builder().selection_mode(gtk::SelectionMode::Single).css_classes(["navigation-sidebar", "conflict-list"]).build();
@@ -524,6 +533,7 @@ pub fn build(analysis: &Rc<Analysis>, rescan: gtk::Button, hooks: Rc<MergeHooks>
     let backups = footer_button("document-open-recent-symbolic", &t!("Backups"), &t!("Merged Patch Backups…"));
     backups.set_action_name(Some("win.patch-backups"));
     let lookup = footer_button("system-search-symbolic", &t!("Look Up"), &t!("Look Up Objects…"));
+    diff_view::append_shortcut_tooltip(&lookup, "<Control>l");
     lookup.set_action_name(Some("win.object-lookup"));
     rescan.set_hexpand(true);
     let buttons = gtk::Grid::builder().row_spacing(6).column_spacing(6).column_homogeneous(true).build();
@@ -565,6 +575,7 @@ pub fn build(analysis: &Rc<Analysis>, rescan: gtk::Button, hooks: Rc<MergeHooks>
         hooks: hooks.clone(),
         split: split.clone(),
         list: list.clone(),
+        search: search.clone(),
         content,
         summary,
         details,
@@ -1190,15 +1201,18 @@ impl Page {
         }
     }
 
+    /// Focuses the conflicts search box, revealing the sidebar when collapsed.
+    pub fn focus_search(&self) {
+        self.split.set_show_content(false);
+        self.search.grab_focus();
+    }
+
     /// Lets the shortcut for `action` (one of [`shortcuts`]) press
     /// `button`, and adds the keys to its tooltip. The last button bound
     /// wins, as views bind theirs again each time they're drawn.
     pub fn bind_key(&self, action: &'static str, button: &gtk::Button) {
-        if let Some((_, accel, _)) = shortcuts().iter().find(|s| s.0 == action)
-            && let Some((key, modifiers)) = gtk::accelerator_parse(*accel)
-            && let Some(tooltip) = button.tooltip_text()
-        {
-            button.set_tooltip_text(Some(&tf!("{tooltip} ({keys})", tooltip = &tooltip, keys = gtk::accelerator_get_label(key, modifiers))));
+        if let Some((_, accel, _)) = shortcuts().iter().find(|s| s.0 == action) {
+            diff_view::append_shortcut_tooltip(button, accel);
         }
         self.keys.borrow_mut().insert(action, button.downgrade());
     }
@@ -1362,6 +1376,7 @@ impl Page {
         };
         let Some((folder, winner)) = self.folder_and_winner(item) else {
             let button = gtk::Button::builder().child(&content).tooltip_text(tooltip).valign(gtk::Align::Center).build();
+            diff_view::append_shortcut_tooltip(&button, "<Alt>i");
             button.connect_clicked(move |_| toggle());
             return button.upcast();
         };
@@ -1377,6 +1392,7 @@ impl Page {
         });
         actions.add_action(&action);
         let button = adw::SplitButton::builder().child(&content).menu_model(&menu).tooltip_text(tooltip).dropdown_tooltip(t!("More ways to ignore")).valign(gtk::Align::Center).build();
+        diff_view::append_shortcut_tooltip(&button, "<Alt>i");
         button.insert_action_group("ignore", Some(&actions));
         button.connect_clicked(move |_| toggle());
         button.upcast()
@@ -1834,9 +1850,13 @@ pub(crate) fn show_inline_scripts(
 
     let merge = gtk::Button::builder()
         .label(t!("Merge with AI"))
+        .tooltip_text(t!("Merge these two versions with AI"))
         .css_classes(["suggested-action"])
         .build();
-    let save_button = gtk::Button::builder().label(t!("Save to Patch")).build();
+    let save_button = gtk::Button::builder()
+        .label(t!("Save to Patch"))
+        .tooltip_text(t!("Save to the merged patch"))
+        .build();
     if provider.is_none() {
         merge.set_tooltip_text(Some(&t!("Set up an AI provider in Preferences first")));
         merge.set_sensitive(false);
@@ -1985,6 +2005,7 @@ pub(crate) fn show_inline_scripts(
 
     let title = tnf!("Inline Script ({count})", "Inline Scripts ({count})", count = comparisons.len());
     let dialog = adw::Dialog::builder().title(title).content_width(980).content_height(720).child(&toolbar).build();
+    diff_view::bind_button_shortcuts(&dialog, &[("<Alt>m", &merge), ("<Control>s", &save_button)]);
     object::keep_alive(&dialog, pair);
     object::keep_alive(&dialog, thinking);
     dialog.present(Some(parent));

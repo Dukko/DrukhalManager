@@ -583,6 +583,7 @@ impl ObjectView {
                     view.render(gtk::StackTransitionType::SlideRight);
                 }
             });
+            page.bind_key("undo-step", &undo);
             header.actions.append(&undo);
         }
         if !steps.history.is_empty() || steps.from_saved {
@@ -902,6 +903,7 @@ impl ObjectView {
                 }
             });
         }
+        page.bind_key("take-change", &take);
         bar.extra.append(&take);
         bar.extra.append(&self.merge_tool_button(
             page,
@@ -1026,6 +1028,7 @@ impl ObjectView {
         busy: bool,
     ) -> gtk::Button {
         let button = gtk::Button::builder().label(t!("Merge Tool…")).tooltip_text(t!("Merge these two versions in your merge tool; what you save there replaces the right one")).sensitive(!busy).css_classes(["flat"]).build();
+        page.bind_key("merge-tool", &button);
         let (weak, page_ref) = (Rc::downgrade(self), Rc::downgrade(page));
         let (left_label, left, right_label, right, base) = (
             left_label.to_owned(),
@@ -1304,6 +1307,7 @@ impl ObjectView {
                     let do_save = do_save.clone();
                     save.connect_clicked(move |_| do_save());
                 }
+                page.bind_key("save", &save);
                 let toolbar_save = gtk::Button::builder()
                     .label(t!("Save to Patch"))
                     .css_classes(["suggested-action"])
@@ -1313,6 +1317,7 @@ impl ObjectView {
                     let do_save = do_save.clone();
                     toolbar_save.connect_clicked(move |_| do_save());
                 }
+                page.bind_key("save", &toolbar_save);
                 toolbar.append(&toolbar_save);
                 body.append(&card.widget);
                 keep_alive(&body, card);
@@ -1369,6 +1374,7 @@ impl ObjectView {
                         view.render(gtk::StackTransitionType::None);
                     }
                 });
+                page.bind_key("take-change", &take);
                 bar.extra.append(&take);
                 let weak = Rc::downgrade(self);
                 bar.extra.append(&option_toggle(&page.hooks, &t!("Changed Lines Only"), &t!("Fold runs of lines that are the same in both, keeping a few around each difference. Click a fold to open it"), |s| s.fold_unchanged, |s, v| s.fold_unchanged = v, move || {

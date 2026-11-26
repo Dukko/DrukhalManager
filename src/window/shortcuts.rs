@@ -80,12 +80,16 @@ impl Window {
             dialog.add(section);
         }
         let conflicts = adw::ShortcutsSection::new(Some(&t!("Conflicts")));
+        conflicts.add(adw::ShortcutsItem::from_action(&t!("Search Conflicts"), "win.find"));
+        conflicts.add(adw::ShortcutsItem::from_action(&t!("Look Up Objects"), "win.object-lookup"));
         for (action, _, title) in crate::conflicts_view::shortcuts() {
             conflicts.add(adw::ShortcutsItem::from_action(&title, &format!("conflicts.{action}")));
         }
-        // These belong to the comparison, not to an action.
+        // These belong to the comparison cards or editor, not a window action.
         conflicts.add(adw::ShortcutsItem::new(&t!("Next Difference"), "<Alt>Down"));
         conflicts.add(adw::ShortcutsItem::new(&t!("Previous Difference"), "<Alt>Up"));
+        conflicts.add(adw::ShortcutsItem::new(&t!("Copy This Over"), "<Alt>c"));
+        conflicts.add(adw::ShortcutsItem::new(&t!("Clean Up the Code"), "<Control><Shift>f"));
         dialog.add(conflicts);
         dialog.present(Some(&self.window));
     }
