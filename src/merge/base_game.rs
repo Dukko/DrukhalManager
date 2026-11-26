@@ -245,9 +245,15 @@ fn by_version(dir: &Path) -> Vec<(PathBuf, Vec<u64>)> {
     saved
 }
 
-/// Deletes all but the snapshots of the newest game versions.
-fn prune(dir: &Path) {
-    for (old, _) in by_version(dir).into_iter().skip(KEEP) {
+/// Deletes snapshots down to [`KEEP`], never `version`'s own: the newest
+/// older versions go last, and versions newer than `version` (after a game
+/// rollback) go first.
+fn prune(dir: &Path, version: &str) {
+    let (own_file, own) = (path(dir, version), version_key(version));
+    let (mut older, mut newer): (Vec<_>, Vec<_>) = by_version(dir).into_iter().filter(|(p, _)| *p != own_file).partition(|(_, key)| *key < own);
+    newer.reverse();
+    older.extend(newer);
+    for (old, _) in older.into_iter().skip(KEEP - 1) {
         let _ = std::fs::remove_file(old);
     }
 }
@@ -270,7 +276,7 @@ pub fn ensure(dir: &Path, game_dir: &Path, version: &str) -> io::Result<Snapshot
     }
     taken.snapshot.save(dir)?;
     crate::diagnostics::log!("scan", "Saved the base game snapshot for {version} ({files} files read)", files = taken.files);
-    prune(dir);
+    prune(dir, version);
     Ok(taken.snapshot)
 }
 
@@ -513,6 +519,26 @@ mod tests {
     }
 
     #[test]
+    fn never_prunes_the_installed_versions_snapshot_after_a_rollback() {
+        let game = temp("rollback-game");
+        let cache = temp("rollback-cache");
+        write(&game, &[("common/technology/00_tech.txt", "tech_a = { cost = 1 }\n")]);
+        for version in ["v4.6.0", "v4.7.0", "v4.8.0"] {
+            ensure(&cache, &game, version).unwrap();
+        }
+        ensure(&cache, &game, "v4.5.3").unwrap();
+        assert!(path(&cache, "v4.5.3").is_file());
+        assert!(!path(&cache, "v4.8.0").exists());
+        let before = std::fs::metadata(path(&cache, "v4.5.3")).unwrap().modified().unwrap();
+        write(&game, &[("common/technology/00_tech.txt", "tech_a = { cost = 2 }\n")]);
+        let again = ensure(&cache, &game, "v4.5.3").unwrap();
+        assert_eq!(again.get("common/technology", "tech_a").unwrap().text, "tech_a = { cost = 1 }");
+        assert_eq!(std::fs::metadata(path(&cache, "v4.5.3")).unwrap().modified().unwrap(), before);
+        let _ = std::fs::remove_dir_all(&game);
+        let _ = std::fs::remove_dir_all(&cache);
+    }
+
+    #[test]
     fn keeps_three_snapshots_and_finds_the_previous_one() {
         let game = temp("keep-game");
         let cache = temp("keep-cache");
@@ -525,7 +551,7 @@ mod tests {
             file.set_modified(base + std::time::Duration::from_secs(i as u64 * 10)).unwrap();
         }
         // v4 was saved with the newest mtime only after pruning ran, so prune once more.
-        prune(&cache);
+        prune(&cache, "v4");
         assert_eq!(saved_files(&cache).len(), 3);
         assert!(load(&cache, "v1").is_none());
         assert_eq!(previous(&cache, "v4").unwrap().version, "v3");
