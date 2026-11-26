@@ -323,9 +323,24 @@ fn joined(log: &str) -> Vec<String> {
 }
 
 /// The files, lowercased, the game says it failed to read because they start
-/// with a byte-order mark.
-pub fn bom_files(log: &str) -> std::collections::HashSet<String> {
-    joined(log).iter().filter(|l| l.contains("verify encoding is UTF8 (no BOM)")).filter_map(|l| find_path(l)).map(|f| f.to_lowercase()).collect()
+/// with a byte-order mark, with the lines in the file those messages give.
+/// The game words any `key={` format error this way, so the lines tell
+/// whether the BOM is the cause.
+pub fn bom_files(log: &str) -> HashMap<String, Vec<usize>> {
+    const MARKER: &str = "verify encoding is UTF8 (no BOM)";
+    let mut out: HashMap<String, Vec<usize>> = HashMap::new();
+    for entry in joined(log).iter().filter(|l| l.contains(MARKER)) {
+        let Some(file) = find_path(entry) else { continue };
+        let lines = out.entry(file.to_lowercase()).or_default();
+        for (at, _) in entry.match_indices(MARKER) {
+            let rest = &entry[at..];
+            if let Some(found) = rest.find("near line: ") {
+                let digits: String = rest[found + "near line: ".len()..].chars().take_while(char::is_ascii_digit).collect();
+                lines.extend(digits.parse::<usize>());
+            }
+        }
+    }
+    out
 }
 
 /// How many lines of `log` are real problems, after joining multi-line errors.
