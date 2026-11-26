@@ -226,11 +226,28 @@ fn saved_files(dir: &Path) -> Vec<(PathBuf, std::time::SystemTime)> {
         .collect()
 }
 
-/// Deletes all but the most recently saved snapshots.
+/// The numbers in a game version, so that `v4.10.0` sorts after `v4.9.2`.
+fn version_key(version: &str) -> Vec<u64> {
+    version.split(|c: char| !c.is_ascii_digit()).filter(|n| !n.is_empty()).filter_map(|n| n.parse().ok()).collect()
+}
+
+/// The saved snapshots' files, newest game version first.
+fn by_version(dir: &Path) -> Vec<(PathBuf, Vec<u64>)> {
+    let mut saved: Vec<(PathBuf, Vec<u64>)> = saved_files(dir)
+        .into_iter()
+        .map(|(p, _)| {
+            let name = p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+            let key = version_key(name.trim_end_matches(".json.gz"));
+            (p, key)
+        })
+        .collect();
+    saved.sort_by(|a, b| b.1.cmp(&a.1));
+    saved
+}
+
+/// Deletes all but the snapshots of the newest game versions.
 fn prune(dir: &Path) {
-    let mut saved = saved_files(dir);
-    saved.sort_by_key(|(_, modified)| std::cmp::Reverse(*modified));
-    for (old, _) in saved.into_iter().skip(KEEP) {
+    for (old, _) in by_version(dir).into_iter().skip(KEEP) {
         let _ = std::fs::remove_file(old);
     }
 }
@@ -257,12 +274,17 @@ pub fn ensure(dir: &Path, game_dir: &Path, version: &str) -> io::Result<Snapshot
     Ok(taken.snapshot)
 }
 
-/// The most recently saved snapshot of a different version.
+/// Every saved snapshot of a game version older than `version`, newest
+/// first, each read only when reached.
+pub fn older(dir: &Path, version: &str) -> impl Iterator<Item = Snapshot> {
+    let own = version_key(version);
+    let version = version.to_owned();
+    by_version(dir).into_iter().filter(move |(_, key)| *key < own).filter_map(|(p, _)| read(&p)).filter(move |s| s.version != version)
+}
+
+/// The newest saved snapshot of an older game version.
 pub fn previous(dir: &Path, version: &str) -> Option<Snapshot> {
-    let mut saved = saved_files(dir);
-    saved.sort_by_key(|(_, modified)| std::cmp::Reverse(*modified));
-    let own = path(dir, version);
-    saved.into_iter().filter(|(p, _)| *p != own).find_map(|(p, _)| read(&p)).filter(|s| s.version != version)
+    older(dir, version).next()
 }
 
 /// An object an enabled mod replaces whose base-game version changed
@@ -468,6 +490,24 @@ mod tests {
         assert_eq!(snapshot.len(), 0);
         assert!(saved_files(&cache).is_empty(), "an incomplete walk mustn't stay in use");
         std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o644)).unwrap();
+        let _ = std::fs::remove_dir_all(&game);
+        let _ = std::fs::remove_dir_all(&cache);
+    }
+
+    #[test]
+    fn orders_older_snapshots_by_game_version_not_save_time() {
+        let game = temp("order-game");
+        let cache = temp("order-cache");
+        write(&game, &[("common/technology/00_tech.txt", "tech_a = { cost = 1 }\n")]);
+        for version in ["v4.9.2", "v4.10.0", "v4.8.0"] {
+            ensure(&cache, &game, version).unwrap();
+        }
+        // The oldest version was saved last.
+        let file = std::fs::File::options().write(true).open(path(&cache, "v4.8.0")).unwrap();
+        file.set_modified(std::time::SystemTime::now() + std::time::Duration::from_secs(100)).unwrap();
+        let older: Vec<String> = older(&cache, "v4.11.0").map(|s| s.version).collect();
+        assert_eq!(older, ["v4.10.0", "v4.9.2", "v4.8.0"]);
+        assert_eq!(previous(&cache, "v4.10.0").unwrap().version, "v4.9.2");
         let _ = std::fs::remove_dir_all(&game);
         let _ = std::fs::remove_dir_all(&cache);
     }

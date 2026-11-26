@@ -635,7 +635,7 @@ impl Patch {
     /// file. That bookkeeping is saved if it changed.
     #[cfg(test)]
     pub fn recheck(&mut self, roots: &HashMap<String, PathBuf>, game_version: Option<&str>) -> Vec<Stale> {
-        self.recheck_with(roots, game_version, &Sources::default(), &|_, _| None)
+        self.recheck_with(roots, game_version, &Sources::default(), &|_, _| Vec::new())
     }
 
     /// [`Patch::check`], with each entry's pick marked as
@@ -646,9 +646,11 @@ impl Patch {
         let sources = Sources::default();
         let previous = std::cell::OnceCell::new();
         let previous_game = |category: &str, key: &str| {
-            let snapshot = previous.get_or_init(|| game_version.and_then(|v| super::base_game::previous(&super::base_game::dir(), v)));
-            let saved = snapshot.as_ref()?.get(category, key)?;
-            Some(Source { label: "Previous game version".to_owned(), file: saved.file.clone(), text: saved.text.clone() })
+            let snapshots = previous.get_or_init(|| game_version.map(|v| super::base_game::older(&super::base_game::dir(), v).collect::<Vec<_>>()).unwrap_or_default());
+            snapshots
+                .iter()
+                .filter_map(|s| s.get(category, key).map(|saved| Source { label: s.version.clone(), file: saved.file.clone(), text: saved.text.clone() }))
+                .collect()
         };
         let mut stale = self.recheck_with(roots, game_version, &sources, &previous_game);
         Self::mark_picks(&mut stale, &self.picks_with(roots, &sources));
@@ -656,7 +658,7 @@ impl Patch {
     }
 
     /// [`Patch::check`], reading source files through `sources`.
-    fn recheck_with(&mut self, roots: &HashMap<String, PathBuf>, game_version: Option<&str>, sources: &Sources, previous_game: &dyn Fn(&str, &str) -> Option<Source>) -> Vec<Stale> {
+    fn recheck_with(&mut self, roots: &HashMap<String, PathBuf>, game_version: Option<&str>, sources: &Sources, previous_game: &dyn Fn(&str, &str) -> Vec<Source>) -> Vec<Stale> {
         let game_dir = roots.get(VANILLA).map(PathBuf::as_path);
         if let Some(dir) = game_dir
             && let Err(e) = self.relocate_base_events(dir)
@@ -1212,7 +1214,7 @@ enum MergeContent {
 /// value, left over in the mod, so `previous_game` (the object as the
 /// game had it before its last update) is consulted when the merge looks
 /// incomplete.
-fn merge_content(merge: &Merge, roots: &HashMap<String, PathBuf>, sources: &Sources, previous_game: &dyn Fn(&str, &str) -> Option<Source>) -> MergeContent {
+fn merge_content(merge: &Merge, roots: &HashMap<String, PathBuf>, sources: &Sources, previous_game: &dyn Fn(&str, &str) -> Vec<Source>) -> MergeContent {
     if merge.prints.is_empty() {
         return MergeContent::Unavailable;
     }
@@ -1234,7 +1236,7 @@ fn merge_content(merge: &Merge, roots: &HashMap<String, PathBuf>, sources: &Sour
             mods.push(source);
         }
     }
-    let problems_with = |previous: Option<&Source>| -> Vec<String> {
+    let problems_with = |previous: &[Source]| -> Vec<String> {
         let validation = super::validate::validate_object_since(&merge.category, &merge.key, &merge.script, vanilla.as_ref(), previous, &mods, None);
         validation
             .problems
@@ -1244,11 +1246,12 @@ fn merge_content(merge: &Merge, roots: &HashMap<String, PathBuf>, sources: &Sour
             .map(|p| p.message.clone())
             .collect()
     };
-    let mut problems = problems_with(None);
-    if !problems.is_empty()
-        && let Some(previous) = previous_game(&merge.category, &merge.key)
-    {
-        problems = problems_with(Some(&previous));
+    let mut problems = problems_with(&[]);
+    if !problems.is_empty() {
+        let previous = previous_game(&merge.category, &merge.key);
+        if !previous.is_empty() {
+            problems = problems_with(&previous);
+        }
     }
     if problems.is_empty() {
         MergeContent::Clean
@@ -1400,7 +1403,7 @@ mod tests {
 
     /// Saves `merged` over a mod copy and the current game's copy, then
     /// rechecks it with `previous` as the previous game version's copy.
-    fn recheck_against_previous(tag: &str, mod_text: &str, merged: &str, previous: &str) -> (Vec<Stale>, Option<String>) {
+    fn recheck_against_previous(tag: &str, mod_text: &str, merged: &str, previous: &[&str]) -> (Vec<Stale>, Option<String>) {
         let root = std::env::temp_dir().join(format!("drukhal-previous-game-{tag}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         let (user, a, game) = (root.join("user"), root.join("a"), root.join("game"));
@@ -1415,8 +1418,8 @@ mod tests {
         let mut patch = Patch::open(&user, &test_target()).unwrap();
         patch.save(&user, Some("v4.6.0"), "common/ethics", "ethic", merged, prints).unwrap();
         let roots: std::collections::HashMap<String, PathBuf> = [("mod/a.mod".to_owned(), a), (VANILLA.to_owned(), game)].into();
-        let previous = Source { label: "Previous".into(), file: "common/ethics/00.txt".into(), text: previous.into() };
-        let stale = patch.recheck_with(&roots, Some("v4.6.0"), &Sources::default(), &|_, _| Some(previous.clone()));
+        let previous: Vec<Source> = previous.iter().map(|text| Source { label: "Previous".into(), file: "common/ethics/00.txt".into(), text: (*text).into() }).collect();
+        let stale = patch.recheck_with(&roots, Some("v4.6.0"), &Sources::default(), &|_, _| previous.clone());
         let accepted = patch.get("common/ethics", "ethic").unwrap().accepted.clone();
         std::fs::remove_dir_all(root).unwrap();
         (stale, accepted)
@@ -1428,7 +1431,19 @@ mod tests {
             "leftover",
             "ethic = { category_value = 4 }\n",
             "ethic = { category_value = 5 }",
-            "ethic = { category_value = 4 }",
+            &["ethic = { category_value = 4 }"],
+        );
+        assert!(stale.is_empty(), "{stale:?}");
+        assert!(accepted.is_some());
+    }
+
+    #[test]
+    fn a_mod_written_two_game_versions_ago_is_compared_against_the_older_snapshot_too() {
+        let (stale, accepted) = recheck_against_previous(
+            "two-updates",
+            "ethic = { category_value = 3 }\n",
+            "ethic = { category_value = 5 }",
+            &["ethic = { category_value = 4 }", "ethic = { category_value = 3 }"],
         );
         assert!(stale.is_empty(), "{stale:?}");
         assert!(accepted.is_some());
@@ -1440,7 +1455,7 @@ mod tests {
             "genuine",
             "ethic = { category_value = 4 modifier = { army_damage_mult = 0.1 } }\n",
             "ethic = { category_value = 5 }",
-            "ethic = { category_value = 4 }",
+            &["ethic = { category_value = 4 }"],
         );
         assert_eq!(stale.len(), 1, "{stale:?}");
         assert!(stale[0].reasons.iter().any(|r| r.contains("Missing additions from A") && r.contains("army_damage_mult")), "{:?}", stale[0].reasons);

@@ -1439,10 +1439,6 @@ impl ObjectView {
             })
             .collect();
         let game_dir = page.hooks.game_dir.clone();
-        let previous_game = page.analysis.game_version.as_deref().and_then(|version| {
-            let saved = crate::merge::base_game::previous(&crate::merge::base_game::dir(), version)?.get(&self.category, &self.name).cloned()?;
-            Some(Source { label: "Previous game version".to_owned(), file: saved.file, text: saved.text })
-        });
         let Some((vanilla, sources, ctx, all_at_once, merged_labels)) = self.with_steps(|s| {
             let fresh = s.next == 1 && !s.edited;
             let (candidate_sources, candidate_positions, working) = if fresh {
@@ -1481,7 +1477,7 @@ impl ObjectView {
                 max_attempts: None,
                 prints: s.loaded.prints.clone(),
                 inline,
-                previous_game: previous_game.clone(),
+                previous_game: Vec::new(),
             };
             // Fall back to pairwise if the combined input would exceed a safe budget,
             // keeping the working result tagged as <result> rather than a mod.
@@ -1513,6 +1509,15 @@ impl ObjectView {
         let view = self.clone();
         glib::spawn_future_local(async move {
             let result = thinking_view::run_cancellable(&view.thinking, None, move |cancel, on| {
+                let mut ctx = ctx;
+                if let Some(version) = ctx.game_version.as_deref() {
+                    ctx.previous_game = crate::merge::base_game::older(&crate::merge::base_game::dir(), version)
+                        .filter_map(|s| {
+                            let saved = s.get(&ctx.category, &ctx.key)?;
+                            Some(Source { label: s.version.clone(), file: saved.file.clone(), text: saved.text.clone() })
+                        })
+                        .collect();
+                }
                 ai::merge_checked_cancellable(
                     &provider,
                     &ctx,

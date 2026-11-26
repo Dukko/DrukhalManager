@@ -92,18 +92,18 @@ pub fn validate_object(
     sources: &[Source],
     script_ctx: Option<(&ScriptContext, &Known)>,
 ) -> Validation {
-    validate_object_since(category, key, text, vanilla, None, sources, script_ctx)
+    validate_object_since(category, key, text, vanilla, &[], sources, script_ctx)
 }
 
-/// As [`validate_object`]. `previous` is the object in the game version
-/// before `vanilla`: a source line that equals it is the game's old value,
-/// not that source's addition, so the merge need not keep it.
+/// As [`validate_object`]. `previous` is the object in older game versions:
+/// a source line that equals one is the game's old value, not that source's
+/// addition, so the merge need not keep it.
 pub fn validate_object_since(
     category: &str,
     key: &str,
     text: &str,
     vanilla: Option<&Source>,
-    previous: Option<&Source>,
+    previous: &[Source],
     sources: &[Source],
     script_ctx: Option<(&ScriptContext, &Known)>,
 ) -> Validation {
@@ -307,7 +307,7 @@ pub fn validate_file(
                 }
                 check_duplicate_single_valued_keys(&category, &entries, &mut problems);
                 if !sources.is_empty() {
-                    check_source_coverage(&entries, vanilla, None, sources, &mut problems);
+                    check_source_coverage(&entries, vanilla, &[], sources, &mut problems);
                 }
                 if let Some((ctx, known)) = script_ctx {
                     check_unknown_script_names(
@@ -668,7 +668,7 @@ fn normalize_negations(leaves: &mut Vec<String>) {
 fn check_source_coverage(
     result_entries: &[Entry],
     vanilla: Option<&Source>,
-    previous: Option<&Source>,
+    previous: &[Source],
     sources: &[Source],
     problems: &mut Vec<Problem>,
 ) {
@@ -687,7 +687,7 @@ fn check_source_coverage(
     let mut vanilla_values: HashMap<String, HashSet<String>> = HashMap::new();
     values_by_path(&vanilla_leaves, &mut vanilla_values);
 
-    let mut previous_leaves = previous.and_then(|p| leaves_of(&p.text)).unwrap_or_default();
+    let mut previous_leaves: Vec<String> = previous.iter().flat_map(|p| leaves_of(&p.text).unwrap_or_default()).collect();
     normalize_ethics(&mut previous_leaves);
     normalize_negations(&mut previous_leaves);
     let previous_set: HashSet<String> = previous_leaves.into_iter().collect();
