@@ -1057,7 +1057,7 @@ type Spans = Vec<(Entry, Range<usize>)>;
 
 impl Objects {
     /// The key of the top-level object whose definition covers 1-based `line`
-    /// of `text`, as [`source::object_at`] finds it.
+    /// of `text`, the way `source::extract` finds it.
     fn key_at(&mut self, category: &str, text: &str, line: usize) -> Option<String> {
         if category == "localisation" || line == 0 {
             return None;

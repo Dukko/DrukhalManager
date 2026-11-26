@@ -73,6 +73,7 @@ pub fn extract_parsed(
 /// `src` whose definition covers 1-based `line`. Events are keyed by `id`.
 /// `None` for localisation, `@variable` lines, `namespace`, lines between
 /// objects, or a file that doesn't parse.
+#[cfg(test)]
 pub fn object_at(category: &str, src: &str, line: usize) -> Option<(String, String)> {
     if category == "localisation" || line == 0 {
         return None;
