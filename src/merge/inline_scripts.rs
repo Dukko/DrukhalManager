@@ -455,8 +455,9 @@ fn inside_quotes(text: &str, at: usize) -> bool {
     quoted
 }
 
-/// Rewrites `script = <old>` values whose name is in `names` to the new name.
-/// Only the value changes; indentation, spacing and comments stay.
+/// Rewrites `script = <old>` and `inline_script = <old>` values whose name is
+/// in `names` to the new name.  Only the value changes; indentation, spacing
+/// and comments stay.
 pub fn rewrite_calls(text: &str, names: &[(String, String)]) -> String {
     if names.is_empty() {
         return text.to_owned();
@@ -471,16 +472,34 @@ pub fn rewrite_calls(text: &str, names: &[(String, String)]) -> String {
         let (code, comment) = split_comment(body);
         let mut rewritten = String::with_capacity(code.len());
         let mut last = 0;
+        // We search for two keywords:
+        // - "inline_script" followed by `= <value>` (scalar form)
+        // - "script" (not preceded by a word char) followed by `= <value>`
+        //   (block-interior `script = …` key)
+        // We iterate over "script" matches — an `inline_script` match always
+        // contains a `script` substring.  When we see `inline_` right before
+        // the match we handle it as the scalar form; otherwise we handle it
+        // as the block-interior key form, rejecting word-char predecessors.
         for (at, _) in code.match_indices("script") {
-            if inside_quotes(code, at)
-                || (at > 0 && code[..at].chars().next_back().is_some_and(word))
-            {
+            if inside_quotes(code, at) {
                 continue;
+            }
+            // Determine whether this is `inline_script` (scalar form) or
+            // bare `script` (block-interior key form).
+            let is_inline = at >= 7
+                && &code[at - 7..at] == "inline_"
+                && !(at >= 8 && code[..at - 7].chars().next_back().is_some_and(word));
+            if !is_inline {
+                // Bare `script` — reject if preceded or followed by a word char.
+                if at > 0 && code[..at].chars().next_back().is_some_and(word) {
+                    continue;
+                }
+                let after = at + "script".len();
+                if code[after..].chars().next().is_some_and(word) {
+                    continue;
+                }
             }
             let after = at + "script".len();
-            if code[after..].chars().next().is_some_and(word) {
-                continue;
-            }
             let rest = code[after..].trim_start();
             let spaces = code[after..].len() - rest.len();
             let Some(rest) = rest.strip_prefix('=') else {
@@ -489,6 +508,11 @@ pub fn rewrite_calls(text: &str, names: &[(String, String)]) -> String {
             let value_spaces = rest.len() - rest.trim_start().len();
             let value_start = after + spaces + 1 + value_spaces;
             let value = &code[value_start..];
+            if is_inline && value.starts_with('{') {
+                // Block form `inline_script = { script = … }` — the inner
+                // `script =` match will handle it.
+                continue;
+            }
             let (value_len, quoted) = if let Some(text) = value.strip_prefix('"') {
                 let Some(end) = text.find('"') else { continue };
                 (end + 2, true)
@@ -506,6 +530,13 @@ pub fn rewrite_calls(text: &str, names: &[(String, String)]) -> String {
             let Some((_, target)) = names.iter().find(|(n, _)| n.eq_ignore_ascii_case(&name)) else {
                 continue;
             };
+            // For inline_script, include the whole `inline_script = ` key in
+            // the unchanged prefix so we only replace the value.
+            let prefix_start = if is_inline { at - 7 } else { last };
+            // Avoid emitting text we already emitted (overlapping match).
+            if prefix_start < last {
+                continue;
+            }
             rewritten.push_str(&code[last..value_start]);
             if quoted {
                 rewritten.push('"');
@@ -664,5 +695,57 @@ imperialist = {
 
         let _ = std::fs::remove_dir_all(&mod_dir);
         let _ = std::fs::remove_dir_all(&game_dir);
+    }
+
+    #[test]
+    fn rewrite_calls_scalar_inline_script_unquoted() {
+        let names = vec![
+            ("pop_faction_types/demands/imperialist".into(), "MECR/factions/imperialist_460".into()),
+        ];
+        let input = "imperialist = { inline_script = pop_faction_types/demands/imperialist }";
+        let result = rewrite_calls(input, &names);
+        assert_eq!(result, "imperialist = { inline_script = MECR/factions/imperialist_460 }");
+    }
+
+    #[test]
+    fn rewrite_calls_scalar_inline_script_quoted() {
+        let names = vec![
+            ("pop_faction_types/demands/imperialist".into(), "MECR/factions/imperialist_460".into()),
+        ];
+        let input = r#"imperialist = { inline_script = "pop_faction_types/demands/imperialist" }"#;
+        let result = rewrite_calls(input, &names);
+        assert_eq!(result, r#"imperialist = { inline_script = "MECR/factions/imperialist_460" }"#);
+    }
+
+    #[test]
+    fn rewrite_calls_scalar_inside_string_untouched() {
+        let names = vec![
+            ("pop_faction_types/demands/imperialist".into(), "MECR/factions/imperialist_460".into()),
+        ];
+        // Value inside a string should not be rewritten.
+        let input = r#"desc = "inline_script = pop_faction_types/demands/imperialist""#;
+        let result = rewrite_calls(input, &names);
+        assert_eq!(result, input);
+    }
+
+    #[test]
+    fn rewrite_calls_block_inline_script_still_works() {
+        let names = vec![
+            ("pop_faction_types/demands/imperialist".into(), "MECR/factions/imperialist_460".into()),
+        ];
+        let input = "inline_script = { script = pop_faction_types/demands/imperialist }";
+        let result = rewrite_calls(input, &names);
+        assert_eq!(result, "inline_script = { script = MECR/factions/imperialist_460 }");
+    }
+
+    #[test]
+    fn rewrite_calls_does_not_match_other_inline_script_prefix() {
+        let names = vec![
+            ("pop_faction_types/demands/imperialist".into(), "MECR/factions/imperialist_460".into()),
+        ];
+        // `not_inline_script` should not trigger.
+        let input = "not_inline_script = pop_faction_types/demands/imperialist";
+        let result = rewrite_calls(input, &names);
+        assert_eq!(result, input);
     }
 }
