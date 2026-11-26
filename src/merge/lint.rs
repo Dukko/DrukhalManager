@@ -645,6 +645,14 @@ mod tests {
     }
 
     #[test]
+    fn closer_left_open_after_a_finished_object_is_not_blamed_on_it() {
+        let src = "done = {\n\tcost = 1\n}\n  indented = {\n\tcost = 2\nnext = {\n\tcost = 3\n}\n";
+        let r = repair("common/buildings", src).unwrap();
+        assert_eq!(r.kinds, [FixKind::ClosedBeforeNextObject]);
+        assert!(r.damaged.is_empty(), "blamed an unrelated object: {:?}", r.damaged);
+    }
+
+    #[test]
     fn clean_up_fixes_spacing_operators_and_indentation() {
         let messy = "\
 country_event={
