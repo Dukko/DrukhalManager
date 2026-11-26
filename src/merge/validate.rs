@@ -712,6 +712,16 @@ fn check_source_coverage(
             if let Some((path, value)) = leaf.split_once('=')
                 && value != "{}"
             {
+                // A game update sometimes renames a script value. Keeping
+                // the current game's `value:...` reference instead of an
+                // older mod's one is a priority choice, not a lost change.
+                let script_value_pick = value.starts_with("value:")
+                    && result_values
+                        .get(path)
+                        .is_some_and(|kept| kept.iter().any(|v| v.starts_with("value:")));
+                if script_value_pick {
+                    continue;
+                }
                 // Several sources changed this path differently and the
                 // result kept one of those values: priority chose it, so the
                 // losing sources aren't missing anything.
@@ -1035,6 +1045,29 @@ mod tests {
         let res = validate_object(
             "common/policies",
             "policy",
+            merged,
+            Some(&v),
+            &[m],
+            None,
+        );
+        assert!(res.is_ok(), "{:?}", res.problems);
+    }
+
+    #[test]
+    fn treats_a_script_value_choice_as_a_priority_pick() {
+        let v = src(
+            "Vanilla",
+            "agenda = { add_resource = { mult = value:count_assigned_priests } }",
+        );
+        let m = src(
+            "Mod",
+            "agenda = { add_resource = { mult = value:country_assigned_priests } }",
+        );
+        let merged =
+            "agenda = { add_resource = { mult = value:count_assigned_priests } }";
+        let res = validate_object(
+            "common/council_agendas",
+            "agenda",
             merged,
             Some(&v),
             &[m],

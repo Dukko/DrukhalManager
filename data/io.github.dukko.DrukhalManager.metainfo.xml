@@ -36,6 +36,16 @@
     <control>keyboard</control>
   </supports>
   <releases>
+    <release version="2.7.32" date="2026-11-26">
+      <description>
+        <p>Stops the saved-merge audit from flagging a script-value priority choice as a dropped addition:</p>
+        <ul>
+          <li>When the result keeps a current value: reference and an older mod used a different one, the audit now treats it as the merge's priority choice</li>
+          <li>Covers game updates that rename script values, such as value:count_assigned_priests replacing an older mod's value:country_assigned_priests</li>
+          <li>Clears old audit warnings for those merges without re-merging</li>
+        </ul>
+      </description>
+    </release>
     <release version="2.7.31" date="2026-11-26">
       <description>
         <p>Extends the saved-merge audit's equivalence rules so rewriting trigger blocks as flat conditions doesn't look like a dropped addition:</p>
