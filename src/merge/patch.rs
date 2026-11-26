@@ -392,6 +392,9 @@ impl Patch {
     }
 
     fn save_file_unlogged(&mut self, user_dir: &Path, game_version: Option<&str>, path: &str, contents: impl AsRef<[u8]>, prints: Vec<Print>) -> io::Result<()> {
+        if !is_inside(path) {
+            return Err(io::Error::new(io::ErrorKind::InvalidInput, format!("{path} is outside the patch folder")));
+        }
         let sources = prints.iter().filter(|p| p.mod_id != VANILLA).map(|p| p.name.clone()).collect();
         self.write_descriptors(user_dir, game_version)?;
         let target = self.root.join(path);
@@ -420,6 +423,10 @@ impl Patch {
 
     fn remove_unlogged(&mut self, category: &str, key: &str) -> io::Result<()> {
         if let Some(at) = self.manifest.merges.iter().position(|m| m.category == category && m.key == key) {
+            let file = &self.manifest.merges[at].file;
+            if !is_inside(file) {
+                return Err(io::Error::new(io::ErrorKind::InvalidInput, format!("{file} is outside the patch folder")));
+            }
             let merge = self.manifest.merges.remove(at);
             remove_if_present(&self.root.join(&merge.file))?;
             for name in &merge.scripts {
@@ -1265,6 +1272,23 @@ mod tests {
         assert_eq!((t.id().as_str(), t.name.as_str()), ("mod/drukhal_patch_main.mod", "Main (Patch)"));
         assert!(is_patch(&t.id()) && is_patch("mod/drukhal_merged_patch.mod"));
         assert!(!is_patch("mod/ugc_1.mod") && !is_patch("mod/drukhal_merged_patch_fork.mod"));
+    }
+
+    #[test]
+    fn refuses_writes_outside_the_patch_folder() {
+        let user = std::env::temp_dir().join(format!("drukhal-outside-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&user);
+        std::fs::create_dir_all(user.join("mod")).unwrap();
+        let mut patch = Patch::open(&user, &test_target()).unwrap();
+
+        let err = patch.save_file(&user, None, "../x", "x", vec![]).unwrap_err();
+
+        assert_eq!(err.kind(), io::ErrorKind::InvalidInput);
+        assert!(!test_target().root(&user).parent().unwrap().join("x").exists());
+        assert!(!test_target().root(&user).exists(), "nothing was created");
+        patch.save_file(&user, None, "common/x.txt", "x", vec![]).unwrap();
+        assert!(test_target().root(&user).join("common/x.txt").is_file());
+        std::fs::remove_dir_all(user).unwrap();
     }
 
     #[test]
