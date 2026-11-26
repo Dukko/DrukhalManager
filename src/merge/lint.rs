@@ -270,18 +270,30 @@ pub fn verify_brace_repair(original: &str, repaired: &str) -> Result<(), String>
 /// [`verify_brace_repair`] for a repair that also dropped the lines in
 /// `removed`, each of which must be a whole line of `original`.
 pub fn verify_repair_removing(original: &str, repaired: &str, removed: &[String]) -> Result<(), String> {
-    let mut kept: Vec<&str> = original.lines().collect();
-    for line in removed.iter().map(|r| r.trim()).filter(|r| !r.is_empty()) {
-        match kept.iter().position(|l| l.trim() == line) {
-            Some(at) => {
-                kept.remove(at);
-            }
-            None => {
-                return Err(format!("`{line}` is listed as removed but is not a line of the object. List only lines that are in the original."));
+    let wanted: Vec<&str> = removed.iter().map(|r| r.trim()).filter(|r| !r.is_empty()).collect();
+    let lines: Vec<&str> = original.lines().collect();
+    if let Some(line) = wanted.iter().find(|w| !lines.iter().any(|l| l.trim() == **w)) {
+        return Err(format!("`{line}` is listed as removed but is not a line of the object. List only lines that are in the original."));
+    }
+    // A listed line may occur several times; any one occurrence may be the removed one.
+    fn attempt(lines: Vec<&str>, wanted: &[&str], repaired: &str) -> Result<(), String> {
+        let Some((line, rest)) = wanted.split_first() else {
+            return verify_brace_repair(&lines.join("\n"), repaired);
+        };
+        let mut first_error = None;
+        for at in (0..lines.len()).filter(|&i| lines[i].trim() == *line) {
+            let mut kept = lines.clone();
+            kept.remove(at);
+            match attempt(kept, rest, repaired) {
+                Ok(()) => return Ok(()),
+                Err(e) => {
+                    first_error.get_or_insert(e);
+                }
             }
         }
+        Err(first_error.unwrap_or_else(|| format!("`{line}` is listed as removed more often than it occurs.")))
     }
-    verify_brace_repair(&kept.join("\n"), repaired)
+    attempt(lines, &wanted, repaired)
 }
 
 /// Whether `repaired` holds less than `original` apart from braces and whitespace.
@@ -808,6 +820,16 @@ foo = {  # comment next to open
         assert!(verify_repair_removing(orig, stub, &["add = 1".to_owned()]).is_err());
         let invented = verify_repair_removing(orig, stub, &["mult = 3".to_owned()]).unwrap_err();
         assert!(invented.contains("not a line of the object"), "{invented}");
+    }
+
+    #[test]
+    fn repair_removing_accepts_a_later_duplicate_line() {
+        let orig = "sv = {\n\tadd = 1\n\tmult = 2\n\tadd = 1\n}";
+        let dropped_last = "sv = {\n\tadd = 1\n\tmult = 2\n}";
+        assert!(verify_repair_removing(orig, dropped_last, &["add = 1".to_owned()]).is_ok());
+        let dropped_twice = "sv = {\n\tmult = 2\n}";
+        assert!(verify_repair_removing(orig, dropped_twice, &["add = 1".to_owned(), "add = 1".to_owned()]).is_ok());
+        assert!(verify_repair_removing(orig, dropped_twice, &["add = 1".to_owned()]).is_err());
     }
 
     #[test]

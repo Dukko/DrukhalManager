@@ -37,6 +37,9 @@ struct State {
 }
 
 /// An object's key, its status label and its row.
+/// The open review panels, by object key.
+type Panels = Rc<RefCell<Vec<(String, gtk::Box)>>>;
+
 type Row = (String, gtk::Label, adw::ActionRow);
 
 pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
@@ -75,7 +78,7 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
         .description(t!("Nothing changes in the file below until you apply a fix."))
         .visible(false)
         .build();
-    let pending: Rc<Cell<usize>> = Rc::default();
+    let pending: Panels = Rc::default();
     let thinking = ThinkingView::new();
     let result_box = gtk::Box::new(gtk::Orientation::Vertical, 8);
     result_box.append(&thinking.widget);
@@ -293,7 +296,7 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
                                 label.set_css_classes(&["warning", "caption"]);
                                 row.set_subtitle(&outcome_notes(&outcome));
                                 let proposal = Proposal { key: key.clone(), category: category.clone(), original: object, outcome };
-                                add_review(&review, &pending, &editor, &label, proposal);
+                                add_review(&review, &pending, &editor, &label, &button, proposal);
                             }
                             Err(e) => {
                                 failures += 1;
@@ -316,7 +319,7 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
                         button.set_sensitive(failures > 0);
                         button.set_label(&if failures > 0 {
                             t!("Retry")
-                        } else if pending.get() > 0 {
+                        } else if !pending.borrow().is_empty() {
                             t!("Review below")
                         } else {
                             t!("Done")
@@ -402,7 +405,7 @@ fn choices(proposal: &Proposal) -> Vec<(String, String, Option<String>)> {
 
 /// Shows what the AI proposes for one object as a before/after diff, and
 /// puts the chosen version into the editor only when the user applies it.
-fn add_review(review: &adw::PreferencesGroup, pending: &Rc<Cell<usize>>, editor: &gtk::TextView, label: &gtk::Label, proposal: Proposal) {
+fn add_review(review: &adw::PreferencesGroup, pending: &Panels, editor: &gtk::TextView, label: &gtk::Label, retry: &gtk::Button, proposal: Proposal) {
     let choices = choices(&proposal);
     let panel = gtk::Box::new(gtk::Orientation::Vertical, 8);
     let heading = gtk::Label::builder().label(&proposal.key).xalign(0.0).css_classes(["heading"]).build();
@@ -449,9 +452,16 @@ fn add_review(review: &adw::PreferencesGroup, pending: &Rc<Cell<usize>>, editor:
     pair.widget.set_vexpand(false);
     panel.append(&pair.widget);
     panel.append(&apply);
+    let message = gtk::Label::builder().xalign(0.0).wrap(true).css_classes(["error"]).visible(false).build();
+    panel.append(&message);
+    let replaced = pending.borrow().iter().position(|(key, _)| *key == proposal.key);
+    if let Some(at) = replaced {
+        let (_, old) = pending.borrow_mut().remove(at);
+        review.remove(&old);
+    }
     review.add(&panel);
     review.set_visible(true);
-    pending.set(pending.get() + 1);
+    pending.borrow_mut().push((proposal.key.clone(), panel.clone()));
 
     apply.connect_clicked(glib::clone!(
         #[weak]
@@ -462,6 +472,10 @@ fn add_review(review: &adw::PreferencesGroup, pending: &Rc<Cell<usize>>, editor:
         editor,
         #[weak]
         label,
+        #[weak]
+        retry,
+        #[weak]
+        message,
         #[strong]
         pending,
         #[strong]
@@ -475,6 +489,17 @@ fn add_review(review: &adw::PreferencesGroup, pending: &Rc<Cell<usize>>, editor:
                 Some(script) => {
                     let buffer = editor.buffer();
                     let text = buffer.text(&buffer.start_iter(), &buffer.end_iter(), false).to_string();
+                    let current = lint::object_span(&proposal.category, &proposal.key, &text).map(|range| &text[range]);
+                    if current != Some(proposal.original.as_str()) {
+                        label.set_label(&t!("Not fixed; check it by hand"));
+                        label.set_css_classes(&["error", "caption"]);
+                        message.set_label(&t!("The object changed after this fix was made. Use Retry so the AI sees the current text."));
+                        message.set_visible(true);
+                        retry.set_label(&t!("Retry"));
+                        retry.set_sensitive(true);
+                        retry.set_visible(true);
+                        return;
+                    }
                     let Some(new_text) = lint::replace_object(&proposal.category, &proposal.key, &text, script) else {
                         label.set_label(&t!("Not found in the file"));
                         label.set_css_classes(&["error", "caption"]);
@@ -486,8 +511,8 @@ fn add_review(review: &adw::PreferencesGroup, pending: &Rc<Cell<usize>>, editor:
                 }
             }
             review.remove(&panel);
-            pending.set(pending.get().saturating_sub(1));
-            review.set_visible(pending.get() > 0);
+            pending.borrow_mut().retain(|(_, p)| *p != panel);
+            review.set_visible(!pending.borrow().is_empty());
         }
     ));
 }

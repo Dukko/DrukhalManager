@@ -1357,27 +1357,37 @@ Rules:
 - `notes` is a short plain-text summary for the player of what you changed or why you changed nothing. No markdown.
 - Reply with a JSON object with exactly the fields `unchanged` (boolean), `script` (string), `notes` (string), `removed` (array of strings) and `options` (array of objects with string fields `script` and `notes`). Leave the ones you don't use false, empty or [].";
 
+/// Reads an explicit `null` as the default, as some OpenAI-compatible
+/// proxies send for fields the model left out.
+fn null_default<'de, D, T>(deserializer: D) -> Result<T, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Default + Deserialize<'de>,
+{
+    Ok(Option::<T>::deserialize(deserializer)?.unwrap_or_default())
+}
+
 /// The repair reply the model sends.
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]
 struct FixReply {
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_default")]
     unchanged: bool,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_default")]
     script: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_default")]
     notes: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_default")]
     removed: Vec<String>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_default")]
     options: Vec<FixOption>,
 }
 
 /// One of several repairs the model offers.
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]
 pub struct FixOption {
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_default")]
     pub script: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_default")]
     pub notes: String,
 }
 
@@ -4086,6 +4096,20 @@ mod tests {
 
     fn reply(json: Value) -> FixReply {
         parse_fix_reply(&json.to_string()).unwrap()
+    }
+
+    #[test]
+    fn null_fields_read_as_empty() {
+        let r = parse_fix_reply(
+            r#"{"unchanged": null, "script": null, "notes": null, "removed": null,
+                "options": [{"script": null, "notes": null}]}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            r,
+            FixReply { options: vec![FixOption::default()], ..FixReply::default() }
+        );
+        assert_eq!(parse_fix_reply(r#"{"options": null, "script": "a = {}"}"#).unwrap().script, "a = {}");
     }
 
     #[test]
