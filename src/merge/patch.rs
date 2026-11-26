@@ -757,7 +757,10 @@ impl Patch {
             if check.reasons.is_empty() {
                 let hash = fingerprint(&m.script);
                 if m.accepted.as_deref() != Some(hash.as_str()) {
-                    match merge_content(m, roots, sources, previous_game) {
+                    // One source's version kept whole is a deliberate choice.
+                    let kept_whole = m.prints.iter().any(|p| p.mod_id != VANILLA && p.hash == hash);
+                    let outcome = if kept_whole { MergeContent::Clean } else { merge_content(m, roots, sources, previous_game) };
+                    match outcome {
                         MergeContent::Problems(problems) => {
                             check.reasons.push(tf!(
                                 "The saved merge no longer combines its sources cleanly: {problems}",
@@ -1740,6 +1743,55 @@ mod tests {
         write(&b, "common/buildings/m.txt", "lab = { cost = 7 }\nfarm = { cost = 2 }");
         assert!(patch.picks_to_update(&roots).is_empty());
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    /// A patch whose lab was saved as `merged` over mods A and B, which each
+    /// add something to the game's lab.
+    fn recheck_two_additions(tag: &str, merged: &str, after: impl FnOnce(&Path, &Path)) -> (Vec<Stale>, Option<String>) {
+        let root = std::env::temp_dir().join(format!("drukhal-kept-whole-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let (user, a, b, game) = (root.join("user"), root.join("a"), root.join("b"), root.join("game"));
+        for dir in [&a, &b, &game] {
+            std::fs::create_dir_all(dir.join("common/buildings")).unwrap();
+        }
+        std::fs::write(game.join("common/buildings/00.txt"), "lab = { cost = 0 }\n").unwrap();
+        std::fs::write(a.join("common/buildings/m.txt"), "lab = { cost = 0 a_extra = 1 }\n").unwrap();
+        std::fs::write(b.join("common/buildings/m.txt"), "lab = { cost = 0 b_extra = 1 }\n").unwrap();
+        std::fs::create_dir_all(user.join("mod")).unwrap();
+        let mods = [(("mod/a.mod".to_owned(), "A".to_owned(), a.clone()), "common/buildings/m.txt".to_owned()), (("mod/b.mod".to_owned(), "B".to_owned(), b.clone()), "common/buildings/m.txt".to_owned())];
+        let mut patch = Patch::open(&user, &test_target()).unwrap();
+        patch.save(&user, None, "common/buildings", "lab", merged, object_prints("common/buildings", "lab", Some(&game), &mods)).unwrap();
+        after(&a, &b);
+        let roots: HashMap<String, PathBuf> = [("mod/a.mod".to_owned(), a), ("mod/b.mod".to_owned(), b), (VANILLA.to_owned(), game)].into();
+        let stale = patch.check(&roots, None);
+        let accepted = patch.get("common/buildings", "lab").unwrap().accepted.clone();
+        std::fs::remove_dir_all(root).unwrap();
+        (stale, accepted)
+    }
+
+    #[test]
+    fn keeping_one_mods_version_whole_is_not_audited_for_the_others_additions() {
+        let (stale, accepted) = recheck_two_additions("pick", "lab = {\n\tcost = 0\n\ta_extra = 1\n}", |_, _| {});
+        assert!(stale.is_empty(), "{stale:?}");
+        assert!(accepted.is_some());
+    }
+
+    #[test]
+    fn a_hand_edit_that_drops_a_mods_addition_is_still_audited() {
+        let (stale, accepted) = recheck_two_additions("edit", "lab = { cost = 0 a_extra = 1 c_extra = 1 }", |_, _| {});
+        assert_eq!(stale.len(), 1, "{stale:?}");
+        assert!(stale[0].content, "{stale:?}");
+        assert_eq!(accepted, None);
+    }
+
+    #[test]
+    fn a_kept_whole_version_whose_mod_changed_is_reported_as_a_pick_to_update() {
+        let (stale, _) = recheck_two_additions("changed", "lab = { cost = 0 a_extra = 1 }", |a, _| {
+            std::fs::write(a.join("common/buildings/m.txt"), "lab = { cost = 0 a_extra = 2 }\n").unwrap();
+        });
+        assert_eq!(stale.len(), 1, "{stale:?}");
+        assert!(stale[0].reasons.iter().any(|r| r.contains("A changed it")), "{:?}", stale[0].reasons);
+        assert_eq!(stale[0].pick.as_deref(), Some("A"));
     }
 
     #[test]
