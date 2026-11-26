@@ -6,7 +6,7 @@ use std::path::PathBuf;
 
 use crate::merge::patch::{Print, VANILLA};
 use crate::merge::source::{self, Source};
-use crate::paradox::script;
+use crate::merge::validate::validate_object_since;
 
 pub(crate) struct Loaded {
     pub vanilla: Option<Source>,
@@ -46,51 +46,32 @@ pub(crate) fn load_with(category: &str, key: &str, vanilla: Option<Source>, orig
     Loaded { vanilla, sources, missing, prints }
 }
 
-/// Checks the edited script before it goes into the patch: it must parse,
-/// and it must still define the object being merged. Returns the text to
+/// Checks the edited script before it goes into the patch: it must pass the
+/// checks an AI merge gets, and still define the object being merged. It need
+/// not keep what each mod added; that is the user's call. Returns the text to
 /// save; for localisation, comments and blank lines are dropped.
 pub fn validate(category: &str, key: &str, text: &str) -> Result<String, String> {
-    if category == "localisation" {
-        let lines: Vec<&str> = text.lines().map(str::trim).filter(|l| !l.is_empty() && !l.starts_with('#')).collect();
-        let name = key.split_once(':').map_or(key, |(_, k)| k);
-        return match lines[..] {
-            [line] if line.split_once(':').is_some_and(|(k, _)| k == name) => Ok(line.to_owned()),
-            _ => Err(tf!("A localisation merge must be a single line starting with `{name}:`", name = name)),
-        };
+    let validation = validate_object_since(category, key, text, None, &[], &[], None);
+    match validation.error_summary() {
+        Some(problems) => Err(problems),
+        None => Ok(validation.normalized),
     }
-    let entries = script::parse(text).map_err(|e| tf!("The merged script has a syntax error at {error}", error = e))?;
-    // Like an AI's object merge, exactly one object may come back: an extra
-    // one would be written into the patch's highest-priority file. A
-    // `common/scripted_variables` merge defines an `@variable` itself, so
-    // count that one; other `@variable` lines it needs stay preamble.
-    let objects = entries
-        .iter()
-        .filter(|entry| match entry {
-            script::Entry::Assign { key: entry_key, .. } => !entry_key.starts_with('@') || entry_key.as_str() == key,
-            _ => false,
-        })
-        .count();
-    if objects != 1 {
-        return Err(tf!("The merged script must define `{key}` and nothing else", key = key));
-    }
-    if source::extract(category, key, text).is_none() {
-        return Err(tf!("The merged script must define `{key}`", key = key));
-    }
-    let params = crate::merge::script_check::cached_scripted_params();
-    let is_definitions = crate::merge::script_check::is_scripted_definitions_category(category);
-    let violations = crate::merge::script_check::find_undeclared_scripted_effect_blocks(text, &params, is_definitions);
-    if let Some(v) = violations.first() {
-        return Err(tf!(
-            "The merged script contains invalid child block `{param} = {{ ... }}` inside scripted effect/trigger `{effect}` near line {line}",
-            param = &v.param, effect = &v.effect, line = v.line
-        ));
-    }
-    Ok(text.trim().to_owned())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn manual_save_rejects_duplicate_single_valued_key() {
+        let err = validate("common/buildings", "building_lab", "building_lab = { cost = { a = 1 } cost = { a = 2 } }").unwrap_err();
+        assert!(err.contains("`cost`"), "{err}");
+    }
+
+    #[test]
+    fn manual_save_may_drop_a_mods_addition() {
+        assert!(validate("common/buildings", "building_lab", "building_lab = { cost = { a = 1 } }").is_ok());
+    }
 
     #[test]
     fn validates_merged_scripts() {

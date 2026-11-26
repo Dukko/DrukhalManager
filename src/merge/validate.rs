@@ -246,6 +246,31 @@ pub fn validate_file(
         };
     }
 
+    check_script_text(&category, text, vanilla, sources, script_ctx, &mut problems);
+
+    Validation {
+        normalized: trimmed.to_owned(),
+        problems,
+    }
+}
+
+/// Problems in a script file saved without a merge: braces, syntax,
+/// undeclared scripted-effect blocks and duplicate single-valued keys. It
+/// does not look at what any mod added.
+pub(crate) fn script_file_problems(category: &str, text: &str) -> Vec<Problem> {
+    let mut problems = Vec::new();
+    check_script_text(category, text, None, &[], None, &mut problems);
+    problems
+}
+
+fn check_script_text(
+    category: &str,
+    text: &str,
+    vanilla: Option<&Source>,
+    sources: &[Source],
+    script_ctx: Option<(&ScriptContext, &Known)>,
+    problems: &mut Vec<Problem>,
+) {
     let mut depth: i32 = 0;
     let mut in_quote = false;
     let mut in_comment = false;
@@ -268,10 +293,7 @@ pub fn validate_file(
                         ProblemKind::Syntax,
                         t!("The merged script has an unexpected closing brace `}` before an opening brace"),
                     ));
-                    return Validation {
-                        normalized: trimmed.to_owned(),
-                        problems,
-                    };
+                    return;
                 }
             }
             _ => {}
@@ -285,60 +307,40 @@ pub fn validate_file(
                 depth = depth
             ),
         ));
-        return Validation {
-            normalized: trimmed.to_owned(),
-            problems,
-        };
+        return;
     }
 
-    if category != "localisation" {
-        match script::parse(text) {
-            Ok(entries) => {
-                let params = script_check::cached_scripted_params();
-                let is_definitions = script_check::is_scripted_definitions_category(&category);
-                for v in script_check::find_undeclared_scripted_effect_blocks(
-                    text,
-                    &params,
-                    is_definitions,
-                ) {
-                    problems.push(Problem::error(
-                        ProblemKind::ScriptedEffectBlock,
-                        tf!(
-                            "Invalid child block `{param} = {{ ... }}` inside scripted effect/trigger `{effect}` near line {line}",
-                            param = &v.param,
-                            effect = &v.effect,
-                            line = v.line
-                        ),
-                    ));
-                }
-                check_duplicate_single_valued_keys(&category, &entries, &mut problems);
-                if !sources.is_empty() {
-                    check_source_coverage(&entries, vanilla, &[], sources, &mut problems);
-                }
-                if let Some((ctx, known)) = script_ctx {
-                    check_unknown_script_names(
-                        ctx,
-                        known,
-                        &category,
-                        text,
-                        vanilla,
-                        sources,
-                        &mut problems,
-                    );
-                }
-            }
-            Err(e) => {
+    match script::parse(text) {
+        Ok(entries) => {
+            let params = script_check::cached_scripted_params();
+            let is_definitions = script_check::is_scripted_definitions_category(category);
+            for v in
+                script_check::find_undeclared_scripted_effect_blocks(text, &params, is_definitions)
+            {
                 problems.push(Problem::error(
-                    ProblemKind::Syntax,
-                    format!("The merged script has a syntax error at {e}"),
+                    ProblemKind::ScriptedEffectBlock,
+                    tf!(
+                        "Invalid child block `{param} = {{ ... }}` inside scripted effect/trigger `{effect}` near line {line}",
+                        param = &v.param,
+                        effect = &v.effect,
+                        line = v.line
+                    ),
                 ));
             }
+            check_duplicate_single_valued_keys(category, &entries, problems);
+            if !sources.is_empty() {
+                check_source_coverage(&entries, vanilla, &[], sources, problems);
+            }
+            if let Some((ctx, known)) = script_ctx {
+                check_unknown_script_names(ctx, known, category, text, vanilla, sources, problems);
+            }
         }
-    }
-
-    Validation {
-        normalized: trimmed.to_owned(),
-        problems,
+        Err(e) => {
+            problems.push(Problem::error(
+                ProblemKind::Syntax,
+                tf!("The merged script has a syntax error at {error}", error = e),
+            ));
+        }
     }
 }
 

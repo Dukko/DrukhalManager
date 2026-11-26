@@ -23,6 +23,7 @@ use std::collections::{BTreeMap, HashSet};
 use super::ai::MergedScript;
 use super::patch::Print;
 use super::source::Source;
+use super::validate::{script_file_problems, Severity};
 use crate::paradox::script::{self, Entries, Entry, Value};
 
 /// Whether `path` is a file this module can split into objects.
@@ -181,10 +182,10 @@ impl Plan {
             let name = item.key.split_once(':').map_or(item.key.as_str(), |(_, k)| k);
             return match lines[..] {
                 [line] if line.split_once(':').is_some_and(|(k, _)| k == name) => Ok(line.to_owned()),
-                _ => Err(format!("A localisation merge must be a single line starting with `{name}:`")),
+                _ => Err(tf!("A localisation merge must be a single line starting with `{name}:`", name = name)),
             };
         }
-        let entries = script::parse(text).map_err(|e| format!("The merged script has a syntax error at {e}"))?;
+        let entries = script::parse(text).map_err(|e| tf!("The merged script has a syntax error at {error}", error = e))?;
         let mut defined = Vec::new();
         for entry in &entries {
             match entry {
@@ -199,8 +200,12 @@ impl Plan {
             }
         }
         match &defined[..] {
-            [key] if *key == item.key => Ok(text.trim().to_owned()),
-            _ => Err(format!("The merged script must define `{}` and nothing else", item.key)),
+            [key] if *key == item.key => {}
+            _ => return Err(tf!("The merged script must define `{key}` and nothing else", key = &item.key)),
+        }
+        match script_file_problems(&self.category, text).into_iter().find(|p| p.severity == Severity::Error) {
+            Some(problem) => Err(problem.message),
+            None => Ok(text.trim().to_owned()),
         }
     }
 }
@@ -478,17 +483,11 @@ pub fn validate(category: &str, text: &str) -> Result<(), String> {
         }
         return Ok(());
     }
-    script::parse(text).map(|_| ()).map_err(|e| format!("The merged file has a syntax error at {e}"))?;
-    let params = crate::merge::script_check::cached_scripted_params();
-    let is_definitions = crate::merge::script_check::is_scripted_definitions_category(category);
-    let violations = crate::merge::script_check::find_undeclared_scripted_effect_blocks(text, &params, is_definitions);
-    if let Some(v) = violations.first() {
-        return Err(format!(
-            "The merged file contains invalid child block `{param} = {{ ... }}` inside scripted effect/trigger `{effect}` near line {line}",
-            param = v.param, effect = v.effect, line = v.line
-        ));
+    script::parse(text).map_err(|e| tf!("This file has a syntax error at {error}", error = e))?;
+    match script_file_problems(category, text).into_iter().find(|p| p.severity == Severity::Error) {
+        Some(problem) => Err(problem.message),
+        None => Ok(()),
     }
-    Ok(())
 }
 
 /// Inline scripts produced by AI merges inside the file-merge dialog, held in
@@ -651,6 +650,25 @@ mod tests {
         // Entries before any header stay above the headers.
         let plan = plan_of("localisation/x_l_english.yml", &[" stray:0 \"S\"\nl_english:\n a:0 \"A\"\n", "l_english:\n a:0 \"A\"\n"]);
         assert_eq!(plan.render(), "\u{feff} stray:0 \"S\"\nl_english:\n a:0 \"A\"\n");
+    }
+
+    #[test]
+    fn file_saves_get_the_shared_checks_but_not_coverage() {
+        let err = validate("common/buildings/00.txt", "b = { cost = { a = 1 } cost = { a = 2 } }").unwrap_err();
+        assert!(err.contains("`cost`"), "{err}");
+        assert!(validate("common/buildings/00.txt", "b = {").is_err());
+        assert!(validate("common/buildings/00.txt", "b = { cost = { a = 1 } }").is_ok(), "dropping a mod's addition is the user's call");
+
+        let a = "b = { cost = { a = 1 } }";
+        let plan = plan_of("common/buildings/00.txt", &[a, "b = { cost = { a = 2 } extra = yes }"]);
+        assert!(plan.validate_item(0, "b = { cost = { a = 1 } cost = { a = 2 } }").is_err(), "duplicate single-valued key");
+        assert!(plan.validate_item(0, "b = { cost = { a = 3 } }").is_ok(), "dropping the other mod's extra");
+    }
+
+    #[test]
+    fn valid_inline_script_with_placeholders_passes() {
+        let text = "@v = 3\nif = {\n\tlimit = { has_resource = { type = $RES$ amount >= $AMOUNT$ } }\n\tadd_resource = { $RES$ = @v }\n}";
+        assert!(validate("common/inline_scripts", text).is_ok());
     }
 
     #[test]
