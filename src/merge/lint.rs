@@ -11,12 +11,24 @@
 
 use crate::paradox::script::{self, Entry};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FixKind {
+    /// A block left open was closed before the next top-level object started; nesting inside may be wrong.
+    ClosedBeforeNextObject,
+    /// A stray `}` that closed nothing at depth 0 was removed.
+    RemovedStray,
+    /// Unclosed blocks were closed at the end of the file.
+    ClosedAtEof,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Repair {
     pub text: String,
     /// What was changed, for the user.
     pub fixes: Vec<String>,
-    /// Keys of top-level objects whose braces were changed.
+    /// Classification of each change in `fixes`.
+    pub kinds: Vec<FixKind>,
+    /// Keys of top-level objects with ambiguous nesting (`ClosedBeforeNextObject`).
     pub damaged: Vec<String>,
 }
 
@@ -29,6 +41,7 @@ pub fn repair(category: &str, src: &str) -> Option<Repair> {
     }
     let mut out = String::with_capacity(src.len() + 16);
     let mut fixes = Vec::new();
+    let mut kinds = Vec::new();
     let mut damaged: Vec<String> = Vec::new();
     let mut depth = 0usize;
     let mut in_string = false;
@@ -47,10 +60,12 @@ pub fn repair(category: &str, src: &str) -> Option<Repair> {
         let number = n + 1;
         if !in_string && depth > 0 && starts_top_level_object(line) {
             fixes.push(tnf!("Closed {count} block left open before line {line}", "Closed {count} blocks left open before line {line}", count = depth, line = number));
+            kinds.push(FixKind::ClosedBeforeNextObject);
             mark(&mut damaged, &current);
             out.push_str(&"}".repeat(depth));
             out.push('\n');
             depth = 0;
+            current = None;
         }
         if !in_string && depth == 0 && starts_top_level_object(line) {
             current = Some((number, line.split(['=', ' ', '\t']).next().unwrap_or_default().to_owned()));
@@ -83,10 +98,15 @@ pub fn repair(category: &str, src: &str) -> Option<Repair> {
                 '{' => depth += 1,
                 '}' if depth == 0 => {
                     fixes.push(tf!("Removed a '}}' that closed nothing on line {line}", line = number));
-                    mark(&mut damaged, &current);
+                    kinds.push(FixKind::RemovedStray);
                     continue;
                 }
-                '}' => depth -= 1,
+                '}' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        current = None;
+                    }
+                }
                 _ => {}
             }
             out.push(c);
@@ -97,7 +117,7 @@ pub fn repair(category: &str, src: &str) -> Option<Repair> {
     }
     if depth > 0 {
         fixes.push(tnf!("Closed {count} block left open at the end of the file", "Closed {count} blocks left open at the end of the file", count = depth));
-        mark(&mut damaged, &current);
+        kinds.push(FixKind::ClosedAtEof);
         if !out.ends_with('\n') {
             out.push('\n');
         }
@@ -119,7 +139,7 @@ pub fn repair(category: &str, src: &str) -> Option<Repair> {
                 .unwrap_or(key)
         })
         .collect();
-    Some(Repair { text: out, fixes, damaged })
+    Some(Repair { text: out, fixes, kinds, damaged })
 }
 
 /// The byte range of the top-level object `key` (an event id for events).
@@ -582,18 +602,46 @@ mod tests {
         let src = "a = {\n}\n}\nb = { # comment with } brace\n\tname = \"has } brace\"\n\tc = {\n";
         let r = repair("common/x", src).unwrap();
         assert_eq!(r.fixes, ["Removed a '}' that closed nothing on line 3", "Closed 2 blocks left open at the end of the file"]);
-        assert_eq!(r.damaged, ["a", "b"]);
+        assert_eq!(r.kinds, [FixKind::RemovedStray, FixKind::ClosedAtEof]);
+        assert!(r.damaged.is_empty(), "unambiguous fixes should not mark objects for AI: {:?}", r.damaged);
         assert!(r.text.contains("# comment with } brace") && r.text.contains("\"has } brace\""));
     }
 
     #[test]
     fn reports_event_ids_and_skips_valid_files() {
-        let r = repair("events", "namespace = ns\ncountry_event = {\n\tid = ns.1\n\ttrigger = {\n").unwrap();
+        let r = repair("events", "namespace = ns\ncountry_event = {\n\tid = ns.1\n\ttrigger = {\n\ncountry_event = {\n\tid = ns.2\n}\n").unwrap();
         assert_eq!(r.damaged, ["ns.1"]);
+        assert_eq!(r.kinds, [FixKind::ClosedBeforeNextObject]);
         assert_eq!(repair("common/x", "a = { }"), None);
         let fixed = replace_object("events", "ns.1", &r.text, "country_event = {\n\tid = ns.1\n\ttrigger = { }\n}").unwrap();
-        assert_eq!(fixed, "namespace = ns\ncountry_event = {\n\tid = ns.1\n\ttrigger = { }\n}\n");
+        assert_eq!(fixed, "namespace = ns\ncountry_event = {\n\tid = ns.1\n\ttrigger = { }\n}\ncountry_event = {\n\tid = ns.2\n}\n");
         assert_eq!(repair("common/x", "a = { name = \"unterminated }"), None);
+    }
+
+    #[test]
+    fn stray_closer_after_complete_object_is_not_damaged() {
+        let src = "a = {\n\tcost = 1\n}\n}\nb = {\n\tcost = 2\n}\n";
+        let r = repair("common/buildings", src).unwrap();
+        assert_eq!(r.kinds, [FixKind::RemovedStray]);
+        assert!(r.damaged.is_empty());
+        assert!(script::parse(&r.text).is_ok());
+    }
+
+    #[test]
+    fn missing_final_brace_at_eof_is_not_damaged() {
+        let src = "a = {\n\tcost = 1\n}\nb = {\n\tcost = 2\n";
+        let r = repair("common/buildings", src).unwrap();
+        assert_eq!(r.kinds, [FixKind::ClosedAtEof]);
+        assert!(r.damaged.is_empty());
+        assert!(script::parse(&r.text).is_ok());
+    }
+
+    #[test]
+    fn unclosed_object_before_next_object_flags_only_that_object() {
+        let src = "ok_first = {\n\tcost = 1\n}\nbroken = {\n\tpotential = {\n\t\tis_ai = no\n\nok_last = {\n\tcost = 2\n}\n";
+        let r = repair("common/buildings", src).unwrap();
+        assert_eq!(r.kinds, [FixKind::ClosedBeforeNextObject]);
+        assert_eq!(r.damaged, ["broken"]);
     }
 
     #[test]

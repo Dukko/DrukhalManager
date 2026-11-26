@@ -36,6 +36,16 @@
     <control>keyboard</control>
   </supports>
   <releases>
+    <release version="2.7.27" date="2026-11-25">
+      <description>
+        <p>Avoids asking AI to rewrite objects when brace repairs are already unambiguous:</p>
+        <ul>
+          <li>Classifies mechanical brace repairs and only flags blocks closed before a new top-level object for AI review</li>
+          <li>Skips AI repair and enables saving directly when only stray closing braces were removed or blocks were closed at end of file</li>
+          <li>Resets the active-object tracker when brace depth returns to zero so stray braces aren't blamed on earlier objects</li>
+        </ul>
+      </description>
+    </release>
     <release version="2.7.26" date="2026-11-25">
       <description>
         <p>Keeps Fix with AI from dropping the content it is repairing:</p>

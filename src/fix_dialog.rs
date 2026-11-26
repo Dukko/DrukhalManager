@@ -122,11 +122,16 @@ pub fn present(parent: &impl IsA<gtk::Widget>, request: Request) {
                 return;
             };
 
-            repairs.set_description(Some(&tnf!(
-                "Braces were fixed so the file parses and every object is separate again. {count} object may still be nested wrongly inside.",
-                "Braces were fixed so the file parses and every object is separate again. {count} objects may still be nested wrongly inside.",
-                count = repair.damaged.len()
-            )));
+            let desc = if repair.damaged.is_empty() {
+                t!("Braces were fixed unambiguously so the file parses cleanly. Review and save to the merged patch.")
+            } else {
+                tnf!(
+                    "Braces were fixed so the file parses and every object is separate again. {count} object may still be nested wrongly inside.",
+                    "Braces were fixed so the file parses and every object is separate again. {count} objects may still be nested wrongly inside.",
+                    count = repair.damaged.len()
+                )
+            };
+            repairs.set_description(Some(&desc));
             for fix in &repair.fixes {
                 repairs.add(&adw::ActionRow::builder().title(fix).use_markup(false).build());
             }
