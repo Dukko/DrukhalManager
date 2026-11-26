@@ -14,6 +14,7 @@ use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
 use super::conflicts;
 use super::source::{Files as Sources, Source};
@@ -1100,10 +1101,20 @@ fn file_for(category: &str, key: &str) -> String {
         let name: String = name.chars().map(|c| if c.is_ascii_alphanumeric() || c == '_' { c } else { '_' }).collect();
         let language: String = language.chars().map(|c| if c.is_ascii_lowercase() || c == '_' { c } else { '_' }).collect();
         let folder = language.strip_prefix("l_").unwrap_or(&language);
-        return format!("localisation/replace/{folder}/drukhal_{name}_{language}.yml");
+        let (raw_language, raw_name) = key.split_once(':').unwrap_or(("l_english", key));
+        let tag = if raw_language == language && raw_name == name { String::new() } else { key_hash(key) };
+        return format!("localisation/replace/{folder}/drukhal_{name}{tag}_{language}.yml");
     }
     let prefix = if conflicts::is_fios(category) { SORT_FIRST } else { SORT_LAST };
-    format!("{category}/{prefix}{safe}.txt")
+    let tag = if safe == key { String::new() } else { key_hash(key) };
+    format!("{category}/{prefix}{safe}{tag}.txt")
+}
+
+/// `_` plus the first 8 hex digits of the key's SHA-256: tells apart keys
+/// whose sanitized names are equal.
+fn key_hash(key: &str) -> String {
+    let digest = Sha256::digest(key.as_bytes());
+    format!("_{:02x}{:02x}{:02x}{:02x}", digest[0], digest[1], digest[2], digest[3])
 }
 
 /// The event a merged event inherits from with `base =`, if it has one.
@@ -1288,6 +1299,25 @@ mod tests {
         assert!(!test_target().root(&user).exists(), "nothing was created");
         patch.save_file(&user, None, "common/x.txt", "x", vec![]).unwrap();
         assert!(test_target().root(&user).join("common/x.txt").is_file());
+        std::fs::remove_dir_all(user).unwrap();
+    }
+
+    #[test]
+    fn keys_that_sanitize_alike_get_separate_files() {
+        let user = std::env::temp_dir().join(format!("drukhal-collide-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&user);
+        std::fs::create_dir_all(user.join("mod")).unwrap();
+        let mut patch = Patch::open(&user, &test_target()).unwrap();
+
+        patch.save(&user, None, "common/buildings", "a b", "a = {}", vec![]).unwrap();
+        patch.save(&user, None, "common/buildings", "a:b", "b = {}", vec![]).unwrap();
+
+        assert_eq!(patch.manifest.merges.len(), 2);
+        assert_ne!(patch.get("common/buildings", "a b").unwrap().file, patch.get("common/buildings", "a:b").unwrap().file);
+        let root = test_target().root(&user);
+        assert!(std::fs::read_to_string(root.join(&patch.get("common/buildings", "a b").unwrap().file)).unwrap().contains("a = {}"));
+        assert_eq!(file_for("localisation", "l_english:a b"), "localisation/replace/english/drukhal_a_b_c61402c1_l_english.yml");
+        assert_ne!(file_for("localisation", "l_english:a b"), file_for("localisation", "l_english:a:b"));
         std::fs::remove_dir_all(user).unwrap();
     }
 
@@ -1664,7 +1694,7 @@ mod tests {
         assert_eq!(file_for("common/component_templates", "c"), "common/component_templates/!!!!!!_drukhal_c.txt");
         assert_eq!(file_for("localisation", "l_german:lab"), "localisation/replace/german/drukhal_lab_l_german.yml");
         assert_eq!(file_for("localisation", "l_braz_por:lab"), "localisation/replace/braz_por/drukhal_lab_l_braz_por.yml");
-        assert_eq!(file_for("localisation", "../../x:lab"), "localisation/replace/______x/drukhal_lab_______x.yml", "a crafted language stays in the folder");
+        assert_eq!(file_for("localisation", "../../x:lab"), "localisation/replace/______x/drukhal_lab_b2e89022_______x.yml", "a crafted language stays in the folder");
         assert!(SORT_LAST > "zzzz_" && SORT_LAST > "~ste" && SORT_LAST > "伞伞zzz_");
         assert!(SORT_FIRST < "!_pd" && SORT_FIRST < "00_");
     }
