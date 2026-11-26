@@ -929,11 +929,21 @@ impl ObjectView {
                     return;
                 };
                 let session = page.hooks.session.borrow();
+                let provider = (page.hooks.provider)();
+                let save_page = page_ref.clone();
+                let save: super::SaveInlineScript = Rc::new(move |name: &str, text: &str, prints| {
+                    let page = save_page.upgrade().ok_or("The window was closed")?;
+                    let path = crate::merge::inline_scripts::file_path(name)
+                        .ok_or_else(|| tf!("Unsafe inline script path: {name}", name = name))?;
+                    (page.hooks.save_file)(&path, text.as_bytes(), prints)
+                });
                 super::show_inline_scripts(
                     b,
                     inline_comparisons.clone(),
                     session.fold_unchanged,
                     session.ignore_whitespace,
+                    provider,
+                    Some(save),
                 );
             });
             bar.extra.append(&btn);

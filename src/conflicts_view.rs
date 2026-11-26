@@ -21,9 +21,12 @@ use adw::prelude::*;
 use gtk::{gio, glib};
 
 use crate::diff_view::{self, Pair};
-use crate::merge::ai::Provider;
+use crate::merge::ai::{self, Provider};
 use crate::merge::base_game;
 use crate::merge::conflicts::Report;
+use crate::merge::patch::VANILLA;
+use crate::merge::source::Source;
+use crate::thinking_view::{self, ThinkingView};
 use crate::merge::file_merge;
 use crate::merge::script_check;
 use crate::paradox::script_docs::{self, Docs};
@@ -1739,26 +1742,55 @@ pub fn run_merge_tool(button: &impl IsA<gtk::Widget>, command: String, left: Too
     });
 }
 
+/// Saves an inline script edited in the comparison dialog.
+pub(crate) type SaveInlineScript =
+    Rc<dyn Fn(&str, &str, Vec<Print>) -> Result<(), String>>;
+
 /// Opens a dialog comparing inline scripts that differ or were replaced
-/// between two object versions.
+/// between two object versions. The right side is editable; it can also be
+/// merged with AI and saved to the patch.
 pub(crate) fn show_inline_scripts(
     parent: &impl IsA<gtk::Widget>,
     comparisons: Vec<crate::merge::inline_scripts::InlineScriptComparison>,
     fold: bool,
     ignore_whitespace: bool,
+    provider: Option<Provider>,
+    save: Option<SaveInlineScript>,
 ) {
     if comparisons.is_empty() {
         return;
     }
-    let pair = Pair::new(false);
+    let pair = Pair::new(true);
     pair.set_fold(fold);
     let bar = diff_bar(&pair);
+    let selected = Rc::new(Cell::new(0usize));
+    let target = adw::EntryRow::builder().title(t!("Save as script name")).build();
+    let banner = gtk::Label::builder()
+        .xalign(0.0)
+        .wrap(true)
+        .visible(false)
+        .css_classes(["dim-label", "caption"])
+        .build();
+    let thinking = ThinkingView::new();
+
+    let default_name = |c: &crate::merge::inline_scripts::InlineScriptComparison| {
+        if c.left.source_label.eq_ignore_ascii_case("Vanilla") {
+            c.right.name.clone()
+        } else {
+            c.left.name.clone()
+        }
+    };
+    target.set_text(&default_name(&comparisons[0]));
 
     let show = {
         let pair = Rc::clone(&pair);
         let comparisons = comparisons.clone();
+        let target = target.clone();
+        let selected = selected.clone();
         move |index: usize| {
             let Some(c) = comparisons.get(index) else { return };
+            selected.set(index);
+            target.set_text(&default_name(c));
             pair.left.set_header(&crate::diff_view::Header {
                 title: c.left.source_label.clone(),
                 subtitle: c.left.path.clone(),
@@ -1771,7 +1803,12 @@ pub(crate) fn show_inline_scripts(
                 color: None,
                 badge: None,
             });
-            pair.show(&c.left.text, &c.right.text, &crate::diff_view::Compare::Each, ignore_whitespace);
+            pair.show(
+                &c.left.text,
+                &c.right.text,
+                &crate::diff_view::Compare::Each,
+                ignore_whitespace,
+            );
         }
     };
 
@@ -1786,16 +1823,161 @@ pub(crate) fn show_inline_scripts(
                 }
             })
             .collect();
-        let picker = gtk::DropDown::from_strings(&labels.iter().map(String::as_str).collect::<Vec<_>>());
+        let picker = gtk::DropDown::from_strings(
+            &labels.iter().map(String::as_str).collect::<Vec<_>>(),
+        );
         let show_fn = show.clone();
         picker.connect_selected_notify(move |p| show_fn(p.selected() as usize));
         bar.extra.append(&picker);
     }
     show(0);
 
-    let body = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(8).margin_top(12).margin_bottom(12).margin_start(12).margin_end(12).build();
+    let merge = gtk::Button::builder()
+        .label(t!("Merge with AI"))
+        .css_classes(["suggested-action"])
+        .build();
+    let save_button = gtk::Button::builder().label(t!("Save to Patch")).build();
+    if provider.is_none() {
+        merge.set_tooltip_text(Some(&t!("Set up an AI provider in Preferences first")));
+        merge.set_sensitive(false);
+    }
+    if save.is_none() {
+        save_button.set_sensitive(false);
+    }
+
+    {
+        let pair = Rc::downgrade(&pair);
+        let target = target.clone();
+        let selected = selected.clone();
+        let comparisons = comparisons.clone();
+        let banner = banner.clone();
+        let thinking = thinking.clone();
+        merge.connect_clicked(move |button| {
+            let (Some(pair), Some(provider)) = (pair.upgrade(), provider.clone()) else {
+                return;
+            };
+            let index = selected.get();
+            let Some(c) = comparisons.get(index) else { return };
+            let name = target.text().trim().to_owned();
+            let Some(path) = crate::merge::inline_scripts::file_path(&name) else {
+                banner.set_label(&t!("That script name is not a safe path"));
+                banner.add_css_class("error");
+                banner.set_visible(true);
+                return;
+            };
+            let sources = vec![
+                Source {
+                    label: c.left.source_label.clone(),
+                    file: c.left.path.clone(),
+                    text: c.left.text.clone(),
+                },
+                Source {
+                    label: c.right.source_label.clone(),
+                    file: c.right.path.clone(),
+                    text: c.right.text.clone(),
+                },
+            ];
+            let prints = vec![print_for(&c.left), print_for(&c.right)];
+            let ctx = ai::MergeContext {
+                category: "common/inline_scripts".into(),
+                key: name.clone(),
+                prints,
+                ..Default::default()
+            };
+            let (pair, banner, button, thinking) =
+                (pair, banner.clone(), button.clone(), thinking.clone());
+            button.set_sensitive(false);
+            banner.set_visible(false);
+            glib::spawn_future_local(async move {
+                let result = thinking_view::run_cancellable(&thinking, None, move |cancel, on| {
+                    ai::merge_file_checked_cancellable(
+                        &provider,
+                        &ctx,
+                        &path,
+                        None,
+                        &sources,
+                        None,
+                        Some(cancel),
+                        on,
+                    )
+                })
+                .await;
+                button.set_sensitive(true);
+                match result {
+                    Some(Ok(checked)) => match checked.script {
+                        Ok(script) => {
+                            pair.right.replace_text(&script);
+                            banner.set_label(&t!("Merged with AI. Edit the result, then save it."));
+                            banner.remove_css_class("error");
+                            banner.set_visible(true);
+                        }
+                        Err(e) => {
+                            banner.set_label(&tf!("The merge was rejected: {error}", error = e));
+                            banner.add_css_class("error");
+                            banner.set_visible(true);
+                        }
+                    },
+                    Some(Err(e)) => {
+                        banner.set_label(&e);
+                        banner.add_css_class("error");
+                        banner.set_visible(true);
+                    }
+                    None => {
+                        banner.set_label(&t!("The merge was stopped"));
+                        banner.add_css_class("error");
+                        banner.set_visible(true);
+                    }
+                }
+            });
+        });
+    }
+
+    {
+        let pair = Rc::downgrade(&pair);
+        let target = target.clone();
+        let selected = selected.clone();
+        let comparisons = comparisons.clone();
+        let banner = banner.clone();
+        save_button.connect_clicked(move |_| {
+            let Some(pair) = pair.upgrade() else { return };
+            let Some(save) = save.clone() else { return };
+            let index = selected.get();
+            let Some(c) = comparisons.get(index) else { return };
+            let name = target.text().trim().to_owned();
+            let prints = vec![print_for(&c.left), print_for(&c.right)];
+            match save(&name, &pair.right.text(), prints) {
+                Ok(()) => {
+                    banner.set_label(&tf!("Saved {name} to the merged patch", name = &name));
+                    banner.remove_css_class("error");
+                    banner.set_visible(true);
+                }
+                Err(e) => {
+                    banner.set_label(&e);
+                    banner.add_css_class("error");
+                    banner.set_visible(true);
+                }
+            }
+        });
+    }
+
+    let controls = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+    controls.append(&target);
+    controls.append(&merge);
+    controls.append(&save_button);
+
+    let body = gtk::Box::builder()
+        .orientation(gtk::Orientation::Vertical)
+        .spacing(8)
+        .margin_top(12)
+        .margin_bottom(12)
+        .margin_start(12)
+        .margin_end(12)
+        .build();
     body.append(&bar.widget);
     body.append(&pair.widget);
+    body.append(&thinking.widget);
+    body.append(&controls);
+    body.append(&banner);
 
     let toolbar = adw::ToolbarView::new();
     toolbar.add_top_bar(&adw::HeaderBar::new());
@@ -1804,7 +1986,17 @@ pub(crate) fn show_inline_scripts(
     let title = tnf!("Inline Script ({count})", "Inline Scripts ({count})", count = comparisons.len());
     let dialog = adw::Dialog::builder().title(title).content_width(980).content_height(720).child(&toolbar).build();
     object::keep_alive(&dialog, pair);
+    object::keep_alive(&dialog, thinking);
     dialog.present(Some(parent));
+}
+
+fn print_for(file: &crate::merge::inline_scripts::InlineScriptFile) -> Print {
+    let id = if file.source_label.eq_ignore_ascii_case("Vanilla") {
+        VANILLA
+    } else {
+        &file.source_label
+    };
+    Print::new(id, &file.source_label, &file.path, &file.text)
 }
 
 #[cfg(test)]

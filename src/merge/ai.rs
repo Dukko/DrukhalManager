@@ -122,7 +122,7 @@ pub fn claude_models(api_key: &str) -> Result<Vec<ClaudeModel>, String> {
         .build()
         .new_agent()
         .get(ANTHROPIC_MODELS_URL)
-        .header("x-api-key", api_key)
+        .header("x-api-key", api_key.trim())
         .header("anthropic-version", API_VERSION)
         .call()
         .map_err(|e| format!("Could not reach the Claude API: {e}"))?;
@@ -402,7 +402,7 @@ pub fn price(provider: &Provider) -> Option<Price> {
                 .new_agent()
                 .get(&url);
             if !api_key.is_empty() {
-                request = request.header("authorization", &format!("Bearer {api_key}"));
+                request = request.header("authorization", &format!("Bearer {}", api_key.trim()));
             }
             let mut response = request.call().ok()?;
             if response.status() != 200 {
@@ -1573,7 +1573,7 @@ fn merge_anthropic(
         let mut response = with_backoff(cancel, on, || {
             let mut request = agent()
                 .post(ANTHROPIC_URL)
-                .header("x-api-key", api_key)
+                .header("x-api-key", api_key.trim())
                 .header("anthropic-version", API_VERSION);
             if caps.fallbacks {
                 request = request.header("anthropic-beta", FALLBACK_BETA);
@@ -1824,7 +1824,7 @@ fn merge_openai(
                 .post(&url)
                 .header("content-type", "application/json");
             if !api_key.is_empty() {
-                request = request.header("authorization", &format!("Bearer {api_key}"));
+                request = request.header("authorization", &format!("Bearer {}", api_key.trim()));
             }
             request
                 .send_json(&body)

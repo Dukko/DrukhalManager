@@ -36,6 +36,16 @@
     <control>keyboard</control>
   </supports>
   <releases>
+    <release version="2.7.24" date="2026-11-25">
+      <description>
+        <p>Lets replaced inline scripts be merged or edited by hand, and trims API keys before use:</p>
+        <ul>
+          <li>Adds Merge with AI, an editable result, a target script name, and Save to Patch to the Inline Scripts comparison dialog</li>
+          <li>Stops the manual editor from being read-only when a replaced inline script needs a judgement call</li>
+          <li>Trims whitespace from saved, keyring and environment API keys before they are sent</li>
+        </ul>
+      </description>
+    </release>
     <release version="2.7.23" date="2026-11-25">
       <description>
         <p>Merges replaced inline scripts with their objects, and makes conflict merging safer:</p>

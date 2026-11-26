@@ -586,7 +586,23 @@ impl BehindView {
                 btn.connect_clicked(move |b| {
                     let Some(page) = page_weak.upgrade() else { return };
                     let session = page.hooks.session.borrow();
-                    conflicts_view::show_inline_scripts(b, inline_comparisons.clone(), session.fold_unchanged, session.ignore_whitespace);
+                    let provider = (page.hooks.provider)();
+                    let save_page = page_weak.clone();
+                    let save: conflicts_view::SaveInlineScript =
+                        Rc::new(move |name: &str, text: &str, prints| {
+                        let page = save_page.upgrade().ok_or("The window was closed")?;
+                        let path = crate::merge::inline_scripts::file_path(name)
+                            .ok_or_else(|| tf!("Unsafe inline script path: {name}", name = name))?;
+                        (page.hooks.save_file)(&path, text.as_bytes(), prints)
+                    });
+                    conflicts_view::show_inline_scripts(
+                        b,
+                        inline_comparisons.clone(),
+                        session.fold_unchanged,
+                        session.ignore_whitespace,
+                        provider,
+                        Some(save),
+                    );
                 });
                 bar.extra.append(&btn);
             }

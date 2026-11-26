@@ -271,6 +271,7 @@ impl Settings {
         let mut moved_steam_key = None;
         let kind = crate::secrets::kind(&self.provider);
         let key = api_key_mut(&mut self.provider);
+        *key = key.trim().to_owned();
         if !key.is_empty() {
             if crate::secrets::set(kind, key).is_ok() {
                 self.key_in_keyring = true;
@@ -280,7 +281,7 @@ impl Settings {
             // Reachable: keys saved from now on go there.
             self.key_in_keyring = true;
             if let Some(found) = found {
-                *key = found;
+                *key = found.trim().to_owned();
             }
         }
         // A Steam key saved while there was no keyring moves there too.
@@ -300,11 +301,23 @@ impl Settings {
 
     pub fn ready_provider(&self) -> Option<Provider> {
         match &self.provider {
-            Provider::Anthropic { api_key, model } if api_key.is_empty() => {
-                std::env::var("ANTHROPIC_API_KEY").ok().filter(|k| !k.is_empty()).map(|api_key| Provider::Anthropic { api_key, model: model.clone() })
+            Provider::Anthropic { api_key, model } if api_key.trim().is_empty() => {
+                std::env::var("ANTHROPIC_API_KEY")
+                    .ok()
+                    .map(|key| key.trim().to_owned())
+                    .filter(|key| !key.is_empty())
+                    .map(|api_key| Provider::Anthropic { api_key, model: model.clone() })
             }
-            Provider::OpenAiCompatible { base_url, model, .. } if base_url.trim().is_empty() || model.trim().is_empty() => None,
-            p => Some(p.clone()),
+            Provider::OpenAiCompatible { base_url, model, .. }
+                if base_url.trim().is_empty() || model.trim().is_empty() =>
+            {
+                None
+            }
+            p => {
+                let mut p = p.clone();
+                *api_key_mut(&mut p) = api_key_mut(&mut p).trim().to_owned();
+                Some(p)
+            }
         }
     }
 }

@@ -6,9 +6,9 @@
 #, fuzzy
 msgid ""
 msgstr ""
-"Project-Id-Version: DrukhalManager 2.7.23\n"
+"Project-Id-Version: DrukhalManager 2.7.24\n"
 "Report-Msgid-Bugs-To: https://github.com/Dukko/DrukhalManager/issues\n"
-"POT-Creation-Date: 2026-11-26 02:16+0000\n"
+"POT-Creation-Date: 2026-11-26 02:26+0000\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -166,6 +166,10 @@ msgstr[1] ""
 msgid "Compare the inline script files that differ or were replaced between the mod and the base game"
 msgstr ""
 
+#: src/behind_dialog.rs src/conflicts_view/object.rs src/window/conflicts_ui.rs src/window/conflicts_ui.rs
+msgid "Unsafe inline script path: {name}"
+msgstr ""
+
 #: src/behind_dialog.rs src/conflicts_view/file.rs src/conflicts_view/object.rs src/conflicts_view/object.rs
 msgid "Changed Lines Only"
 msgstr ""
@@ -194,7 +198,7 @@ msgstr ""
 msgid "{tool} was closed without saving, so nothing changed"
 msgstr ""
 
-#: src/behind_dialog.rs src/behind_dialog.rs src/conflicts_view/object.rs src/conflicts_view/object.rs src/script_check_dialog.rs
+#: src/behind_dialog.rs src/behind_dialog.rs src/conflicts_view/object.rs src/conflicts_view/object.rs src/conflicts_view.rs src/script_check_dialog.rs
 msgid "Set up an AI provider in Preferences first"
 msgstr ""
 
@@ -485,7 +489,7 @@ msgstr ""
 msgid "Go through the versions again from the first"
 msgstr ""
 
-#: src/conflicts_view/object.rs src/conflicts_view.rs src/file_merge_dialog.rs
+#: src/conflicts_view/object.rs src/conflicts_view.rs src/conflicts_view.rs src/file_merge_dialog.rs
 msgid "Merge with AI"
 msgstr ""
 
@@ -611,7 +615,7 @@ msgstr ""
 msgid "Not saved yet"
 msgstr ""
 
-#: src/conflicts_view/object.rs src/file_merge_dialog.rs src/fix_dialog.rs
+#: src/conflicts_view/object.rs src/conflicts_view.rs src/file_merge_dialog.rs src/fix_dialog.rs
 msgid "Save to Patch"
 msgstr ""
 
@@ -1213,6 +1217,30 @@ msgstr ""
 
 #: src/conflicts_view.rs
 msgid "The merge tool failed"
+msgstr ""
+
+#: src/conflicts_view.rs
+msgid "Save as script name"
+msgstr ""
+
+#: src/conflicts_view.rs
+msgid "That script name is not a safe path"
+msgstr ""
+
+#: src/conflicts_view.rs
+msgid "Merged with AI. Edit the result, then save it."
+msgstr ""
+
+#: src/conflicts_view.rs
+msgid "The merge was rejected: {error}"
+msgstr ""
+
+#: src/conflicts_view.rs
+msgid "The merge was stopped"
+msgstr ""
+
+#: src/conflicts_view.rs
+msgid "Saved {name} to the merged patch"
 msgstr ""
 
 #: src/diff_view.rs
@@ -3985,10 +4013,6 @@ msgstr ""
 
 #: src/window/conflicts_ui.rs
 msgid "Could not save ignored conflicts: {error}"
-msgstr ""
-
-#: src/window/conflicts_ui.rs src/window/conflicts_ui.rs
-msgid "Unsafe inline script path: {name}"
 msgstr ""
 
 #: src/window/conflicts_ui.rs
