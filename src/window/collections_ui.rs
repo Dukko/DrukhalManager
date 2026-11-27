@@ -164,6 +164,16 @@ impl Window {
             manage.append(Some(&t!("De_lete")), Some("win.collection-delete"));
         }
         menu.append_section(None, &manage);
+        // Turning the load order into a mod is easy to look for near the mods,
+        // not among sharing actions, so it gets its own named section.
+        let make = gio::Menu::new();
+        make.append(Some(&t!("_Merge into One Mod…")), Some("win.collection-merge"));
+        if collections.active().frozen.is_empty() {
+            make.append(Some(&t!("_Freeze This Collection…")), Some("win.collection-freeze"));
+        } else {
+            make.append(Some(&t!("Un_freeze This Collection…")), Some("win.collection-unfreeze"));
+        }
+        menu.append_section(Some(&t!("Make a Mod From This Collection")), &make);
         let share = gio::Menu::new();
         let import = gio::Menu::new();
         import.append(Some(&t!("From the _Game's Load Order")), Some("win.collection-import-game"));
@@ -179,13 +189,7 @@ impl Window {
         share.append_submenu(Some(&t!("_Export")), &export);
         share.append(Some(&t!("_Copy Load Order")), Some("win.collection-copy"));
         share.append(Some(&t!("_Paste Load Order")), Some("win.collection-paste"));
-        share.append(Some(&t!("_Merge into One Mod…")), Some("win.collection-merge"));
-        if collections.active().frozen.is_empty() {
-            share.append(Some(&t!("_Freeze This Collection…")), Some("win.collection-freeze"));
-        } else {
-            share.append(Some(&t!("Un_freeze This Collection…")), Some("win.collection-unfreeze"));
-        }
-        menu.append_section(None, &share);
+        menu.append_submenu(Some(&t!("_Share")), &share);
         // Only once there's an Extra Mod Folder, or to bring it back.
         let active = collections.active();
         let has_extra = self.settings.borrow().game.extra_mod_dir.is_some();

@@ -229,6 +229,7 @@ impl Window {
         } else if let Some(vp) = viewport {
             glib::idle_add_local_once(move || vp.set_scroll_to_focus(true));
         }
+        self.update_select_shown();
         self.scan_if_stale();
     }
 

@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: DrukhalManager 2.7.40\n"
 "Report-Msgid-Bugs-To: https://github.com/Dukko/DrukhalManager/issues\n"
-"POT-Creation-Date: 2026-11-27 03:51+0000\n"
+"POT-Creation-Date: 2026-11-27 14:09+0000\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -3639,6 +3639,22 @@ msgid "De_lete"
 msgstr ""
 
 #: src/window/collections_ui.rs
+msgid "_Merge into One Mod…"
+msgstr ""
+
+#: src/window/collections_ui.rs
+msgid "_Freeze This Collection…"
+msgstr ""
+
+#: src/window/collections_ui.rs
+msgid "Un_freeze This Collection…"
+msgstr ""
+
+#: src/window/collections_ui.rs
+msgid "Make a Mod From This Collection"
+msgstr ""
+
+#: src/window/collections_ui.rs
 msgid "From the _Game's Load Order"
 msgstr ""
 
@@ -3687,15 +3703,7 @@ msgid "_Paste Load Order"
 msgstr ""
 
 #: src/window/collections_ui.rs
-msgid "_Merge into One Mod…"
-msgstr ""
-
-#: src/window/collections_ui.rs
-msgid "_Freeze This Collection…"
-msgstr ""
-
-#: src/window/collections_ui.rs
-msgid "Un_freeze This Collection…"
+msgid "_Share"
 msgstr ""
 
 #: src/window/collections_ui.rs
@@ -5732,6 +5740,12 @@ msgid "No Other Collections"
 msgstr ""
 
 #: src/window/selection_ui.rs
+msgid "Merge {count} Mod into One…"
+msgid_plural "Merge {count} Mods into One…"
+msgstr[0] ""
+msgstr[1] ""
+
+#: src/window/selection_ui.rs
 msgid "Enabled {mods}"
 msgstr ""
 
@@ -6213,6 +6227,10 @@ msgstr ""
 #. While a view, category or search narrows the list.
 #: src/window.rs
 msgid "Select every mod listed, to change them all at once"
+msgstr ""
+
+#: src/window.rs
+msgid "Copy every enabled mod's files into one local mod, the way the game loads them"
 msgstr ""
 
 #: src/window.rs

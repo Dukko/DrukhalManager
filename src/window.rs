@@ -89,6 +89,8 @@ struct Window {
     restoring_marks: Cell<bool>,
     bulk: selection_ui::BulkBar,
     select_shown: gtk::Button,
+    /// "Merge N Mods into One…", hidden while the list is narrowed.
+    merge_button: gtk::Button,
     /// "Last game logged 23 errors", under `game_info`.
     errors_link: gtk::Button,
     /// When the error log counted for `errors_link` was written.
@@ -428,6 +430,8 @@ pub fn build(
     // While a view, category or search narrows the list.
     let select_shown = gtk::Button::builder().label(t!("Select All Shown")).action_name("win.select-shown").tooltip_text(t!("Select every mod listed, to change them all at once")).css_classes(["flat"]).visible(false).build();
     enabled_heading.append(&select_shown);
+    let merge_button = gtk::Button::builder().action_name("win.collection-merge").tooltip_text(t!("Copy every enabled mod's files into one local mod, the way the game loads them")).css_classes(["flat"]).visible(false).build();
+    enabled_heading.append(&merge_button);
     enabled_section.append(&enabled_heading);
     enabled_section.append(&enabled_list);
     content.append(&enabled_section);
@@ -578,6 +582,7 @@ pub fn build(
         restoring_marks: Cell::new(false),
         bulk,
         select_shown,
+        merge_button,
         errors_link,
         error_log_seen: Cell::new(None),
         profile_link,

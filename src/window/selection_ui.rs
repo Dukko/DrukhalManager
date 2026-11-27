@@ -297,10 +297,15 @@ impl Window {
         self.read_marks();
     }
 
-    /// Shows Select All Shown while something narrows the list.
+    /// Shows the load-order heading's actions: Select All Shown while
+    /// something narrows the list, and Merge into One Mod while nothing does
+    /// and there are mods to merge.
     pub(super) fn update_select_shown(&self) {
         let narrowed = self.view.get() != crate::mods::filter::View::All || self.category.get().is_some() || !self.search.text().trim().is_empty();
         self.select_shown.set_visible(narrowed);
+        let count = self.state.borrow().enabled.len();
+        self.merge_button.set_label(&tnf!("Merge {count} Mod into One…", "Merge {count} Mods into One…", count = count));
+        self.merge_button.set_visible(!narrowed && count > 0);
     }
 
     fn bulk_enable(self: &Rc<Self>, on: bool) {
