@@ -36,6 +36,15 @@
     <control>keyboard</control>
   </supports>
   <releases>
+    <release version="2.7.39" date="2026-11-26">
+      <description>
+        <p>Keeps saved collections from being overwritten at startup:</p>
+        <ul>
+          <li>Collections are loaded before the merged patch is opened, so the empty placeholder built with the window can no longer replace them with a single Default collection and rename the active one</li>
+          <li>The patch refuses to save collections until they have been loaded</li>
+        </ul>
+      </description>
+    </release>
     <release version="2.7.38" date="2026-11-26">
       <description>
         <p>Catches merges that leave a mod out:</p>
