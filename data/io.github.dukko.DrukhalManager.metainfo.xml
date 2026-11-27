@@ -36,6 +36,16 @@
     <control>keyboard</control>
   </supports>
   <releases>
+    <release version="2.7.40" date="2026-11-27">
+      <description>
+        <p>Fixes outdated merges that could not be settled:</p>
+        <ul>
+          <li>Updating an object from the game-update list no longer drops the other mods a merge was made from, which left it reported as a mod never merged and stayed out of date after every save</li>
+          <li>Re-merge on the Outdated list opens the full conflict page, so every defining mod can be merged back in</li>
+          <li>Keep As Is is offered on every outdated merge and tracks the mods' current versions, clearing the warning</li>
+        </ul>
+      </description>
+    </release>
     <release version="2.7.39" date="2026-11-26">
       <description>
         <p>Keeps saved collections from being overwritten at startup:</p>
