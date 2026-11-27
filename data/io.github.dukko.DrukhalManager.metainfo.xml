@@ -36,6 +36,16 @@
     <control>keyboard</control>
   </supports>
   <releases>
+    <release version="2.7.42" date="2026-11-27">
+      <description>
+        <p>Makes out-of-date merge warnings explain what to do:</p>
+        <ul>
+          <li>The warning now states the reason plainly and adds a line on whether to re-merge or use Keep As Is</li>
+          <li>A mod that defines an object, or ships a file, without being part of the merge is called out separately, since Keep As Is is often enough when a merged mod loads later</li>
+          <li>The old “Saving a new one replaces it” line is gone, since saving that page cannot add a source the merge never had</li>
+        </ul>
+      </description>
+    </release>
     <release version="2.7.41" date="2026-11-27">
       <description>
         <p>Makes merging a load order into one mod easier to find:</p>
