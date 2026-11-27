@@ -1648,12 +1648,24 @@ pub(crate) fn stale_buttons(hooks: &Rc<MergeHooks>, s: &Stale) -> Vec<gtk::Butto
 }
 
 /// Why the saved merge of an object is out of date, with the buttons to
-/// settle it.
+/// settle it and a line on which one to use.
 pub(crate) fn stale_note(hooks: &Rc<MergeHooks>, entry: &Stale, reasons: &[String]) -> gtk::Box {
     let row = gtk::Box::builder().spacing(12).build();
-    let text = note(&tf!("The saved merge is out of date: {reasons}. Saving a new one replaces it.", reasons = reasons.join("; ")), Some("warning"));
-    text.set_hexpand(true);
-    row.append(&text);
+    let message = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(2).hexpand(true).build();
+    message.append(&note(&tf!("The saved merge is out of date: {reasons}.", reasons = reasons.join("; ")), Some("warning")));
+    let guidance = if entry.untracked {
+        t!("Keep As Is tracks the versions it was made from, so later changes are noticed. Re-merging rebuilds it from the mods' current files.")
+    } else if entry.content {
+        t!("Keep As Is accepts the saved result as it is. Re-merging rebuilds it from the current sources.")
+    } else if entry.pick.is_some() {
+        t!("Use New Version takes only the picked mod's update. Keep As Is keeps the saved result and records the new versions.")
+    } else if entry.unmerged {
+        t!("If the saved result is still the version you want — for example, because a merged mod already loads after this one — Keep As Is accepts it and records the current versions. Re-merge only to take this mod's changes.")
+    } else {
+        t!("Keep As Is accepts the saved result and records the mods' current versions, which is the simpler choice if it still looks right. Re-merging takes their changes.")
+    };
+    message.append(&note(&guidance, None));
+    row.append(&message);
     for button in stale_buttons(hooks, entry) {
         row.append(&button);
     }
@@ -2155,6 +2167,7 @@ mod tests {
             untracked,
             base_game: false,
             content: false,
+            unmerged: false,
             pick: None,
         }
     }

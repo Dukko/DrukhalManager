@@ -171,6 +171,10 @@ pub struct Stale {
     /// Whether the saved script itself no longer matches its sources, as
     /// opposed to a source having changed since it was merged.
     pub content: bool,
+    /// Whether another enabled mod defines the object or ships the file but
+    /// was not one of the merge's sources. Keep As Is is often enough for
+    /// this: a merged mod that loads later may already override it.
+    pub unmerged: bool,
     /// For a "Use This Version" choice where only the picked mod changed,
     /// that mod's name: its new version can replace the old one.
     pub pick: Option<String>,
@@ -728,7 +732,7 @@ impl Patch {
         for m in &mut self.manifest.merges {
             let (category, key) = (m.category.clone(), m.key.clone());
             if m.prints.is_empty() {
-                stale.push(Stale { object: Some((category, key)), path: m.file.clone(), reasons: vec![UNTRACKED.to_owned()], untracked: true, base_game: false, content: false, pick: None });
+                stale.push(Stale { object: Some((category, key)), path: m.file.clone(), reasons: vec![UNTRACKED.to_owned()], untracked: true, base_game: false, content: false, unmerged: false, pick: None });
                 continue;
             }
             let read = |root: &Path, file: &str| sources.object(root, file, &category, &key);
@@ -794,9 +798,11 @@ impl Patch {
             // even when every recorded source is unchanged.
             let known: std::collections::HashSet<&str> = m.prints.iter().map(|p| p.mod_id.as_str()).collect();
             let mut reported = std::collections::BTreeSet::new();
+            let mut unmerged = false;
             for (id, name, _) in definitions(&category, &key) {
                 if id != VANILLA && !known.contains(id.as_str()) && reported.insert(id) {
-                    check.reasons.push(tf!("{name} also defines it, and was not merged", name = &name));
+                    unmerged = true;
+                    check.reasons.push(tf!("{name} also defines this, but the saved merge was made without it", name = &name));
                 }
             }
             dirty |= check.confirm(&mut m.game_version, game_dir, game_version);
@@ -824,12 +830,12 @@ impl Patch {
                 }
             }
             if !check.reasons.is_empty() {
-                stale.push(Stale { object: Some((category, key)), path: m.file.clone(), base_game: check.base_game, reasons: check.reasons, untracked: false, content, pick: None });
+                stale.push(Stale { object: Some((category, key)), path: m.file.clone(), base_game: check.base_game, reasons: check.reasons, untracked: false, content, unmerged, pick: None });
             }
         }
         for f in &mut self.manifest.files {
             if f.prints.is_empty() {
-                stale.push(Stale { object: None, path: f.path.clone(), reasons: vec![UNTRACKED.to_owned()], untracked: true, base_game: false, content: false, pick: None });
+                stale.push(Stale { object: None, path: f.path.clone(), reasons: vec![UNTRACKED.to_owned()], untracked: true, base_game: false, content: false, unmerged: false, pick: None });
                 continue;
             }
             let read = |root: &Path, file: &str| sources.text(root, file).map(|t| t.as_str().to_owned());
@@ -857,14 +863,16 @@ impl Patch {
             // file now, and its version would be dropped silently.
             let known: std::collections::HashSet<&str> = f.prints.iter().map(|p| p.mod_id.as_str()).collect();
             let mut reported = std::collections::BTreeSet::new();
+            let mut unmerged = false;
             for (id, name) in shippers(&f.path) {
                 if id != VANILLA && !known.contains(id.as_str()) && reported.insert(id) {
-                    check.reasons.push(tf!("{name} also ships it, and was not merged", name = &name));
+                    unmerged = true;
+                    check.reasons.push(tf!("{name} also ships this file, but the saved merge was made without it", name = &name));
                 }
             }
             dirty |= check.confirm(&mut f.game_version, game_dir, game_version);
             if !check.reasons.is_empty() {
-                stale.push(Stale { object: None, path: f.path.clone(), base_game: check.base_game, reasons: check.reasons, untracked: false, content: false, pick: None });
+                stale.push(Stale { object: None, path: f.path.clone(), base_game: check.base_game, reasons: check.reasons, untracked: false, content: false, unmerged, pick: None });
             }
         }
         if dirty && let Err(e) = self.write_manifest() {
@@ -1558,7 +1566,8 @@ mod tests {
         };
         let stale = patch.check_with(&roots, Some("v4.5.3"), &definitions, &|_| Vec::new());
         assert_eq!(stale.len(), 1, "{stale:?}");
-        assert!(stale[0].reasons.iter().any(|r| r.contains("B also defines it, and was not merged")), "{:?}", stale[0].reasons);
+        assert!(stale[0].reasons.iter().any(|r| r.contains("B also defines this, but the saved merge was made without it")), "{:?}", stale[0].reasons);
+        assert!(stale[0].unmerged, "the note offers Keep As Is for it");
         std::fs::remove_dir_all(root).unwrap();
     }
 
@@ -1592,7 +1601,8 @@ mod tests {
         };
         let stale = patch.check_with(&roots, None, &|_, _| Vec::new(), &shippers);
         assert_eq!(stale.len(), 1, "{stale:?}");
-        assert!(stale[0].reasons.iter().any(|r| r.contains("B also ships it, and was not merged")), "{:?}", stale[0].reasons);
+        assert!(stale[0].reasons.iter().any(|r| r.contains("B also ships this file, but the saved merge was made without it")), "{:?}", stale[0].reasons);
+        assert!(stale[0].unmerged, "the note offers Keep As Is for it");
         std::fs::remove_dir_all(root).unwrap();
     }
 

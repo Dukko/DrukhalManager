@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: DrukhalManager 2.7.41\n"
 "Report-Msgid-Bugs-To: https://github.com/Dukko/DrukhalManager/issues\n"
-"POT-Creation-Date: 2026-11-27 14:14+0000\n"
+"POT-Creation-Date: 2026-11-27 14:40+0000\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -1170,7 +1170,27 @@ msgid "Keep As Is"
 msgstr ""
 
 #: src/conflicts_view.rs
-msgid "The saved merge is out of date: {reasons}. Saving a new one replaces it."
+msgid "The saved merge is out of date: {reasons}."
+msgstr ""
+
+#: src/conflicts_view.rs
+msgid "Keep As Is tracks the versions it was made from, so later changes are noticed. Re-merging rebuilds it from the mods' current files."
+msgstr ""
+
+#: src/conflicts_view.rs
+msgid "Keep As Is accepts the saved result as it is. Re-merging rebuilds it from the current sources."
+msgstr ""
+
+#: src/conflicts_view.rs
+msgid "Use New Version takes only the picked mod's update. Keep As Is keeps the saved result and records the new versions."
+msgstr ""
+
+#: src/conflicts_view.rs
+msgid "If the saved result is still the version you want — for example, because a merged mod already loads after this one — Keep As Is accepts it and records the current versions. Re-merge only to take this mod's changes."
+msgstr ""
+
+#: src/conflicts_view.rs
+msgid "Keep As Is accepts the saved result and records the mods' current versions, which is the simpler choice if it still looks right. Re-merging takes their changes."
 msgstr ""
 
 #: src/conflicts_view.rs
@@ -2179,7 +2199,7 @@ msgid "The base game added it in {version}"
 msgstr ""
 
 #: src/merge/patch.rs
-msgid "{name} also defines it, and was not merged"
+msgid "{name} also defines this, but the saved merge was made without it"
 msgstr ""
 
 #: src/merge/patch.rs
@@ -2199,7 +2219,7 @@ msgid "The base game added this file in {version}"
 msgstr ""
 
 #: src/merge/patch.rs
-msgid "{name} also ships it, and was not merged"
+msgid "{name} also ships this file, but the saved merge was made without it"
 msgstr ""
 
 #: src/merge/patch.rs src/merge/patch.rs src/merge/patch.rs
