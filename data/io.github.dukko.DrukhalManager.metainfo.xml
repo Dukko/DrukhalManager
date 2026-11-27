@@ -36,6 +36,16 @@
     <control>keyboard</control>
   </supports>
   <releases>
+    <release version="2.7.41" date="2026-11-27">
+      <description>
+        <p>Makes merging a load order into one mod easier to find:</p>
+        <ul>
+          <li>Merge into One Mod and Freeze have their own “Make a Mod From This Collection” section in the collection menu, apart from sharing actions</li>
+          <li>Import, Export, Copy and Paste are grouped under one Share submenu</li>
+          <li>The Load Order heading has a “Merge N Mods into One…” button, hidden while a search or filter narrows the list</li>
+        </ul>
+      </description>
+    </release>
     <release version="2.7.40" date="2026-11-27">
       <description>
         <p>Fixes outdated merges that could not be settled:</p>
