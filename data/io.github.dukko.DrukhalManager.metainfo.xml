@@ -36,6 +36,14 @@
     <control>keyboard</control>
   </supports>
   <releases>
+    <release version="2.7.38" date="2026-11-26">
+      <description>
+        <p>Catches merges that leave a mod out:</p>
+        <ul>
+          <li>An object or file merge is flagged when an enabled mod defines the object, or ships the file, without being one of its sources, so a merge made before that mod was enabled no longer silently drops its version</li>
+        </ul>
+      </description>
+    </release>
     <release version="2.7.37" date="2026-11-26">
       <description>
         <p>Catches two kinds of broken script:</p>
