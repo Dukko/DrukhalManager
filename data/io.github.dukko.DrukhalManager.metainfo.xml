@@ -36,6 +36,16 @@
     <control>keyboard</control>
   </supports>
   <releases>
+    <release version="2.7.43" date="2026-11-27">
+      <description>
+        <p>Handles cut-off AI replies better:</p>
+        <ul>
+          <li>Short merges reserve 8192 output tokens instead of 4096, leaving reasoning models room to think before writing the result</li>
+          <li>A reply cut off at the output limit now names the model and suggests retrying, choosing a model with more room, or merging by hand</li>
+          <li>The log records the input and output tokens a cut-off reply used, to show whether the model spent them on reasoning</li>
+        </ul>
+      </description>
+    </release>
     <release version="2.7.42" date="2026-11-27">
       <description>
         <p>Makes out-of-date merge warnings explain what to do:</p>
