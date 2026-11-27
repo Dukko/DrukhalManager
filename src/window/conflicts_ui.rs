@@ -27,21 +27,45 @@ impl Window {
         if self.stack.visible_child_name().as_deref() != Some("conflicts") {
             return;
         }
-        let revision = self.state.borrow().revision;
-        if self
-            .analysis
-            .borrow()
-            .as_ref()
-            .is_none_or(|a| a.revision.get() != revision)
-        {
+        // The page can change inside code that still holds one of these
+        // borrows (a dialog, a collection switch). Borrowing again then would
+        // panic and take the window down; scan once that handler returns.
+        let Ok(state) = self.state.try_borrow() else {
+            return self.scan_later();
+        };
+        let revision = state.revision;
+        drop(state);
+        let Ok(analysis) = self.analysis.try_borrow() else {
+            return self.scan_later();
+        };
+        let fresh = analysis.as_ref().is_some_and(|a| a.revision.get() == revision);
+        drop(analysis);
+        if !fresh {
             self.scan();
         }
+    }
+
+    /// Runs [`Window::scan_if_stale`] after the current signal handler
+    /// returns, once the borrow that made it unsafe is gone.
+    fn scan_later(self: &Rc<Self>) {
+        let weak = Rc::downgrade(self);
+        glib::idle_add_local_once(move || {
+            if let Some(ui) = weak.upgrade() {
+                ui.scan_if_stale();
+            }
+        });
     }
 
     /// Scans the enabled mods' files in the background.
     pub(super) fn scan(self: &Rc<Self>) {
         if self.scanning.replace(true) {
             return;
+        }
+        // Same as `scan_if_stale`: don't borrow into a handler that still
+        // holds state, collections or settings.
+        if self.state.try_borrow().is_err() || self.collections.try_borrow().is_err() || self.settings.try_borrow().is_err() {
+            self.scanning.set(false);
+            return self.scan_later();
         }
         self.conflicts_page
             .set_child(Some(&conflicts_view::scanning()));
@@ -52,7 +76,7 @@ impl Window {
             let scanned: Vec<(usize, &Mod)> = state
                 .enabled
                 .iter()
-                .map(|&i| &state.mods[i])
+                .filter_map(|&i| state.mods.get(i))
                 .enumerate()
                 .filter(|(_, m)| !patch::is_patch(&m.id))
                 .collect();
@@ -465,8 +489,10 @@ impl Window {
         }
     }
 
-    /// Starts tracking a merge saved before fingerprints existed, taking its
-    /// mods' current versions (from the last scan) as what it merged.
+    /// Starts tracking a merge as it is, taking its sources' current versions
+    /// (from the last scan) as what it merged: for merges saved before
+    /// fingerprints existed, and for ones the user accepts despite a source
+    /// change or a mod that started defining the object without being merged.
     pub(super) fn keep_merge(self: &Rc<Self>, stale: &patch::Stale) {
         let what = stale
             .object
@@ -495,21 +521,24 @@ impl Window {
         let Some(analysis) = self.analysis.borrow().clone() else {
             return;
         };
-        let Some(sources) = self.patch.borrow().as_ref().and_then(|p| {
-            p.sources(stale.object.as_ref(), &stale.path)
-                .map(<[String]>::to_vec)
-        }) else {
+        let in_patch = self
+            .patch
+            .borrow()
+            .as_ref()
+            .is_some_and(|p| p.sources(stale.object.as_ref(), &stale.path).is_some());
+        if !in_patch {
             return;
-        };
+        }
+        // Everything that defines it now, not only the mods the merge was
+        // recorded as coming from: a mod that started defining it after the
+        // merge (or one whose print was lost) is otherwise left out and the
+        // stale reason never clears.
         let source_mod = |m: usize| -> Option<patch::SourceMod> {
-            let name = analysis.name(m);
-            sources.iter().any(|s| s == name).then(|| {
-                Some((
-                    analysis.ids[m].clone(),
-                    name.to_owned(),
-                    analysis.roots[m].clone()?,
-                ))
-            })?
+            Some((
+                analysis.ids.get(m)?.clone(),
+                analysis.name(m).to_owned(),
+                analysis.roots.get(m)?.clone()?,
+            ))
         };
         // Which mods define it now, according to the last scan.
         enum Found {

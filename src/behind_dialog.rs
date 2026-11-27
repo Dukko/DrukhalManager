@@ -18,7 +18,7 @@ use crate::diff_view::{Compare, Header, Pair};
 use crate::folder_merge_dialog::{dollars, tokens};
 use crate::merge::ai::{self, Checked, Estimate, Progress, Provider, Versions};
 use crate::merge::base_game::{self, Behind, Saved};
-use crate::merge::patch::{Print, VANILLA};
+use crate::merge::patch::{Merge, Print, VANILLA};
 use crate::merge::snapshot;
 use crate::merge::source::{self, Source};
 use crate::merge::update_all;
@@ -56,7 +56,11 @@ struct Job {
     key: String,
     before: Source,
     after: Source,
+    /// What the AI brings forward: the patch's merge of the object if it has
+    /// one, otherwise the mod's copy.
     mod_copy: Source,
+    /// The mod's own copy, for its replaced inline scripts and fingerprints.
+    mod_text: Source,
     game_dir: Option<PathBuf>,
     /// The mod's folder and descriptor id, for replaced inline scripts.
     mod_root: PathBuf,
@@ -67,13 +71,18 @@ struct Job {
 
 impl Job {
     fn new(analysis: &Analysis, hooks: &MergeHooks, b: &Behind, now: &Saved, old: &str, new: &str, mod_text: &str) -> Job {
-        let source = |label: String, file: &str, text: &str| Source { label, file: file.to_owned(), text: text.to_owned() };
+        let source = |file: &str, text: &str| Source { label: analysis.name(b.mod_position).to_owned(), file: file.to_owned(), text: text.to_owned() };
+        // When the patch already holds a merge of this object, that merge is
+        // what the update must bring forward, not just the one mod's copy:
+        // the other merged mods' changes are part of it.
+        let copy_text = (hooks.existing)(&b.category, &b.key).map_or_else(|| mod_text.to_owned(), |m| m.script);
         Job {
             category: b.category.clone(),
             key: b.key.clone(),
-            before: source(tf!("Stellaris {version}", version = old), &b.was.file, &b.was.text),
-            after: source(tf!("Stellaris {version}", version = new), &now.file, &now.text),
-            mod_copy: source(analysis.name(b.mod_position).to_owned(), &b.file, mod_text),
+            before: Source { label: tf!("Stellaris {version}", version = old), file: b.was.file.clone(), text: b.was.text.clone() },
+            after: Source { label: tf!("Stellaris {version}", version = new), file: now.file.clone(), text: now.text.clone() },
+            mod_copy: source(&b.file, &copy_text),
+            mod_text: source(&b.file, mod_text),
             game_dir: hooks.game_dir.clone(),
             mod_root: analysis.roots[b.mod_position].clone().unwrap_or_default(),
             mod_id: analysis.ids[b.mod_position].clone(),
@@ -94,7 +103,7 @@ impl Job {
             Err(_) => checked.merged.script.clone(),
         };
         let snapshot = self.game_dir.as_deref().and_then(|dir| base_game::ensure(&base_game::dir(), dir, &self.version).ok());
-        let known = snapshot.iter().flat_map(|s| s.texts()).chain([self.before.text.as_str(), self.after.text.as_str(), self.mod_copy.text.as_str()]);
+        let known = snapshot.iter().flat_map(|s| s.texts()).chain([self.before.text.as_str(), self.after.text.as_str(), self.mod_copy.text.as_str(), self.mod_text.text.as_str()]);
         let warnings = vocabulary::unknown(&text, known);
         Ok((checked, warnings))
     }
@@ -111,7 +120,7 @@ impl Job {
         };
         let pairs = crate::merge::inline_scripts::replaced_call_pairs(
             &self.before.text,
-            &self.mod_copy.text,
+            &self.mod_text.text,
         );
         if pairs.is_empty() {
             return Ok(Vec::new());
@@ -208,6 +217,18 @@ impl Job {
     }
 }
 
+/// Fingerprints of the updated object: the game's new version and the mod's
+/// copy, keeping the other mods the patch's merge was made from. Saving an
+/// update must not forget them, or the merge is reported as missing a mod
+/// that defines it, which re-saving never clears.
+fn update_prints(existing: Option<&Merge>, vanilla: &Saved, id: &str, name: &str, file: &str, text: &str) -> Vec<Print> {
+    let mut prints = existing.map(|m| m.prints.clone()).unwrap_or_default();
+    prints.retain(|p| p.mod_id != VANILLA && p.mod_id != id);
+    prints.insert(0, Print::new(VANILLA, "Vanilla", &vanilla.file, &vanilla.text));
+    prints.insert(1, Print::new(id, name, file, text));
+    prints
+}
+
 /// Saves `text` as the updated copy of `b` to the merged patch.
 fn save_update(
     analysis: &Analysis,
@@ -225,7 +246,8 @@ fn save_update(
         (hooks.save_file)(&path, merged.script.as_bytes(), merged.prints.clone())?;
     }
     let position = b.mod_position;
-    let prints = vec![Print::new(VANILLA, "Vanilla", &now.file, &now.text), Print::new(&analysis.ids[position], analysis.name(position), &b.file, mod_text)];
+    let existing = (hooks.existing)(&b.category, &b.key);
+    let prints = update_prints(existing.as_ref(), now, &analysis.ids[position], analysis.name(position), &b.file, mod_text);
     (hooks.save_object)(&b.category, &b.key, &script, prints)?;
     if !scripts.is_empty() {
         (hooks.set_scripts)(
@@ -1148,5 +1170,47 @@ fn review_parts(analysis: &Analysis, b: &Behind, mod_text: &str, version: &str, 
         error,
         buttons,
         scripts,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn saved(text: &str) -> Saved {
+        Saved { file: "common/x/new.txt".into(), text: text.into() }
+    }
+
+    #[test]
+    fn updating_keeps_the_other_mods_the_merge_was_made_from() {
+        let existing = Merge {
+            category: "common/ascension_perks".into(),
+            key: "ap_world_shaper".into(),
+            script: "ap_world_shaper = {}".into(),
+            sources: vec!["Better Perks".into(), "Planetary Diversity".into()],
+            file: "common/ascension_perks/x.txt".into(),
+            prints: vec![
+                Print::new(VANILLA, "Vanilla", "common/ascension_perks/old.txt", "old game text"),
+                Print::new("mod/ugc_1.mod", "Better Perks", "common/ascension_perks/bp.txt", "old better perks"),
+                Print::new("mod/ugc_2.mod", "Planetary Diversity", "common/ascension_perks/pd.txt", "planetary diversity"),
+            ],
+            game_version: Some("v4.5.4".into()),
+            scripts: Vec::new(),
+            accepted: None,
+        };
+        let now = saved("new game text");
+        let prints = update_prints(Some(&existing), &now, "mod/ugc_1.mod", "Better Perks", "common/ascension_perks/bp.txt", "new better perks");
+
+        assert_eq!(prints.len(), 3);
+        assert_eq!((prints[0].mod_id.as_str(), prints[0].file.as_str()), (VANILLA, "common/x/new.txt"));
+        assert_eq!((prints[1].mod_id.as_str(), prints[1].hash.as_str()), ("mod/ugc_1.mod", Print::new("mod/ugc_1.mod", "Better Perks", "common/ascension_perks/bp.txt", "new better perks").hash.as_str()));
+        assert_eq!(prints[2].name, "Planetary Diversity");
+        assert_eq!(prints[2].hash, existing.prints[2].hash, "an unchanged other mod keeps its fingerprint");
+    }
+
+    #[test]
+    fn updating_without_an_existing_merge_only_records_the_mod_and_the_game() {
+        let prints = update_prints(None, &saved("new game text"), "mod/ugc_1.mod", "Better Perks", "common/ascension_perks/bp.txt", "new better perks");
+        assert_eq!(prints.iter().map(|p| p.mod_id.as_str()).collect::<Vec<_>>(), [VANILLA, "mod/ugc_1.mod"]);
     }
 }

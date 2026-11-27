@@ -897,12 +897,16 @@ impl Patch {
     }
 
     pub fn track(&mut self, object: Option<&(String, String)>, path: &str, prints: Vec<Print>, game_version: Option<&str>) -> io::Result<()> {
+        // The tracked prints are what the merge now counts as its sources;
+        // keep the recorded names in step with them.
+        let sources: Vec<String> = prints.iter().filter(|p| p.mod_id != VANILLA).map(|p| p.name.clone()).collect();
         match object {
             Some((category, key)) => {
                 let Some(merge) = self.manifest.merges.iter_mut().find(|m| &m.category == category && &m.key == key) else {
                     return Err(io::Error::new(io::ErrorKind::NotFound, t!("It is no longer in the patch")));
                 };
                 merge.prints = prints;
+                merge.sources = sources;
                 merge.game_version = game_version.map(str::to_owned);
                 merge.accepted = Some(fingerprint(&merge.script));
             }
@@ -911,6 +915,7 @@ impl Patch {
                     return Err(io::Error::new(io::ErrorKind::NotFound, t!("It is no longer in the patch")));
                 };
                 merge.prints = prints;
+                merge.sources = sources;
                 merge.game_version = game_version.map(str::to_owned);
             }
         }

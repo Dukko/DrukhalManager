@@ -1537,7 +1537,7 @@ impl Page {
             (t!("Merges to Check"), t!("Saved by an older version"), t!("These were merged by an older version of DrukhalManager, which didn't record what the mods looked like, so their updates can't be noticed. If one still looks right, keep it to track changes from now on; otherwise re-merge it from the list, or remove it."))
         } else {
             let what = if all.iter().any(|s| !s.untracked && s.base_game) { t!("Mods or the base game") } else { t!("Mods") };
-            (t!("Outdated Merges"), outdated_summary(&all), tf!("{what} changed since these were merged or fixed, so the patch may be undoing their updates. Re-merge them from the list, or remove them from the patch.", what = &what))
+            (t!("Outdated Merges"), outdated_summary(&all), tf!("{what} changed since these were merged or fixed, so the patch may be undoing their updates. Re-merge them from the list, keep one as it is to accept it, or remove it from the patch.", what = &what))
         };
         let header = self.detail_header(&title, &subtitle);
         let picks = all.iter().filter(|s| !untracked && !s.untracked && s.pick.is_some()).count();
@@ -1583,13 +1583,18 @@ impl Page {
             let r = row(title, &subtitle);
             let icon = if s.untracked { "dialog-question-symbolic" } else { "dialog-warning-symbolic" };
             r.add_prefix(&gtk::Image::builder().icon_name(icon).css_classes(["warning"]).build());
-            // Jump to the conflict, if it's still listed.
-            let target = self.rows.borrow().iter().flatten().copied().find(|&i| match (i, &s.object) {
-                (Item::Object(i), Some((c, k))) => &self.analysis.report.objects[i].category == c && &self.analysis.report.objects[i].key == k,
-                (Item::Behind(i), Some((c, k))) => &self.analysis.behind[i].category == c && &self.analysis.behind[i].key == k,
-                (Item::File(i), None) => self.analysis.report.files[i].path.eq_ignore_ascii_case(&s.path),
+            // Jump to the conflict, if it's still listed. Prefer the full
+            // object/file page: the game-update page updates one mod's copy,
+            // so re-merging from there would not bring the other mods back.
+            let matches = |i: &Item| match (i, &s.object) {
+                (Item::Object(i), Some((c, k))) => &self.analysis.report.objects[*i].category == c && &self.analysis.report.objects[*i].key == k,
+                (Item::Behind(i), Some((c, k))) => &self.analysis.behind[*i].category == c && &self.analysis.behind[*i].key == k,
+                (Item::File(i), None) => self.analysis.report.files[*i].path.eq_ignore_ascii_case(&s.path),
                 _ => false,
-            });
+            };
+            let rows = self.rows.borrow();
+            let listed = rows.iter().flatten().copied();
+            let target = listed.clone().find(|i| !matches!(i, Item::Behind(_)) && matches(i)).or_else(|| listed.clone().find(matches));
             if let Some(target) = target {
                 let open = gtk::Button::builder().label(t!("Re-merge…")).valign(gtk::Align::Center).css_classes(["flat"]).build();
                 let weak = Rc::downgrade(self);
@@ -1628,17 +1633,17 @@ pub(crate) fn stale_buttons(hooks: &Rc<MergeHooks>, s: &Stale) -> Vec<gtk::Butto
         update.connect_clicked(move |_| (hooks.update_picks)(Some(&stale)));
         buttons.push(update);
     }
-    if s.untracked || s.content {
-        let tooltip = if s.content {
-            t!("Accept the saved merge as it is. Changes to its sources will still be noticed")
-        } else {
-            t!("Track changes to its mods from their current versions")
-        };
-        let keep = gtk::Button::builder().label(t!("Keep As Is")).tooltip_text(tooltip).valign(gtk::Align::Center).css_classes(["flat"]).build();
-        let (hooks, stale) = (hooks.clone(), s.clone());
-        keep.connect_clicked(move |_| (hooks.keep_merge)(&stale));
-        buttons.push(keep);
-    }
+    let tooltip = if s.untracked {
+        t!("Track changes to its mods from their current versions")
+    } else if s.content {
+        t!("Accept the saved merge as it is. Changes to its sources will still be noticed")
+    } else {
+        t!("Accept the saved merge as it is, taking its mods' current versions as what it merged. Later changes to them will still be noticed")
+    };
+    let keep = gtk::Button::builder().label(t!("Keep As Is")).tooltip_text(tooltip).valign(gtk::Align::Center).css_classes(["flat"]).build();
+    let (hooks, stale) = (hooks.clone(), s.clone());
+    keep.connect_clicked(move |_| (hooks.keep_merge)(&stale));
+    buttons.push(keep);
     buttons
 }
 

@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: DrukhalManager 2.7.39\n"
 "Report-Msgid-Bugs-To: https://github.com/Dukko/DrukhalManager/issues\n"
-"POT-Creation-Date: 2026-11-27 03:05+0000\n"
+"POT-Creation-Date: 2026-11-27 03:44+0000\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -1098,7 +1098,7 @@ msgid "Outdated Merges"
 msgstr ""
 
 #: src/conflicts_view.rs
-msgid "{what} changed since these were merged or fixed, so the patch may be undoing their updates. Re-merge them from the list, or remove them from the patch."
+msgid "{what} changed since these were merged or fixed, so the patch may be undoing their updates. Re-merge them from the list, keep one as it is to accept it, or remove it from the patch."
 msgstr ""
 
 #: src/conflicts_view.rs
@@ -1154,11 +1154,15 @@ msgid "Replace the picked version with {name}'s new one. The patch is backed up 
 msgstr ""
 
 #: src/conflicts_view.rs
+msgid "Track changes to its mods from their current versions"
+msgstr ""
+
+#: src/conflicts_view.rs
 msgid "Accept the saved merge as it is. Changes to its sources will still be noticed"
 msgstr ""
 
 #: src/conflicts_view.rs
-msgid "Track changes to its mods from their current versions"
+msgid "Accept the saved merge as it is, taking its mods' current versions as what it merged. Later changes to them will still be noticed"
 msgstr ""
 
 #: src/conflicts_view.rs
