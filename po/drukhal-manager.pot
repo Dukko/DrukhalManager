@@ -6,9 +6,9 @@
 #, fuzzy
 msgid ""
 msgstr ""
-"Project-Id-Version: DrukhalManager 2.7.37\n"
+"Project-Id-Version: DrukhalManager 2.7.38\n"
 "Report-Msgid-Bugs-To: https://github.com/Dukko/DrukhalManager/issues\n"
-"POT-Creation-Date: 2026-11-26 19:43+0000\n"
+"POT-Creation-Date: 2026-11-27 02:47+0000\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -2175,6 +2175,10 @@ msgid "The base game added it in {version}"
 msgstr ""
 
 #: src/merge/patch.rs
+msgid "{name} also defines it, and was not merged"
+msgstr ""
+
+#: src/merge/patch.rs
 msgid "The saved merge no longer combines its sources cleanly: {problems}"
 msgstr ""
 
@@ -2188,6 +2192,10 @@ msgstr ""
 
 #: src/merge/patch.rs
 msgid "The base game added this file in {version}"
+msgstr ""
+
+#: src/merge/patch.rs
+msgid "{name} also ships it, and was not merged"
 msgstr ""
 
 #: src/merge/patch.rs src/merge/patch.rs src/merge/patch.rs

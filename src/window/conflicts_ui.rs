@@ -277,11 +277,49 @@ impl Window {
     pub(super) fn check_stale(&self) {
         let roots = self.stale_roots();
         let version = self.game.as_ref().and_then(|g| g.version.as_deref());
+        // The last scan knows every enabled mod's definitions, so merges also
+        // notice a mod that started defining their object after they were
+        // made. Without a scan, only the recorded sources are rechecked.
+        let analysis = self.analysis.borrow().clone();
+        let definitions = |category: &str, key: &str| -> Vec<(String, String, String)> {
+            let Some(analysis) = &analysis else { return Vec::new() };
+            analysis
+                .report
+                .defined
+                .get(&(category.to_owned(), key.to_owned()))
+                .map(|defs| {
+                    defs.iter()
+                        .filter_map(|d| {
+                            Some((
+                                analysis.ids.get(d.mod_position)?.clone(),
+                                analysis.name(d.mod_position).to_owned(),
+                                d.file.clone(),
+                            ))
+                        })
+                        .collect()
+                })
+                .unwrap_or_default()
+        };
+        let shippers = |path: &str| -> Vec<(String, String)> {
+            let Some(analysis) = &analysis else { return Vec::new() };
+            analysis
+                .report
+                .shippers
+                .get(&path.to_lowercase())
+                .map(|mods| {
+                    mods.iter()
+                        .filter_map(|(position, _)| {
+                            Some((analysis.ids.get(*position)?.clone(), analysis.name(*position).to_owned()))
+                        })
+                        .collect()
+                })
+                .unwrap_or_default()
+        };
         let stale = self
             .patch
             .borrow_mut()
             .as_mut()
-            .map(|p| p.check(&roots, version))
+            .map(|p| p.check_with(&roots, version, &definitions, &shippers))
             .unwrap_or_default();
         self.stale.replace(stale);
     }

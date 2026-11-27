@@ -129,6 +129,12 @@ pub struct Print {
 
 pub const VANILLA: &str = "vanilla";
 
+/// Every place the enabled mods define an object: descriptor id, name, file.
+pub type ObjectDefinitions<'a> = &'a dyn Fn(&str, &str) -> Vec<(String, String, String)>;
+
+/// The mods that ship a file: descriptor id, name.
+pub type FileShippers<'a> = &'a dyn Fn(&str) -> Vec<(String, String)>;
+
 /// A stable fingerprint of script text that ignores formatting changes.
 pub fn fingerprint(text: &str) -> String {
     // FNV-1a over the whitespace-separated words.
@@ -635,12 +641,34 @@ impl Patch {
     /// file. That bookkeeping is saved if it changed.
     #[cfg(test)]
     pub fn recheck(&mut self, roots: &HashMap<String, PathBuf>, game_version: Option<&str>) -> Vec<Stale> {
-        self.recheck_with(roots, game_version, &Sources::default(), &|_, _| Vec::new())
+        self.recheck_with(roots, game_version, &Sources::default(), &|_, _| Vec::new(), &|_, _| Vec::new(), &|_| Vec::new())
     }
 
     /// [`Patch::check`], with each entry's pick marked as
     /// [`Patch::mark_picks`] does, reading each source file once for both.
+    #[cfg(test)]
     pub fn check(&mut self, roots: &HashMap<String, PathBuf>, game_version: Option<&str>) -> Vec<Stale> {
+        self.check_with(roots, game_version, &|_, _| Vec::new(), &|_| Vec::new())
+    }
+
+    /// [`Patch::check`], also noticing definitions the enabled mods *added*
+    /// since a merge was made. `definitions` returns where every enabled mod
+    /// currently defines `(category, key)`, as `(descriptor id, name, file)`;
+    /// the conflicts scan already knows this. Without it a merge only
+    /// rechecks the mods it was made from, so a mod that starts defining the
+    /// object later (or was enabled later) is missed and the patch keeps
+    /// dropping its version.
+    /// `shippers` does the same for a merged file: the mods that currently
+    /// ship `path`, as `(descriptor id, name)`. A file merge only rechecks the
+    /// mods it was made from too, so a mod that starts shipping the file is
+    /// missed the same way.
+    pub fn check_with(
+        &mut self,
+        roots: &HashMap<String, PathBuf>,
+        game_version: Option<&str>,
+        definitions: ObjectDefinitions<'_>,
+        shippers: FileShippers<'_>,
+    ) -> Vec<Stale> {
         // Sharing one reader is safe: `recheck_with` writes only the patch's
         // manifest, never a source file the reader has cached.
         let sources = Sources::default();
@@ -652,13 +680,21 @@ impl Patch {
                 .filter_map(|s| s.get(category, key).map(|saved| Source { label: s.version.clone(), file: saved.file.clone(), text: saved.text.clone() }))
                 .collect()
         };
-        let mut stale = self.recheck_with(roots, game_version, &sources, &previous_game);
+        let mut stale = self.recheck_with(roots, game_version, &sources, &previous_game, definitions, shippers);
         Self::mark_picks(&mut stale, &self.picks_with(roots, &sources));
         stale
     }
 
     /// [`Patch::check`], reading source files through `sources`.
-    fn recheck_with(&mut self, roots: &HashMap<String, PathBuf>, game_version: Option<&str>, sources: &Sources, previous_game: &dyn Fn(&str, &str) -> Vec<Source>) -> Vec<Stale> {
+    fn recheck_with(
+        &mut self,
+        roots: &HashMap<String, PathBuf>,
+        game_version: Option<&str>,
+        sources: &Sources,
+        previous_game: &dyn Fn(&str, &str) -> Vec<Source>,
+        definitions: ObjectDefinitions<'_>,
+        shippers: FileShippers<'_>,
+    ) -> Vec<Stale> {
         let game_dir = roots.get(VANILLA).map(PathBuf::as_path);
         if let Some(dir) = game_dir
             && let Err(e) = self.relocate_base_events(dir)
@@ -752,6 +788,17 @@ impl Patch {
             if added.contains(&(category.clone(), key.clone())) {
                 check.base_game(tf!("The base game added it in {version}", version = game_version.unwrap_or_default()));
             }
+            // A mod that wasn't part of the merge may define the object now
+            // (enabled later, or it gained the definition in an update). The
+            // saved merge has never seen its version, so it is out of date
+            // even when every recorded source is unchanged.
+            let known: std::collections::HashSet<&str> = m.prints.iter().map(|p| p.mod_id.as_str()).collect();
+            let mut reported = std::collections::BTreeSet::new();
+            for (id, name, _) in definitions(&category, &key) {
+                if id != VANILLA && !known.contains(id.as_str()) && reported.insert(id) {
+                    check.reasons.push(tf!("{name} also defines it, and was not merged", name = &name));
+                }
+            }
             dirty |= check.confirm(&mut m.game_version, game_dir, game_version);
             let mut content = false;
             if check.reasons.is_empty() {
@@ -805,6 +852,15 @@ impl Patch {
                 && dir.join(&f.path).is_file()
             {
                 check.base_game(tf!("The base game added this file in {version}", version = game_version.unwrap_or_default()));
+            }
+            // As with objects: a mod the merge was not made from may ship the
+            // file now, and its version would be dropped silently.
+            let known: std::collections::HashSet<&str> = f.prints.iter().map(|p| p.mod_id.as_str()).collect();
+            let mut reported = std::collections::BTreeSet::new();
+            for (id, name) in shippers(&f.path) {
+                if id != VANILLA && !known.contains(id.as_str()) && reported.insert(id) {
+                    check.reasons.push(tf!("{name} also ships it, and was not merged", name = &name));
+                }
             }
             dirty |= check.confirm(&mut f.game_version, game_dir, game_version);
             if !check.reasons.is_empty() {
@@ -1450,6 +1506,91 @@ mod tests {
         std::fs::remove_dir_all(root).unwrap();
     }
 
+    #[test]
+    fn notices_a_mod_that_started_defining_a_merged_object() {
+        let root = std::env::temp_dir().join(format!("drukhal-new-source-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let (user, a, b, game) = (root.join("user"), root.join("a"), root.join("b"), root.join("game"));
+        for dir in [&a, &b, &game] {
+            std::fs::create_dir_all(dir.join("common/buildings")).unwrap();
+        }
+        std::fs::write(game.join("common/buildings/00.txt"), "lab = { cost = { minerals = 100 } }\n").unwrap();
+        std::fs::write(a.join("common/buildings/a.txt"), "lab = { cost = { minerals = 50 } }\n").unwrap();
+        std::fs::write(b.join("common/buildings/b.txt"), "lab = { cost = { minerals = 25 } }\n").unwrap();
+        std::fs::create_dir_all(user.join("mod")).unwrap();
+
+        let prints = object_prints(
+            "common/buildings",
+            "lab",
+            Some(&game),
+            &[(
+                ("mod/a.mod".to_owned(), "A".to_owned(), a.clone()),
+                "common/buildings/a.txt".to_owned(),
+            )],
+        );
+        let mut patch = Patch::open(&user, &test_target()).unwrap();
+        patch.save(&user, Some("v4.5.3"), "common/buildings", "lab", "lab = { cost = { minerals = 50 } }", prints).unwrap();
+        let roots: std::collections::HashMap<String, PathBuf> = [
+            ("mod/a.mod".to_owned(), a),
+            ("mod/b.mod".to_owned(), b),
+            (VANILLA.to_owned(), game),
+        ]
+        .into();
+
+        // Rechecking only the recorded source can't see B, which was not part
+        // of the merge, even though the enabled mods define the object twice.
+        assert!(patch.check(&roots, Some("v4.5.3")).is_empty());
+
+        let definitions = |category: &str, key: &str| {
+            if (category, key) == ("common/buildings", "lab") {
+                vec![
+                    ("mod/a.mod".to_owned(), "A".to_owned(), "common/buildings/a.txt".to_owned()),
+                    ("mod/b.mod".to_owned(), "B".to_owned(), "common/buildings/b.txt".to_owned()),
+                ]
+            } else {
+                Vec::new()
+            }
+        };
+        let stale = patch.check_with(&roots, Some("v4.5.3"), &definitions, &|_| Vec::new());
+        assert_eq!(stale.len(), 1, "{stale:?}");
+        assert!(stale[0].reasons.iter().any(|r| r.contains("B also defines it, and was not merged")), "{:?}", stale[0].reasons);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn notices_a_mod_that_started_shipping_a_merged_file() {
+        let root = std::env::temp_dir().join(format!("drukhal-new-file-source-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let (user, a, b) = (root.join("user"), root.join("a"), root.join("b"));
+        for dir in [&a, &b] {
+            std::fs::create_dir_all(dir.join("common/defines")).unwrap();
+        }
+        std::fs::write(a.join("common/defines/00_defines.txt"), "NAI = { X = 1 }\n").unwrap();
+        std::fs::write(b.join("common/defines/00_defines.txt"), "NAI = { X = 2 }\n").unwrap();
+        std::fs::create_dir_all(user.join("mod")).unwrap();
+
+        let path = "common/defines/00_defines.txt";
+        let prints = file_prints(path, None, &[("mod/a.mod".to_owned(), "A".to_owned(), a.clone())]);
+        let mut patch = Patch::open(&user, &test_target()).unwrap();
+        patch.save_file(&user, None, path, b"NAI = { X = 1 }\n", prints).unwrap();
+        let roots: std::collections::HashMap<String, PathBuf> =
+            [("mod/a.mod".to_owned(), a), ("mod/b.mod".to_owned(), b)].into();
+
+        assert!(patch.check(&roots, None).is_empty());
+
+        let shippers = |shipped: &str| {
+            if shipped.eq_ignore_ascii_case(path) {
+                vec![("mod/a.mod".to_owned(), "A".to_owned()), ("mod/b.mod".to_owned(), "B".to_owned())]
+            } else {
+                Vec::new()
+            }
+        };
+        let stale = patch.check_with(&roots, None, &|_, _| Vec::new(), &shippers);
+        assert_eq!(stale.len(), 1, "{stale:?}");
+        assert!(stale[0].reasons.iter().any(|r| r.contains("B also ships it, and was not merged")), "{:?}", stale[0].reasons);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
     /// Saves `merged` over a mod copy and the current game's copy, then
     /// rechecks it with `previous` as the previous game version's copy.
     fn recheck_against_previous(tag: &str, mod_text: &str, merged: &str, previous: &[&str]) -> (Vec<Stale>, Option<String>) {
@@ -1468,7 +1609,7 @@ mod tests {
         patch.save(&user, Some("v4.6.0"), "common/ethics", "ethic", merged, prints).unwrap();
         let roots: std::collections::HashMap<String, PathBuf> = [("mod/a.mod".to_owned(), a), (VANILLA.to_owned(), game)].into();
         let previous: Vec<Source> = previous.iter().map(|text| Source { label: "Previous".into(), file: "common/ethics/00.txt".into(), text: (*text).into() }).collect();
-        let stale = patch.recheck_with(&roots, Some("v4.6.0"), &Sources::default(), &|_, _| previous.clone());
+        let stale = patch.recheck_with(&roots, Some("v4.6.0"), &Sources::default(), &|_, _| previous.clone(), &|_, _| Vec::new(), &|_| Vec::new());
         let accepted = patch.get("common/ethics", "ethic").unwrap().accepted.clone();
         std::fs::remove_dir_all(root).unwrap();
         (stale, accepted)

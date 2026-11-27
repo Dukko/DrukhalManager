@@ -42,6 +42,9 @@ pub struct Report {
     /// How many files the scan read from each mod, by scanned position;
     /// 0 for skipped mods.
     pub shipped: Vec<usize>,
+    /// Every file the scan read, by lowercased relative path, with the mods
+    /// that ship it in load order and the path as spelled in each mod.
+    pub shippers: BTreeMap<String, Vec<(usize, String)>>,
     /// For each scanned mod, by scanned position, how many of its files each
     /// later mod replaces (replacer position -> file count): a later mod ships
     /// the same path, or a `replace_path` covers it. A mod's files counted here
@@ -585,6 +588,7 @@ pub fn analyze_cached(
         }
     }
     report.defined = objects;
+    report.shippers = files;
     report
 }
 
