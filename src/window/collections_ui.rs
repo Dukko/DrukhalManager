@@ -38,6 +38,7 @@ impl Window {
             }
         };
         self.collections.replace(loaded);
+        self.collections_loaded.set(true);
 
         let action = |name: &str, f: fn(&Rc<Window>)| {
             let a = gio::SimpleAction::new(name, None);

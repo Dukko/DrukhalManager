@@ -177,6 +177,9 @@ struct Window {
     /// Every notification, kept to read later.
     bell: Rc<notifications::Bell>,
     collections: RefCell<Collections>,
+    /// Set once `setup_collections` has read the saved collections. Before
+    /// that, `collections` holds a placeholder, and nothing may persist it.
+    collections_loaded: Cell<bool>,
     collection_button: gtk::MenuButton,
     /// Offers to restore the active collection when the game's load order
     /// was changed elsewhere.
@@ -554,6 +557,7 @@ pub fn build(
         paths,
         game,
         collections: RefCell::new(Collections::starting_with(Vec::new())),
+        collections_loaded: Cell::new(false),
         collection_button,
         restore_banner,
         hunt_banner: hunt_banner.clone(),
@@ -707,9 +711,17 @@ pub fn build(
             glib::ControlFlow::Break
         }
     });
+    // Before `sync_patch`: it opens the active collection's merged patch, and
+    // `patch_target` saves the collections when it gives one a folder. That
+    // must not happen while `collections` still holds the placeholder made at
+    // construction, or that placeholder (Default, with no mods) would be
+    // written over the user's collections on every launch.
+    ui.setup_collections();
     if let Err(e) = ui.sync_patch() {
         ui.add_toast(adw::Toast::builder().title(e).timeout(0).build());
     }
+    // The patch folder just given to the collection may add menu entries.
+    ui.rebuild_collection_menu();
     let weak = Rc::downgrade(&ui);
     repair_banner.connect_button_clicked(move |_| {
         if let Some(ui) = weak.upgrade() {
@@ -717,7 +729,6 @@ pub fn build(
         }
     });
     ui.update_repair_banner();
-    ui.setup_collections();
     ui.setup_overview();
     ui.setup_selection(app);
     disabled_order.set_selected(match ui.settings.borrow().disabled_order {

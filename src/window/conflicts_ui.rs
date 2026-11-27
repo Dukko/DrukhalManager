@@ -1285,7 +1285,11 @@ impl Window {
             .collections
             .borrow_mut()
             .patch_target(legacy, |folder| user_dir.join("mod").join(folder).exists());
+        // Never while `collections` is still the placeholder built with the
+        // window: that would write an empty Default collection over the
+        // saved ones. `setup_collections` runs before the first caller.
         if given
+            && self.collections_loaded.get()
             && let Err(e) = self
                 .collections
                 .borrow()
