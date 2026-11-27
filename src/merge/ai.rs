@@ -1662,7 +1662,7 @@ fn output_budget(provider: &Provider, system: &str, prompt: &str) -> Result<u64,
             limit = max_in
         ));
     }
-    Ok((tokens(prompt) / 2 + 4096).clamp(4096, max_out))
+    Ok((tokens(prompt) / 2 + 8192).min(max_out))
 }
 
 fn is_unsupported_param_error(status: u16, reply: &Value) -> bool {
@@ -1756,6 +1756,18 @@ fn complete_as(
             base_url, model, api_key, &system, prompt, max_tokens, reply, cancel, on,
         ),
     };
+    // The stream parsers can only say the reply was cut off; name the model
+    // and the way out here, where it is known.
+    let result = result.map_err(|e| {
+        if e == t!("The merged result was too long and got cut off.") {
+            tf!(
+                "{model} hit its output limit before finishing the merge. Try again, choose a model with a larger output limit, or merge this object by hand.",
+                model = provider.model_name()
+            )
+        } else {
+            e
+        }
+    });
     let took = started.elapsed().as_secs_f32();
     match &result {
         Ok(Merged { usage: Some(u), .. }) => {
@@ -2110,6 +2122,19 @@ fn count_thinking(total: &mut usize, added: usize) -> Result<(), String> {
     Ok(())
 }
 
+/// Logs what a reply cut off at the output limit had used, so a bug report
+/// shows whether the model spent the budget on reasoning.
+fn log_cut_off(usage: Option<&Usage>) {
+    if let Some(u) = usage {
+        crate::diagnostics::log!(
+            "ai",
+            "Reply cut off at the output limit after {} input and {} output tokens",
+            u.input,
+            u.output
+        );
+    }
+}
+
 /// Reads Server-Sent Events, calling `f` with each event's data.
 fn read_sse(
     mut reader: impl BufRead,
@@ -2206,7 +2231,10 @@ fn anthropic_stream(
     })?;
     match stop_reason.as_deref() {
         Some("refusal") => Err(t!("Claude declined to merge this object.")),
-        Some("max_tokens") => Err(t!("The merged result was too long and got cut off.")),
+        Some("max_tokens") => {
+            log_cut_off(Some(&usage));
+            Err(t!("The merged result was too long and got cut off."))
+        }
         _ => parse_reply(reply, &text).map(|m| Merged {
             usage: Some(usage),
             ..m
@@ -2383,7 +2411,10 @@ fn openai_stream(
         Ok(())
     })?;
     match finish.as_deref() {
-        Some("length") => Err(t!("The merged result was too long and got cut off.")),
+        Some("length") => {
+            log_cut_off(usage.as_ref());
+            Err(t!("The merged result was too long and got cut off."))
+        }
         Some("content_filter") => Err(t!("The model declined to merge this object.")),
         _ => parse_reply(reply, split_think(&raw).1).map(|m| Merged { usage, ..m }),
     }
@@ -2718,7 +2749,11 @@ fn parse_openai(status: u16, reply: &Value) -> Result<Merged, String> {
     }
     let choice = &reply["choices"][0];
     match choice["finish_reason"].as_str() {
-        Some("length") => return Err(t!("The merged result was too long and got cut off.")),
+        Some("length") => {
+            let usage = openai_usage(&reply["usage"]);
+            log_cut_off(usage.as_ref());
+            return Err(t!("The merged result was too long and got cut off."));
+        }
         Some("content_filter") => return Err(t!("The model declined to merge this object.")),
         _ => {}
     }
@@ -3617,6 +3652,39 @@ mod tests {
             (result.unwrap().script, thinking.as_str()),
             ("c = {}".to_owned(), "R")
         );
+    }
+
+    #[test]
+    fn short_prompts_reserve_room_for_reasoning() {
+        let provider = Provider::OpenAiCompatible {
+            base_url: "http://localhost".into(),
+            model: "m".into(),
+            api_key: String::new(),
+        };
+        assert!(output_budget(&provider, "sys", "tiny").unwrap() >= 8192);
+    }
+
+    #[test]
+    fn names_the_model_when_the_reply_is_cut_off() {
+        use std::io::Write;
+        let (url, _) = serve(|mut stream| {
+            read_request(&mut stream);
+            let body = "data: {\"choices\":[{\"delta\":{\"content\":\"{\"},\"finish_reason\":\"length\"}],\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":20}}\n\ndata: [DONE]\n\n";
+            write!(
+                stream,
+                "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+                body.len()
+            )
+            .unwrap();
+        });
+        let provider = Provider::OpenAiCompatible {
+            base_url: url,
+            model: "reasoner-x".into(),
+            api_key: String::new(),
+        };
+        let err = complete(&provider, "sys", "prompt", &mut |_| {}).unwrap_err();
+        assert!(err.contains("reasoner-x"), "{err}");
+        assert!(err.contains("output limit"), "{err}");
     }
 
     #[test]

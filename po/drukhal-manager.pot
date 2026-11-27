@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: DrukhalManager 2.7.42\n"
 "Report-Msgid-Bugs-To: https://github.com/Dukko/DrukhalManager/issues\n"
-"POT-Creation-Date: 2026-11-27 14:41+0000\n"
+"POT-Creation-Date: 2026-11-27 15:05+0000\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -2098,12 +2098,16 @@ msgstr ""
 msgid "This merge is too large for {model} (~{tokens} input tokens, limit {limit}); try splitting it into individual objects or merging two versions at a time."
 msgstr ""
 
-#: src/merge/ai.rs
-msgid "Claude declined to merge this object."
+#: src/merge/ai.rs src/merge/ai.rs src/merge/ai.rs src/merge/ai.rs
+msgid "The merged result was too long and got cut off."
 msgstr ""
 
-#: src/merge/ai.rs src/merge/ai.rs src/merge/ai.rs
-msgid "The merged result was too long and got cut off."
+#: src/merge/ai.rs
+msgid "{model} hit its output limit before finishing the merge. Try again, choose a model with a larger output limit, or merge this object by hand."
+msgstr ""
+
+#: src/merge/ai.rs
+msgid "Claude declined to merge this object."
 msgstr ""
 
 #: src/merge/ai.rs
