@@ -36,6 +36,13 @@
     <control>keyboard</control>
   </supports>
   <releases>
+    <release version="2.7.44" date="2026-11-27">
+      <description>
+        <ul>
+          <li>The Changed by the Game Update group is now listed after the object and file conflicts, just before Resolved, instead of pushing the mods' own categories down</li>
+        </ul>
+      </description>
+    </release>
     <release version="2.7.43" date="2026-11-27">
       <description>
         <p>Handles cut-off AI replies better:</p>

@@ -6,9 +6,9 @@
 #, fuzzy
 msgid ""
 msgstr ""
-"Project-Id-Version: DrukhalManager 2.7.43\n"
+"Project-Id-Version: DrukhalManager 2.7.44\n"
 "Report-Msgid-Bugs-To: https://github.com/Dukko/DrukhalManager/issues\n"
-"POT-Creation-Date: 2026-11-27 15:05+0000\n"
+"POT-Creation-Date: 2026-11-28 02:52+0000\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -704,15 +704,15 @@ msgid "Needs Attention"
 msgstr ""
 
 #: src/conflicts_view.rs
-msgid "Changed by the Game Update ({old} → {new})"
-msgstr ""
-
-#: src/conflicts_view.rs
 msgid "Overridden Files"
 msgstr ""
 
 #: src/conflicts_view.rs
 msgid "Overridden Files · {folder}"
+msgstr ""
+
+#: src/conflicts_view.rs
+msgid "Changed by the Game Update ({old} → {new})"
 msgstr ""
 
 #: src/conflicts_view.rs
