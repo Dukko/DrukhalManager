@@ -7,6 +7,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 use drukhal_core::load_order_state::State;
+use drukhal_core::merge::patch::{self, Patch, Print, Target};
 use drukhal_core::mods::collections::{self, Collections};
 use drukhal_core::mods::{self, Mod, checks};
 use drukhal_core::paradox::{game, launcher_db, steam};
@@ -25,6 +26,8 @@ pub struct Library {
     /// Each mod's problems (outdated, a requirement off or missing), by
     /// index into `state.mods`, for the current load order.
     pub issues: HashMap<usize, Vec<checks::Issue>>,
+    /// The active collection's merged patch, once it could be opened.
+    pub patch: Option<Patch>,
 }
 
 impl Library {
@@ -57,8 +60,9 @@ impl Library {
         diagnostics::log!("app", "{} mods found; game {}", found.len(), game.as_ref().and_then(|g| g.version.as_deref()).unwrap_or("not found"));
         let state = State::new(found);
         let collections = load_collections(&state);
-        let mut library = Self { user_dir, backup_dir: platform::data_dir().join("backups"), game, settings, collections, state, error, issues: HashMap::new() };
+        let mut library = Self { user_dir, backup_dir: platform::data_dir().join("backups"), game, settings, collections, state, error, issues: HashMap::new(), patch: None };
         library.recheck();
+        library.open_patch();
         library
     }
 
@@ -134,6 +138,7 @@ impl Library {
         let missing = self.state.set_enabled_ids(&mods);
         let saved = self.save()?;
         self.recheck();
+        self.open_patch();
         Ok(if missing.is_empty() {
             saved
         } else {
@@ -184,6 +189,130 @@ impl Library {
 
     pub fn mod_at(&self, i: usize) -> &Mod {
         &self.state.mods[i]
+    }
+
+    pub fn game_dir(&self) -> Option<PathBuf> {
+        self.game.as_ref().map(|g| g.dir.clone())
+    }
+
+    /// The active collection's merged patch, giving the collection one if
+    /// it has none yet.
+    pub fn patch_target(&mut self) -> Target {
+        let user_dir = self.user_dir.clone();
+        let legacy = Target::new(patch::LEGACY_FOLDER, "").root(&user_dir).is_dir();
+        let (target, given) = self.collections.patch_target(legacy, |folder| user_dir.join("mod").join(folder).exists());
+        if given && let Err(e) = self.collections.save(&collections::path()) {
+            diagnostics::log!("patch", "Could not save collections: {e}");
+        }
+        target
+    }
+
+    /// Opens the active collection's patch, so the views know what's merged.
+    pub fn open_patch(&mut self) {
+        let target = self.patch_target();
+        if self.patch.as_ref().is_some_and(|p| *p.target() == target) {
+            return;
+        }
+        self.patch = match Patch::open(&self.user_dir, &target) {
+            Ok(p) => Some(p),
+            Err(e) => {
+                diagnostics::log!("patch", "Could not read the merged patch: {e}");
+                None
+            }
+        };
+    }
+
+    /// Whether the patch has a merge for this object.
+    pub fn merged(&self, category: &str, key: &str) -> bool {
+        self.patch.as_ref().is_some_and(|p| p.get(category, key).is_some())
+    }
+
+    /// Whether the patch ships its own copy of this file.
+    pub fn merged_file(&self, path: &str) -> bool {
+        self.patch.as_ref().is_some_and(|p| p.get_file(path).is_some())
+    }
+
+    /// Saves a merged object into the patch. Returns what to tell the player.
+    pub fn save_merge(&mut self, category: &str, key: &str, script: &str, prints: Vec<Print>) -> Result<String, String> {
+        self.open_patch();
+        let game_dir = self.game_dir();
+        let version = self.game_version().map(str::to_owned);
+        let user_dir = self.user_dir.clone();
+        let patch = self.patch.as_mut().ok_or_else(|| t!("The merged patch couldn't be opened"))?;
+        patch.save_for_game(&user_dir, version.as_deref(), game_dir.as_deref(), category, key, script, prints).map_err(|e| tf!("Could not save the merged patch: {error}", error = e))?;
+        self.patch_saved()
+    }
+
+    /// Saves a file, as one mod ships it, into the patch.
+    pub fn save_file_merge(&mut self, path: &str, contents: &[u8], prints: Vec<Print>) -> Result<String, String> {
+        self.open_patch();
+        let version = self.game_version().map(str::to_owned);
+        let user_dir = self.user_dir.clone();
+        let patch = self.patch.as_mut().ok_or_else(|| t!("The merged patch couldn't be opened"))?;
+        patch.save_file(&user_dir, version.as_deref(), path, contents, prints).map_err(|e| tf!("Could not save the merged patch: {error}", error = e))?;
+        self.patch_saved()
+    }
+
+    /// Makes sure the patch is in the load order, last, once it has
+    /// content, and saves the load order if it had to be added.
+    fn patch_saved(&mut self) -> Result<String, String> {
+        let target = self.patch_target();
+        let index = match self.state.mods.iter().position(|m| m.id == target.id()) {
+            Some(i) => i,
+            None => {
+                let descriptor = std::fs::read_to_string(self.user_dir.join(target.id())).ok().and_then(|src| mods::Descriptor::parse(&src).ok()).unwrap_or_default();
+                self.state.mods.push(Mod {
+                    id: target.id(),
+                    descriptor,
+                    content: Some(target.root(&self.user_dir)),
+                    source: mods::Source::Local,
+                    load_position: None,
+                    error: None,
+                    steam: None,
+                    requires: Vec::new(),
+                });
+                self.state.mods.len() - 1
+            }
+        };
+        if self.state.enabled.contains(&index) {
+            return Ok(tf!("Saved to {name}", name = target.name.as_str()));
+        }
+        // Pinned to the end, like every change.
+        self.state.set_enabled(index, true);
+        self.save()?;
+        self.recheck();
+        Ok(tf!("Saved to {name}, which was added to the end of the load order", name = target.name.as_str()))
+    }
+
+    /// Ignores conflicts by key (see `merge::scan`), or by an ignore rule
+    /// line, and saves the settings.
+    pub fn ignore(&mut self, key: Option<String>, rule: Option<String>) -> Result<(), String> {
+        if let Some(key) = key {
+            self.settings.ignored.insert(key);
+        }
+        if let Some(rule) = rule {
+            if !self.settings.ignore_rules.is_empty() && !self.settings.ignore_rules.ends_with('\n') {
+                self.settings.ignore_rules.push('\n');
+            }
+            self.settings.ignore_rules.push_str(&rule);
+            self.settings.ignore_rules.push('\n');
+        }
+        self.save_settings()
+    }
+
+    /// Takes a key, or a rule line, out of what's ignored.
+    pub fn unignore(&mut self, key: Option<&str>, rule: Option<&str>) -> Result<(), String> {
+        if let Some(key) = key {
+            self.settings.ignored.remove(key);
+        }
+        if let Some(rule) = rule {
+            self.settings.ignore_rules = self.settings.ignore_rules.lines().filter(|l| l.trim() != rule.trim()).map(|l| format!("{l}\n")).collect();
+        }
+        self.save_settings()
+    }
+
+    pub fn save_settings(&self) -> Result<(), String> {
+        self.settings.save(&settings::path()).map_err(|e| tf!("Could not save settings: {error}", error = e))
     }
 }
 

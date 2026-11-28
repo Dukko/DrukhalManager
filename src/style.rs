@@ -34,7 +34,9 @@ pub fn pill(bg: Rgb, fg: Rgb, status: button::Status) -> button::Style {
         button::Status::Pressed => 0.12,
         _ => 0.0,
     };
-    button::Style { background: Some(Background::Color(c(bg.mix(fg, layer)))), text_color: c(fg), border: Border { radius: 999.0.into(), ..Border::default() }, shadow: Shadow::default(), snap: true }
+    // Disabled: faded, as Material's 38% content on a 12% container.
+    let (bg, text) = if status == button::Status::Disabled { (alpha(bg, 0.35), alpha(fg, 0.5)) } else { (c(bg.mix(fg, layer)), c(fg)) };
+    button::Style { background: Some(Background::Color(bg)), text_color: text, border: Border { radius: 999.0.into(), ..Border::default() }, shadow: Shadow::default(), snap: true }
 }
 
 /// The same, with a transparent resting state, for quiet buttons.
@@ -90,5 +92,12 @@ pub mod icons {
         UP = "go-up",
         DOWN_ARROW = "go-down",
         ADD = "list-add",
+        HIDE = "view-conceal",
+        AI = "io.github.dukko.DrukhalManager-ai",
+        OK = "emblem-ok",
+        REFRESH = "view-refresh",
+        NEXT = "go-next",
+        PREVIOUS = "go-previous",
+        SWAP = "document-edit",
     }
 }

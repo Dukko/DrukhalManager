@@ -12,6 +12,7 @@
 #[macro_use]
 extern crate drukhal_core;
 
+mod conflicts_view;
 mod library;
 mod mods_view;
 mod palette;
@@ -89,6 +90,7 @@ struct App {
     mode: Mode,
     library: Library,
     mods: mods_view::State,
+    conflicts: conflicts_view::State,
     /// The last thing that happened, and whether it went wrong.
     notice: Option<(String, bool)>,
     command: Option<String>,
@@ -101,7 +103,10 @@ enum Message {
     Palette(Palette),
     Mode(Mode),
     Mods(mods_view::Message),
+    Conflicts(conflicts_view::Message),
     Cursor(iced::Point),
+    /// The right button went down, after the cursor moved there.
+    RightPressed,
     /// The left button came up, wherever it was.
     Released,
     Escape,
@@ -137,8 +142,9 @@ impl App {
         };
         let library = Library::load();
         let mods = mods_view::State::new(&library);
-        let app = Self { palette, fixed_palette: args.palette, screenshot: args.screenshot, mode: args.mode, library, mods, notice: None, command: None, cursor: iced::Point::ORIGIN };
-        (app, shot)
+        let mut app = Self { palette, fixed_palette: args.palette, screenshot: args.screenshot, mode: args.mode, library, mods, conflicts: conflicts_view::State::new(), notice: None, command: None, cursor: iced::Point::ORIGIN };
+        let scan = if app.mode == Mode::Conflicts { app.conflicts.scan(&app.library).map(Message::Conflicts) } else { Task::none() };
+        (app, Task::batch([shot, scan]))
     }
 
     fn title(&self) -> String {
@@ -151,7 +157,25 @@ impl App {
             Message::Mode(m) => {
                 self.mode = m;
                 self.command = None;
+                // Conflicts describe the load order as it is now.
+                if m == Mode::Conflicts && self.conflicts.stale(&self.library) {
+                    return self.conflicts.scan(&self.library).map(Message::Conflicts);
+                }
             }
+            Message::Conflicts(m) => {
+                let opens_menu = matches!(m, conflicts_view::Message::OpenMenu(_));
+                let (task, notice) = self.conflicts.update(&mut self.library, m);
+                if opens_menu {
+                    self.conflicts.place_menu(self.cursor);
+                }
+                if let Some(notice) = notice {
+                    self.notice = Some(notice);
+                }
+                return task.map(Message::Conflicts);
+            }
+            // A click can arrive in the same batch as the move before it,
+            // after the menu opened at the old position: place it again.
+            Message::RightPressed => self.conflicts.place_menu(self.cursor),
             Message::Mods(m) => {
                 if let Some(notice) = self.mods.update(&mut self.library, m) {
                     self.notice = Some(notice);
@@ -162,11 +186,34 @@ impl App {
             Message::Escape => {
                 if self.command.is_some() {
                     self.command = None;
+                } else if self.mode == Mode::Conflicts {
+                    let _ = self.conflicts.update(&mut self.library, conflicts_view::Message::CloseMenu);
+                    let _ = self.conflicts.update(&mut self.library, conflicts_view::Message::CloseIgnore);
                 } else {
                     return self.update(Message::Mods(mods_view::Message::DragCancel));
                 }
             }
             Message::Key(key, modifiers) => {
+                if self.command.is_none() && self.mode == Mode::Conflicts && !self.conflicts.has_sheet() {
+                    use conflicts_view::{Message as M, Op};
+                    let message = match key.as_ref() {
+                        keyboard::Key::Character("z") if modifiers.command() => Some(M::Undo),
+                        keyboard::Key::Character("s") if modifiers.command() => Some(M::SaveMerge),
+                        keyboard::Key::Character("r") if modifiers.command() => Some(M::Scan),
+                        _ if modifiers.command() || modifiers.alt() => None,
+                        keyboard::Key::Character("]") => Some(M::StepBlock(1)),
+                        keyboard::Key::Character("[") => Some(M::StepBlock(-1)),
+                        keyboard::Key::Character("a") => Some(M::ApplyFocused(Op::Above)),
+                        keyboard::Key::Character("b") => Some(M::ApplyFocused(Op::Below)),
+                        keyboard::Key::Character("r") => Some(M::ApplyFocused(Op::Replace)),
+                        keyboard::Key::Character("j") => Some(M::Step(1)),
+                        keyboard::Key::Character("k") => Some(M::Step(-1)),
+                        _ => None,
+                    };
+                    if let Some(message) = message {
+                        return self.update(Message::Conflicts(message));
+                    }
+                }
                 if self.command.is_none() && self.mode == Mode::Mods && modifiers.command() {
                     let message = match key.as_ref() {
                         keyboard::Key::Character("s") => Some(mods_view::Message::Save),
@@ -232,6 +279,7 @@ impl App {
         let mouse = iced::event::listen_with(|event, _, _| match event {
             iced::Event::Mouse(iced::mouse::Event::CursorMoved { position }) => Some(Message::Cursor(position)),
             iced::Event::Mouse(iced::mouse::Event::ButtonReleased(iced::mouse::Button::Left)) => Some(Message::Released),
+            iced::Event::Mouse(iced::mouse::Event::ButtonPressed(iced::mouse::Button::Right)) => Some(Message::RightPressed),
             _ => None,
         });
         Subscription::batch([palette, keys, mouse])
@@ -249,7 +297,7 @@ impl App {
         let p = &self.palette;
         let body: Element<'_, Message> = match self.mode {
             Mode::Mods => self.mods.view(&self.library, p).map(Message::Mods),
-            Mode::Conflicts => conflicts_placeholder(p),
+            Mode::Conflicts => self.conflicts.view(&self.library, p).map(Message::Conflicts),
         };
         let status: Element<'_, Message> = match &self.notice {
             Some((message, error)) => row![
@@ -261,7 +309,7 @@ impl App {
             .into(),
             None => text(match self.mode {
                 Mode::Mods => self.mods.status(&self.library),
-                Mode::Conflicts => String::new(),
+                Mode::Conflicts => self.conflicts.status_line(&self.library),
             })
             .size(12)
             .color(c(p.muted))
@@ -269,6 +317,11 @@ impl App {
         };
         let main = container(column![self.header(), container(body).height(Fill), status].spacing(12).padding(12)).width(Fill).height(Fill).style(move |_| surface(p.window, p.on_window, 0.0));
         let mut layers = stack![main];
+        if self.mode == Mode::Conflicts
+            && let Some(overlay) = self.conflicts.overlay(p)
+        {
+            layers = layers.push(overlay.map(Message::Conflicts));
+        }
         if self.mode == Mode::Mods
             && let Some(name) = self.mods.dragging(&self.library)
         {
@@ -302,7 +355,7 @@ impl App {
             .style(move |_| surface(p.container_low, p.on_window, 999.0));
         let actions: Element<'_, Message> = match self.mode {
             Mode::Mods => self.mods.header_actions(&self.library, p).map(Message::Mods),
-            Mode::Conflicts => space().into(),
+            Mode::Conflicts => self.conflicts.header_actions(p).map(Message::Conflicts),
         };
         let kbd = button(text("Ctrl K").size(12).font(MONO).color(c(p.muted))).padding([4, 8]).on_press(Message::OpenCommands).style(move |_, s| ghost(p.muted, s));
         row![text("Drukhal").font(DISPLAY).size(30), space().width(12), switch, space().width(Fill), actions, kbd].spacing(10).align_y(iced::Center).into()
@@ -329,7 +382,19 @@ impl App {
                 list.push(Command { name: t!("Go to Conflicts"), keys: "Ctrl 2", run: Box::new(Message::Mode(Mode::Conflicts)) });
                 list
             }
-            Mode::Conflicts => vec![Command { name: t!("Go to Mods"), keys: "Ctrl 1", run: Box::new(Message::Mode(Mode::Mods)) }],
+            Mode::Conflicts => {
+                let conflicts = |name: String, keys: &'static str, m: conflicts_view::Message| Command { name, keys, run: Box::new(Message::Conflicts(m)) };
+                vec![
+                    conflicts(t!("Rescan"), "Ctrl R", conflicts_view::Message::Scan),
+                    conflicts(t!("Merge with AI"), "", conflicts_view::Message::MergeAi),
+                    conflicts(t!("Save merge"), "Ctrl S", conflicts_view::Message::SaveMerge),
+                    conflicts(t!("Next conflict"), "J", conflicts_view::Message::Step(1)),
+                    conflicts(t!("Previous conflict"), "K", conflicts_view::Message::Step(-1)),
+                    conflicts(t!("Ignore this conflict…"), "", conflicts_view::Message::OpenIgnore),
+                    conflicts(t!("Show ignored conflicts"), "", conflicts_view::Message::View(conflicts_view::View::Ignored)),
+                    Command { name: t!("Go to Mods"), keys: "Ctrl 1", run: Box::new(Message::Mode(Mode::Mods)) },
+                ]
+            }
         }
     }
 
@@ -364,23 +429,6 @@ impl App {
         let scrim = mouse_area(container(space()).width(Fill).height(Fill).style(|_| container::Style { background: Some(Background::Color(Color::from_rgba(0.0, 0.0, 0.0, 0.5))), ..Default::default() })).on_press(Message::CloseCommands);
         stack![scrim, container(opaque(card)).width(Fill).padding(iced::Padding { top: 110.0, ..iced::Padding::ZERO }).center_x(Fill)].into()
     }
-}
-
-/// Conflicts mode, until its port: what it will hold.
-fn conflicts_placeholder<'a>(p: &'a Palette) -> Element<'a, Message> {
-    container(
-        column![
-            text(t!("Conflicts")).size(20),
-            text(t!("Conflict scans and merging are being rebuilt for the new interface. The mockup in prototypes/iced-workbench shows where they're going: the queue, the versions side by side, adding blocks above or below, and comparing with the base game.")).size(13).color(c(p.muted)),
-        ]
-        .spacing(8)
-        .max_width(680),
-    )
-    .padding(20)
-    .width(Fill)
-    .height(Fill)
-    .style(move |_| surface(p.container_low, p.on_window, 24.0))
-    .into()
 }
 
 /// Where the colours came from, shortly.

@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: DrukhalManager 2.7.46\n"
 "Report-Msgid-Bugs-To: https://github.com/Dukko/DrukhalManager/issues\n"
-"POT-Creation-Date: 2026-11-28 13:57+0000\n"
+"POT-Creation-Date: 2026-11-28 14:13+0000\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -24,7 +24,7 @@ msgstr ""
 msgid "Last save: {empire}, {date}"
 msgstr ""
 
-#: core/src/i18n.rs core/src/i18n.rs src/mods_view.rs
+#: core/src/i18n.rs core/src/i18n.rs src/conflicts_view.rs src/mods_view.rs
 msgid "{count} mod"
 msgid_plural "{count} mods"
 msgstr[0] ""
@@ -178,7 +178,7 @@ msgstr ""
 msgid "{name} {missing}"
 msgstr ""
 
-#: core/src/merge/script_check.rs
+#: core/src/merge/script_check.rs src/conflicts_view.rs
 msgid "Could not read {file}: {error}"
 msgstr ""
 
@@ -654,6 +654,378 @@ msgstr ""
 msgid "No releases are published yet"
 msgstr ""
 
+#: src/conflicts_view.rs
+msgid "All"
+msgstr ""
+
+#: src/conflicts_view.rs src/conflicts_view.rs
+msgid "Needs merge"
+msgstr ""
+
+#: src/conflicts_view.rs src/conflicts_view.rs
+msgid "Simple"
+msgstr ""
+
+#: src/conflicts_view.rs
+msgid "Files"
+msgstr ""
+
+#: src/conflicts_view.rs src/conflicts_view.rs
+msgid "Done"
+msgstr ""
+
+#: src/conflicts_view.rs
+msgid "Set up an AI provider in the settings first"
+msgstr ""
+
+#: src/conflicts_view.rs
+msgid "The AI's merge didn't pass the checks: {reason}"
+msgstr ""
+
+#: src/conflicts_view.rs
+msgid "The merge failed"
+msgstr ""
+
+#: src/conflicts_view.rs
+msgid "Only {key}"
+msgstr ""
+
+#: src/conflicts_view.rs
+msgid "Just this conflict."
+msgstr ""
+
+#: src/conflicts_view.rs
+msgid "Everything in {folder}"
+msgstr ""
+
+#: src/conflicts_view.rs
+msgid "Every object conflict in this folder, now and after later scans."
+msgstr ""
+
+#: src/conflicts_view.rs src/conflicts_view.rs
+msgid "Whenever {mods} conflict"
+msgstr ""
+
+#: src/conflicts_view.rs src/conflicts_view.rs
+msgid "Any conflict between exactly these mods, wherever it is. Saved as an ignore rule."
+msgstr ""
+
+#: src/conflicts_view.rs
+msgid "Only {file}"
+msgstr ""
+
+#: src/conflicts_view.rs
+msgid "Just this file."
+msgstr ""
+
+#: src/conflicts_view.rs
+msgid "Every file in {folder}"
+msgstr ""
+
+#: src/conflicts_view.rs
+msgid "Every file override in this folder."
+msgstr ""
+
+#: src/conflicts_view.rs
+msgid "Scanning…"
+msgstr ""
+
+#: src/conflicts_view.rs
+msgid "Scanned in {seconds} s"
+msgstr ""
+
+#: src/conflicts_view.rs src/main.rs
+msgid "Rescan"
+msgstr ""
+
+#: src/conflicts_view.rs
+msgid "{count} conflicts between {mods} mods · {done} done · {hidden} ignored"
+msgstr ""
+
+#: src/conflicts_view.rs
+msgid "Scanning your mods…"
+msgstr ""
+
+#: src/conflicts_view.rs
+msgid "Not scanned yet"
+msgstr ""
+
+#: src/conflicts_view.rs
+msgid "Reading every enabled mod's files. A big load order takes a minute the first time; later scans only read what changed."
+msgstr ""
+
+#: src/conflicts_view.rs
+msgid "Scan the load order to find where mods overwrite each other."
+msgstr ""
+
+#: src/conflicts_view.rs
+msgid "Queue"
+msgstr ""
+
+#: src/conflicts_view.rs src/conflicts_view.rs
+msgid "Ignored"
+msgstr ""
+
+#: src/conflicts_view.rs
+msgid "{count} more; search to narrow them"
+msgid_plural "{count} more; search to narrow them"
+msgstr[0] ""
+msgstr[1] ""
+
+#: src/conflicts_view.rs
+msgid "{files} files couldn't be read, {mods} mods were skipped"
+msgstr ""
+
+#: src/conflicts_view.rs
+msgid "{count} conflict"
+msgid_plural "{count} conflicts"
+msgstr[0] ""
+msgstr[1] ""
+
+#: src/conflicts_view.rs
+msgid "{done} done · {left} to go"
+msgstr ""
+
+#: src/conflicts_view.rs
+msgid "Search objects and files"
+msgstr ""
+
+#: src/conflicts_view.rs
+msgid "Editing"
+msgstr ""
+
+#: src/conflicts_view.rs
+msgid "Nothing left to resolve"
+msgstr ""
+
+#: src/conflicts_view.rs
+msgid "Every conflict here is merged or ignored."
+msgstr ""
+
+#: src/conflicts_view.rs src/conflicts_view.rs
+msgid "In game"
+msgstr ""
+
+#: src/conflicts_view.rs
+msgid "Keep {name}'s"
+msgstr ""
+
+#: src/conflicts_view.rs
+msgid "The merged patch ships its own copy of this file."
+msgstr ""
+
+#: src/conflicts_view.rs
+msgid "Several mods ship this file; the game loads only the copy from the mod that loads last. Keeping one copies it into the merged patch."
+msgstr ""
+
+#: src/conflicts_view.rs src/conflicts_view.rs
+msgid "Ignore…"
+msgstr ""
+
+#: src/conflicts_view.rs
+msgid "Compare with"
+msgstr ""
+
+#: src/conflicts_view.rs
+msgid "the merge"
+msgstr ""
+
+#: src/conflicts_view.rs
+msgid "the base game"
+msgstr ""
+
+#: src/conflicts_view.rs
+msgid "Previous"
+msgstr ""
+
+#: src/conflicts_view.rs
+msgid "Next"
+msgstr ""
+
+#: src/conflicts_view.rs
+msgid "Reading the versions…"
+msgstr ""
+
+#: src/conflicts_view.rs
+msgid "Merging with AI…"
+msgstr ""
+
+#: src/conflicts_view.rs
+msgid "AI merge: {notes} Review it, then save."
+msgstr ""
+
+#: src/conflicts_view.rs
+msgid "Coloured lines are what each mod changed from the base game; green where every mod made the same change. A bar at the left marks what you can still add to the merge."
+msgstr ""
+
+#: src/conflicts_view.rs
+msgid "You're building a merge on {name}'s version, the one the game uses. Right-click a highlighted block in another version, or use [ ] and A B R."
+msgstr ""
+
+#: src/conflicts_view.rs
+msgid "The merged patch has a merge of this object. Saving again replaces it."
+msgstr ""
+
+#: src/conflicts_view.rs
+msgid "{reason}. In game now: {name}'s version."
+msgstr ""
+
+#: src/conflicts_view.rs
+msgid "In game now: {name}'s version, because {reason}."
+msgstr ""
+
+#: src/conflicts_view.rs
+msgid "No version could be read"
+msgstr ""
+
+#: src/conflicts_view.rs
+msgid "Missing: {mods}"
+msgstr ""
+
+#: src/conflicts_view.rs src/main.rs
+msgid "Save merge"
+msgstr ""
+
+#: src/conflicts_view.rs
+msgid "{count} lines · Ctrl+S"
+msgstr ""
+
+#: src/conflicts_view.rs src/mods_view.rs src/main.rs
+msgid "Undo"
+msgstr ""
+
+#: src/conflicts_view.rs
+msgid "Start over"
+msgstr ""
+
+#: src/conflicts_view.rs
+msgid "Keep {name}"
+msgstr ""
+
+#: src/conflicts_view.rs
+msgid "Merging…"
+msgstr ""
+
+#: src/conflicts_view.rs src/main.rs
+msgid "Merge with AI"
+msgstr ""
+
+#: src/conflicts_view.rs
+msgid "Set up AI in the settings"
+msgstr ""
+
+#: src/conflicts_view.rs
+msgid "In game · your merge"
+msgstr ""
+
+#: src/conflicts_view.rs
+msgid "right-click a block"
+msgstr ""
+
+#: src/conflicts_view.rs
+msgid "[ ]  blocks   A above   B below   R replace"
+msgstr ""
+
+#: src/conflicts_view.rs
+msgid "{count} line"
+msgid_plural "{count} lines"
+msgstr[0] ""
+msgstr[1] ""
+
+#: src/conflicts_view.rs
+msgid "line {n}"
+msgstr ""
+
+#: src/conflicts_view.rs
+msgid "lines {from}–{to}"
+msgstr ""
+
+#: src/conflicts_view.rs src/conflicts_view.rs src/conflicts_view.rs
+msgid "Before line {n}"
+msgstr ""
+
+#: src/conflicts_view.rs
+msgid "After line {n}"
+msgstr ""
+
+#: src/conflicts_view.rs
+msgid "{what} from {from} into {into}'s version"
+msgstr ""
+
+#: src/conflicts_view.rs
+msgid "Add above"
+msgstr ""
+
+#: src/conflicts_view.rs
+msgid "Add below"
+msgstr ""
+
+#: src/conflicts_view.rs
+msgid "Replace"
+msgstr ""
+
+#: src/conflicts_view.rs
+msgid "{lines} of the merge"
+msgstr ""
+
+#: src/conflicts_view.rs
+msgid "hides {count}"
+msgid_plural "hides {count}"
+msgstr[0] ""
+msgstr[1] ""
+
+#: src/conflicts_view.rs
+msgid "Ignore conflicts"
+msgstr ""
+
+#: src/conflicts_view.rs
+msgid "Ignored conflicts leave the queue. You can bring them back from Ignored."
+msgstr ""
+
+#: src/conflicts_view.rs
+msgid "Cancel"
+msgstr ""
+
+#: src/conflicts_view.rs
+msgid "Ignore"
+msgstr ""
+
+#: src/conflicts_view.rs
+msgid "Show again"
+msgstr ""
+
+#: src/conflicts_view.rs
+msgid "Ignore rule"
+msgstr ""
+
+#: src/conflicts_view.rs
+msgid "Nothing ignored yet. Ignore a conflict from its action bar."
+msgstr ""
+
+#: src/conflicts_view.rs
+msgid "What keeps conflicts out of the queue: single conflicts, whole folders, and ignore rules."
+msgstr ""
+
+#: src/conflicts_view.rs
+msgid "Object"
+msgstr ""
+
+#: src/conflicts_view.rs
+msgid "Every object in this folder"
+msgstr ""
+
+#: src/conflicts_view.rs
+msgid "Every file in this folder"
+msgstr ""
+
+#: src/conflicts_view.rs src/conflicts_view.rs
+msgid "File"
+msgstr ""
+
+#: src/conflicts_view.rs
+msgid "Base game"
+msgstr ""
+
 #: src/library.rs
 msgid "Could not save load order: {error}"
 msgstr ""
@@ -714,6 +1086,26 @@ msgstr ""
 msgid "Starting Stellaris…"
 msgstr ""
 
+#: src/library.rs src/library.rs
+msgid "The merged patch couldn't be opened"
+msgstr ""
+
+#: src/library.rs src/library.rs
+msgid "Could not save the merged patch: {error}"
+msgstr ""
+
+#: src/library.rs
+msgid "Saved to {name}"
+msgstr ""
+
+#: src/library.rs
+msgid "Saved to {name}, which was added to the end of the load order"
+msgstr ""
+
+#: src/library.rs
+msgid "Could not save settings: {error}"
+msgstr ""
+
 #: src/mods_view.rs src/mods_view.rs
 msgid "Load order"
 msgstr ""
@@ -768,10 +1160,6 @@ msgstr ""
 
 #: src/mods_view.rs
 msgid "{installed} mods installed · {on} in the load order · {game}"
-msgstr ""
-
-#: src/mods_view.rs src/main.rs
-msgid "Undo"
 msgstr ""
 
 #: src/mods_view.rs src/main.rs
@@ -920,7 +1308,7 @@ msgstr ""
 msgid "Mods"
 msgstr ""
 
-#: src/main.rs src/main.rs
+#: src/main.rs
 msgid "Conflicts"
 msgstr ""
 
@@ -941,15 +1329,27 @@ msgid "Go to Conflicts"
 msgstr ""
 
 #: src/main.rs
+msgid "Next conflict"
+msgstr ""
+
+#: src/main.rs
+msgid "Previous conflict"
+msgstr ""
+
+#: src/main.rs
+msgid "Ignore this conflict…"
+msgstr ""
+
+#: src/main.rs
+msgid "Show ignored conflicts"
+msgstr ""
+
+#: src/main.rs
 msgid "Go to Mods"
 msgstr ""
 
 #: src/main.rs
 msgid "Type a command"
-msgstr ""
-
-#: src/main.rs
-msgid "Conflict scans and merging are being rebuilt for the new interface. The mockup in prototypes/iced-workbench shows where they're going: the queue, the versions side by side, adding blocks above or below, and comparing with the base game."
 msgstr ""
 
 #: src/main.rs

@@ -32,6 +32,39 @@ MODS = [
 ]
 
 
+# Files some mods share, so the Conflicts view has something to show:
+# (mod index, path, contents). The game's own copies are in GAME_FILES.
+LAB = """building_research_lab_1 = {{
+\tbase_buildtime = 360
+\tcategory = research
+\tresources = {{
+\t\tcost = {{ minerals = {cost} }}
+\t\tupkeep = {{ energy = 2 }}
+\t\tproduces = {{
+\t\t\tphysics_research = 4
+\t\t\tsociety_research = 4{extra}
+\t\t}}
+\t}}{block}
+}}
+"""
+SHARED = [
+    (3, "common/buildings/gpm_research.txt", LAB.format(cost=300, extra="", block="\n\ttriggered_planet_modifier = {\n\t\tpotential = { has_modifier = gpm_crystal_caves }\n\t\tmodifier = { planet_researchers_produces_mult = 0.10 }\n\t}")),
+    (5, "common/buildings/ecc_labs.txt", LAB.format(cost=250, extra="\n\t\t\tengineering_research = 2", block="\n\tcountry_modifier = {\n\t\tpotential = { has_civic = civic_technocracy }\n\t}")),
+    (1, "common/technology/giga_tech.txt", "tech_mega_engineering = {\n\tcost = @tier5cost1\n\tarea = engineering\n\ttier = 5\n}\n"),
+    (6, "common/technology/zz_act_tech.txt", "tech_mega_engineering = {\n\tcost = @tier5cost1\n\tarea = engineering\n\ttier = 5\n}\n"),
+    (7, "common/ship_sizes/nsc_sizes.txt", "battleship = {\n\tmax_speed = 120\n\tmax_hitpoints = 3200\n}\n"),
+    (1, "common/ship_sizes/giga_sizes.txt", "battleship = {\n\tmax_speed = 100\n\tmax_hitpoints = 3000\n\tsection_slots = { mid = { locator = part1 } }\n}\n"),
+    (6, "events/act_relics.txt", "namespace = ancrel\ncountry_event = {\n\tid = ancrel.1004\n\ttitle = ancrel.1004.name\n\tis_triggered_only = yes\n}\n"),
+    (2, "events/upc_ancrel.txt", "namespace = ancrel\ncountry_event = {\n\tid = ancrel.1004\n\ttitle = ancrel.1004.name\n\tis_triggered_only = yes\n\tmean_time_to_happen = { days = 30 }\n}\n"),
+    (0, "interface/main_hud.gui", "guiTypes = { containerWindowType = { name = \"hud\" size = { x = 100 } } }\n"),
+    (8, "interface/main_hud.gui", "guiTypes = { containerWindowType = { name = \"hud\" size = { x = 120 } } }\n"),
+]
+GAME_FILES = [
+    ("common/buildings/00_research_buildings.txt", LAB.format(cost=300, extra="", block="")),
+    ("common/ship_sizes/00_ship_sizes.txt", "battleship = {\n\tmax_speed = 100\n\tmax_hitpoints = 3000\n}\n"),
+]
+
+
 def main(root: Path) -> None:
     if root.exists():
         shutil.rmtree(root)
@@ -44,7 +77,7 @@ def main(root: Path) -> None:
         steam_id = 2_100_000_000 + n
         content = workshop / str(steam_id)
         (content / "common/buildings").mkdir(parents=True)
-        (content / "common/buildings/demo.txt").write_text(f"demo_building_{n} = {{}}\n")
+        (content / f"common/buildings/demo_{n}.txt").write_text(f"demo_building_{n} = {{}}\n")
         body = (
             f'name="{name}"\n'
             f'supported_version="{version}"\n'
@@ -53,6 +86,10 @@ def main(root: Path) -> None:
             + ("dependencies={\n" + "".join(f'\t"{d}"\n' for d in deps) + "}\n" if deps else "")
             + f'remote_file_id="{steam_id}"\n'
         )
+        for (owner, path, text) in SHARED:
+            if owner == n:
+                (content / path).parent.mkdir(parents=True, exist_ok=True)
+                (content / path).write_text(text)
         (content / "descriptor.mod").write_text(body)
         (user / f"mod/ugc_{steam_id}.mod").write_text(body + f'path="{content}"\n')
         if on:
@@ -61,6 +98,9 @@ def main(root: Path) -> None:
 
     game = root / "game"
     game.mkdir()
+    for (path, text) in GAME_FILES:
+        (game / path).parent.mkdir(parents=True, exist_ok=True)
+        (game / path).write_text(text)
     exe = game / "stellaris"
     exe.write_text("#!/bin/sh\necho \"Stellaris (pretend) started with: $*\"\n")
     exe.chmod(0o755)
