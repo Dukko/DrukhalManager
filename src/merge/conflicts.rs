@@ -199,6 +199,12 @@ pub fn is_fios(category: &str) -> bool {
         .any(|(_, f)| category.eq_ignore_ascii_case(f) || is_under(category, f))
 }
 
+/// Whether `category` is the game's defines folder, whose keys are the single
+/// assignments inside blocks like `NGameplay = { ... }`.
+pub fn is_defines(category: &str) -> bool {
+    category.eq_ignore_ascii_case("common/defines") || is_under(category, "common/defines")
+}
+
 impl Report {
     /// Load positions of mods whose `replace_path` covers `category`.
     pub fn replace_path_mods(&self, category: &str) -> Vec<usize> {
@@ -421,7 +427,6 @@ fn reads(path: &str, languages: Option<&BTreeSet<String>>) -> bool {
 /// Folders whose objects the game merges rather than overrides.
 const MERGED_FOLDERS: &[&str] = &[
     "common/on_actions",
-    "common/defines",
     "common/random_names",
     "common/start_screen_messages",
 ];
@@ -703,6 +708,23 @@ pub fn object_key_for_entry(category: &str, entry: &Entry) -> Option<String> {
     {
         return None;
     }
+    // Defines are the single assignments inside a block, not the block: two
+    // mods can set different keys of `NGameplay` without conflicting.
+    if is_defines(category) {
+        let defines: Vec<&str> = block
+            .map(|b| {
+                b.iter()
+                    .filter_map(|e| match e {
+                        Entry::Assign { key, .. } if !key.starts_with('@') => {
+                            Some(key.as_str())
+                        }
+                        _ => None,
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        return (defines.len() == 1).then(|| format!("{key}.{}", defines[0]));
+    }
     if category == "events" || key.ends_with("_event") {
         return block.and_then(|b| b.scalar("id")).map(str::to_owned);
     }
@@ -747,6 +769,14 @@ pub fn object_key_for_entry(category: &str, entry: &Entry) -> Option<String> {
 fn object_keys(category: &str, src: &str) -> Result<Vec<String>, ScanError> {
     if category == "localisation" {
         return Ok(localisation_keys(src));
+    }
+    if is_defines(category) {
+        return super::source::define_index(src)
+            .map(|index| index.into_keys().collect())
+            .map_err(|e| ScanError {
+                message: e.message,
+                line: Some(e.line),
+            });
     }
     let entries = script::parse(src).map_err(|e| ScanError {
         message: e.message,
@@ -1695,6 +1725,10 @@ mod tests {
         assert_eq!(object_category("common/on_actions/x.txt"), None);
         assert_eq!(object_category("common/random_names/x.txt"), None);
         assert_eq!(object_category("common/start_screen_messages/x.txt"), None);
+        assert_eq!(
+            object_category("common/defines/x.txt").as_deref(),
+            Some("common/defines")
+        );
         for folder in [
             "common/colors",
             "common/country_limits/ownership_limits",
@@ -1977,6 +2011,49 @@ mod tests {
             report.objects[0].winner(),
             Some((0, Reason::FirstFile))
         );
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn defines_conflict_per_key() {
+        let root = std::env::temp_dir().join(format!("dm-defines-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        write(
+            &root.join("m1"),
+            &[(
+                "common/defines/m1.txt",
+                "NGameplay = {\n\tPOLICY_YEARS = 10\n\tOTHER = 1\n}\n",
+            )],
+        );
+        write(
+            &root.join("m2"),
+            &[(
+                "common/defines/m2.txt",
+                "NGameplay = {\n\tPOLICY_YEARS = 20\n\tTHIRD = 3\n}\n",
+            )],
+        );
+
+        let report = analyze(&[input(&root, "m1", &[]), input(&root, "m2", &[])], None);
+        assert_eq!(report.objects.len(), 1, "{:?}", report.objects);
+        let c = &report.objects[0];
+        assert_eq!(c.category, "common/defines");
+        assert_eq!(c.key, "NGameplay.POLICY_YEARS");
+        assert_eq!(c.winner(), Some((1, Reason::LastFile)));
+
+        // Different keys in the same block are not a conflict.
+        write(
+            &root.join("m1"),
+            &[("common/defines/m1.txt", "NGameplay = {\n\tA = 1\n}\n")],
+        );
+        write(
+            &root.join("m2"),
+            &[("common/defines/m2.txt", "NGameplay = {\n\tB = 2\n}\n")],
+        );
+        let report = analyze(&[input(&root, "m1", &[]), input(&root, "m2", &[])], None);
+        assert!(report.objects.is_empty(), "{:?}", report.objects);
+        assert!(report.defined.contains_key(&("common/defines".to_owned(), "NGameplay.A".to_owned())));
+        assert!(report.defined.contains_key(&("common/defines".to_owned(), "NGameplay.B".to_owned())));
 
         std::fs::remove_dir_all(root).unwrap();
     }

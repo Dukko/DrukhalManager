@@ -94,6 +94,12 @@ mod tests {
         assert!(validate("common/scripted_variables", "@my_cost", "@my_cost = 100").is_ok());
         assert!(validate("common/scripted_variables", "@my_cost", "@helper = 2\n@my_cost = 100").is_ok());
         assert!(validate("common/scripted_variables", "@my_cost", "@other = 100").is_err());
+
+        // A define is one key inside its block; the merged copy may bring the
+        // `@variable` lines it needs.
+        assert!(validate("common/defines", "NGameplay.POLICY_YEARS", "@policy = 10\nNGameplay = {\n\tPOLICY_YEARS = @policy\n}").is_ok());
+        assert!(validate("common/defines", "NGameplay.POLICY_YEARS", "NGameplay = {\n\tPOLICY_YEARS = 10\n\tOTHER = 1\n}").is_ok());
+        assert!(validate("common/defines", "NGameplay.POLICY_YEARS", "NGameplay = {\n\tOTHER = 1\n}").is_err());
     }
 
     #[test]

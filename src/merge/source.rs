@@ -7,7 +7,7 @@ use std::ops::Range;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
-use crate::paradox::script::{self, Entry};
+use crate::paradox::script::{self, Entry, Value};
 
 /// One version of an object, as written in one file.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -24,6 +24,89 @@ pub fn key_token(key: &str) -> &str {
     check.split_once(" → ").map_or(check, |(from, _)| from)
 }
 
+/// Whether `src` could define `key`, without parsing it. A define is keyed by
+/// `BLOCK.KEY`, so both parts have to appear.
+pub(crate) fn may_define(category: &str, key: &str, src: &str) -> bool {
+    if crate::merge::conflicts::is_defines(category) {
+        let (block, define) = key.split_once('.').unwrap_or((key, ""));
+        src.contains(block) && src.contains(define)
+    } else {
+        src.contains(key_token(key))
+    }
+}
+
+/// The defines in `src`, by `BLOCK.KEY`, each as a `BLOCK = { KEY = value }`
+/// definition that can be shown and saved on its own. The last definition of
+/// a key in the file wins, as in the game.
+pub(crate) fn define_index(src: &str) -> Result<HashMap<String, String>, script::ParseError> {
+    let top = script::parse_with_spans(src)?;
+    let vars: Vec<(&str, &str)> = top
+        .iter()
+        .filter_map(|(entry, range)| match entry {
+            Entry::Assign { key, .. } if key.starts_with('@') => {
+                Some((key.as_str(), &src[range.clone()]))
+            }
+            _ => None,
+        })
+        .collect();
+    let mut found = HashMap::new();
+    for (entry, range) in &top {
+        let Entry::Assign {
+            key: block,
+            value: Value::Block(_),
+            ..
+        } = entry
+        else {
+            continue;
+        };
+        let text = &src[range.clone()];
+        let (Some(open), Some(close)) = (first_open_brace(text), text.rfind('}')) else {
+            continue;
+        };
+        if close <= open {
+            continue;
+        }
+        let inner = &text[open + 1..close];
+        let children = script::parse_with_spans(inner)?;
+        for (child, child_range) in children {
+            let Entry::Assign { key: define, .. } = child else {
+                continue;
+            };
+            if define.starts_with('@') {
+                continue;
+            }
+            let child_text = &inner[child_range];
+            let mut definition = String::new();
+            for (var, var_text) in &vars {
+                if uses_variable(child_text, var) {
+                    definition.push_str(var_text);
+                    definition.push('\n');
+                }
+            }
+            definition.push_str(block);
+            definition.push_str(" = {\n\t");
+            definition.push_str(child_text.trim_end());
+            definition.push_str("\n}");
+            found.insert(format!("{block}.{define}"), definition);
+        }
+    }
+    Ok(found)
+}
+
+/// The first `{` in `text` that isn't inside a `#` comment.
+fn first_open_brace(text: &str) -> Option<usize> {
+    let mut comment = false;
+    for (i, byte) in text.bytes().enumerate() {
+        match byte {
+            b'#' if !comment => comment = true,
+            b'\n' => comment = false,
+            b'{' if !comment => return Some(i),
+            _ => {}
+        }
+    }
+    None
+}
+
 /// Finds the definition of `key` in `src`. For script objects this includes
 /// any file-local `@variables` the definition uses, since it can't be moved
 /// to another file without them.
@@ -31,8 +114,11 @@ pub fn extract(category: &str, key: &str, src: &str) -> Option<String> {
     if category == "localisation" {
         return localisation_line(key, src);
     }
-    if !src.contains(key_token(key)) {
+    if !may_define(category, key, src) {
         return None;
+    }
+    if crate::merge::conflicts::is_defines(category) {
+        return define_index(src).ok()?.remove(key);
     }
     let entries = script::parse_with_spans(src).ok()?;
     extract_parsed(category, key, src, &entries)
@@ -48,6 +134,9 @@ pub fn extract_parsed(
 ) -> Option<String> {
     if category == "localisation" {
         return localisation_line(key, src);
+    }
+    if crate::merge::conflicts::is_defines(category) {
+        return define_index(src).ok()?.remove(key);
     }
     let found = entries.iter().find(|(entry, _)| {
         crate::merge::conflicts::object_key_for_entry(category, entry).as_deref() == Some(key)
@@ -92,6 +181,9 @@ fn object_at_parsed(
     if category == "localisation" || line == 0 {
         return None;
     }
+    if crate::merge::conflicts::is_defines(category) {
+        return define_at(src, line);
+    }
     let start = if line == 1 {
         0
     } else {
@@ -104,6 +196,42 @@ fn object_at_parsed(
     let key = crate::merge::conflicts::object_key_for_entry(category, entry)?;
     let text = extract_parsed(category, &key, src, entries)?;
     Some((key, text))
+}
+
+/// The define covering `line` in a file, as [`object_at`] finds it.
+fn define_at(src: &str, line: usize) -> Option<(String, String)> {
+    if src.lines().nth(line.checked_sub(1)?)?.trim().starts_with('}') {
+        return None;
+    }
+    let nodes = script::parse_lines(src).ok()?;
+    let mut index = define_index(src).ok()?;
+    for (i, node) in nodes.iter().enumerate() {
+        let Some(block) = node.key.as_deref() else {
+            continue;
+        };
+        let Some(kids) = &node.kids else {
+            continue;
+        };
+        let block_end = nodes
+            .get(i + 1)
+            .map_or(usize::MAX, |next| next.line.saturating_sub(1));
+        if line < node.line || line > block_end {
+            continue;
+        }
+        for (j, kid) in kids.iter().enumerate() {
+            let Some(define) = kid.key.as_deref() else {
+                continue;
+            };
+            let end = kids
+                .get(j + 1)
+                .map_or(block_end, |next| next.line.saturating_sub(1));
+            if line >= kid.line && line <= end {
+                let key = format!("{block}.{define}");
+                return index.remove(&key).map(|text| (key, text));
+            }
+        }
+    }
+    None
 }
 
 /// Every object `src` defines, as [`extract`] would cut each one out, by
@@ -129,6 +257,9 @@ pub fn index(category: &str, src: &str) -> HashMap<String, String> {
             }
         }
         return found;
+    }
+    if crate::merge::conflicts::is_defines(category) {
+        return define_index(src).unwrap_or_default();
     }
     let Ok(entries) = script::parse_with_spans(src) else {
         return found;
@@ -284,7 +415,7 @@ impl Files {
             return extract_parsed(category, key, &self.text(root, file)?, &[]);
         }
         // As `extract` does: files that can't define it aren't parsed.
-        if !self.text(root, file)?.contains(key_token(key)) {
+        if !may_define(category, key, &self.text(root, file)?) {
             return None;
         }
         let (text, entries) = self.parsed(root, file)?;
@@ -590,6 +721,24 @@ mod tests {
             Some(tf.trim_end())
         );
 
+        let defines = "@policy = 10\nNGameplay = {\n\tPOLICY_YEARS = @policy\n\tOTHER = 5\n}\nNShips = {\n\tMAX = 3\n}\n";
+        assert_eq!(
+            extract("common/defines", "NGameplay.POLICY_YEARS", defines).as_deref(),
+            Some("@policy = 10\nNGameplay = {\n\tPOLICY_YEARS = @policy\n}")
+        );
+        assert_eq!(
+            extract("common/defines", "NGameplay.OTHER", defines).as_deref(),
+            Some("NGameplay = {\n\tOTHER = 5\n}")
+        );
+        assert_eq!(
+            object_at("common/defines", defines, 3).unwrap().0,
+            "NGameplay.POLICY_YEARS"
+        );
+        let indexed = index("common/defines", defines);
+        assert_eq!(indexed.len(), 3);
+        assert!(indexed.contains_key("NGameplay.POLICY_YEARS"));
+        assert!(indexed.contains_key("NShips.MAX"));
+
         let files = Files::default();
         let root = std::env::temp_dir().join(format!("dm-source-tf-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
@@ -607,5 +756,38 @@ mod tests {
             Some(tf.trim_end())
         );
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Checks every key of the game's own defines files parses back as a
+    /// one-key block. `DRUKHAL_GAME` is the game folder.
+    #[test]
+    #[ignore]
+    fn defines_index_the_game() {
+        let Some(game) = std::env::var_os("DRUKHAL_GAME").map(PathBuf::from) else {
+            println!("SURVEY skipped: set DRUKHAL_GAME");
+            return;
+        };
+        let dir = game.join("common/defines");
+        let mut files: Vec<PathBuf> = std::fs::read_dir(&dir)
+            .unwrap()
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| p.extension().is_some_and(|e| e == "txt"))
+            .collect();
+        files.sort();
+        let mut keys = 0;
+        for file in files {
+            let src = std::fs::read_to_string(&file).unwrap();
+            let index = define_index(&src).unwrap();
+            keys += index.len();
+            for (key, text) in index {
+                assert!(
+                    script::parse(&text).is_ok(),
+                    "{}: {key}:\n{text}",
+                    file.display()
+                );
+            }
+        }
+        println!("SURVEY defines files={} keys={keys}", std::fs::read_dir(&dir).unwrap().count());
     }
 }
