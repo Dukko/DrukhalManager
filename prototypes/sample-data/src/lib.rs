@@ -104,6 +104,8 @@ pub struct Conflict {
     /// The versions in load order; `winner` is the one the game uses.
     pub versions: Vec<Version>,
     pub winner: usize,
+    /// The base game's version, if it has the object.
+    pub vanilla: Option<&'static str>,
     pub why: &'static str,
     /// The scan found it needs no AI to merge.
     pub simple: Option<&'static str>,
@@ -127,6 +129,7 @@ pub fn conflicts() -> Vec<Conflict> {
                 },
             ],
             winner: 1,
+            vanilla: Some("building_research_lab_1 = {\n\tbase_buildtime = 360\n\tcategory = research\n\tresources = {\n\t\tcost = { minerals = 300 }\n\t\tupkeep = { energy = 2 }\n\t\tproduces = {\n\t\t\tphysics_research = 4\n\t\t\tsociety_research = 4\n\t\t}\n\t}\n}"),
             why: "its file name sorts last, and in this folder later files override earlier ones",
             simple: None,
         },
@@ -138,6 +141,7 @@ pub fn conflicts() -> Vec<Conflict> {
                 Version { mod_name: "Unofficial Patch Collection", file: "events/upc_ancrel.txt", text: "country_event = {\n\tid = ancrel.1004\n\ttitle = ancrel.1004.name\n\tis_triggered_only = yes\n\tmean_time_to_happen = { days = 30 }\n}" },
             ],
             winner: 0,
+            vanilla: None,
             why: "its file name sorts first, and this folder keeps the first definition it reads",
             simple: None,
         },
@@ -149,6 +153,7 @@ pub fn conflicts() -> Vec<Conflict> {
                 Version { mod_name: "Ancient Cache of Technologies", file: "common/technology/zz_act_tech.txt", text: "tech_mega_engineering = {\n\tcost = @tier5cost1\n\tarea = engineering\n\ttier = 5\n}" },
             ],
             winner: 1,
+            vanilla: Some("tech_mega_engineering = {\n\tcost = @tier5cost1\n\tarea = engineering\n\ttier = 5\n}"),
             why: "its file name sorts last, and in this folder later files override earlier ones",
             simple: Some("Every mod ships the same version"),
         },
@@ -160,6 +165,7 @@ pub fn conflicts() -> Vec<Conflict> {
                 Version { mod_name: "Gigastructural Engineering & More", file: "common/ship_sizes/giga_sizes.txt", text: "battleship = {\n\tmax_speed = 100\n\tmax_hitpoints = 3000\n}" },
             ],
             winner: 0,
+            vanilla: Some("battleship = {\n\tmax_speed = 100\n\tmax_hitpoints = 3000\n}"),
             why: "its file has the same name as another mod's, and this mod loads later",
             simple: None,
         },
@@ -171,6 +177,7 @@ pub fn conflicts() -> Vec<Conflict> {
                 Version { mod_name: "Unofficial Patch Collection", file: "localisation/english/upc_l_english.yml", text: " tech_mega_engineering:0 \"Mega Engineering\"" },
             ],
             winner: 0,
+            vanilla: None,
             why: "it's in a localisation replace folder, which overrides the others",
             simple: None,
         },

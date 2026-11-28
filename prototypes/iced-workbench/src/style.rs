@@ -98,5 +98,6 @@ pub mod icons {
         NEXT = "go-next",
         PREVIOUS = "go-previous",
         UPDATE = "software-update-available",
+        SWAP = "document-edit",
     }
 }

@@ -36,7 +36,8 @@ fn main() -> iced::Result {
 
 /// `--palette <file>`, `--screenshot <out.png>`, `--mode mods|conflicts`,
 /// `--commands` (opens the command palette), and for screenshots
-/// `--show menu|added|drag` (a context menu open, a block added, a drag
+/// `--show menu|added|base|ignore|drag` (a context menu open, a block
+/// added, the comparison with the base game, the ignore sheet, a drag
 /// under way).
 struct Args {
     palette: Option<PathBuf>,
@@ -86,6 +87,10 @@ enum Message {
     Cursor(iced::Point),
     /// The left button came up, wherever it was.
     Released,
+    /// The right button went down, after the cursor moved there.
+    RightPressed,
+    /// A key nothing else took, for the current mode's shortcuts.
+    Key(keyboard::Key, keyboard::Modifiers),
     Escape,
     Palette(Palette),
     Mode(Mode),
@@ -153,6 +158,8 @@ impl App {
         match args.show.as_deref() {
             Some("menu") => app.conflicts.demo_menu(iced::Point::new(330.0, 370.0)),
             Some("added") => app.conflicts.demo_added(),
+            Some("base") => app.conflicts.demo_base(),
+            Some("ignore") => app.conflicts.demo_ignore(),
             Some("drag") => {
                 app.mods.demo_drag();
                 app.cursor = iced::Point::new(560.0, 300.0);
@@ -166,12 +173,38 @@ impl App {
         match message {
             Message::Cursor(at) => self.cursor = at,
             Message::Released => self.mods.update(mods::Message::DragEnd),
+            // A click can arrive in the same batch as the move before it,
+            // after the menu opened at the old position: place it again.
+            Message::RightPressed => self.conflicts.place_menu(self.cursor),
+            Message::Key(key, modifiers) => {
+                if self.mode == Mode::Conflicts && self.command.is_none() && !self.conflicts.has_sheet() {
+                    use conflicts::{Message as M, Op};
+                    let message = match key.as_ref() {
+                        keyboard::Key::Character("z") if modifiers.command() => Some(M::Undo),
+                        keyboard::Key::Character("s") if modifiers.command() => Some(M::SaveMerge),
+                        _ if modifiers.command() || modifiers.alt() => None,
+                        keyboard::Key::Character("]") => Some(M::StepBlock(1)),
+                        keyboard::Key::Character("[") => Some(M::StepBlock(-1)),
+                        keyboard::Key::Character("a") => Some(M::ApplyFocused(Op::Above)),
+                        keyboard::Key::Character("b") => Some(M::ApplyFocused(Op::Below)),
+                        keyboard::Key::Character("r") => Some(M::ApplyFocused(Op::Replace)),
+                        keyboard::Key::Character("m") => Some(M::ApplyFocused(Op::Ai)),
+                        keyboard::Key::Character("j") => Some(M::Step(1)),
+                        keyboard::Key::Character("k") => Some(M::Step(-1)),
+                        _ => None,
+                    };
+                    if let Some(message) = message {
+                        self.conflicts.update(message);
+                    }
+                }
+            }
             Message::Escape => {
                 if self.command.is_some() {
                     self.command = None;
                 } else {
                     self.mods.update(mods::Message::DragCancel);
                     self.conflicts.update(conflicts::Message::CloseMenu);
+                    self.conflicts.update(conflicts::Message::CloseIgnore);
                 }
             }
             Message::Palette(p) => self.palette = p,
@@ -181,7 +214,7 @@ impl App {
             }
             Message::Mods(m) => self.mods.update(m),
             Message::Conflicts(m) => {
-                let opens_menu = matches!(m, conflicts::Message::OpenMenu { .. });
+                let opens_menu = matches!(m, conflicts::Message::OpenMenu(_));
                 self.conflicts.update(m);
                 if opens_menu {
                     self.conflicts.place_menu(self.cursor);
@@ -233,12 +266,13 @@ impl App {
                 keyboard::Key::Character("1") if modifiers.command() => Some(Message::Mode(Mode::Mods)),
                 keyboard::Key::Character("2") if modifiers.command() => Some(Message::Mode(Mode::Conflicts)),
                 keyboard::Key::Named(keyboard::key::Named::Escape) => Some(Message::Escape),
-                _ => None,
+                _ => Some(Message::Key(key.clone(), modifiers)),
             }
         });
         let mouse = iced::event::listen_with(|event, _, _| match event {
             iced::Event::Mouse(iced::mouse::Event::CursorMoved { position }) => Some(Message::Cursor(position)),
             iced::Event::Mouse(iced::mouse::Event::ButtonReleased(iced::mouse::Button::Left)) => Some(Message::Released),
+            iced::Event::Mouse(iced::mouse::Event::ButtonPressed(iced::mouse::Button::Right)) => Some(Message::RightPressed),
             _ => None,
         });
         Subscription::batch([palette, keys, mouse])
@@ -268,7 +302,7 @@ impl App {
             .style(move |_| surface(p.window, p.on_window, 0.0));
         let mut layers = stack![main];
         if self.mode == Mode::Conflicts
-            && let Some(menu) = self.conflicts.menu(p)
+            && let Some(menu) = self.conflicts.overlay(p)
         {
             layers = layers.push(menu.map(Message::Conflicts));
         }
