@@ -7,7 +7,8 @@ pkgdesc="Native Linux mod manager for Stellaris with AI-assisted merging, a fork
 arch=('x86_64' 'aarch64')
 url="https://github.com/Dukko/DrukhalManager"
 license=('MIT' 'OFL-1.1' 'Apache-2.0')
-depends=('gtk4' 'libadwaita' 'glib2' 'hicolor-icon-theme')
+# iced loads the windowing and graphics libraries when it starts.
+depends=('gcc-libs' 'glibc' 'gettext' 'libxkbcommon' 'wayland' 'libx11' 'libxcursor' 'libxi' 'libxrandr' 'vulkan-icd-loader' 'hicolor-icon-theme')
 makedepends=('cargo' 'git' 'gettext')
 provides=('drukhal-manager')
 conflicts=('drukhal-manager')

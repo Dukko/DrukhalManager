@@ -23,8 +23,8 @@ finish-args:
   - --filesystem=home
   # Libraries of the Flatpak version of Steam.
   - --filesystem=~/.var/app/com.valvesoftware.Steam:ro
-  # The user's GTK 4 stylesheet, so custom libadwaita colour schemes
-  # (Gradience, matugen, DankMaterialShell and the like) apply.
+  # The palette matugen, DankMaterialShell or Gradience write into the GTK 4
+  # stylesheet, which the app's colours follow.
   - --filesystem=xdg-config/gtk-4.0:ro
   # Omarchy's active theme, when XDG_CONFIG_HOME is outside ~/.config.
   - --filesystem=xdg-config/omarchy:ro

@@ -19,11 +19,11 @@ fi
 version=$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -1)
 output=${1:-po/drukhal-manager.pot}
 
-# The keywords mirror the macros in src/i18n.rs. Nothing else is extracted,
+# The keywords mirror the macros in core/src/i18n.rs. Nothing else is extracted,
 # so a string only becomes translatable by being wrapped in one of them.
 # Line numbers shift with every edit, so `--add-location file` leaves them
 # out: the template then survives changes that don't touch a string.
-xtr src/main.rs \
+xtr core/src/lib.rs src/main.rs \
     --output "$output" \
     --package-name DrukhalManager \
     --package-version "$version" \

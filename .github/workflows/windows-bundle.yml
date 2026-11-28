@@ -1,6 +1,6 @@
 name: Windows bundle
 
-# Builds DrukhalManager for Windows with the GTK it runs on
+# Builds DrukhalManager for Windows and the DLLs it needs
 # (packaging/windows/bundle.sh), checks it starts outside MSYS2 and uploads
 # the folder as an artifact to try out. Runs by hand, on PRs that touch the
 # packaging, and on a version tag. It also builds the installer
@@ -46,10 +46,6 @@ jobs:
           install: >-
             mingw-w64-ucrt-x86_64-gcc
             mingw-w64-ucrt-x86_64-pkgconf
-            mingw-w64-ucrt-x86_64-gtk4
-            mingw-w64-ucrt-x86_64-libadwaita
-            mingw-w64-ucrt-x86_64-librsvg
-            mingw-w64-ucrt-x86_64-adwaita-icon-theme
             mingw-w64-ucrt-x86_64-gettext
             mingw-w64-ucrt-x86_64-rust
       - name: Bundle
