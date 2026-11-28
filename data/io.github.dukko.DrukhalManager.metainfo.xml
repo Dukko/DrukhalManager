@@ -36,6 +36,14 @@
     <control>keyboard</control>
   </supports>
   <releases>
+    <release version="3.0.0-beta.2" date="2026-11-28" type="development">
+      <description>
+        <p>A second 3.0 test version, with the beta.1 features.</p>
+        <ul>
+          <li>Finished conflicts fold into a Done section at the bottom of the queue, so the ones left to resolve stay together</li>
+        </ul>
+      </description>
+    </release>
     <release version="3.0.0-beta.1" date="2026-11-28" type="development">
       <description>
         <p>A test version of 3.0, with a new interface. It's rebuilt in iced instead of GTK, in two separate modes: Mods for everyone, and Conflicts for those who merge. Your settings, collections, ignored conflicts and merged patches carry over. Some features of 2.7 aren't back yet; if you need them, stay on 2.7.46.</p>
