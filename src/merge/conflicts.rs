@@ -172,18 +172,20 @@ impl Reason {
 
 /// Folders where the game keeps the first definition of an object it
 /// reads rather than the last (FIOS = first in, only served), tagged
-/// with the Stellaris version verified against.
-/// Source: Irony Mod Manager Stellaris rules, verified against Stellaris 4.6.0.
+/// with the Stellaris version checked.
+/// Source: Irony Mod Manager's Stellaris rules, corrected against the
+/// Stellaris wiki's overwrite table (up to v4.5) and v4.6.0.
 const FIOS_RULES: &[(&str, &str)] = &[
+    ("4.6", "common/ambient_objects"),
     ("4.6", "common/component_sets"),
     ("4.6", "common/component_templates"),
     ("4.6", "common/event_chains"),
     ("4.6", "common/global_ship_designs"),
+    ("4.6", "common/scripted_loc"),
     ("4.6", "common/scripted_variables"),
     ("4.6", "common/section_templates"),
     ("4.6", "common/ship_behaviors"),
     ("4.6", "common/special_projects"),
-    ("4.6", "common/strategic_resources"),
     ("4.6", "events"),
     ("4.6", "common/solar_system_initializers"),
     ("4.6", "common/traits"),
@@ -424,6 +426,25 @@ const MERGED_FOLDERS: &[&str] = &[
     "common/start_screen_messages",
 ];
 
+/// Folders whose objects the game keeps every copy of rather than overriding,
+/// so there is nothing to merge. Unlike [`MERGED_FOLDERS`], a same-named file
+/// still replaces the earlier one, so file overrides are worth reporting.
+const DUPLICATE_FOLDERS: &[&str] = &[
+    // Duplicate phrase keys are all kept and weighed together: two mods'
+    // definitions of the same action add to each other rather than replace.
+    "common/diplo_phrases",
+    // Kept as duplicates, or additions only; a same-key definition in another
+    // file does not override, so there is nothing to merge object by object.
+    "common/colors",
+    "common/country_limits/ownership_limits",
+    "common/name_lists",
+    "common/observation_station_missions",
+    "common/species_names",
+    // Overriding one of these needs the whole same-named file replaced.
+    "common/strategic_resources",
+    "common/terraform",
+];
+
 /// Blocks the game adds to an existing object instead of replacing it,
 /// by folder: an object holding nothing but these blocks is an addition.
 pub const ADDITIVE_BLOCKS: &[(&str, &str)] =
@@ -640,6 +661,7 @@ pub(crate) fn object_category(path: &str) -> Option<String> {
     if dir.starts_with("common/")
         && !MERGED_FOLDERS
             .iter()
+            .chain(DUPLICATE_FOLDERS)
             .chain(FRAGMENT_FOLDERS)
             .any(|m| dir == *m || is_under(dir, m))
     {
@@ -1630,6 +1652,8 @@ mod tests {
         assert!(
             is_fios("common/governments/authorities")
                 && is_fios("common/traits")
+                && is_fios("common/scripted_loc")
+                && is_fios("common/ambient_objects")
                 && !is_fios("common/species_traits")
         );
         // Same names: the load order decides, either way round.
@@ -1671,6 +1695,18 @@ mod tests {
         assert_eq!(object_category("common/on_actions/x.txt"), None);
         assert_eq!(object_category("common/random_names/x.txt"), None);
         assert_eq!(object_category("common/start_screen_messages/x.txt"), None);
+        for folder in [
+            "common/colors",
+            "common/country_limits/ownership_limits",
+            "common/name_lists",
+            "common/observation_station_missions",
+            "common/species_names",
+            "common/strategic_resources",
+            "common/terraform",
+            "common/diplo_phrases",
+        ] {
+            assert_eq!(object_category(&format!("{folder}/x.txt")), None, "{folder}");
+        }
         assert_eq!(
             object_category("common/ambient_objects/x.txt").as_deref(),
             Some("common/ambient_objects")
@@ -1864,7 +1900,7 @@ mod tests {
         );
         assert_eq!(
             report_conflict.objects.len(),
-            8,
+            7,
             "same keys and names do conflict"
         );
         let mut keys: Vec<String> = report_conflict.objects.into_iter().map(|o| o.key).collect();
@@ -1878,7 +1914,6 @@ mod tests {
                 "SET_A",
                 "UTILITY_1",
                 "amb_1",
-                "pc_barren → pc_desert",
                 "rl_habitable_normal"
             ]
         );
@@ -1937,6 +1972,11 @@ mod tests {
         assert_eq!(report.objects.len(), 1, "{:?}", report.objects);
         assert_eq!(report.objects[0].category, "common/scripted_loc");
         assert_eq!(report.objects[0].key, "pf_ring_name");
+        // Scripted localisation keeps the first definition read.
+        assert_eq!(
+            report.objects[0].winner(),
+            Some((0, Reason::FirstFile))
+        );
 
         std::fs::remove_dir_all(root).unwrap();
     }
@@ -1960,6 +2000,52 @@ mod tests {
             "MERGED_FOLDERS should not emit FileConflict: {:?}",
             report.files
         );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn diplo_phrases_are_kept_not_merged_as_objects() {
+        let root = std::env::temp_dir().join(format!("dm-diplo-phrases-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        // The game keeps every copy of a phrase key and weighs them together,
+        // so definitions from different mods add up instead of replacing.
+        write(
+            &root.join("m1"),
+            &[(
+                "common/diplo_phrases/m1_phrases.txt",
+                "action_declare_war = {\n\tpropose = { LRSK_QCC_DOW_PROPOSE = { weight = { weight = 5 } } }\n}\n",
+            )],
+        );
+        write(
+            &root.join("m2"),
+            &[(
+                "common/diplo_phrases/m2_phrases.txt",
+                "action_declare_war = {\n\tpropose = { MEM_NE0CH_DOW_PROPOSE = { weight = { weight = 1000 } } }\n}\n",
+            )],
+        );
+
+        let report = analyze(&[input(&root, "m1", &[]), input(&root, "m2", &[])], None);
+        assert!(report.objects.is_empty(), "{:?}", report.objects);
+        assert!(
+            !report
+                .defined
+                .keys()
+                .any(|(category, _)| category.eq_ignore_ascii_case("common/diplo_phrases"))
+        );
+
+        // A same-named file still replaces the earlier one whole, which is a
+        // real file conflict even though the objects are never one.
+        write(
+            &root.join("m2"),
+            &[(
+                "common/diplo_phrases/m1_phrases.txt",
+                "action_declare_war = {\n\tpropose = { MEM_NE0CH_DOW_PROPOSE = { weight = { weight = 1000 } } }\n}\n",
+            )],
+        );
+        let report = analyze(&[input(&root, "m1", &[]), input(&root, "m2", &[])], None);
+        assert!(report.objects.is_empty(), "{:?}", report.objects);
+        assert_eq!(report.files.len(), 1, "{:?}", report.files);
+        assert_eq!(report.files[0].path, "common/diplo_phrases/m1_phrases.txt");
         std::fs::remove_dir_all(root).unwrap();
     }
 
