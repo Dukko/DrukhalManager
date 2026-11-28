@@ -496,19 +496,6 @@ pub fn build(analysis: &Rc<Analysis>, rescan: gtk::Button, hooks: Rc<MergeHooks>
 
     let mut groups = Vec::new();
     groups.push(Group { title: t!("Needs Attention"), folder_key: None, folder: None, merge_all: false, attention: true, items: Vec::new() });
-    if let Some((old, new)) = &analysis.behind_versions {
-        let behind_items: Vec<Item> = behind.iter().copied().map(Item::Behind).collect();
-        if !behind_items.is_empty() {
-            groups.push(Group {
-                title: tf!("Changed by the Game Update ({old} → {new})", old = old, new = new),
-                folder_key: None,
-                folder: None,
-                merge_all: true,
-                attention: false,
-                items: behind_items,
-            });
-        }
-    }
     let mut by_category: BTreeMap<&str, Vec<Item>> = BTreeMap::new();
     for &i in &objects {
         by_category.entry(&report.objects[i].category).or_default().push(Item::Object(i));
@@ -524,6 +511,21 @@ pub fn build(analysis: &Rc<Analysis>, rescan: gtk::Button, hooks: Rc<MergeHooks>
         let title = if folder.is_empty() { t!("Overridden Files") } else { tf!("Overridden Files · {folder}", folder = folder) };
         let merge_all = items.iter().any(|i| matches!(i, Item::File(f) if file_merge::mergeable(&report.files[*f].path)));
         groups.push(Group { title, folder_key: Some(files_folder_key(folder)), folder: (!folder.is_empty()).then(|| folder.to_owned()), merge_all, attention: false, items });
+    }
+    // Last before Resolved: game-update objects are less common than ordinary
+    // conflicts, and this keeps them out of the way of the mods' own folders.
+    if let Some((old, new)) = &analysis.behind_versions {
+        let behind_items: Vec<Item> = behind.iter().copied().map(Item::Behind).collect();
+        if !behind_items.is_empty() {
+            groups.push(Group {
+                title: tf!("Changed by the Game Update ({old} → {new})", old = old, new = new),
+                folder_key: None,
+                folder: None,
+                merge_all: true,
+                attention: false,
+                items: behind_items,
+            });
+        }
     }
 
     // The sidebar.
