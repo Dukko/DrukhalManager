@@ -63,6 +63,33 @@ pub fn mods() -> Vec<Mod> {
     mods
 }
 
+/// A line about the mod, as its Workshop page might open.
+pub fn about(name: &str) -> &'static str {
+    match name {
+        "UI Overhaul Dynamic" => "A rebuilt interface that scales to any resolution, and the base many UI mods build on.",
+        "Gigastructural Engineering & More" => "Hundreds of megastructures, new crises and end-game threats.",
+        "Unofficial Patch Collection" => "Fixes for bugs in the base game's scripts and events.",
+        "Guilli's Planet Modifiers" => "New planet features, modifiers and the buildings that use them.",
+        "Expanded Stellaris Traditions" => "More tradition trees, and more choice within each.",
+        "Ethics & Civics Classic" => "Extra civics and ethics, balanced against the base game's.",
+        "Ancient Cache of Technologies" => "Late-game technologies and the relics that unlock them.",
+        "NSC3 – New Ship Classes" => "New ship sizes from dreadnoughts to flagships, with their sections.",
+        "Real Space 4.0" => "Realistic star systems, skyboxes and lighting.",
+        "Dark UI" => "A darker skin for the game's interface.",
+        "Drukhal merged patch" => "Made by DrukhalManager: the merges you've saved.",
+        _ => "",
+    }
+}
+
+/// Mods it needs loaded first, by name.
+pub fn needs(name: &str) -> &'static [&'static str] {
+    match name {
+        "NSC3 – New Ship Classes" | "Gigastructural Engineering & More" => &["UI Overhaul Dynamic"],
+        "Dark UI" => &["UI Overhaul Dynamic"],
+        _ => &[],
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Version {
     pub mod_name: &'static str,

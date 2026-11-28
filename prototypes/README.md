@@ -1,16 +1,30 @@
-# Native UI prototypes
+# Native UI prototype (iced)
 
-Two GTK-free mockups of DrukhalManager's main window, to compare toolkits
-and layouts before committing to a port. They show sample data only; they
-don't read your mods.
+A GTK-free mockup of DrukhalManager's main window in
+[iced](https://iced.rs) 0.14, the toolkit COSMIC is built on. It shows
+sample data only; it doesn't read your mods.
 
-| Folder | Toolkit | Layout |
-| --- | --- | --- |
-| `iced-workbench/` | [iced](https://iced.rs) 0.14 (the toolkit COSMIC is built on) | Three panes: views rail, load order with conflict heat, inspector. Ctrl+K command palette. |
-| `slint-resolve/` | [Slint](https://slint.dev) 1.19 | Conflicts first: the conflict queue, the versions side by side with the one the game uses marked, and the merge actions. |
+## Two modes that don't overlap
 
-Both take their colours from `palette/`, which reads the same sources the
-GTK app does, in the same order, and reloads them live:
+The app splits into two halves, switched from the header (Ctrl+1 / Ctrl+2):
+
+- **Mods** is for everyone: the load order, playsets and collections,
+  launching and the game's logs. It never mentions conflicts: no counts,
+  no win/lose bars, no merge buttons. Someone who never resolves a
+  conflict can use the whole app from here.
+- **Conflicts** is for those who want it: the queue the last scan found,
+  each conflict's versions side by side with the one the game uses
+  marked, and keeping a version, merging with AI or ignoring it. The
+  merged patches and ignore rules live here too.
+
+The mode switch carries no badge, so the Mods side doesn't nudge anyone
+towards conflicts. Ctrl+K opens a command palette with only the current
+mode's commands, plus one to go to the other mode.
+
+## Colours
+
+`palette/` reads the same sources the GTK app does, in the same order, and
+reloads them live:
 
 1. `~/.config/gtk-4.0/gtk.css`: the `@define-color` lines matugen,
    DankMaterialShell or Gradience write (`accent_bg_color`,
@@ -19,39 +33,16 @@ GTK app does, in the same order, and reloads them live:
    `~/.config/omarchy/current/theme/` (`colors.toml`, `light.mode`).
 3. A built-in Material 3 dark palette.
 
+The tonal surfaces are worked out from those as `src/theme/material.css`
+does, and the fonts and Material icons are the GTK app's own.
+
 ## Screenshots
 
-`iced-workbench` with Omarchy's Tokyo Night, Catppuccin Latte (light), and
-a matugen palette with the command palette open:
-
-![iced, Tokyo Night](shots/iced-tokyo-night.png)
-![iced, Catppuccin Latte](shots/iced-catppuccin-latte.png)
-![iced, matugen, command palette](shots/iced-matugen-palette-open.png)
-
-`slint-resolve` with Omarchy's Gruvbox, matugen, and Catppuccin Latte:
-
-![Slint, Gruvbox](shots/slint-gruvbox.png)
-![Slint, matugen](shots/slint-matugen.png)
-![Slint, Catppuccin Latte](shots/slint-catppuccin-latte.png)
-
-## How the toolkits compare so far
-
-- **iced**: everything is Rust, in the Elm style (state, messages,
-  `view`). Async work fits through `Task` and `Subscription`, so the
-  scan's `spawn_blocking` jobs map over directly. Styling is a closure per
-  widget, so the Material look lives in plain Rust helpers. COSMIC is
-  built on it, so Wayland, IME and accessibility get steady attention.
-- **Slint**: the layout is a separate `.slint` file with live preview in
-  its editor tooling. It reads well for dense, designed screens and
-  rebinding colours is one global. Its built-in widgets are fewer,
-  and anything custom (the diff view, drag reordering) is drawn by hand.
-  It's licensed GPLv3, under a royalty-free licence for desktop apps
-  (which asks for a visible Slint attribution), or commercially; the
-  royalty-free one would cover this app, but read its terms first.
-- Both draw the same fonts (Google Sans Flex, Fira Code, DM Serif
-  Display) and Material icons the GTK app uses, and both render through
-  wgpu/femtovg or a software renderer, so Windows comes along later
-  without a second UI.
+| | Mods | Conflicts |
+| --- | --- | --- |
+| Omarchy Tokyo Night | ![](shots/mods-tokyo-night.png) | ![](shots/conflicts-tokyo-night.png) |
+| Omarchy Catppuccin Latte | ![](shots/mods-catppuccin-latte.png) | ![](shots/conflicts-catppuccin-latte.png) |
+| Command palette | ![](shots/mods-matugen-commands.png) (matugen) | ![](shots/conflicts-gruvbox-commands.png) (Omarchy Gruvbox) |
 
 ## Running
 
@@ -59,10 +50,11 @@ a matugen palette with the command palette open:
 cd prototypes/iced-workbench && cargo run --release
 ```
 
-```bash
-cd prototypes/slint-resolve && cargo run --release
-```
+- `--mode conflicts` starts in the Conflicts mode.
+- `--palette <file>` uses a specific `gtk.css`, `colors.toml` or Omarchy
+  theme folder instead of the desktop's; `samples/` has a few.
+- `--commands` opens the command palette.
+- `--screenshot <out.png>` saves the first frame and quits.
 
-`--palette <file>` uses a specific `gtk.css` or `colors.toml` instead, and
-`--screenshot <out.png>` saves the first frame and quits. The `samples/`
-folder has a few palettes to try.
+Without a GPU (a VM, CI), `ICED_BACKEND=tiny-skia` uses the software
+renderer.
