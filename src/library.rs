@@ -28,6 +28,10 @@ pub struct Library {
     pub issues: HashMap<usize, Vec<checks::Issue>>,
     /// The active collection's merged patch, once it could be opened.
     pub patch: Option<Patch>,
+    /// Its merges whose mods (or the game) changed since, from the last check.
+    pub stale: Vec<patch::Stale>,
+    /// The last conflict scan, for checking the patch against.
+    pub analysis: Option<std::sync::Arc<drukhal_core::merge::scan::Analysis>>,
 }
 
 impl Library {
@@ -60,7 +64,7 @@ impl Library {
         diagnostics::log!("app", "{} mods found; game {}", found.len(), game.as_ref().and_then(|g| g.version.as_deref()).unwrap_or("not found"));
         let state = State::new(found);
         let collections = load_collections(&state);
-        let mut library = Self { user_dir, backup_dir: platform::data_dir().join("backups"), game, settings, collections, state, error, issues: HashMap::new(), patch: None };
+        let mut library = Self { user_dir, backup_dir: platform::data_dir().join("backups"), game, settings, collections, state, error, issues: HashMap::new(), patch: None, stale: Vec::new(), analysis: None };
         library.recheck();
         library.open_patch();
         library
@@ -220,6 +224,83 @@ impl Library {
                 None
             }
         };
+        self.check_stale();
+    }
+
+    /// Each enabled mod's folder by id, and the game's, for checking the
+    /// patch's merges against what their sources hold now.
+    fn stale_roots(&self) -> HashMap<String, PathBuf> {
+        let mut roots: HashMap<String, PathBuf> =
+            self.state.enabled.iter().filter_map(|&i| Some((self.state.mods[i].id.clone(), mods::archive::cached(self.state.mods[i].content.as_deref()?)?))).collect();
+        if let Some(dir) = self.game_dir() {
+            roots.insert(patch::VANILLA.to_owned(), dir);
+        }
+        roots
+    }
+
+    /// Checks the patch's merges against their sources now, marking those
+    /// whose only change can be taken as it is (a picked version that
+    /// changed). The last scan, when there is one, knows every enabled
+    /// mod's definitions, so merges also notice a mod that started defining
+    /// their object after they were made.
+    pub fn check_stale(&mut self) {
+        let roots = self.stale_roots();
+        let version = self.game_version().map(str::to_owned);
+        let analysis = self.analysis.clone();
+        let definitions = |category: &str, key: &str| -> Vec<(String, String, String)> {
+            let Some(a) = &analysis else { return Vec::new() };
+            a.report.defined.get(&(category.to_owned(), key.to_owned())).map(|defs| defs.iter().filter_map(|d| Some((a.ids.get(d.mod_position)?.clone(), a.name(d.mod_position).to_owned(), d.file.clone()))).collect()).unwrap_or_default()
+        };
+        let shippers = |path: &str| -> Vec<(String, String)> {
+            let Some(a) = &analysis else { return Vec::new() };
+            a.report.shippers.get(&path.to_lowercase()).map(|mods| mods.iter().filter_map(|(position, _)| Some((a.ids.get(*position)?.clone(), a.name(*position).to_owned()))).collect()).unwrap_or_default()
+        };
+        self.stale = match self.patch.as_mut() {
+            Some(patch) => patch.check_with(&roots, version.as_deref(), &definitions, &shippers),
+            None => Vec::new(),
+        };
+    }
+
+    /// Takes a merge (object or file) out of the patch.
+    pub fn remove_merge(&mut self, object: Option<&(String, String)>, path: &str) -> Result<String, String> {
+        let patch = self.patch.as_mut().ok_or_else(|| t!("The merged patch couldn't be opened"))?;
+        match object {
+            Some((category, key)) => patch.remove(category, key),
+            None => patch.remove_file(path),
+        }
+        .map_err(|e| tf!("Could not change the merged patch: {error}", error = e))?;
+        self.check_stale();
+        Ok(tf!("Removed {what} from the merged patch", what = object.map_or(path, |(_, k)| k.as_str())))
+    }
+
+    /// Replaces a picked version that its mod changed with the new one.
+    pub fn update_pick(&mut self, stale: &patch::Stale) -> Result<String, String> {
+        let roots = self.stale_roots();
+        let version = self.game_version().map(str::to_owned);
+        let user_dir = self.user_dir.clone();
+        let patch = self.patch.as_mut().ok_or_else(|| t!("The merged patch couldn't be opened"))?;
+        let picks: Vec<patch::Pick> = patch.picks_to_update(&roots).into_iter().filter(|p| p.matches(stale)).collect();
+        if picks.is_empty() {
+            return Err(t!("There's no newer version to take"));
+        }
+        patch.update_picks(&user_dir, version.as_deref(), picks).map_err(|e| tf!("Could not change the merged patch: {error}", error = e))?;
+        self.check_stale();
+        Ok(t!("Took the new version"))
+    }
+
+    /// Keeps a stale merge as it is: changes from now on are noticed
+    /// again, against `prints` (what its sources hold now).
+    pub fn keep_merge(&mut self, stale: &patch::Stale, prints: Vec<Print>) -> Result<String, String> {
+        let version = self.game_version().map(str::to_owned);
+        let patch = self.patch.as_mut().ok_or_else(|| t!("The merged patch couldn't be opened"))?;
+        let result = match (&stale.object, stale.content && !stale.untracked) {
+            // Only the saved script changed: accept it as it is.
+            (Some((category, key)), true) => patch.accept(category, key),
+            _ => patch.track(stale.object.as_ref(), &stale.path, prints, version.as_deref()),
+        };
+        result.map_err(|e| tf!("Could not change the merged patch: {error}", error = e))?;
+        self.check_stale();
+        Ok(t!("Kept as it is; changes to its mods will be noticed from now on"))
     }
 
     /// Whether the patch has a merge for this object.
@@ -240,6 +321,7 @@ impl Library {
         let user_dir = self.user_dir.clone();
         let patch = self.patch.as_mut().ok_or_else(|| t!("The merged patch couldn't be opened"))?;
         patch.save_for_game(&user_dir, version.as_deref(), game_dir.as_deref(), category, key, script, prints).map_err(|e| tf!("Could not save the merged patch: {error}", error = e))?;
+        self.check_stale();
         self.patch_saved()
     }
 
@@ -250,6 +332,7 @@ impl Library {
         let user_dir = self.user_dir.clone();
         let patch = self.patch.as_mut().ok_or_else(|| t!("The merged patch couldn't be opened"))?;
         patch.save_file(&user_dir, version.as_deref(), path, contents, prints).map_err(|e| tf!("Could not save the merged patch: {error}", error = e))?;
+        self.check_stale();
         self.patch_saved()
     }
 

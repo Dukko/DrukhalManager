@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: DrukhalManager 2.7.46\n"
 "Report-Msgid-Bugs-To: https://github.com/Dukko/DrukhalManager/issues\n"
-"POT-Creation-Date: 2026-11-28 14:13+0000\n"
+"POT-Creation-Date: 2026-11-28 14:24+0000\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -675,6 +675,24 @@ msgid "Done"
 msgstr ""
 
 #: src/conflicts_view.rs
+msgid "Merged {count} simple conflict into the patch"
+msgid_plural "Merged {count} simple conflicts into the patch"
+msgstr[0] ""
+msgstr[1] ""
+
+#: src/conflicts_view.rs
+msgid "This conflict is ignored; it's shown anyway"
+msgstr ""
+
+#: src/conflicts_view.rs src/conflicts_view.rs src/conflicts_view.rs
+msgid "Its mods don't conflict over it any more. Remove it from the patch, or enable them and rescan."
+msgstr ""
+
+#: src/conflicts_view.rs
+msgid "Scan first, so the mods it comes from are known"
+msgstr ""
+
+#: src/conflicts_view.rs
 msgid "Set up an AI provider in the settings first"
 msgstr ""
 
@@ -734,6 +752,14 @@ msgstr ""
 msgid "Scanned in {seconds} s"
 msgstr ""
 
+#: src/conflicts_view.rs src/conflicts_view.rs
+msgid "Merging…"
+msgstr ""
+
+#: src/conflicts_view.rs
+msgid "Merge simple ones"
+msgstr ""
+
 #: src/conflicts_view.rs src/main.rs
 msgid "Rescan"
 msgstr ""
@@ -760,6 +786,10 @@ msgstr ""
 
 #: src/conflicts_view.rs
 msgid "Queue"
+msgstr ""
+
+#: src/conflicts_view.rs
+msgid "Patch"
 msgstr ""
 
 #: src/conflicts_view.rs src/conflicts_view.rs
@@ -902,10 +932,6 @@ msgstr ""
 msgid "Keep {name}"
 msgstr ""
 
-#: src/conflicts_view.rs
-msgid "Merging…"
-msgstr ""
-
 #: src/conflicts_view.rs src/main.rs
 msgid "Merge with AI"
 msgstr ""
@@ -982,12 +1008,58 @@ msgstr ""
 msgid "Ignored conflicts leave the queue. You can bring them back from Ignored."
 msgstr ""
 
-#: src/conflicts_view.rs
+#: src/conflicts_view.rs src/settings_view.rs
 msgid "Cancel"
 msgstr ""
 
 #: src/conflicts_view.rs
 msgid "Ignore"
+msgstr ""
+
+#: src/conflicts_view.rs
+msgid "No merged patch yet"
+msgstr ""
+
+#: src/conflicts_view.rs
+msgid "Saving a merge or keeping a version creates the collection's merged patch, a mod that loads last."
+msgstr ""
+
+#: src/conflicts_view.rs
+msgid "Take the new version"
+msgstr ""
+
+#: src/conflicts_view.rs
+msgid "Keep as is"
+msgstr ""
+
+#: src/conflicts_view.rs
+msgid "Open"
+msgstr ""
+
+#: src/conflicts_view.rs
+msgid "Remove"
+msgstr ""
+
+#: src/conflicts_view.rs
+msgid "changed since"
+msgstr ""
+
+#: src/conflicts_view.rs
+msgid "up to date"
+msgstr ""
+
+#: src/conflicts_view.rs
+msgid "Nothing merged yet."
+msgstr ""
+
+#: src/conflicts_view.rs
+msgid "{count} changed since merged"
+msgid_plural "{count} changed since merged"
+msgstr[0] ""
+msgstr[1] ""
+
+#: src/conflicts_view.rs
+msgid "The mod that holds your merges, loading last. A merge goes stale when a mod it came from, or the game, changes it; keep it, take the new version, or open it to merge again."
 msgstr ""
 
 #: src/conflicts_view.rs
@@ -1086,8 +1158,28 @@ msgstr ""
 msgid "Starting Stellaris…"
 msgstr ""
 
-#: src/library.rs src/library.rs
+#: src/library.rs src/library.rs src/library.rs src/library.rs src/library.rs
 msgid "The merged patch couldn't be opened"
+msgstr ""
+
+#: src/library.rs src/library.rs src/library.rs
+msgid "Could not change the merged patch: {error}"
+msgstr ""
+
+#: src/library.rs
+msgid "Removed {what} from the merged patch"
+msgstr ""
+
+#: src/library.rs
+msgid "There's no newer version to take"
+msgstr ""
+
+#: src/library.rs
+msgid "Took the new version"
+msgstr ""
+
+#: src/library.rs
+msgid "Kept as it is; changes to its mods will be noticed from now on"
 msgstr ""
 
 #: src/library.rs src/library.rs
@@ -1102,7 +1194,7 @@ msgstr ""
 msgid "Saved to {name}, which was added to the end of the load order"
 msgstr ""
 
-#: src/library.rs
+#: src/library.rs src/settings_view.rs
 msgid "Could not save settings: {error}"
 msgstr ""
 
@@ -1138,7 +1230,7 @@ msgstr ""
 msgid "Search mods"
 msgstr ""
 
-#: src/mods_view.rs
+#: src/mods_view.rs src/settings_view.rs
 msgid "Save"
 msgstr ""
 
@@ -1300,6 +1392,74 @@ msgstr ""
 msgid "Continue last save"
 msgstr ""
 
+#: src/settings_view.rs
+msgid "Settings saved"
+msgstr ""
+
+#: src/settings_view.rs
+msgid "Settings saved. The keyring couldn't be reached ({error}), so the key is in the settings file, readable only by you."
+msgstr ""
+
+#: src/settings_view.rs
+msgid "A key is saved in the keyring; type a new one to replace it"
+msgstr ""
+
+#: src/settings_view.rs src/settings_view.rs
+msgid "API key"
+msgstr ""
+
+#: src/settings_view.rs
+msgid "Claude"
+msgstr ""
+
+#: src/settings_view.rs
+msgid "OpenRouter"
+msgstr ""
+
+#: src/settings_view.rs
+msgid "Other"
+msgstr ""
+
+#: src/settings_view.rs src/settings_view.rs
+msgid "Model"
+msgstr ""
+
+#: src/settings_view.rs
+msgid "Model, as OpenRouter names it"
+msgstr ""
+
+#: src/settings_view.rs
+msgid "Server, the part before /chat/completions"
+msgstr ""
+
+#: src/settings_view.rs
+msgid "Game data folder (empty: found on its own)"
+msgstr ""
+
+#: src/settings_view.rs
+msgid "Game executable (empty: found in the Steam libraries)"
+msgstr ""
+
+#: src/settings_view.rs
+msgid "Path to stellaris"
+msgstr ""
+
+#: src/settings_view.rs
+msgid "Launch options"
+msgstr ""
+
+#: src/settings_view.rs src/main.rs src/main.rs
+msgid "Settings"
+msgstr ""
+
+#: src/settings_view.rs
+msgid "AI merging"
+msgstr ""
+
+#: src/settings_view.rs
+msgid "The game"
+msgstr ""
+
 #: src/main.rs
 msgid "Dismiss"
 msgstr ""
@@ -1326,6 +1486,14 @@ msgstr ""
 
 #: src/main.rs
 msgid "Go to Conflicts"
+msgstr ""
+
+#: src/main.rs
+msgid "Merge every simple conflict"
+msgstr ""
+
+#: src/main.rs
+msgid "Show the merged patch"
 msgstr ""
 
 #: src/main.rs

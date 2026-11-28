@@ -93,6 +93,8 @@ pub mod icons {
         DOWN_ARROW = "go-down",
         ADD = "list-add",
         HIDE = "view-conceal",
+        SETTINGS = "open-menu",
+        PATCH = "package-x-generic",
         AI = "io.github.dukko.DrukhalManager-ai",
         OK = "emblem-ok",
         REFRESH = "view-refresh",

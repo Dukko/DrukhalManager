@@ -16,6 +16,7 @@ mod conflicts_view;
 mod library;
 mod mods_view;
 mod palette;
+mod settings_view;
 mod style;
 
 use std::path::PathBuf;
@@ -76,6 +77,9 @@ fn args() -> Args {
     args
 }
 
+/// The command palette's field, focused when it opens.
+const COMMAND_INPUT: &str = "command-input";
+
 /// The two halves of the app. Nothing of one shows in the other.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Mode {
@@ -94,6 +98,8 @@ struct App {
     /// The last thing that happened, and whether it went wrong.
     notice: Option<(String, bool)>,
     command: Option<String>,
+    /// The settings sheet, while open.
+    settings: Option<settings_view::Draft>,
     /// Where the mouse is, for the dragged row.
     cursor: iced::Point,
 }
@@ -112,6 +118,8 @@ enum Message {
     Escape,
     /// A key nothing else took.
     Key(keyboard::Key, keyboard::Modifiers),
+    OpenSettings,
+    Settings(settings_view::Message),
     OpenCommands,
     Command(String),
     RunCommand(Command),
@@ -142,7 +150,7 @@ impl App {
         };
         let library = Library::load();
         let mods = mods_view::State::new(&library);
-        let mut app = Self { palette, fixed_palette: args.palette, screenshot: args.screenshot, mode: args.mode, library, mods, conflicts: conflicts_view::State::new(), notice: None, command: None, cursor: iced::Point::ORIGIN };
+        let mut app = Self { palette, fixed_palette: args.palette, screenshot: args.screenshot, mode: args.mode, library, mods, conflicts: conflicts_view::State::new(), notice: None, command: None, settings: None, cursor: iced::Point::ORIGIN };
         let scan = if app.mode == Mode::Conflicts { app.conflicts.scan(&app.library).map(Message::Conflicts) } else { Task::none() };
         (app, Task::batch([shot, scan]))
     }
@@ -186,6 +194,8 @@ impl App {
             Message::Escape => {
                 if self.command.is_some() {
                     self.command = None;
+                } else if self.settings.is_some() {
+                    self.settings = None;
                 } else if self.mode == Mode::Conflicts {
                     let _ = self.conflicts.update(&mut self.library, conflicts_view::Message::CloseMenu);
                     let _ = self.conflicts.update(&mut self.library, conflicts_view::Message::CloseIgnore);
@@ -194,7 +204,10 @@ impl App {
                 }
             }
             Message::Key(key, modifiers) => {
-                if self.command.is_none() && self.mode == Mode::Conflicts && !self.conflicts.has_sheet() {
+                if self.command.is_none() && self.settings.is_none() && modifiers.command() && key.as_ref() == keyboard::Key::Character(",") {
+                    return self.update(Message::OpenSettings);
+                }
+                if self.command.is_none() && self.settings.is_none() && self.mode == Mode::Conflicts && !self.conflicts.has_sheet() {
                     use conflicts_view::{Message as M, Op};
                     let message = match key.as_ref() {
                         keyboard::Key::Character("z") if modifiers.command() => Some(M::Undo),
@@ -214,7 +227,7 @@ impl App {
                         return self.update(Message::Conflicts(message));
                     }
                 }
-                if self.command.is_none() && self.mode == Mode::Mods && modifiers.command() {
+                if self.command.is_none() && self.settings.is_none() && self.mode == Mode::Mods && modifiers.command() {
                     let message = match key.as_ref() {
                         keyboard::Key::Character("s") => Some(mods_view::Message::Save),
                         keyboard::Key::Character("z") if modifiers.shift() => Some(mods_view::Message::Redo),
@@ -227,7 +240,34 @@ impl App {
                     }
                 }
             }
-            Message::OpenCommands => self.command = Some(String::new()),
+            Message::OpenSettings => {
+                self.command = None;
+                self.settings = Some(settings_view::Draft::new(&self.library.settings));
+            }
+            Message::Settings(m) => {
+                let Some(draft) = &mut self.settings else { return Task::none() };
+                match draft.update(&self.library.settings, m) {
+                    None => {}
+                    Some(Ok(None)) => self.settings = None,
+                    Some(Ok(Some(saved))) => {
+                        self.settings = None;
+                        self.notice = Some((saved.notice, false));
+                        if saved.reload {
+                            // Other folders: read the game and the mods again.
+                            self.library = Library::load();
+                            self.mods = mods_view::State::new(&self.library);
+                            self.conflicts = conflicts_view::State::new();
+                        } else {
+                            self.library.settings = saved.settings;
+                        }
+                    }
+                    Some(Err(e)) => self.notice = Some((e, true)),
+                }
+            }
+            Message::OpenCommands => {
+                self.command = Some(String::new());
+                return iced::widget::operation::focus(COMMAND_INPUT);
+            }
             Message::Command(s) => self.command = Some(s),
             Message::RunCommand(cmd) => {
                 self.command = None;
@@ -332,6 +372,9 @@ impl App {
                 .style(move |_| container::Style { border: iced::Border { radius: 14.0.into(), width: 1.5, color: c(p.accent) }, ..surface(p.secondary, p.on_window, 14.0) });
             layers = layers.push(iced::widget::pin(ghost).x(self.cursor.x + 12.0).y(self.cursor.y - 18.0).width(Fill).height(Fill));
         }
+        if let Some(draft) = &self.settings {
+            layers = layers.push(draft.view(p).map(Message::Settings));
+        }
         if let Some(query) = &self.command {
             layers = layers.push(self.commands(query));
         }
@@ -358,7 +401,8 @@ impl App {
             Mode::Conflicts => self.conflicts.header_actions(p).map(Message::Conflicts),
         };
         let kbd = button(text("Ctrl K").size(12).font(MONO).color(c(p.muted))).padding([4, 8]).on_press(Message::OpenCommands).style(move |_, s| ghost(p.muted, s));
-        row![text("Drukhal").font(DISPLAY).size(30), space().width(12), switch, space().width(Fill), actions, kbd].spacing(10).align_y(iced::Center).into()
+        let gear = button(icon(icons::SETTINGS, 20, p.on_window)).padding(10).on_press(Message::OpenSettings).style(move |_, s| ghost(p.on_window, s));
+        row![text("Drukhal").font(DISPLAY).size(30), space().width(12), switch, space().width(Fill), actions, kbd, gear].spacing(10).align_y(iced::Center).into()
     }
 
     /// The current mode's commands, plus going to the other mode.
@@ -379,6 +423,7 @@ impl App {
                         list.push(mods(tf!("Switch to {name}", name = coll.name.as_str()), "", mods_view::Message::SwitchCollection(coll.name.clone())));
                     }
                 }
+                list.push(Command { name: t!("Settings"), keys: "Ctrl ,", run: Box::new(Message::OpenSettings) });
                 list.push(Command { name: t!("Go to Conflicts"), keys: "Ctrl 2", run: Box::new(Message::Mode(Mode::Conflicts)) });
                 list
             }
@@ -387,11 +432,14 @@ impl App {
                 vec![
                     conflicts(t!("Rescan"), "Ctrl R", conflicts_view::Message::Scan),
                     conflicts(t!("Merge with AI"), "", conflicts_view::Message::MergeAi),
+                    conflicts(t!("Merge every simple conflict"), "", conflicts_view::Message::MergeSimple),
+                    conflicts(t!("Show the merged patch"), "", conflicts_view::Message::View(conflicts_view::View::Patches)),
                     conflicts(t!("Save merge"), "Ctrl S", conflicts_view::Message::SaveMerge),
                     conflicts(t!("Next conflict"), "J", conflicts_view::Message::Step(1)),
                     conflicts(t!("Previous conflict"), "K", conflicts_view::Message::Step(-1)),
                     conflicts(t!("Ignore this conflict…"), "", conflicts_view::Message::OpenIgnore),
                     conflicts(t!("Show ignored conflicts"), "", conflicts_view::Message::View(conflicts_view::View::Ignored)),
+                    Command { name: t!("Settings"), keys: "Ctrl ,", run: Box::new(Message::OpenSettings) },
                     Command { name: t!("Go to Mods"), keys: "Ctrl 1", run: Box::new(Message::Mode(Mode::Mods)) },
                 ]
             }
@@ -417,7 +465,7 @@ impl App {
                 .into()
         }))
         .spacing(2);
-        let mut input = text_input(&t!("Type a command"), query).on_input(Message::Command).padding([12, 16]).size(16).style(move |_, _| style::field(p, 14.0, true));
+        let mut input = text_input(&t!("Type a command"), query).id(COMMAND_INPUT).on_input(Message::Command).padding([12, 16]).size(16).style(move |_, _| style::field(p, 14.0, true));
         if let Some(cmd) = first {
             input = input.on_submit(Message::RunCommand(cmd));
         }

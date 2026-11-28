@@ -34,6 +34,7 @@ const QUEUE_LIMIT: usize = 300;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum View {
     Queue,
+    Patches,
     Ignored,
 }
 
@@ -182,6 +183,7 @@ pub struct State {
     focus: Option<Block>,
     ignore: Option<IgnoreSheet>,
     ai: Option<Ai>,
+    merging_simple: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -215,7 +217,21 @@ pub enum Message {
     CloseIgnore,
     UnignoreKey(String),
     UnignoreRule(String),
+    /// Resolve every simple conflict not merged yet, as its verdict says.
+    MergeSimple,
+    SimpleReady(Arc<Vec<Resolution>>),
+    /// Patches view actions, by index into the library's stale list or,
+    /// for removal, the merge itself.
+    RemoveMerge(Option<(String, String)>, String),
+    KeepMerge(usize),
+    UpdatePick(usize),
+    /// Open a merge from the patch in the queue.
+    OpenMerge(Option<(String, String)>, String),
 }
+
+/// A resolution worked out off the UI thread: category, key, the script
+/// to save, and the fingerprints of what it came from.
+pub type Resolution = (String, String, String, Vec<Print>);
 
 /// What happened, for the app's status line.
 pub type Notice = Option<(String, bool)>;
@@ -239,6 +255,7 @@ impl State {
             focus: None,
             ignore: None,
             ai: None,
+            merging_simple: false,
         }
     }
 
@@ -269,6 +286,8 @@ impl State {
             Message::Scan => self.scan(library),
             Message::Scanned(analysis) => {
                 self.scanning = false;
+                library.analysis = Some(analysis.clone());
+                library.check_stale();
                 self.analysis = Some(analysis);
                 self.rebuild(library);
                 let keep = self.selected.filter(|s| self.queue.contains(s));
@@ -289,7 +308,13 @@ impl State {
             Message::Loaded(versions) => {
                 if Some(versions.item) == self.selected {
                     self.loading = false;
+                    // A merge already in the patch is what's edited.
+                    if let (Item::Object(i), Some(a)) = (versions.item, &self.analysis) {
+                        let c = &a.report.objects[i];
+                        self.merged = library.patch.as_ref().and_then(|p| p.get(&c.category, &c.key)).map(|m| m.script.lines().map(str::to_owned).collect());
+                    }
                     self.versions = Some(versions);
+                    self.refocus();
                 }
                 Task::none()
             }
@@ -461,6 +486,72 @@ impl State {
                 }
                 self.rebuild(library);
                 Task::none()
+            }
+            Message::MergeSimple => self.merge_simple(library),
+            Message::SimpleReady(resolved) => {
+                let mut saved = 0;
+                for (category, key, script, prints) in resolved.iter() {
+                    match library.save_merge(category, key, script, prints.clone()) {
+                        Ok(_) => saved += 1,
+                        Err(e) => {
+                            notice = Some((e, true));
+                            break;
+                        }
+                    }
+                }
+                if notice.is_none() {
+                    notice = Some((tnf!("Merged {count} simple conflict into the patch", "Merged {count} simple conflicts into the patch", count = saved), false));
+                }
+                self.merging_simple = false;
+                Task::none()
+            }
+            Message::RemoveMerge(object, path) => {
+                notice = Some(match library.remove_merge(object.as_ref(), &path) {
+                    Ok(m) => (m, false),
+                    Err(e) => (e, true),
+                });
+                Task::none()
+            }
+            Message::KeepMerge(at) => {
+                if let Some(stale) = library.stale.get(at).cloned() {
+                    let prints = self.current_prints(library, &stale);
+                    notice = Some(match prints.and_then(|prints| library.keep_merge(&stale, prints)) {
+                        Ok(m) => (m, false),
+                        Err(e) => (e, true),
+                    });
+                }
+                Task::none()
+            }
+            Message::UpdatePick(at) => {
+                if let Some(stale) = library.stale.get(at).cloned() {
+                    notice = Some(match library.update_pick(&stale) {
+                        Ok(m) => (m, false),
+                        Err(e) => (e, true),
+                    });
+                }
+                Task::none()
+            }
+            Message::OpenMerge(object, path) => {
+                let Some(a) = self.analysis.clone() else { return (Task::none(), None) };
+                let item = match &object {
+                    Some((category, key)) => a.report.objects.iter().position(|c| &c.category == category && &c.key == key).map(Item::Object),
+                    None => a.report.files.iter().position(|f| f.path.eq_ignore_ascii_case(&path)).map(Item::File),
+                };
+                match item {
+                    Some(item) => {
+                        self.view = View::Queue;
+                        self.filter = Filter::All;
+                        self.search.clear();
+                        if !self.queue.contains(&item) {
+                            notice = Some((t!("This conflict is ignored; it's shown anyway"), false));
+                        }
+                        self.select(library, item)
+                    }
+                    None => {
+                        notice = Some((t!("Its mods don't conflict over it any more. Remove it from the patch, or enable them and rescan."), true));
+                        Task::none()
+                    }
+                }
             }
         };
         (task, notice)
@@ -639,6 +730,70 @@ impl State {
         self.refocus();
     }
 
+    /// Works out every simple conflict's resolution off the UI thread; the
+    /// app then saves them (see [`Message::SimpleReady`]).
+    fn merge_simple(&mut self, library: &Library) -> Task<Message> {
+        let Some(a) = self.analysis.clone() else { return Task::none() };
+        if self.merging_simple {
+            return Task::none();
+        }
+        let todo: Vec<usize> = self
+            .queue
+            .iter()
+            .filter_map(|&item| match item {
+                Item::Object(i) if a.simple.contains_key(&i) && !library.merged(&a.report.objects[i].category, &a.report.objects[i].key) => Some(i),
+                _ => None,
+            })
+            .collect();
+        if todo.is_empty() {
+            return Task::none();
+        }
+        self.merging_simple = true;
+        let game_dir = library.game_dir();
+        Task::perform(
+            async move {
+                tokio::task::spawn_blocking(move || {
+                    todo.into_iter()
+                        .filter_map(|i| {
+                            let v = load_versions(&a, i, game_dir.clone());
+                            let resolved = drukhal_core::merge::trivial::resolve(v.vanilla.as_ref(), &v.sources)?;
+                            let c = &a.report.objects[i];
+                            Some((c.category.clone(), c.key.clone(), v.sources[resolved.index].text.clone(), v.prints))
+                        })
+                        .collect::<Vec<_>>()
+                })
+                .await
+                .unwrap_or_default()
+            },
+            |resolved| Message::SimpleReady(Arc::new(resolved)),
+        )
+    }
+
+    /// What a stale merge's sources hold now, from the last scan, for
+    /// keeping it as it is.
+    fn current_prints(&self, library: &Library, stale: &patch::Stale) -> Result<Vec<Print>, String> {
+        let a = self.analysis.as_ref().ok_or_else(|| t!("Scan first, so the mods it comes from are known"))?;
+        let source_mod = |m: usize| -> Option<patch::SourceMod> { Some((a.ids.get(m)?.clone(), a.names.get(m)?.clone(), a.roots.get(m)?.clone()?)) };
+        let game_dir = library.game_dir();
+        let prints = match &stale.object {
+            Some((category, key)) => {
+                let defs = a.report.objects.iter().find(|c| &c.category == category && &c.key == key).map(|c| c.definitions.iter().filter_map(|d| Some((source_mod(d.mod_position)?, d.file.clone()))).collect::<Vec<_>>()).unwrap_or_default();
+                if defs.is_empty() && !(stale.content && !stale.untracked) {
+                    return Err(t!("Its mods don't conflict over it any more. Remove it from the patch, or enable them and rescan."));
+                }
+                patch::object_prints(category, key, game_dir.as_deref(), &defs)
+            }
+            None => {
+                let mods = a.report.files.iter().find(|f| f.path.eq_ignore_ascii_case(&stale.path)).map(|f| f.mods.iter().filter_map(|&m| source_mod(m)).collect::<Vec<_>>()).unwrap_or_default();
+                if mods.is_empty() {
+                    return Err(t!("Its mods don't conflict over it any more. Remove it from the patch, or enable them and rescan."));
+                }
+                patch::file_prints(&stale.path, game_dir.as_deref(), &mods)
+            }
+        };
+        Ok(prints)
+    }
+
     /// Asks the configured AI provider to merge the object, off the UI thread.
     fn merge_ai(&mut self, library: &Library) -> Task<Message> {
         let (Some(versions), Some(item @ Item::Object(i)), Some(a)) = (self.versions.clone(), self.selected, self.analysis.clone()) else { return Task::none() };
@@ -728,6 +883,10 @@ impl State {
         };
         row![
             text(when).size(13).color(c(p.muted)),
+            button(text(if self.merging_simple { t!("Merging…") } else { t!("Merge simple ones") }).size(14))
+                .padding([10, 18])
+                .on_press_maybe((!self.scanning && !self.merging_simple && self.analysis.as_ref().is_some_and(|a| !a.simple.is_empty())).then_some(Message::MergeSimple))
+                .style(move |_, s| pill(p.secondary, p.on_window, s)),
             button(row![icon(icons::REFRESH, 16, p.on_window), text(t!("Rescan")).size(14)].spacing(8).align_y(iced::Center)).padding([10, 18]).on_press_maybe((!self.scanning).then_some(Message::Scan)).style(move |_, s| pill(p.container_high, p.on_window, s)),
         ]
         .spacing(12)
@@ -750,6 +909,7 @@ impl State {
         let main: Element<'a, Message> = match (self.view, &self.analysis) {
             (_, None) => placeholder(p, if self.scanning { t!("Scanning your mods…") } else { t!("Not scanned yet") }, if self.scanning { t!("Reading every enabled mod's files. A big load order takes a minute the first time; later scans only read what changed.") } else { t!("Scan the load order to find where mods overwrite each other.") }),
             (View::Ignored, Some(_)) => self.ignored(library, p),
+            (View::Patches, Some(_)) => self.patches(library, p),
             (View::Queue, Some(a)) => row![self.queue_pane(library, p, a), self.detail(library, p, a)].spacing(12).into(),
         };
         row![self.rail(p), main].spacing(12).height(Fill).into()
@@ -777,7 +937,7 @@ impl State {
             .spacing(4)
             .align_x(iced::Center)
         };
-        container(column![item(View::Queue, t!("Queue"), icons::WARNING), item(View::Ignored, t!("Ignored"), icons::HIDE)].spacing(14).align_x(iced::Center))
+        container(column![item(View::Queue, t!("Queue"), icons::WARNING), item(View::Patches, t!("Patch"), icons::PATCH), item(View::Ignored, t!("Ignored"), icons::HIDE)].spacing(14).align_x(iced::Center))
             .width(76)
             .height(Fill)
             .padding([14, 8])
@@ -1200,6 +1360,61 @@ impl State {
         .style(move |_| container::Style { shadow: Shadow { color: Color::from_rgba(0.0, 0.0, 0.0, 0.45), offset: Vector::new(0.0, 12.0), blur_radius: 40.0 }, ..surface(p.container_high, p.on_window, 28.0) });
         let scrim = mouse_area(container(space()).width(Fill).height(Fill).style(|_| container::Style { background: Some(Background::Color(Color::from_rgba(0.0, 0.0, 0.0, 0.5))), ..Default::default() })).on_press(Message::CloseIgnore);
         Some(stack![scrim, container(opaque(card)).center(Fill)].into())
+    }
+
+    /// What the merged patch holds, which merges went stale since their
+    /// mods (or the game) changed, and what to do about those.
+    fn patches<'a>(&'a self, library: &'a Library, p: &'a Palette) -> Element<'a, Message> {
+        let Some(patch) = &library.patch else {
+            return placeholder(p, t!("No merged patch yet"), t!("Saving a merge or keeping a version creates the collection's merged patch, a mod that loads last."));
+        };
+        let stale_of = |object: Option<&(String, String)>, path: &str| library.stale.iter().position(|s| s.object.as_ref() == object && (object.is_some() || s.path.eq_ignore_ascii_case(path)));
+        let entry = |title: String, subtitle: String, object: Option<(String, String)>, path: String| -> Element<'a, Message> {
+            let stale = stale_of(object.as_ref(), &path);
+            let mut actions = row![].spacing(6).align_y(iced::Center);
+            let mut reasons: Element<'a, Message> = space().into();
+            if let Some(at) = stale {
+                let s = &library.stale[at];
+                reasons = text(s.reasons.join(" ")).size(12).color(c(p.warning)).into();
+                if s.pick.is_some() {
+                    actions = actions.push(button(text(t!("Take the new version")).size(12)).padding([6, 12]).on_press(Message::UpdatePick(at)).style(move |_, st| pill(p.accent, p.on_accent, st)));
+                }
+                actions = actions.push(button(text(t!("Keep as is")).size(12)).padding([6, 12]).on_press(Message::KeepMerge(at)).style(move |_, st| pill(p.container_high, p.on_window, st)));
+            }
+            actions = actions.push(button(text(t!("Open")).size(12)).padding([6, 12]).on_press(Message::OpenMerge(object.clone(), path.clone())).style(move |_, st| pill(p.container_high, p.on_window, st)));
+            actions = actions.push(button(text(t!("Remove")).size(12).color(c(p.error))).padding([6, 12]).on_press(Message::RemoveMerge(object, path)).style(move |_, st| ghost(p.error, st)));
+            let mark: Element<'a, Message> = if stale.is_some() { chip(t!("changed since"), p.warning) } else { chip(t!("up to date"), p.success) };
+            container(column![row![column![text(title).font(MONO).size(13), text(subtitle).size(11).color(c(p.muted))].spacing(3).width(Fill), mark, actions].spacing(12).align_y(iced::Center), reasons].spacing(6))
+                .padding([12, 16])
+                .style(move |_| surface(p.container, p.on_window, 16.0))
+                .into()
+        };
+        let mut list = column![].spacing(8);
+        let stale_count = library.stale.iter().filter(|s| !s.untracked).count();
+        for m in patch.merges() {
+            list = list.push(entry(m.key.clone(), format!("{} · {}", m.category, m.sources.join(", ")), Some((m.category.clone(), m.key.clone())), m.file.clone()));
+        }
+        for f in patch.files() {
+            list = list.push(entry(f.path.clone(), f.sources.join(", "), None, f.path.clone()));
+        }
+        if patch.merges().is_empty() && patch.files().is_empty() {
+            list = list.push(text(t!("Nothing merged yet.")).size(13).color(c(p.muted)));
+        }
+        let target = patch.target();
+        container(
+            column![
+                row![text(target.name.as_str()).size(20), space().width(Fill), text(tnf!("{count} changed since merged", "{count} changed since merged", count = stale_count)).size(12).color(c(if stale_count > 0 { p.warning } else { p.muted }))].align_y(iced::Center),
+                text(t!("The mod that holds your merges, loading last. A merge goes stale when a mod it came from, or the game, changes it; keep it, take the new version, or open it to merge again.")).size(13).color(c(p.muted)),
+                scrollable(list).height(Fill),
+            ]
+            .spacing(12)
+            .max_width(900),
+        )
+        .padding(20)
+        .width(Fill)
+        .height(Fill)
+        .style(move |_| surface(p.container_low, p.on_window, 24.0))
+        .into()
     }
 
     fn ignored<'a>(&'a self, library: &'a Library, p: &'a Palette) -> Element<'a, Message> {

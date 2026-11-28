@@ -386,6 +386,16 @@ impl Patch {
         self.manifest.merges.iter().find(|m| m.category == category && m.key == key)
     }
 
+    /// Every object merge in the patch, in the order saved.
+    pub fn merges(&self) -> &[Merge] {
+        &self.manifest.merges
+    }
+
+    /// Every file the patch ships its own copy of.
+    pub fn files(&self) -> &[FileMerge] {
+        &self.manifest.files
+    }
+
     pub fn get_file(&self, path: &str) -> Option<&FileMerge> {
         self.manifest.files.iter().find(|f| f.path.eq_ignore_ascii_case(path))
     }
