@@ -173,6 +173,8 @@ pub struct State {
     view: View,
     filter: Filter,
     search: String,
+    /// Whether the Done section at the bottom of the queue is open.
+    done_open: bool,
     versions: Option<Arc<Versions>>,
     loading: bool,
     /// The merge being built, by line, once edited; until then it's the
@@ -193,6 +195,8 @@ pub enum Message {
     View(View),
     Filter(Filter),
     Search(String),
+    /// Open or close the Done section at the bottom of the queue.
+    ToggleDone,
     Scan,
     Scanned(Arc<Analysis>),
     Select(Item),
@@ -249,6 +253,7 @@ impl State {
             view: View::Queue,
             filter: Filter::All,
             search: String::new(),
+            done_open: false,
             versions: None,
             loading: false,
             merged: None,
@@ -287,6 +292,10 @@ impl State {
                 self.search = s;
                 Task::none()
             }
+            Message::ToggleDone => {
+                self.done_open = !self.done_open;
+                Task::none()
+            }
             Message::Scan => self.scan(library),
             Message::Scanned(analysis) => {
                 self.scanning = false;
@@ -306,7 +315,7 @@ impl State {
                 self.select(library, item)
             }
             Message::Step(by) => {
-                let shown = self.shown(library);
+                let shown = self.visible(library);
                 match self.selected.and_then(|s| shown.iter().position(|&i| i == s)) {
                     Some(at) if !shown.is_empty() => self.select(library, shown[(at as isize + by).rem_euclid(shown.len() as isize) as usize]),
                     _ => shown.first().map_or_else(Task::none, |&i| self.select(library, i)),
@@ -646,11 +655,12 @@ impl State {
         }
     }
 
-    /// The queue as filtered and searched.
+    /// The queue as filtered and searched, with Done items last.
     fn shown(&self, library: &Library) -> Vec<Item> {
         let Some(a) = &self.analysis else { return Vec::new() };
         let query = self.search.trim().to_lowercase();
-        self.queue
+        let mut shown: Vec<Item> = self
+            .queue
             .iter()
             .copied()
             .filter(|&item| {
@@ -672,7 +682,25 @@ impl State {
                             Item::File(i) => a.report.files[i].path.to_lowercase().contains(&query),
                         })
             })
-            .collect()
+            .collect();
+        // Stable: the open ones keep the scan's order, then the Done ones.
+        shown.sort_by_key(|&item| self.status(library, item) == Status::Done);
+        shown
+    }
+
+    /// Whether the Done rows are on screen.
+    fn done_expanded(&self) -> bool {
+        self.filter == Filter::Done || self.done_open
+    }
+
+    /// What the keyboard can step through: the rows actually drawn.
+    fn visible(&self, library: &Library) -> Vec<Item> {
+        let shown = self.shown(library);
+        if self.done_expanded() {
+            shown
+        } else {
+            shown.into_iter().filter(|&item| self.status(library, item) != Status::Done).collect()
+        }
     }
 
     fn first_open(&self, library: &Library) -> Option<Item> {
@@ -1027,10 +1055,29 @@ impl State {
         .spacing(4)
         .wrap();
         let shown = self.shown(library);
-        let more = shown.len().saturating_sub(QUEUE_LIMIT);
-        let mut list = column(shown.into_iter().take(QUEUE_LIMIT).map(|i| self.queue_row(library, p, a, i))).spacing(4);
+        let split = shown.partition_point(|&item| self.status(library, item) != Status::Done);
+        let (open, done_items) = shown.split_at(split);
+        let more = open.len().saturating_sub(QUEUE_LIMIT);
+        let mut list = column(open.iter().copied().take(QUEUE_LIMIT).map(|i| self.queue_row(library, p, a, i))).spacing(4);
         if more > 0 {
             list = list.push(container(text(tnf!("{count} more; search to narrow them", "{count} more; search to narrow them", count = more)).size(12).color(c(p.muted))).padding(10));
+        }
+        if !done_items.is_empty() {
+            let done_more = done_items.len().saturating_sub(QUEUE_LIMIT);
+            let rows = column(done_items.iter().copied().take(QUEUE_LIMIT).map(|i| self.queue_row(library, p, a, i))).spacing(4);
+            // The Done filter asks for these; elsewhere they stay folded away
+            // at the bottom until opened.
+            if self.filter != Filter::Done {
+                list = list.push(self.done_header(p, done_items.len(), self.done_open));
+                if self.done_open {
+                    list = list.push(rows);
+                }
+            } else {
+                list = list.push(rows);
+            }
+            if self.done_expanded() && done_more > 0 {
+                list = list.push(container(text(tnf!("{count} more; search to narrow them", "{count} more; search to narrow them", count = done_more)).size(12).color(c(p.muted))).padding(10));
+            }
         }
         let mut errors: Element<'a, Message> = space().into();
         if !a.report.errors.is_empty() || !a.report.skipped.is_empty() {
@@ -1052,6 +1099,24 @@ impl State {
         .height(Fill)
         .padding(14)
         .style(move |_| surface(p.container_low, p.on_window, 24.0))
+        .into()
+    }
+
+    fn done_header<'a>(&self, p: &'a Palette, count: usize, open: bool) -> Element<'a, Message> {
+        let glyph = if open { icons::DOWN_ARROW } else { icons::NEXT };
+        button(
+            row![
+                icon(glyph, 14, p.muted),
+                text(tf!("Done · {count}", count = count)).size(13).color(c(p.muted)),
+                space().width(Fill),
+            ]
+            .spacing(8)
+            .align_y(iced::Center),
+        )
+        .width(Fill)
+        .padding([8, 12])
+        .on_press(Message::ToggleDone)
+        .style(move |_, s| ghost(p.on_window, s))
         .into()
     }
 

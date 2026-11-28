@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: DrukhalManager 3.0.0-beta.1\n"
 "Report-Msgid-Bugs-To: https://github.com/Dukko/DrukhalManager/issues\n"
-"POT-Creation-Date: 2026-11-28 14:33+0000\n"
+"POT-Creation-Date: 2026-11-28 15:20+0000\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -800,7 +800,7 @@ msgstr ""
 msgid "Ignored"
 msgstr ""
 
-#: src/conflicts_view.rs
+#: src/conflicts_view.rs src/conflicts_view.rs
 msgid "{count} more; search to narrow them"
 msgid_plural "{count} more; search to narrow them"
 msgstr[0] ""
@@ -822,6 +822,10 @@ msgstr ""
 
 #: src/conflicts_view.rs
 msgid "Search objects and files"
+msgstr ""
+
+#: src/conflicts_view.rs
+msgid "Done · {count}"
 msgstr ""
 
 #: src/conflicts_view.rs
