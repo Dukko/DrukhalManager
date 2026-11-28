@@ -1,0 +1,13 @@
+/* What matugen's GTK 4 template writes from a purple wallpaper. */
+@define-color accent_color #d0bcff;
+@define-color accent_fg_color #381e72;
+@define-color accent_bg_color #d0bcff;
+@define-color window_bg_color #141218;
+@define-color window_fg_color #e6e0e9;
+@define-color headerbar_bg_color #141218;
+@define-color view_bg_color #1d1b20;
+@define-color view_fg_color #e6e0e9;
+@define-color card_bg_color #211f26;
+@define-color error_color #ffb4ab;
+@define-color success_color #a6d388;
+@define-color warning_color #e8c26e;

@@ -1,6 +1,6 @@
 name: Windows bundle
 
-# Builds DrukhalManager for Windows with the GTK it runs on
+# Builds DrukhalManager for Windows and the DLLs it needs
 # (packaging/windows/bundle.sh), checks it starts outside MSYS2 and uploads
 # the folder as an artifact to try out. Runs by hand, on PRs that touch the
 # packaging, and on a version tag. It also builds the installer
@@ -46,16 +46,10 @@ jobs:
           install: >-
             mingw-w64-ucrt-x86_64-gcc
             mingw-w64-ucrt-x86_64-pkgconf
-            mingw-w64-ucrt-x86_64-gtk4
-            mingw-w64-ucrt-x86_64-libadwaita
-            mingw-w64-ucrt-x86_64-librsvg
-            mingw-w64-ucrt-x86_64-adwaita-icon-theme
             mingw-w64-ucrt-x86_64-gettext
             mingw-w64-ucrt-x86_64-rust
       - name: Bundle
         run: packaging/windows/bundle.sh target/windows-bundle/DrukhalManager
-      - name: Show the loader cache
-        run: grep '^"' target/windows-bundle/DrukhalManager/lib/gdk-pixbuf-2.0/2.10.0/loaders.cache
       # Without MSYS2 on PATH, a missing DLL stops the app at once. Still
       # running after a while means it got as far as its window.
       - name: Starts outside MSYS2

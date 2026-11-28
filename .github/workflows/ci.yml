@@ -12,9 +12,9 @@ jobs:
   ci:
     name: build, test, clippy
     runs-on: ubuntu-latest
-    # ubuntu-24.04 ships GTK 4.14 / libadwaita 1.5, too old for the
-    # gtk4 v4_14 + libadwaita v1_8 feature gates. Fedora 43 has new
-    # enough system headers, so run the job inside that container.
+    # iced loads the windowing and graphics libraries at run time, so the
+    # build only needs a C compiler and gettext (msgfmt, and libintl for
+    # gettext-rs).
     container:
       image: fedora:43
     steps:
@@ -22,8 +22,7 @@ jobs:
         run: |
           dnf install -y --setopt=install_weak_deps=False \
             gcc pkg-config \
-            gtk4-devel libadwaita-devel \
-            gettext \
+            gettext gettext-devel \
             git ca-certificates
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
@@ -41,11 +40,12 @@ jobs:
           cargo install xtr --version 0.1.11 --locked
           po/check-pot.sh
           po/check-placeholders.sh
-      - name: Keep non-UI code free of GTK
-        # So a native Windows UI could reuse it later (#153).
+      - name: Keep the core free of UI toolkits
+        # drukhal-core is everything but the window; the interface is built
+        # on it, so it must not pull a toolkit in.
         run: |
-          if grep -rnE '\b(gtk|adw|glib|gio)::' src/merge src/mods src/paradox src/platform.rs src/settings.rs src/secrets.rs src/diagnostics.rs src/multiplayer.rs src/dds.rs src/diff.rs; then
-            echo "::error::GTK used outside the UI; go through src/platform.rs instead"
+          if cargo tree --locked -p drukhal-core -e normal --prefix none | grep -E '^(iced|winit|wgpu|gtk4|libadwaita|glib) '; then
+            echo "::error::drukhal-core depends on a UI toolkit; keep UI code in src/"
             exit 1
           fi
 
@@ -85,7 +85,7 @@ jobs:
         shell: msys2 {0}
     steps:
       - uses: actions/checkout@v7
-      # GTK, libadwaita and a GNU-target Rust from MSYS2's UCRT64 environment.
+      # gettext and a GNU-target Rust from MSYS2's UCRT64 environment.
       - uses: msys2/setup-msys2@v2
         with:
           msystem: UCRT64
@@ -93,8 +93,6 @@ jobs:
           install: >-
             mingw-w64-ucrt-x86_64-gcc
             mingw-w64-ucrt-x86_64-pkgconf
-            mingw-w64-ucrt-x86_64-gtk4
-            mingw-w64-ucrt-x86_64-libadwaita
             mingw-w64-ucrt-x86_64-gettext
             mingw-w64-ucrt-x86_64-rust
             diffutils

@@ -10,7 +10,7 @@
   </developer>
   <description>
     <p>A native Linux mod manager for Stellaris that edits your load order, finds where mods conflict, and merges them into a patch so every mod's changes survive.</p>
-    <p>A fork of Irony Mod Manager by Mario (bcssov), rewritten in Rust with GTK and libadwaita.</p>
+    <p>A fork of Irony Mod Manager by Mario (bcssov), rewritten in Rust.</p>
     <ul>
       <li>Edit the load order and keep several collections, synced to the Paradox Launcher</li>
       <li>Find files and objects that several mods change</li>
@@ -36,6 +36,28 @@
     <control>keyboard</control>
   </supports>
   <releases>
+    <release version="3.0.0-beta.1" date="2026-11-28" type="development">
+      <description>
+        <p>A test version of 3.0, with a new interface. It's rebuilt in iced instead of GTK, in two separate modes: Mods for everyone, and Conflicts for those who merge. Your settings, collections, ignored conflicts and merged patches carry over. Some features of 2.7 aren't back yet; if you need them, stay on 2.7.46.</p>
+        <p>Mods:</p>
+        <ul>
+          <li>The load order, with drag reordering, switches, undo and redo, and each mod's checks (outdated, requirements)</li>
+          <li>Collections: switch between them, or start one from the current load order</li>
+          <li>Saving to the game and the Paradox Launcher's playset, and launching the game or continuing the last save</li>
+        </ul>
+        <p>Conflicts:</p>
+        <ul>
+          <li>The conflict queue, with filters and search; it rescans when the load order changes</li>
+          <li>Each conflict's versions side by side, with the one the game uses marked and why; add another version's block above or below the game's, or replace it, from its right-click menu or the keyboard, and compare with the base game</li>
+          <li>Overridden script, localisation and interface files merge the same way; other files keep one mod's copy</li>
+          <li>Merge with AI, for objects and whole files, and Merge Simple Ones for every conflict that needs no AI</li>
+          <li>The merged patch: what it holds, which merges changed since, and taking new versions, keeping or removing them</li>
+          <li>Ignoring a conflict, its folder, or every conflict between the same mods, and looking up any object the mods define</li>
+        </ul>
+        <p>Not back yet: Preferences beyond the AI provider and the game's folders, the game update and Script Check views, the load order check, Merge into One Mod, the crash hunt, saves, DLC, backups, repair, unused mods, smart sort, multiplayer, Workshop requirements, update notices and mod thumbnails.</p>
+        <p>Colours follow your desktop's palette as before (matugen, DankMaterialShell, Gradience or Omarchy), now live as you switch themes.</p>
+      </description>
+    </release>
     <release version="2.7.46" date="2026-11-27">
       <description>
         <ul>

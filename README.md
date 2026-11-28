@@ -16,6 +16,9 @@ A Stellaris mod manager for Linux and Windows that can merge conflicting mods wi
 
 </div>
 
+> [!NOTE]
+> **3.0 is in beta, with a new interface.** `master` has moved from GTK to a native Rust interface in [iced](https://iced.rs), in two separate modes: **Mods** for everyone, **Conflicts** for merging. The load order, collections, launching, the conflict queue, the merge editor, AI merging and the merged patch all work; some 2.7 features aren't back yet (the [3.0.0-beta.1 notes](https://github.com/Dukko/DrukhalManager/releases/tag/v3.0.0-beta.1) list them). The [latest stable release](https://github.com/Dukko/DrukhalManager/releases/latest) is still 2.7.46, the GTK version described below.
+
 I play Stellaris on Linux with around 150 mods, and two things kept messing up my evenings: working out which mods overwrite each other, and fixing the load order after every Steam update. [Irony Mod Manager](https://github.com/bcssov/IronyModManager) solves the first one well, but I wanted something native to my desktop that could also do the annoying and boring parts of merging for me. DrukhalManager is an opinionated fork of Irony, rewritten in Rust and GTK 4. It started on Linux and now runs on Windows too, with the same interface.
 
 It does the usual mod manager things (load orders, collections, Paradox Launcher playsets) and a few **less usual** ones:
@@ -162,15 +165,19 @@ There's a longer how-to for each of these in the [wiki](https://github.com/Dukko
 
 ## Building
 
-Requires Rust, GTK 4.14+ and libadwaita 1.8+ development files, plus gettext to compile the translations (Fedora `gettext`, Arch `gettext`, MSYS2 `mingw-w64-ucrt-x86_64-gettext`).
+Requires Rust and gettext, to compile the translations (Fedora `gettext gettext-devel`, Arch `gettext`, MSYS2 `mingw-w64-ucrt-x86_64-gettext`). The interface, in iced, loads the windowing and graphics libraries when it starts, so there are no other development files to install.
+
+The code is a Cargo workspace: `core/` (`drukhal-core`) is everything without a UI (mods, load orders, the game, conflict scans, merging, settings), and `src/` is the interface built on it. CI checks the core never pulls in a UI toolkit.
 
 ```sh
 cargo run --release
 ```
 
+To try it without the game, `tools/demo-library.py` makes a pretend Stellaris setup (mods, a load order and a stand-in game) and prints how to run the app against it.
+
 To install by hand elsewhere, copy `target/release/drukhal-manager` to your `PATH`, `data/io.github.dukko.DrukhalManager.desktop` to `share/applications`, `target/i18n/locale` to `share/locale`, and the icon from `data/icons` to `share/icons/hicolor/scalable/apps`.
 
-On Windows, build in an [MSYS2](https://www.msys2.org/) UCRT64 shell with the packages listed in `.github/workflows/windows-bundle.yml`. `packaging/windows/bundle.sh` builds a release and gathers it with GTK into a folder that runs without MSYS2.
+On Windows, build in an [MSYS2](https://www.msys2.org/) UCRT64 shell with the packages listed in `.github/workflows/windows-bundle.yml`. `packaging/windows/bundle.sh` builds a release and gathers it with the DLLs it needs into a folder that runs without MSYS2.
 
 ## Translating
 

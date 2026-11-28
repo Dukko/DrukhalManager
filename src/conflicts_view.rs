@@ -1,2290 +1,1797 @@
-//! The Conflicts page: every conflict in a sidebar, grouped by folder, and
-//! the selected one's versions side by side.
+//! The Conflicts mode: the conflicts the last scan found, each one's
+//! versions side by side with the one the game uses marked, and resolving
+//! them into the collection's merged patch. Mod management stays in the
+//! Mods mode.
 //!
-//! An object conflict is resolved two versions at a time: the first mod's
-//! version against the next one, then the result so far against the one
-//! after, until one editable result is left to save to the merged patch
-//! (see `object`). An overridden file shows two copies at a time, chosen
-//! from a row of chips (see `file`).
+//! The version the game uses is the merge being built. A highlighted block
+//! in another version can be added above or below the merge's matching
+//! block, or replace it: from its right-click menu, or from the keyboard
+//! (`[` `]` between blocks, then `A`, `B` or `R`). Comparing with the base
+//! game shows what each mod changed from vanilla instead.
 
-mod file;
-mod object;
-
-use std::any::Any;
-use std::cell::{Cell, RefCell};
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
-use std::path::{Path, PathBuf};
-use std::rc::Rc;
+use std::collections::BTreeSet;
+use std::ops::Range;
+use std::path::PathBuf;
 use std::sync::Arc;
 
-use adw::prelude::*;
-use gtk::{gio, glib};
+use drukhal_core::merge::conflicts::{self, FileConflict, ObjectConflict};
+use drukhal_core::merge::ignore_rules::Rules;
+use drukhal_core::merge::patch::{self, Print};
+use drukhal_core::merge::scan::{self, Analysis, Ignores};
+use drukhal_core::merge::source::Source;
+use drukhal_core::merge::ai;
+use drukhal_core::merge_dialog::load as merge_dialog_load;
+use iced::widget::{button, column, container, mouse_area, opaque, pin, row, scrollable, space, stack, text, text_input};
+use iced::{Background, Border, Color, Element, Fill, Length, Point, Shadow, Task, Vector, mouse};
 
-use crate::diff_view::{self, Pair};
-use crate::merge::ai::{self, Provider};
-use crate::merge::base_game;
-use crate::merge::conflicts::Report;
-use crate::merge::patch::VANILLA;
-use crate::merge::source::Source;
-use crate::thinking_view::{self, ThinkingView};
-use crate::merge::file_merge;
-use crate::merge::script_check;
-use crate::paradox::script_docs::{self, Docs};
-use crate::merge::ignore_rules::Rules;
-use crate::merge::patch::{Merge, Print, Stale};
+use crate::library::Library;
+use crate::palette::{Palette, Rgb};
+use crate::style::{MONO, alpha, c, chip, field, filled_chip, ghost, icon, icons, pill, surface};
 
-pub use object::Steps;
+/// The most queue rows drawn at once; search narrows the rest.
+const QUEUE_LIMIT: usize = 300;
 
-/// Rows shown per folder in the sidebar; search finds the rest, so huge
-/// folders (e.g. localisation) stay responsive.
-const ROWS_PER_GROUP: usize = 300;
-
-/// A lightning bolt, for conflicts that merge without AI.
-const SIMPLE_ICON: &str = "io.github.dukko.DrukhalManager-simple-symbolic";
-
-/// Sparkles, on the buttons that ask an AI.
-pub(crate) const AI_ICON: &str = "io.github.dukko.DrukhalManager-ai-symbolic";
-
-/// A finished scan of a particular load order.
-pub struct Analysis {
-    /// The load order revision this describes. Bumped in place for changes
-    /// that don't affect the scan, like enabling the merged patch.
-    pub revision: Cell<u64>,
-    /// Mod names by scanned position, as of the scan.
-    pub names: Vec<String>,
-    /// Descriptor ids by scanned position.
-    pub ids: Vec<String>,
-    /// Each scanned mod's folder.
-    pub roots: Vec<Option<PathBuf>>,
-    /// Each scanned mod's position in the full load order (the merged patch
-    /// itself is not scanned, so these can differ).
-    pub load_positions: Vec<usize>,
-    /// The game version the scan was made against, when known.
-    pub game_version: Option<String>,
-    pub report: Report,
-    /// Object conflicts that need no AI to merge, by index, with why.
-    pub simple: HashMap<usize, String>,
-    /// For each scanned mod, the scanned mods it depends on.
-    pub depends_on: Vec<BTreeSet<usize>>,
-    /// Objects enabled mods replace that the last game update changed, and
-    /// the game versions compared, if a snapshot of an earlier version exists.
-    pub behind: Vec<crate::merge::base_game::Behind>,
-    pub behind_versions: Option<(String, String)>,
-    /// Mods most of whose files a bigger mod replaces, from this scan.
-    pub order: Vec<crate::merge::order_check::Relation>,
-    /// Mods whose every file a later mod replaces, from this scan.
-    pub unused: Vec<crate::merge::unused::Unused>,
-    /// Effects, triggers and scopes mods use that the game doesn't have;
-    /// `None` when the game hasn't written its script documentation.
-    pub script: Option<ScriptCheck>,
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum View {
+    Queue,
+    Lookup,
+    Patches,
+    Ignored,
 }
 
-/// The result of the Script Check, with what's needed to check a fix. The
-/// tables are shared so a fix can be checked off the UI thread.
-pub struct ScriptCheck {
-    pub findings: Vec<script_check::Finding>,
-    pub context: Arc<script_check::Context>,
-    pub known: Arc<script_check::Known>,
-    pub docs: Arc<Docs>,
-    pub game_dir: PathBuf,
-    /// The documentation is from before the game's last update.
-    pub docs_outdated: bool,
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Filter {
+    All,
+    NeedsMerge,
+    Simple,
+    Files,
+    Done,
 }
 
-impl ScriptCheck {
-    /// Checks the enabled mods' scripts. `None` if the documentation isn't
-    /// there. Reads many files; call it off the UI thread.
-    pub fn run(user_dir: &Path, game_dir: &Path, exe: &Path, version: &str, roots: &[Option<PathBuf>], report: &Report, patch: &Path) -> Option<ScriptCheck> {
-        let docs = script_docs::load(user_dir)?;
-        let context = script_check::ensure_context(&base_game::dir().join("script-context"), game_dir, &docs, version);
-        let mut folders: Vec<&Path> = vec![game_dir];
-        folders.extend(roots.iter().flatten().map(PathBuf::as_path));
-        let known = script_check::known(&docs, &folders);
-        script_check::load_scripted_params(&folders);
-        let log = std::fs::read(crate::paradox::error_log::path(user_dir)).map(|b| String::from_utf8_lossy(&b).into_owned()).unwrap_or_default();
-        let findings = script_check::check_mods(&context, &known, roots, report, Some(patch), &crate::paradox::error_log::bom_files(&log));
-        Some(ScriptCheck { findings, context: Arc::new(context), known: Arc::new(known), docs: Arc::new(docs), game_dir: game_dir.to_owned(), docs_outdated: script_docs::older_than(user_dir, exe) })
-    }
+impl Filter {
+    const ALL: [Filter; 5] = [Filter::All, Filter::NeedsMerge, Filter::Simple, Filter::Files, Filter::Done];
 
-    /// How many mods the findings are in.
-    pub fn mods(&self) -> usize {
-        self.findings.iter().map(|f| f.mod_position).collect::<BTreeSet<_>>().len()
-    }
-}
-
-/// What the page needs from the window.
-#[allow(clippy::type_complexity)]
-pub struct MergeHooks {
-    /// Whether the patch already holds a merge of `(category, key)`.
-    pub is_merged: Box<dyn Fn(&str, &str) -> bool>,
-    /// The patch's merge of `(category, key)`, if any.
-    pub existing: Box<dyn Fn(&str, &str) -> Option<Merge>>,
-    /// Saves a merged object to the patch: category, key, script and the
-    /// fingerprints of its sources.
-    pub save_object: Box<dyn Fn(&str, &str, &str, Vec<Print>) -> Result<(), String>>,
-    /// Saves a whole file to the patch at `path`.
-    pub save_file: Box<dyn Fn(&str, &[u8], Vec<Print>) -> Result<(), String>>,
-    /// Records the inline scripts saved alongside an object merge.
-    pub set_scripts: Box<dyn Fn(&str, &str, Vec<String>) -> Result<(), String>>,
-    /// Called after anything was saved to the patch.
-    pub patch_saved: Box<dyn Fn()>,
-    /// Whether the patch already holds a merged copy of a file.
-    pub is_file_merged: Box<dyn Fn(&str) -> bool>,
-    /// Opens the file merge dialog for a file override; the callback runs
-    /// once it's saved.
-    pub open_file: Box<dyn Fn(usize, Box<dyn Fn()>)>,
-    /// Opens the AI merge of several object conflicts in one folder.
-    pub merge_folder: Box<dyn Fn(Vec<usize>)>,
-    /// Opens the AI merge of several overridden files in one folder.
-    pub merge_files: Box<dyn Fn(Vec<usize>)>,
-    /// Opens the fix dialog for a file that failed to parse.
-    pub open_fix: Box<dyn Fn(usize, Box<dyn Fn()>)>,
-    pub is_ignored: Box<dyn Fn(&str) -> bool>,
-    pub set_ignored: Box<dyn Fn(&str, bool)>,
-    /// The ignore rules, as of when the page was built.
-    pub rules: Rules,
-    /// Whether conflicts between mods and their dependencies are hidden.
-    pub hide_dependencies: bool,
-    /// Opens the ignore rules editor.
-    pub edit_rules: Box<dyn Fn()>,
-    /// Opens the rule builder, starting from a folder and the mod at a
-    /// scanned position.
-    pub add_rule: Box<dyn Fn(Option<&str>, Option<usize>)>,
-    /// Whether ignored conflicts are shown (dimmed) instead of hidden.
-    pub show_ignored: bool,
-    pub toggle_show_ignored: Box<dyn Fn()>,
-    /// The scanned position of the mod whose conflicts alone are shown.
-    pub filter: Option<usize>,
-    pub set_filter: Box<dyn Fn(Option<usize>)>,
-    /// Merges and fixes whose sources changed since they were saved.
-    pub stale: StaleSet,
-    /// Checks the patch for out-of-date merges again, after a save.
-    pub reload_stale: Box<dyn Fn() -> Vec<Stale>>,
-    /// Removes an out-of-date merge or fix from the patch.
-    pub remove_merge: Box<dyn Fn(&[Stale])>,
-    /// Starts tracking an untracked merge from its mods' current files.
-    pub keep_merge: Box<dyn Fn(&Stale)>,
-    /// Takes the picked mod's new version for a "Use This Version"
-    /// choice where only that mod changed: that one, or all of them.
-    pub update_picks: Box<dyn Fn(Option<&Stale>)>,
-    /// Rebuilds the whole page, e.g. after a folder was ignored.
-    pub rerender: Box<dyn Fn()>,
-    pub game_dir: Option<PathBuf>,
-    /// The AI provider, if one is set up.
-    pub provider: Box<dyn Fn() -> Option<Provider>>,
-    pub open_preferences: Box<dyn Fn()>,
-    /// Opens Preferences where the merge tool is chosen.
-    pub open_merge_tool_settings: Box<dyn Fn()>,
-    /// The external merge tool's command; empty for none.
-    pub merge_tool: Box<dyn Fn() -> String>,
-    pub toast: Box<dyn Fn(&str)>,
-    /// How many requests a batch of AI calls may run at once.
-    pub merges_at_once: usize,
-    /// Backs up the merged patch before a batch of changes, for the reason
-    /// given; an error means nothing should be changed.
-    pub backup: Box<dyn Fn(&str) -> Result<(), String>>,
-    /// What the page remembers between rebuilds.
-    pub session: Rc<RefCell<Session>>,
-}
-
-impl MergeHooks {
-    fn stale_object(&self, category: &str, key: &str) -> Option<Vec<String>> {
-        self.stale.object(category, key)
-    }
-
-    pub(crate) fn stale_entry(&self, category: &str, key: &str) -> Option<Stale> {
-        self.stale.object_entry(category, key)
-    }
-
-    fn stale_file(&self, path: &str) -> Option<Vec<String>> {
-        self.stale.file(path)
-    }
-
-    /// Notes that something was saved to the patch.
-    pub(crate) fn saved(&self) {
-        (self.patch_saved)();
-        self.stale.replace((self.reload_stale)());
-    }
-}
-
-/// Out-of-date merges, indexed so each row's lookup is constant time.
-#[derive(Default)]
-pub struct StaleSet(RefCell<StaleIndex>);
-
-#[derive(Default)]
-struct StaleIndex {
-    list: Vec<Stale>,
-    objects: HashMap<(String, String), usize>,
-    files: HashMap<String, usize>,
-}
-
-impl StaleSet {
-    pub fn new(list: Vec<Stale>) -> Self {
-        let set = Self::default();
-        set.replace(list);
-        set
-    }
-
-    pub fn replace(&self, list: Vec<Stale>) {
-        let mut objects = HashMap::new();
-        let mut files = HashMap::new();
-        for (at, s) in list.iter().enumerate().filter(|(_, s)| !s.untracked) {
-            match &s.object {
-                Some(object) => {
-                    objects.entry(object.clone()).or_insert(at);
-                }
-                None => {
-                    files.entry(s.path.to_ascii_lowercase()).or_insert(at);
-                }
-            }
+    fn label(self) -> String {
+        match self {
+            Filter::All => t!("All"),
+            Filter::NeedsMerge => t!("Needs merge"),
+            Filter::Simple => t!("Simple"),
+            Filter::Files => t!("Files"),
+            Filter::Done => t!("Done"),
         }
-        *self.0.borrow_mut() = StaleIndex { list, objects, files };
-    }
-
-    pub fn borrow(&self) -> std::cell::Ref<'_, Vec<Stale>> {
-        std::cell::Ref::map(self.0.borrow(), |i| &i.list)
-    }
-
-    fn object_entry(&self, category: &str, key: &str) -> Option<Stale> {
-        let index = self.0.borrow();
-        index.objects.get(&(category.to_owned(), key.to_owned())).map(|&at| index.list[at].clone())
-    }
-
-    fn object(&self, category: &str, key: &str) -> Option<Vec<String>> {
-        self.object_entry(category, key).map(|s| s.reasons)
-    }
-
-    fn file(&self, path: &str) -> Option<Vec<String>> {
-        let index = self.0.borrow();
-        index.files.get(&path.to_ascii_lowercase()).map(|&at| index.list[at].reasons.clone())
     }
 }
 
-/// What the Conflicts page keeps while it is rebuilt: the selection, the
-/// search, and how far each object's merge has got. Cleared on a rescan,
-/// except for the selection and the view options.
-#[derive(Default)]
-pub struct Session {
-    /// Key of the selected item (see [`Page::key_of`]).
-    pub selected: Option<String>,
-    /// Merges in progress, by object key.
-    pub steps: HashMap<String, Steps>,
-    /// Game update conflicts in progress, by item key.
-    pub behind: HashMap<String, crate::behind_dialog::BehindState>,
-    pub search: String,
-    /// Whether cards mark each version's changes from the base game rather
-    /// than the differences between them.
-    pub compare_base: bool,
-    pub ignore_whitespace: bool,
-    /// Whether comparisons fold runs of unchanged lines.
-    pub fold_unchanged: bool,
-    /// Whether the list's Resolved section is open; it starts closed.
-    pub show_resolved: bool,
-}
-
-impl Session {
-    /// Forgets merges in progress, whose versions a rescan may have changed.
-    pub fn rescanned(&mut self) {
-        self.steps.clear();
-        self.behind.clear();
-    }
-}
-
-// Keys for ignored conflicts, stored in the settings.
-pub fn file_key(path: &str) -> String {
-    format!("file:{}", path.to_lowercase())
-}
-pub fn object_key(category: &str, key: &str) -> String {
-    format!("object:{category}:{key}")
-}
-pub fn files_folder_key(folder: &str) -> String {
-    format!("files-in:{}", folder.to_lowercase())
-}
-pub fn objects_folder_key(category: &str) -> String {
-    format!("objects-in:{category}")
-}
-
-pub fn file_folder(path: &str) -> &str {
-    path.rsplit_once('/').map_or("", |(dir, _)| dir)
-}
-
-fn file_name(path: &str) -> &str {
-    path.rsplit_once('/').map_or(path, |(_, f)| f)
-}
-
-/// What hides conflicts: keys ignored one at a time or by folder, and
-/// the ignore rules, which need the mod names by scanned position.
-pub struct Ignores<'a> {
-    pub keys: &'a dyn Fn(&str) -> bool,
-    pub rules: &'a Rules,
-    pub names: &'a [String],
-    /// Each mod's dependencies, when conflicts with them are hidden.
-    pub dependencies: Option<&'a [BTreeSet<usize>]>,
-}
-
-/// Whether a conflict is ignored, directly, through its folder, or by a rule.
-pub fn file_ignored(ignores: &Ignores, c: &crate::merge::conflicts::FileConflict) -> bool {
-    (ignores.keys)(&file_key(&c.path))
-        || (ignores.keys)(&files_folder_key(file_folder(&c.path)))
-        || ignores.rules.hiding_file(c, ignores.names).is_some()
-        || ignores.dependencies.is_some_and(|d| c.builds_on_dependencies(d))
-}
-pub fn object_ignored(ignores: &Ignores, c: &crate::merge::conflicts::ObjectConflict) -> bool {
-    (ignores.keys)(&object_key(&c.category, &c.key))
-        || (ignores.keys)(&objects_folder_key(&c.category))
-        || ignores.rules.hiding_object(c, ignores.names).is_some()
-        || ignores.dependencies.is_some_and(|d| c.builds_on_dependencies(d))
-}
-
-impl Analysis {
-    pub fn name(&self, position: usize) -> &str {
-        &self.names[position]
-    }
-
-    /// "#3 · file", for a card's subtitle.
-    fn origin(&self, position: usize, file: &str) -> String {
-        tf!("#{position} · {file}", position = self.load_positions[position] + 1, file = file)
-    }
-}
-
-pub fn scanning() -> gtk::Widget {
-    let page = adw::StatusPage::builder().title(t!("Scanning Mods…")).description(t!("Reading every enabled mod's files")).vexpand(true).build();
-    page.set_paintable(Some(&adw::SpinnerPaintable::new(Some(&page))));
-    page.upcast()
-}
-
-/// Something the sidebar lists.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+/// A conflict in the queue: an object or a file override, by index into
+/// the scan's report.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Item {
     Object(usize),
     File(usize),
-    Behind(usize),
-    /// Files the game will misread, and mods that couldn't be scanned.
-    Problems,
-    /// Merges whose mods changed since.
-    Outdated,
-    /// Merges saved before fingerprints existed.
-    Untracked,
 }
 
-/// A heading in the sidebar and the items under it.
-struct Group {
-    title: String,
-    /// The key that ignores the whole folder.
-    folder_key: Option<String>,
-    /// The folder, for an ignore rule; `None` for the root.
-    folder: Option<String>,
-    /// Whether "Merge All with AI" is offered for it.
-    merge_all: bool,
-    /// The group of items that need attention, listed from the current
-    /// state at each [`Page::fill`] rather than from `items`.
-    attention: bool,
-    items: Vec<Item>,
-}
-
-/// How an item stands, for the dot before it in the sidebar.
+/// Where a conflict stands.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Status {
-    Open,
-    /// Open, but one version keeps every change, so no AI is needed.
+    NeedsMerge,
     Simple,
-    InProgress,
-    Saved,
-    Outdated,
-    Ignored,
-    Attention,
+    File,
+    Done,
 }
 
-/// What the keyboard can do on the page: an action in the `conflicts`
-/// group, its accelerator, and its name in the Keyboard Shortcuts window.
-/// All use Alt, so none can be typed into a text field by mistake. The
-/// names are made when asked for, so they follow the language.
-pub fn shortcuts() -> Vec<(&'static str, &'static str, String)> {
-    vec![
-        ("next", "<Alt>Page_Down", t!("Next Conflict")),
-        ("previous", "<Alt>Page_Up", t!("Previous Conflict")),
-        ("use-left", "<Alt>Left", t!("Use the Left Version")),
-        ("use-right", "<Alt>Right", t!("Use the Right Version")),
-        ("take-change", "<Alt>t", t!("Take Change")),
-        ("merge-ai", "<Alt>m", t!("Merge with AI")),
-        ("merge-tool", "<Alt>e", t!("Open in Merge Tool…")),
-        ("undo-step", "<Alt>z", t!("Undo Last Step")),
-        ("save", "<Alt>s", t!("Save to Patch")),
-        ("ignore", "<Alt>i", t!("Ignore the Conflict, or Stop Ignoring It")),
-    ]
+/// What the versions are compared with.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Compare {
+    /// The merge being built: what each version would add to it.
+    Merge,
+    /// The base game: what each mod changed.
+    Base,
 }
 
-pub struct Page {
-    pub analysis: Rc<Analysis>,
-    pub hooks: Rc<MergeHooks>,
-    pub split: adw::NavigationSplitView,
-    list: gtk::ListBox,
-    search: gtk::SearchEntry,
-    content: adw::Bin,
-    summary: gtk::Label,
-    details: gtk::Label,
-    progress: gtk::ProgressBar,
-    groups: Vec<Group>,
-    /// The item of each list row, by row index; `None` for headings.
-    rows: RefCell<Vec<Option<Item>>>,
-    /// Each listed item's status holder and subtitle, to update in place.
-    parts: RefCell<HashMap<Item, (gtk::Box, gtk::Label, gtk::ListBoxRow)>>,
-    current: Cell<Option<Item>>,
-    /// The buttons the shortcuts press, by action; see [`Page::bind_key`].
-    keys: RefCell<HashMap<&'static str, glib::WeakRef<gtk::Button>>>,
-    /// Keeps the selected item's view alive; its widgets hold only weak
-    /// references to it.
-    view: RefCell<Option<Rc<dyn Any>>>,
-    /// The conflicts listed (not ignored, or shown although ignored), for
-    /// the summary.
-    files: Vec<usize>,
-    objects: Vec<usize>,
-    behind: Vec<usize>,
-    involved: usize,
-    n_ignored: usize,
-    has_errors: bool,
-    /// The items listed under Resolved at the last [`Page::fill`].
-    resolved: RefCell<HashSet<Item>>,
-    /// Set while a refill is waiting, after an item was resolved or reopened.
-    refill_pending: Cell<bool>,
+/// A run of lines that differ between a version and the merge: `src` in
+/// the version, `dst` in the merge. Either can be empty.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Hunk {
+    pub src: Range<usize>,
+    pub dst: Range<usize>,
 }
 
-/// Builds the page. The window keeps the returned value for as long as it
-/// shows the widget: the widgets only hold weak references to the page.
-pub fn build(analysis: &Rc<Analysis>, rescan: gtk::Button, hooks: Rc<MergeHooks>) -> (gtk::Widget, Rc<dyn Any>) {
-    diff_view::install_css();
-    let report = &analysis.report;
-    let ignored = |k: &str| (hooks.is_ignored)(k);
-    let ignored = Ignores { keys: &ignored, rules: &hooks.rules, names: &analysis.names, dependencies: hooks.hide_dependencies.then_some(&analysis.depends_on[..]) };
-    let filter = hooks.filter;
-    let files: Vec<usize> = (0..report.files.len())
-        .filter(|&i| hooks.show_ignored || !file_ignored(&ignored, &report.files[i]))
-        .filter(|&i| filter.is_none_or(|p| report.files[i].mods.contains(&p)))
-        .collect();
-    let objects: Vec<usize> = (0..report.objects.len())
-        .filter(|&i| hooks.show_ignored || !object_ignored(&ignored, &report.objects[i]))
-        .filter(|&i| filter.is_none_or(|p| report.objects[i].definitions.iter().any(|d| d.mod_position == p)))
-        .collect();
-    let behind: Vec<usize> = if analysis.behind_versions.is_some() {
-        (0..analysis.behind.len())
-            .filter(|&i| {
-                let b = &analysis.behind[i];
-                let is_ign = (hooks.is_ignored)(&object_key(&b.category, &b.key))
-                    || (hooks.is_ignored)(&objects_folder_key(&b.category))
-                    || (hooks.is_ignored)(&format!("behind:{}:{}", b.category, b.key));
-                hooks.show_ignored || !is_ign
-            })
-            .filter(|&i| filter.is_none_or(|p| analysis.behind[i].mod_position == p))
-            .collect()
-    } else {
-        Vec::new()
-    };
-    let n_ignored = report.files.iter().filter(|c| file_ignored(&ignored, c)).count()
-        + report.objects.iter().filter(|c| object_ignored(&ignored, c)).count()
-        + analysis.behind.iter().filter(|b| {
-            (hooks.is_ignored)(&object_key(&b.category, &b.key))
-                || (hooks.is_ignored)(&objects_folder_key(&b.category))
-                || (hooks.is_ignored)(&format!("behind:{}:{}", b.category, b.key))
-        }).count();
-    let involved: BTreeSet<usize> = files
-        .iter()
-        .flat_map(|&i| report.files[i].mods.iter().copied())
-        .chain(objects.iter().flat_map(|&i| report.objects[i].definitions.iter().map(|d| d.mod_position)))
-        .chain(behind.iter().map(|&i| analysis.behind[i].mod_position))
-        .collect();
-    let has_errors = report.errors.iter().any(|e| filter.is_none_or(|p| e.mod_position == p)) || report.skipped.iter().any(|(p, _)| filter.is_none_or(|f| *p == f));
-
-    let mut groups = Vec::new();
-    groups.push(Group { title: t!("Needs Attention"), folder_key: None, folder: None, merge_all: false, attention: true, items: Vec::new() });
-    let mut by_category: BTreeMap<&str, Vec<Item>> = BTreeMap::new();
-    for &i in &objects {
-        by_category.entry(&report.objects[i].category).or_default().push(Item::Object(i));
-    }
-    for (category, items) in by_category {
-        groups.push(Group { title: category.to_owned(), folder_key: Some(objects_folder_key(category)), folder: Some(category.to_owned()), merge_all: true, attention: false, items });
-    }
-    let mut by_folder: BTreeMap<&str, Vec<Item>> = BTreeMap::new();
-    for &i in &files {
-        by_folder.entry(file_folder(&report.files[i].path)).or_default().push(Item::File(i));
-    }
-    for (folder, items) in by_folder {
-        let title = if folder.is_empty() { t!("Overridden Files") } else { tf!("Overridden Files · {folder}", folder = folder) };
-        let merge_all = items.iter().any(|i| matches!(i, Item::File(f) if file_merge::mergeable(&report.files[*f].path)));
-        groups.push(Group { title, folder_key: Some(files_folder_key(folder)), folder: (!folder.is_empty()).then(|| folder.to_owned()), merge_all, attention: false, items });
-    }
-    // Last before Resolved: game-update objects are less common than ordinary
-    // conflicts, and this keeps them out of the way of the mods' own folders.
-    if let Some((old, new)) = &analysis.behind_versions {
-        let behind_items: Vec<Item> = behind.iter().copied().map(Item::Behind).collect();
-        if !behind_items.is_empty() {
-            groups.push(Group {
-                title: tf!("Changed by the Game Update ({old} → {new})", old = old, new = new),
-                folder_key: None,
-                folder: None,
-                merge_all: true,
-                attention: false,
-                items: behind_items,
-            });
-        }
-    }
-
-    // The sidebar.
-    let summary = gtk::Label::builder().xalign(0.0).wrap(true).css_classes(["title-4"]).build();
-    let details = gtk::Label::builder().xalign(0.0).wrap(true).css_classes(["dim-label", "caption"]).build();
-    let progress = gtk::ProgressBar::builder().margin_top(6).build();
-    let top = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(6).margin_top(12).margin_start(12).margin_end(12).margin_bottom(6).build();
-    top.append(&summary);
-    top.append(&details);
-    // Names mods use that the game doesn't have, unless the patch already holds a fix.
-    if let Some(script) = &analysis.script {
-        let pending: Vec<&script_check::Finding> = script.findings.iter().filter(|f| !matches!(f.problem, script_check::Problem::Unsure | script_check::Problem::Elsewhere) && !f.unused && !f.object.as_ref().is_some_and(|(category, key)| (hooks.is_merged)(category, key)) && !(f.problem == script_check::Problem::Bom && (hooks.is_file_merged)(&f.file))).collect();
-        if !pending.is_empty() {
-            let mods = pending.iter().map(|f| f.mod_position).collect::<BTreeSet<_>>().len();
-            let label = gtk::Label::builder()
-                .label(tf!(
-                    "{problems} in {mods}…",
-                    problems = tnf!("{count} script problem", "{count} script problems", count = pending.len()),
-                    mods = tnf!("{count} mod", "{count} mods", count = mods)
-                ))
-                .wrap(true)
-                .xalign(0.0)
-                .build();
-            let button = gtk::Button::builder().child(&label).css_classes(["flat"]).halign(gtk::Align::Start).build();
-            let (analysis, hooks) = (analysis.clone(), hooks.clone());
-            button.connect_clicked(move |b| crate::script_check_dialog::present(b, analysis.clone(), hooks.clone()));
-            top.append(&button);
-        }
-    }
-    top.append(&progress);
-    if let Some(dropdown) = mod_filter(analysis, &hooks, &involved) {
-        dropdown.set_margin_top(6);
-        top.append(&dropdown);
-    }
-    let search = gtk::SearchEntry::builder()
-        .placeholder_text(t!("Search conflicts"))
-        .tooltip_text(t!("Search conflicts (Ctrl+F)"))
-        .text(hooks.session.borrow().search.as_str())
-        .build();
-    top.append(&search);
-
-    let list = gtk::ListBox::builder().selection_mode(gtk::SelectionMode::Single).css_classes(["navigation-sidebar", "conflict-list"]).build();
-    let list_scroll = gtk::ScrolledWindow::builder().child(&list).hscrollbar_policy(gtk::PolicyType::Never).vexpand(true).build();
-
-    let footer = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(6).margin_top(6).margin_bottom(8).margin_start(8).margin_end(8).build();
-    let show_ignored = gtk::CheckButton::builder().label(t!("Show Ignored")).active(hooks.show_ignored).margin_start(4).build();
-    {
-        let hooks = hooks.clone();
-        show_ignored.connect_toggled(move |_| (hooks.toggle_show_ignored)());
-    }
-    let rules = footer_button("view-list-symbolic", &t!("Rules…"), &t!("Ignore conflicts by path, like gfx/** or localisation/*"));
-    {
-        let hooks = hooks.clone();
-        rules.connect_clicked(move |_| (hooks.edit_rules)());
-    }
-    // The window's actions: the merged patch's backups, and looking up any
-    // object from the last scan.
-    let backups = footer_button("document-open-recent-symbolic", &t!("Backups"), &t!("Merged Patch Backups…"));
-    backups.set_action_name(Some("win.patch-backups"));
-    let lookup = footer_button("system-search-symbolic", &t!("Look Up"), &t!("Look Up Objects…"));
-    diff_view::append_shortcut_tooltip(&lookup, "<Control>l");
-    lookup.set_action_name(Some("win.object-lookup"));
-    rescan.set_hexpand(true);
-    let buttons = gtk::Grid::builder().row_spacing(6).column_spacing(6).column_homogeneous(true).build();
-    buttons.attach(&rules, 0, 0, 1, 1);
-    buttons.attach(&backups, 1, 0, 1, 1);
-    buttons.attach(&lookup, 0, 1, 1, 1);
-    buttons.attach(&rescan, 1, 1, 1, 1);
-    footer.append(&show_ignored);
-    footer.append(&buttons);
-
-    // A rounded card inset from the window's edges, like the code cards.
-    let sidebar = gtk::Box::builder()
-        .orientation(gtk::Orientation::Vertical)
-        .css_classes(["conflict-sidebar"])
-        .overflow(gtk::Overflow::Hidden)
-        .margin_top(12)
-        .margin_bottom(12)
-        .margin_start(12)
-        .build();
-    sidebar.append(&top);
-    sidebar.append(&list_scroll);
-    sidebar.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
-    sidebar.append(&footer);
-
-    let content = adw::Bin::builder().hexpand(true).vexpand(true).build();
-    let split = adw::NavigationSplitView::builder()
-        .sidebar(&adw::NavigationPage::builder().title(t!("Conflicts")).child(&sidebar).build())
-        // Scrolls sideways when the window is too narrow for a conflict's
-        // toolbar and cards, instead of asking for more width than there is.
-        .content(&adw::NavigationPage::builder().title(t!("Conflict")).child(&gtk::ScrolledWindow::builder().child(&content).hscrollbar_policy(gtk::PolicyType::Automatic).vscrollbar_policy(gtk::PolicyType::Never).build()).build())
-        .min_sidebar_width(260.0)
-        .max_sidebar_width(380.0)
-        .sidebar_width_fraction(0.24)
-        .css_classes(["conflict-split"])
-        .build();
-
-    let page = Rc::new(Page {
-        analysis: analysis.clone(),
-        hooks: hooks.clone(),
-        split: split.clone(),
-        list: list.clone(),
-        search: search.clone(),
-        content,
-        summary,
-        details,
-        progress,
-        groups,
-        rows: RefCell::default(),
-        parts: RefCell::default(),
-        current: Cell::new(None),
-        keys: RefCell::default(),
-        view: RefCell::new(None),
-        files,
-        objects,
-        behind,
-        involved: involved.len(),
-        n_ignored,
-        has_errors,
-        resolved: RefCell::default(),
-        refill_pending: Cell::new(false),
-    });
-    page.update_summary();
-
-    if page.groups.is_empty() {
-        let (title, description) = match filter {
-            Some(p) => (tf!("{name} Has No Conflicts", name = analysis.name(p)), t!("Choose All Mods to see the others")),
-            None if n_ignored > 0 => (t!("No Conflicts Left"), tnf!("{count} conflict is ignored", "{count} conflicts are ignored", count = n_ignored)),
-            None => (t!("No Conflicts"), t!("None of the enabled mods change the same files or objects")),
-        };
-        page.content.set_child(Some(&adw::StatusPage::builder().icon_name("emblem-ok-symbolic").title(title).description(description).build()));
-    }
-
-    {
-        let weak = Rc::downgrade(&page);
-        list.connect_row_selected(move |_, row| {
-            let (Some(page), Some(row)) = (weak.upgrade(), row) else { return };
-            let item = page.rows.borrow().get(row.index() as usize).copied().flatten();
-            if let Some(item) = item
-                && page.current.get() != Some(item)
-            {
-                page.show(item);
-            }
-        });
-    }
-    {
-        // Clicking the selected row again, e.g. after going back on a
-        // narrow window, shows it again.
-        let weak = Rc::downgrade(&page);
-        list.connect_row_activated(move |_, row| {
-            let Some(page) = weak.upgrade() else { return };
-            let item = page.rows.borrow().get(row.index() as usize).copied().flatten();
-            if item.is_some() && item == page.current.get() {
-                page.split.set_show_content(true);
-            }
-        });
-    }
-    {
-        let weak = Rc::downgrade(&page);
-        search.connect_search_changed(move |entry| {
-            if let Some(page) = weak.upgrade() {
-                page.hooks.session.borrow_mut().search = entry.text().to_string();
-                page.fill();
-            }
-        });
-    }
-    page.fill();
-    page.select_initial();
-
-    // Collapses to one pane at a time on narrow windows.
-    let bin = adw::BreakpointBin::builder().width_request(360).height_request(300).child(&split).vexpand(true).build();
-    let breakpoint = adw::Breakpoint::new(adw::BreakpointCondition::parse("max-width: 760sp").unwrap());
-    breakpoint.add_setter(&split, "collapsed", Some(&true.to_value()));
-    bin.add_breakpoint(breakpoint);
-    (bin.upcast(), page)
+/// What to do with a block of another version.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Op {
+    Above,
+    Below,
+    Replace,
 }
 
-/// The "All Mods" dropdown, when several mods have conflicts.
-/// One of the even buttons under the conflict list: an icon and a label.
-fn footer_button(icon: &str, label: &str, tooltip: &str) -> gtk::Button {
-    gtk::Button::builder().child(&adw::ButtonContent::builder().icon_name(icon).label(label).build()).tooltip_text(tooltip).hexpand(true).build()
+/// A block: a version (by index into the sources) and one of its hunks
+/// against the merge.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Block {
+    pub version: usize,
+    pub hunk: usize,
 }
 
-fn mod_filter(analysis: &Rc<Analysis>, hooks: &Rc<MergeHooks>, involved: &BTreeSet<usize>) -> Option<gtk::DropDown> {
-    let filter = hooks.filter;
-    // Mods with conflicts, in load order, plus the filtered one if it has none.
-    let choices: Vec<usize> = (0..analysis.names.len()).filter(|p| involved.contains(p) || filter == Some(*p)).collect();
-    if choices.len() <= 1 && filter.is_none() {
-        return None;
-    }
-    let labels: Vec<String> = std::iter::once(t!("All Mods")).chain(choices.iter().map(|&p| analysis.name(p).to_owned())).collect();
-    let dropdown = gtk::DropDown::from_strings(&labels.iter().map(String::as_str).collect::<Vec<_>>());
-    dropdown.set_enable_search(true);
-    dropdown.set_tooltip_text(Some(&t!("Show only the conflicts of one mod")));
-    dropdown.set_selected(filter.and_then(|f| choices.iter().position(|&p| p == f)).map_or(0, |i| i as u32 + 1));
-    // The button says what it's for until a mod is picked; the list still
-    // offers All Mods to clear it.
-    let button_factory = gtk::SignalListItemFactory::new();
-    button_factory.connect_setup(|_, item| {
-        let Some(item) = item.downcast_ref::<gtk::ListItem>() else { return };
-        item.set_child(Some(&gtk::Label::builder().xalign(0.0).ellipsize(gtk::pango::EllipsizeMode::End).build()));
-    });
-    // By the item, not its position: the button's item has none.
-    let all_mods = labels[0].clone();
-    button_factory.connect_bind(move |_, item| {
-        let Some(item) = item.downcast_ref::<gtk::ListItem>() else { return };
-        let (Some(label), Some(text)) = (item.child().and_downcast::<gtk::Label>(), item.item().and_downcast::<gtk::StringObject>()) else { return };
-        label.set_label(&if text.string() == all_mods { t!("Filter by Mod") } else { text.string().to_string() });
-    });
-    let list_factory = gtk::SignalListItemFactory::new();
-    list_factory.connect_setup(|_, item| {
-        let Some(item) = item.downcast_ref::<gtk::ListItem>() else { return };
-        item.set_child(Some(&gtk::Label::builder().xalign(0.0).ellipsize(gtk::pango::EllipsizeMode::End).max_width_chars(40).build()));
-    });
-    list_factory.connect_bind(|_, item| {
-        let Some(item) = item.downcast_ref::<gtk::ListItem>() else { return };
-        if let (Some(label), Some(text)) = (item.child().and_downcast::<gtk::Label>(), item.item().and_downcast::<gtk::StringObject>()) {
-            label.set_label(&text.string());
-        }
-    });
-    dropdown.set_factory(Some(&button_factory));
-    dropdown.set_list_factory(Some(&list_factory));
-    // Search by the shown text.
-    dropdown.set_expression(Some(gtk::PropertyExpression::new(gtk::StringObject::static_type(), None::<gtk::Expression>, "string")));
-    let hooks = hooks.clone();
-    dropdown.connect_selected_notify(move |d| {
-        let position = (d.selected() as usize).checked_sub(1).and_then(|i| choices.get(i).copied());
-        (hooks.set_filter)(position);
-    });
-    Some(dropdown)
+/// One object's versions, as read from disk.
+pub struct Versions {
+    pub item: Item,
+    pub vanilla: Option<Source>,
+    /// The mods' versions, in load order.
+    pub sources: Vec<Source>,
+    /// Each source's scanned position.
+    pub positions: Vec<usize>,
+    pub prints: Vec<Print>,
+    /// Mods whose version couldn't be read.
+    pub missing: Vec<String>,
+    /// The source the game uses, and why.
+    pub winner: Option<(usize, conflicts::Reason)>,
 }
 
-impl Page {
-    /// A stable key for `item`, to keep it selected across rebuilds.
-    fn key_of(&self, item: Item) -> String {
-        match item {
-            Item::Object(i) => {
-                let c = &self.analysis.report.objects[i];
-                object_key(&c.category, &c.key)
+impl std::fmt::Debug for Versions {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Versions").field("item", &self.item).field("sources", &self.sources.len()).finish()
+    }
+}
+
+/// What ignoring can cover, for the ignore sheet.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Scope {
+    /// One key in the settings' `ignored` set.
+    Key { key: String, label: String },
+    /// An ignore rule line.
+    Rule { rule: String, label: String },
+}
+
+impl Scope {
+    fn label(&self) -> &str {
+        match self {
+            Scope::Key { label, .. } | Scope::Rule { label, .. } => label,
+        }
+    }
+}
+
+struct IgnoreSheet {
+    scopes: Vec<(Scope, usize, String)>,
+    picked: usize,
+}
+
+/// An AI merge running or finished for the selected object.
+#[derive(Debug, Clone)]
+enum Ai {
+    Running,
+    /// The model's notes on what it combined.
+    Notes(String),
+    Failed(String),
+}
+
+pub struct State {
+    analysis: Option<Arc<Analysis>>,
+    scanning: bool,
+    /// The conflicts not ignored, in the scan's order.
+    queue: Vec<Item>,
+    selected: Option<Item>,
+    view: View,
+    filter: Filter,
+    search: String,
+    versions: Option<Arc<Versions>>,
+    loading: bool,
+    /// The merge being built, by line, once edited; until then it's the
+    /// version the game uses.
+    merged: Option<Vec<String>>,
+    undo: Vec<Option<Vec<String>>>,
+    compare: Compare,
+    menu: Option<(Block, Point)>,
+    focus: Option<Block>,
+    ignore: Option<IgnoreSheet>,
+    ai: Option<Ai>,
+    merging_simple: bool,
+    lookup: String,
+}
+
+#[derive(Debug, Clone)]
+pub enum Message {
+    View(View),
+    Filter(Filter),
+    Search(String),
+    Scan,
+    Scanned(Arc<Analysis>),
+    Select(Item),
+    Step(isize),
+    Loaded(Arc<Versions>),
+    Compare(Compare),
+    OpenMenu(Block),
+    CloseMenu,
+    Apply(Op, Block),
+    StepBlock(isize),
+    ApplyFocused(Op),
+    Undo,
+    Reset,
+    SaveMerge,
+    /// Save one mod's version (by source index) as the resolution.
+    Keep(usize),
+    /// Save one mod's copy of an overridden file (by scanned position).
+    KeepFile(usize),
+    MergeAi,
+    AiDone(Item, Result<(String, String), String>),
+    OpenIgnore,
+    PickScope(usize),
+    ConfirmIgnore,
+    CloseIgnore,
+    UnignoreKey(String),
+    UnignoreRule(String),
+    /// Resolve every simple conflict not merged yet, as its verdict says.
+    MergeSimple,
+    SimpleReady(Arc<Vec<Resolution>>),
+    /// Patches view actions, by index into the library's stale list or,
+    /// for removal, the merge itself.
+    RemoveMerge(Option<(String, String)>, String),
+    KeepMerge(usize),
+    UpdatePick(usize),
+    /// Open a merge from the patch in the queue.
+    OpenMerge(Option<(String, String)>, String),
+    Lookup(String),
+}
+
+/// A resolution worked out off the UI thread: category, key, the script
+/// to save, and the fingerprints of what it came from.
+pub type Resolution = (String, String, String, Vec<Print>);
+
+/// What happened, for the app's status line.
+pub type Notice = Option<(String, bool)>;
+
+impl State {
+    pub fn new() -> Self {
+        Self {
+            analysis: None,
+            scanning: false,
+            queue: Vec::new(),
+            selected: None,
+            view: View::Queue,
+            filter: Filter::All,
+            search: String::new(),
+            versions: None,
+            loading: false,
+            merged: None,
+            undo: Vec::new(),
+            compare: Compare::Merge,
+            menu: None,
+            focus: None,
+            ignore: None,
+            ai: None,
+            merging_simple: false,
+            lookup: String::new(),
+        }
+    }
+
+    /// Whether the last scan no longer describes the load order.
+    pub fn stale(&self, library: &Library) -> bool {
+        !self.scanning && self.analysis.as_ref().is_none_or(|a| a.revision != library.state.revision)
+    }
+
+    pub fn has_sheet(&self) -> bool {
+        self.ignore.is_some()
+    }
+
+    pub fn update(&mut self, library: &mut Library, message: Message) -> (Task<Message>, Notice) {
+        let mut notice = None;
+        let task = match message {
+            Message::View(v) => {
+                self.view = v;
+                Task::none()
             }
-            Item::Behind(i) => {
-                let b = &self.analysis.behind[i];
-                format!("behind:{}:{}", b.category, b.key)
+            Message::Filter(f) => {
+                self.filter = f;
+                Task::none()
             }
-            Item::File(i) => file_key(&self.analysis.report.files[i].path),
-            Item::Problems => "problems".into(),
-            Item::Outdated => "outdated".into(),
-            Item::Untracked => "untracked".into(),
-        }
-    }
-
-    fn title_of(&self, item: Item) -> String {
-        let n_stale = |untracked: bool| self.hooks.stale.borrow().iter().filter(|s| s.untracked == untracked).count();
-        match item {
-            Item::Object(i) => self.analysis.report.objects[i].key.clone(),
-            Item::Behind(i) => self.analysis.behind[i].key.clone(),
-            Item::File(i) => file_name(&self.analysis.report.files[i].path).to_owned(),
-            Item::Problems => t!("Problems"),
-            Item::Outdated => tnf!("{count} outdated merge", "{count} outdated merges", count = n_stale(false)),
-            Item::Untracked => tnf!("{count} merge to check", "{count} merges to check", count = n_stale(true)),
-        }
-    }
-
-    fn matches(&self, item: Item, query: &str) -> bool {
-        if query.is_empty() {
-            return true;
-        }
-        let text = match item {
-            Item::Object(i) => self.analysis.report.objects[i].key.clone(),
-            Item::Behind(i) => {
-                let b = &self.analysis.behind[i];
-                format!("{} {} {}", b.key, b.category, self.analysis.name(b.mod_position))
+            Message::Search(s) => {
+                self.search = s;
+                Task::none()
             }
-            Item::File(i) => self.analysis.report.files[i].path.clone(),
-            Item::Outdated | Item::Untracked => return stale_matches(&self.hooks.stale.borrow(), item == Item::Untracked, query) || self.title_of(item).to_lowercase().contains(query),
-            Item::Problems => self.title_of(item),
-        };
-        text.to_lowercase().contains(query)
-    }
-
-    fn is_ignored(&self, item: Item) -> bool {
-        let ignored = |k: &str| (self.hooks.is_ignored)(k);
-        let ignored = Ignores { keys: &ignored, rules: &self.hooks.rules, names: &self.analysis.names, dependencies: self.hooks.hide_dependencies.then_some(&self.analysis.depends_on[..]) };
-        match item {
-            Item::Object(i) => object_ignored(&ignored, &self.analysis.report.objects[i]),
-            Item::Behind(i) => {
-                let b = &self.analysis.behind[i];
-                (self.hooks.is_ignored)(&object_key(&b.category, &b.key))
-                    || (self.hooks.is_ignored)(&objects_folder_key(&b.category))
-                    || (self.hooks.is_ignored)(&format!("behind:{}:{}", b.category, b.key))
-            }
-            Item::File(i) => file_ignored(&ignored, &self.analysis.report.files[i]),
-            _ => false,
-        }
-    }
-
-    /// The line of the ignore rule hiding `item`, if one does and it isn't
-    /// also ignored by hand.
-    fn hidden_by_rule(&self, item: Item) -> Option<usize> {
-        let keys = |k: &str| (self.hooks.is_ignored)(k);
-        let none = Rules::default();
-        let by_hand = Ignores { keys: &keys, rules: &none, names: &self.analysis.names, dependencies: None };
-        let report = &self.analysis.report;
-        match item {
-            Item::Object(i) if !object_ignored(&by_hand, &report.objects[i]) => self.hooks.rules.hiding_object(&report.objects[i], &self.analysis.names),
-            Item::File(i) if !file_ignored(&by_hand, &report.files[i]) => self.hooks.rules.hiding_file(&report.files[i], &self.analysis.names),
-            _ => None,
-        }
-    }
-
-    /// Whether `item` is hidden only because its later mods depend on the
-    /// earlier ones.
-    fn hidden_by_dependencies(&self, item: Item) -> bool {
-        if !self.hooks.hide_dependencies || self.hidden_by_rule(item).is_some() {
-            return false;
-        }
-        let keys = |k: &str| (self.hooks.is_ignored)(k);
-        let none = Rules::default();
-        let by_hand = Ignores { keys: &keys, rules: &none, names: &self.analysis.names, dependencies: None };
-        let (report, depends) = (&self.analysis.report, &self.analysis.depends_on);
-        match item {
-            Item::Object(i) => !object_ignored(&by_hand, &report.objects[i]) && report.objects[i].builds_on_dependencies(depends),
-            Item::File(i) => !file_ignored(&by_hand, &report.files[i]) && report.files[i].builds_on_dependencies(depends),
-            _ => false,
-        }
-    }
-
-    /// "ignored", or why it's hidden when that isn't by hand.
-    fn ignored_label(&self, item: Item) -> String {
-        if let Some(line) = self.hidden_by_rule(item) {
-            return tf!("ignored by rule {line}", line = line + 1);
-        }
-        if self.hidden_by_dependencies(item) {
-            return t!("a patch of its dependency");
-        }
-        t!("ignored")
-    }
-
-    fn is_saved(&self, item: Item) -> bool {
-        match item {
-            Item::Object(i) => {
-                let c = &self.analysis.report.objects[i];
-                (self.hooks.is_merged)(&c.category, &c.key) && self.hooks.stale_object(&c.category, &c.key).is_none()
-            }
-            Item::Behind(i) => {
-                let b = &self.analysis.behind[i];
-                (self.hooks.is_merged)(&b.category, &b.key) && self.hooks.stale_object(&b.category, &b.key).is_none()
-            }
-            Item::File(i) => {
-                let path = &self.analysis.report.files[i].path;
-                (self.hooks.is_file_merged)(path) && self.hooks.stale_file(path).is_none()
-            }
-            _ => false,
-        }
-    }
-
-    /// Whether `item` is done with: a conflict saved to the patch, or every
-    /// problem fixed. Resolved items move to the list's Resolved section.
-    fn is_resolved(&self, item: Item) -> bool {
-        match item {
-            Item::Object(_) | Item::File(_) | Item::Behind(_) => self.is_saved(item),
-            Item::Problems => self.problems_resolved(),
-            Item::Outdated | Item::Untracked => false,
-        }
-    }
-
-    /// Whether every mod was scanned and every file with errors has an
-    /// up-to-date fix in the merged patch.
-    fn problems_resolved(&self) -> bool {
-        let (report, filter) = (&self.analysis.report, self.hooks.filter);
-        let errors: Vec<_> = report.errors.iter().filter(|e| filter.is_none_or(|p| e.mod_position == p)).collect();
-        !errors.is_empty()
-            && !report.skipped.iter().any(|(p, _)| filter.is_none_or(|f| *p == f))
-            && errors.iter().all(|e| (self.hooks.is_file_merged)(&e.file) && self.hooks.stale_file(&e.file).is_none())
-    }
-
-    /// The item's status and the subtitle under its name.
-    fn status_of(&self, item: Item) -> (Status, String) {
-        let analysis = &self.analysis;
-        match item {
-            Item::Object(i) => {
-                let c = &analysis.report.objects[i];
-                let mods: BTreeSet<usize> = c.definitions.iter().map(|d| d.mod_position).collect();
-                let mods = tnf!("{count} mod", "{count} mods", count = mods.len());
-                if self.is_ignored(item) {
-                    return (Status::Ignored, tf!("{mods} · {reason}", mods = &mods, reason = self.ignored_label(item)));
-                }
-                if self.hooks.stale_object(&c.category, &c.key).is_some() {
-                    return (Status::Outdated, tf!("{mods} · merge out of date", mods = &mods));
-                }
-                let session = self.hooks.session.borrow();
-                if let Some((step, total)) = session.steps.get(&object_key(&c.category, &c.key)).and_then(Steps::progress) {
-                    return if step > total { (Status::InProgress, tf!("{mods} · ready to save", mods = &mods)) } else { (Status::InProgress, tf!("{mods} · step {step} of {total}", mods = &mods, step = step, total = total)) };
-                }
-                if (self.hooks.is_merged)(&c.category, &c.key) {
-                    return (Status::Saved, tf!("{mods} · saved to patch", mods = &mods));
-                }
-                match analysis.simple.contains_key(&i) {
-                    true => (Status::Simple, tf!("{mods} · simple, no AI needed", mods = &mods)),
-                    false => match c.winner() {
-                        Some((w, _)) => (Status::Open, tf!("{mods} · {name} wins", mods = &mods, name = analysis.name(c.definitions[w].mod_position))),
-                        None => (Status::Open, mods),
-                    },
+            Message::Scan => self.scan(library),
+            Message::Scanned(analysis) => {
+                self.scanning = false;
+                library.analysis = Some(analysis.clone());
+                library.check_stale();
+                self.analysis = Some(analysis);
+                self.rebuild(library);
+                let keep = self.selected.filter(|s| self.queue.contains(s));
+                self.selected = None;
+                match keep.or_else(|| self.first_open(library)) {
+                    Some(item) => self.select(library, item),
+                    None => Task::none(),
                 }
             }
-            Item::Behind(i) => {
-                let b = &analysis.behind[i];
-                let mod_name = analysis.name(b.mod_position);
-                if self.is_ignored(item) {
-                    return (Status::Ignored, tf!("{mod_name} · {reason}", mod_name = mod_name, reason = self.ignored_label(item)));
-                }
-                if self.hooks.stale_object(&b.category, &b.key).is_some() {
-                    return (Status::Outdated, tf!("{mod_name} · merge out of date", mod_name = mod_name));
-                }
-                if (self.hooks.is_merged)(&b.category, &b.key) {
-                    return (Status::Saved, tf!("{mod_name} · saved to patch", mod_name = mod_name));
-                }
-                if b.now.is_none() {
-                    return (Status::Attention, tf!("{mod_name} · {removed}", mod_name = mod_name, removed = t!("Removed from the game")));
-                }
-                (Status::Open, tf!("{mod_name} · {category}", mod_name = mod_name, category = &b.category))
+            Message::Select(item) => {
+                self.view = View::Queue;
+                self.select(library, item)
             }
-            Item::File(i) => {
-                let c = &analysis.report.files[i];
-                let mods = tnf!("{count} mod", "{count} mods", count = c.mods.len());
-                if self.is_ignored(item) {
-                    (Status::Ignored, tf!("{mods} · {reason}", mods = &mods, reason = self.ignored_label(item)))
-                } else if self.hooks.stale_file(&c.path).is_some() {
-                    (Status::Outdated, tf!("{mods} · merge out of date", mods = &mods))
-                } else if (self.hooks.is_file_merged)(&c.path) {
-                    (Status::Saved, tf!("{mods} · saved to patch", mods = &mods))
+            Message::Step(by) => {
+                let shown = self.shown(library);
+                match self.selected.and_then(|s| shown.iter().position(|&i| i == s)) {
+                    Some(at) if !shown.is_empty() => self.select(library, shown[(at as isize + by).rem_euclid(shown.len() as isize) as usize]),
+                    _ => shown.first().map_or_else(Task::none, |&i| self.select(library, i)),
+                }
+            }
+            Message::Loaded(versions) => {
+                if Some(versions.item) == self.selected {
+                    self.loading = false;
+                    // A merge already in the patch is what's edited.
+                    match (versions.item, &self.analysis) {
+                        (Item::Object(i), Some(a)) => {
+                            let c = &a.report.objects[i];
+                            self.merged = library.patch.as_ref().and_then(|p| p.get(&c.category, &c.key)).map(|m| m.script.lines().map(str::to_owned).collect());
+                        }
+                        (Item::File(i), Some(a)) => {
+                            let path = &a.report.files[i].path;
+                            self.merged = library.patch.as_ref().filter(|p| p.get_file(path).is_some()).and_then(|p| p.read_file(path).ok()).map(|t| t.lines().map(str::to_owned).collect());
+                        }
+                        _ => {}
+                    }
+                    self.versions = Some(versions);
+                    self.refocus();
+                }
+                Task::none()
+            }
+            Message::Compare(c) => {
+                self.compare = c;
+                Task::none()
+            }
+            Message::OpenMenu(block) => {
+                self.menu = Some((block, Point::ORIGIN));
+                self.focus = Some(block);
+                Task::none()
+            }
+            Message::CloseMenu => {
+                self.menu = None;
+                Task::none()
+            }
+            Message::Apply(op, block) => {
+                self.menu = None;
+                self.apply(op, block);
+                Task::none()
+            }
+            Message::StepBlock(by) => {
+                let blocks = self.blocks();
+                self.focus = if blocks.is_empty() {
+                    None
                 } else {
-                    (Status::Open, tf!("{mods} · {name} wins", mods = &mods, name = analysis.name(*c.mods.last().unwrap())))
+                    let at = self.focus.and_then(|f| blocks.iter().position(|b| *b == f));
+                    Some(blocks[match at {
+                        Some(at) => (at as isize + by).rem_euclid(blocks.len() as isize) as usize,
+                        None if by < 0 => blocks.len() - 1,
+                        None => 0,
+                    }])
+                };
+                Task::none()
+            }
+            Message::ApplyFocused(op) => {
+                if let Some(block) = self.focus.filter(|b| self.blocks().contains(b)) {
+                    self.apply(op, block);
                 }
+                Task::none()
             }
-            Item::Problems => {
-                let filter = self.hooks.filter;
-                let errors = analysis.report.errors.iter().filter(|e| filter.is_none_or(|p| e.mod_position == p)).count();
-                let skipped = analysis.report.skipped.iter().filter(|(p, _)| filter.is_none_or(|f| *p == f)).count();
-                let mut parts = Vec::new();
-                if errors > 0 {
-                    parts.push(tnf!("{count} file with errors", "{count} files with errors", count = errors));
+            Message::Undo => {
+                if let Some(before) = self.undo.pop() {
+                    self.merged = before;
+                    self.refocus();
                 }
-                if skipped > 0 {
-                    parts.push(tnf!("{count} mod not scanned", "{count} mods not scanned", count = skipped));
-                }
-                if self.problems_resolved() {
-                    return (Status::Saved, tnf!("{count} file fixed", "{count} files fixed", count = errors));
-                }
-                (Status::Attention, parts.join(" · "))
+                Task::none()
             }
-            Item::Outdated => (Status::Attention, outdated_summary(&self.hooks.stale.borrow())),
-            Item::Untracked => (Status::Attention, t!("Saved by an older version")),
-        }
-    }
-
-    /// Rebuilds the sidebar list for the current search.
-    pub fn fill(self: &Rc<Self>) {
-        while let Some(row) = self.list.row_at_index(0) {
-            self.list.remove(&row);
-        }
-        let query = self.hooks.session.borrow().search.to_lowercase();
-        let mut rows = Vec::new();
-        let mut parts = HashMap::new();
-        let mut add_items = |list: &gtk::ListBox, items: &[Item], rows: &mut Vec<Option<Item>>| {
-            for &item in items.iter().take(ROWS_PER_GROUP) {
-                let (row, status, subtitle) = self.item_row(item);
-                list.append(&row);
-                rows.push(Some(item));
-                parts.insert(item, (status, subtitle, row));
+            Message::Reset => {
+                self.undo.push(self.merged.take());
+                self.refocus();
+                Task::none()
             }
-            if items.len() > ROWS_PER_GROUP {
-                let more = gtk::ListBoxRow::builder().selectable(false).activatable(false).build();
-                more.set_child(Some(&gtk::Label::builder().label(tf!("…and {count} more. Search to find them.", count = items.len() - ROWS_PER_GROUP)).xalign(0.0).css_classes(["dim-label", "caption"]).margin_start(12).build()));
-                list.append(&more);
-                rows.push(None);
-            }
-        };
-        let mut resolved = Vec::new();
-        for group in &self.groups {
-            let listed = if group.attention { attention_items(&self.hooks.stale.borrow(), self.has_errors) } else { group.items.clone() };
-            let (done, items): (Vec<Item>, Vec<Item>) = listed.iter().copied().filter(|&i| self.matches(i, &query)).partition(|&i| self.is_resolved(i));
-            resolved.extend(done);
-            if items.is_empty() {
-                continue;
-            }
-            self.list.append(&self.group_heading(group, items.len()));
-            rows.push(None);
-            add_items(&self.list, &items, &mut rows);
-        }
-        if !resolved.is_empty() {
-            let open = self.hooks.session.borrow().show_resolved;
-            self.list.append(&self.resolved_heading(resolved.len(), open));
-            rows.push(None);
-            if open {
-                add_items(&self.list, &resolved, &mut rows);
-            }
-        }
-        self.resolved.replace(resolved.into_iter().collect());
-        if rows.is_empty() {
-            let none = gtk::ListBoxRow::builder().selectable(false).activatable(false).build();
-            none.set_child(Some(&gtk::Label::builder().label(t!("No matches")).css_classes(["dim-label"]).margin_top(24).build()));
-            self.list.append(&none);
-            rows.push(None);
-        }
-        self.rows.replace(rows);
-        self.parts.replace(parts);
-        // The summary once, not per row: it looks at every conflict.
-        for item in self.parts.borrow().keys() {
-            self.set_status(*item);
-        }
-        self.update_summary();
-        // Keep the selection on the current item, if it's still listed.
-        if let Some(current) = self.current.get()
-            && let Some((_, _, row)) = self.parts.borrow().get(&current)
-        {
-            self.list.select_row(Some(row));
-        }
-    }
-
-    /// The heading of the Resolved section, which opens and closes it.
-    fn resolved_heading(self: &Rc<Self>, count: usize, open: bool) -> gtk::ListBoxRow {
-        let heading = gtk::Box::builder().spacing(6).build();
-        heading.append(&gtk::Image::builder().icon_name(if open { "pan-down-symbolic" } else { "pan-end-symbolic" }).css_classes(["dim-label"]).build());
-        heading.append(&gtk::Label::builder().label(t!("Resolved")).xalign(0.0).hexpand(true).css_classes(["dim-label"]).build());
-        heading.append(&gtk::Label::builder().label(count.to_string()).css_classes(["dim-label", "numeric"]).build());
-        let button = gtk::Button::builder()
-            .child(&heading)
-            .tooltip_text(if open { t!("Hide the conflicts saved to the merged patch") } else { t!("Show the conflicts saved to the merged patch") })
-            .css_classes(["flat", "resolved-toggle"])
-            .build();
-        let weak = Rc::downgrade(self);
-        button.connect_clicked(move |_| {
-            if let Some(page) = weak.upgrade() {
-                {
-                    let mut session = page.hooks.session.borrow_mut();
-                    session.show_resolved = !session.show_resolved;
-                }
-                page.fill();
-            }
-        });
-        gtk::ListBoxRow::builder().child(&button).selectable(false).activatable(false).css_classes(["folder"]).build()
-    }
-
-    fn group_heading(self: &Rc<Self>, group: &Group, count: usize) -> gtk::ListBoxRow {
-        let heading = gtk::Box::builder().spacing(6).margin_start(6).build();
-        heading.append(&gtk::Label::builder().label(&group.title).xalign(0.0).hexpand(true).wrap(true).wrap_mode(gtk::pango::WrapMode::WordChar).css_classes(["dim-label"]).build());
-        heading.append(&gtk::Label::builder().label(count.to_string()).css_classes(["dim-label", "numeric"]).build());
-        if let Some(folder_key) = &group.folder_key {
-            let menu = gio::Menu::new();
-            let actions = gio::SimpleActionGroup::new();
-            if group.merge_all {
-                menu.append(Some(&t!("Merge All with AI…")), Some("folder.merge-all"));
-                let action = gio::SimpleAction::new("merge-all", None);
-                let (weak, items) = (Rc::downgrade(self), group.items.clone());
-                action.connect_activate(move |_, _| {
-                    if let Some(page) = weak.upgrade() {
-                        let shown: Vec<Item> = items.iter().copied().filter(|&i| !page.is_ignored(i)).collect();
-                        let objects: Vec<usize> = shown.iter().filter_map(|i| if let Item::Object(i) = i { Some(*i) } else { None }).collect();
-                        let files: Vec<usize> = shown.iter().filter_map(|i| if let Item::File(i) = i { Some(*i) } else { None }).collect();
-                        if !objects.is_empty() {
-                            (page.hooks.merge_folder)(objects);
-                        } else if !files.is_empty() {
-                            (page.hooks.merge_files)(files);
+            Message::SaveMerge => {
+                let (Some(versions), Some(item)) = (self.versions.clone(), self.selected) else { return (Task::none(), None) };
+                let Some(analysis) = self.analysis.clone() else { return (Task::none(), None) };
+                let text = self.merge_lines().join("\n");
+                let saved = match item {
+                    Item::Object(i) => {
+                        let c = &analysis.report.objects[i];
+                        drukhal_core::merge_dialog::validate(&c.category, &c.key, &text).and_then(|script| library.save_merge(&c.category, &c.key, &script, versions.prints.clone()))
+                    }
+                    Item::File(i) => {
+                        let path = &analysis.report.files[i].path;
+                        let checked = drukhal_core::merge::validate::validate_file(path, &text, versions.vanilla.as_ref(), &versions.sources, None);
+                        match checked.error_summary() {
+                            Some(problems) => Err(problems),
+                            None => library.save_file_merge(path, format!("{}\n", text.trim_end()).as_bytes(), versions.prints.clone()),
                         }
                     }
-                });
-                actions.add_action(&action);
-            }
-            let ignored = (self.hooks.is_ignored)(folder_key);
-            let label = if ignored { t!("Stop Ignoring Folder") } else { t!("Ignore Folder") };
-            menu.append(Some(&label), Some("folder.ignore"));
-            let action = gio::SimpleAction::new("ignore", None);
-            let (weak, folder_key) = (Rc::downgrade(self), folder_key.clone());
-            action.connect_activate(move |_, _| {
-                if let Some(page) = weak.upgrade() {
-                    (page.hooks.set_ignored)(&folder_key, !ignored);
-                    (page.hooks.rerender)();
-                }
-            });
-            actions.add_action(&action);
-            if let Some(folder) = &group.folder {
-                // Starts from the filtered mod, if one is.
-                let label = match self.hooks.filter {
-                    Some(p) => tf!("Ignore Where {mod_name} Wins…", mod_name = self.analysis.name(p)),
-                    None => t!("Ignore Where a Mod Wins…"),
                 };
-                menu.append(Some(&label), Some("folder.ignore-won"));
-                let action = gio::SimpleAction::new("ignore-won", None);
-                let (weak, folder) = (Rc::downgrade(self), folder.clone());
-                action.connect_activate(move |_, _| {
-                    if let Some(page) = weak.upgrade() {
-                        (page.hooks.add_rule)(Some(&folder), page.hooks.filter);
+                match saved {
+                    Ok(message) => {
+                        notice = Some((message, false));
+                        self.next_open(library)
                     }
-                });
-                actions.add_action(&action);
-            }
-            let button = gtk::MenuButton::builder().icon_name("view-more-symbolic").menu_model(&menu).tooltip_text(t!("Folder actions")).css_classes(["flat", "circular"]).valign(gtk::Align::Center).build();
-            button.insert_action_group("folder", Some(&actions));
-            heading.append(&button);
-        } else if group.merge_all {
-            let menu = gio::Menu::new();
-            let actions = gio::SimpleActionGroup::new();
-            menu.append(Some(&t!("Update All with AI…")), Some("group.update-all"));
-            let action = gio::SimpleAction::new("update-all", None);
-            let weak = Rc::downgrade(self);
-            action.connect_activate(move |_, _| {
-                if let Some(page) = weak.upgrade() {
-                    crate::behind_dialog::run_update_all(&page);
-                }
-            });
-            actions.add_action(&action);
-            let button = gtk::MenuButton::builder().icon_name("view-more-symbolic").menu_model(&menu).tooltip_text(t!("Update All with AI…")).css_classes(["flat", "circular"]).valign(gtk::Align::Center).build();
-            button.insert_action_group("group", Some(&actions));
-            heading.append(&button);
-        }
-        gtk::ListBoxRow::builder().child(&heading).selectable(false).activatable(false).css_classes(["folder"]).build()
-    }
-
-    fn item_row(&self, item: Item) -> (gtk::ListBoxRow, gtk::Box, gtk::Label) {
-        let status = gtk::Box::builder().width_request(18).valign(gtk::Align::Center).halign(gtk::Align::Center).build();
-        let title = self.title_of(item);
-        let title_label = gtk::Label::builder().label(&title).xalign(0.0).ellipsize(gtk::pango::EllipsizeMode::Middle).build();
-        let subtitle = gtk::Label::builder().xalign(0.0).ellipsize(gtk::pango::EllipsizeMode::End).css_classes(["dim-label", "caption"]).build();
-        let text = gtk::Box::builder().orientation(gtk::Orientation::Vertical).hexpand(true).build();
-        text.append(&title_label);
-        text.append(&subtitle);
-        let b = gtk::Box::builder().spacing(10).build();
-        b.append(&status);
-        b.append(&text);
-        let row = gtk::ListBoxRow::builder().child(&b).css_classes(["conflict"]).build();
-        row.set_tooltip_text(Some(&match item {
-            Item::File(i) => self.analysis.report.files[i].path.clone(),
-            Item::Object(i) => {
-                let c = &self.analysis.report.objects[i];
-                c.definitions.iter().map(|d| tf!("{name}: {file}", name = self.analysis.name(d.mod_position), file = &d.file)).collect::<Vec<_>>().join("\n")
-            }
-            Item::Behind(i) => {
-                let b = &self.analysis.behind[i];
-                tf!("{name}: {file}", name = self.analysis.name(b.mod_position), file = &b.file)
-            }
-            _ => title,
-        }));
-        (row, status, subtitle)
-    }
-
-    /// Refreshes the dot and subtitle of `item`'s row, and the summary.
-    /// An item resolved or reopened moves section once the current change
-    /// is done, so moving on to the next conflict still starts from it.
-    pub fn update_status(self: &Rc<Self>, item: Item) {
-        self.set_status(item);
-        self.update_summary();
-        if self.is_resolved(item) != self.resolved.borrow().contains(&item) && !self.refill_pending.replace(true) {
-            let weak = Rc::downgrade(self);
-            glib::idle_add_local_once(move || {
-                if let Some(page) = weak.upgrade() {
-                    page.refill_pending.set(false);
-                    page.fill();
-                }
-            });
-        }
-    }
-
-    /// Refreshes the dot and subtitle of `item`'s row.
-    fn set_status(&self, item: Item) {
-        let parts = self.parts.borrow();
-        let Some((holder, subtitle, row)) = parts.get(&item) else { return };
-        let (status, text) = self.status_of(item);
-        subtitle.set_label(&text);
-        while let Some(child) = holder.first_child() {
-            holder.remove(&child);
-        }
-        let icon = |name: &str, class: &str, tooltip: &str| gtk::Image::builder().icon_name(name).css_classes([class]).tooltip_text(tooltip).build().upcast::<gtk::Widget>();
-        let widget = match status {
-            Status::Open => gtk::Box::builder().css_classes(["status-dot"]).tooltip_text(t!("Not resolved yet")).build().upcast(),
-            Status::Simple => {
-                let reason = match item {
-                    Item::Object(i) => self.analysis.simple.get(&i).cloned().unwrap_or_default(),
-                    _ => String::new(),
-                };
-                icon(SIMPLE_ICON, "accent", &tf!("Simple merge, no AI needed: {reason}", reason = &reason))
-            }
-            Status::InProgress => gtk::Box::builder().css_classes(["status-dot", "progress"]).tooltip_text(t!("Being merged")).build().upcast(),
-            Status::Saved => icon("emblem-ok-symbolic", "success", &t!("Saved to the merged patch")),
-            Status::Outdated => icon("dialog-warning-symbolic", "warning", &t!("Its mods or the base game changed since this was merged")),
-            Status::Ignored => icon("view-conceal-symbolic", "dim-label", &t!("Ignored")),
-            Status::Attention => icon("dialog-warning-symbolic", "warning", ""),
-        };
-        holder.append(&widget);
-        if status == Status::Ignored {
-            row.add_css_class("dim-label");
-        } else {
-            row.remove_css_class("dim-label");
-        }
-    }
-
-    fn update_summary(&self) {
-        let listed: Vec<Item> = self.objects.iter().map(|&i| Item::Object(i))
-            .chain(self.files.iter().map(|&i| Item::File(i)))
-            .chain(self.behind.iter().map(|&i| Item::Behind(i)))
-            .filter(|&i| !self.is_ignored(i))
-            .collect();
-        let saved = listed.iter().filter(|&&i| self.is_saved(i)).count();
-        let conflicts = tnf!("{count} conflict", "{count} conflicts", count = listed.len());
-        self.summary.set_label(&tf!("{summary} · {saved} saved", summary = &conflicts, saved = saved));
-        let mut details = match self.hooks.filter {
-            Some(p) => tf!("Only {name}'s conflicts", name = self.analysis.name(p)),
-            None => tf!("{involved} of {total} mods involved", involved = self.involved, total = self.analysis.names.len()),
-        };
-        if self.n_ignored > 0 {
-            details.push_str(&tf!(" · {count} ignored", count = self.n_ignored));
-        }
-        self.details.set_label(&details);
-        self.progress.set_fraction(if listed.is_empty() { 0.0 } else { saved as f64 / listed.len() as f64 });
-        self.progress.set_visible(!listed.is_empty());
-    }
-
-    /// Selects the item that was selected before the rebuild, or the first
-    /// conflict.
-    fn select_initial(self: &Rc<Self>) {
-        let selected = self.hooks.session.borrow().selected.clone();
-        let items: Vec<Item> = self.rows.borrow().iter().flatten().copied().collect();
-        let item = selected
-            .and_then(|key| items.iter().copied().find(|&i| self.key_of(i) == key))
-            .or_else(|| items.iter().copied().find(|i| matches!(i, Item::Object(_) | Item::File(_) | Item::Behind(_)) && !self.is_saved(*i)))
-            .or_else(|| items.first().copied());
-        if let Some(item) = item {
-            self.show(item);
-        }
-    }
-
-    /// Focuses the conflicts search box, revealing the sidebar when collapsed.
-    pub fn focus_search(&self) {
-        self.split.set_show_content(false);
-        self.search.grab_focus();
-    }
-
-    /// Lets the shortcut for `action` (one of [`shortcuts`]) press
-    /// `button`, and adds the keys to its tooltip. The last button bound
-    /// wins, as views bind theirs again each time they're drawn.
-    pub fn bind_key(&self, action: &'static str, button: &gtk::Button) {
-        if let Some((_, accel, _)) = shortcuts().iter().find(|s| s.0 == action) {
-            diff_view::append_shortcut_tooltip(button, accel);
-        }
-        self.keys.borrow_mut().insert(action, button.downgrade());
-    }
-
-    /// The `conflicts` action group behind [`shortcuts`], for the window.
-    pub fn actions(self: &Rc<Self>) -> gio::SimpleActionGroup {
-        let group = gio::SimpleActionGroup::new();
-        for (name, _, _) in shortcuts() {
-            let action = gio::SimpleAction::new(name, None);
-            let weak = Rc::downgrade(self);
-            action.connect_activate(move |_, _| {
-                if let Some(page) = weak.upgrade() {
-                    page.key(name);
-                }
-            });
-            group.add_action(&action);
-        }
-        group
-    }
-
-    fn key(self: &Rc<Self>, action: &str) {
-        // Not from another page, nor from under a dialog.
-        let under_dialog = self.split.root().and_downcast::<adw::ApplicationWindow>().is_some_and(|w| w.visible_dialog().is_some());
-        if !self.split.is_mapped() || under_dialog {
-            return;
-        }
-        match action {
-            "next" | "previous" => {
-                let rows: Vec<Item> = self.rows.borrow().iter().flatten().copied().collect();
-                let at = self.current.get().and_then(|c| rows.iter().position(|&i| i == c));
-                let to = match (at, action == "next") {
-                    (Some(i), true) => i + 1,
-                    (Some(i), false) => i.wrapping_sub(1),
-                    (None, _) => 0,
-                };
-                if let Some(&item) = rows.get(to) {
-                    self.show(item);
-                    // Brings the row into view.
-                    if let Some((_, _, row)) = self.parts.borrow().get(&item) {
-                        row.grab_focus();
+                    Err(e) => {
+                        notice = Some((e, true));
+                        Task::none()
                     }
                 }
             }
-            "ignore" => {
-                if let Some(item @ (Item::Object(_) | Item::File(_) | Item::Behind(_))) = self.current.get() {
-                    self.toggle_ignored(item);
+            Message::Keep(n) => {
+                if let (Some(versions), Some(Item::File(_))) = (&self.versions, self.selected)
+                    && let Some(&position) = versions.positions.get(n)
+                {
+                    return self.update(library, Message::KeepFile(position));
                 }
-            }
-            _ => {
-                let button = self.keys.borrow().get(action).and_then(|b| b.upgrade());
-                if let Some(button) = button.filter(|b| b.is_mapped() && b.is_sensitive()) {
-                    button.emit_clicked();
-                }
-            }
-        }
-    }
-
-    /// Shows `item` in the main pane and selects its row.
-    pub fn show(self: &Rc<Self>, item: Item) {
-        self.keys.borrow_mut().clear();
-        self.current.set(Some(item));
-        self.hooks.session.borrow_mut().selected = Some(self.key_of(item));
-        if let Some((_, _, row)) = self.parts.borrow().get(&item) {
-            self.list.select_row(Some(row));
-        }
-        let (widget, view): (gtk::Widget, Option<Rc<dyn Any>>) = match item {
-            Item::Object(i) => {
-                let (w, v) = object::view(self, i);
-                (w, Some(v))
-            }
-            Item::Behind(i) => {
-                let (w, v) = crate::behind_dialog::view(self, i);
-                (w, Some(v))
-            }
-            Item::File(i) => {
-                let (w, v) = file::view(self, i);
-                (w, Some(v))
-            }
-            Item::Problems => (self.problems_view(), None),
-            Item::Outdated => (self.stale_view(false), None),
-            Item::Untracked => (self.stale_view(true), None),
-        };
-        self.view.replace(view);
-        self.content.set_child(Some(&widget));
-        self.split.set_show_content(true);
-    }
-
-    /// Moves on from `item` to the next conflict still to resolve.
-    pub fn advance(self: &Rc<Self>, item: Item) {
-        let rows: Vec<Item> = self.rows.borrow().iter().flatten().copied().collect();
-        let start = rows.iter().position(|&i| i == item).map_or(0, |p| p + 1);
-        let next = rows[start..].iter().chain(&rows[..start]).copied().find(|&i| i != item && matches!(i, Item::Object(_) | Item::File(_) | Item::Behind(_)) && !self.is_saved(i) && !self.is_ignored(i));
-        match next {
-            Some(next) => self.show(next),
-            None => self.show(item),
-        }
-    }
-
-    /// Ignores `item`, or stops ignoring it.
-    pub fn toggle_ignored(self: &Rc<Self>, item: Item) {
-        if self.hidden_by_rule(item).is_some() || self.hidden_by_dependencies(item) {
-            return (self.hooks.edit_rules)();
-        }
-        let key = self.key_of(item);
-        let ignore = !self.is_ignored(item);
-        (self.hooks.set_ignored)(&key, ignore);
-        self.update_status(item);
-        if ignore && !self.hooks.show_ignored {
-            self.advance(item);
-        } else {
-            self.show(item);
-        }
-    }
-
-    /// The top of the main pane: a back button when collapsed, the title,
-    /// subtitle, a row for chips, and the actions on the right.
-    pub fn detail_header(&self, title: &str, subtitle: &str) -> DetailHeader {
-        let back = gtk::Button::builder().icon_name("go-previous-symbolic").tooltip_text(t!("Back to the list")).valign(gtk::Align::Center).css_classes(["flat"]).build();
-        self.split.bind_property("collapsed", &back, "visible").sync_create().build();
-        let split = self.split.downgrade();
-        back.connect_clicked(move |_| {
-            if let Some(split) = split.upgrade() {
-                split.set_show_content(false);
-            }
-        });
-        let titles = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(2).hexpand(true).build();
-        // Long paths and names wrap rather than being cut short.
-        titles.append(&gtk::Label::builder().label(title).xalign(0.0).wrap(true).wrap_mode(gtk::pango::WrapMode::WordChar).css_classes(["conflict-title"]).build());
-        titles.append(&gtk::Label::builder().label(subtitle).xalign(0.0).ellipsize(gtk::pango::EllipsizeMode::End).tooltip_text(subtitle).css_classes(["dim-label"]).build());
-        let actions = gtk::Box::builder().spacing(6).valign(gtk::Align::Center).build();
-        let top = gtk::Box::builder().spacing(12).build();
-        top.append(&back);
-        top.append(&titles);
-        top.append(&actions);
-        let chips = gtk::FlowBox::builder().selection_mode(gtk::SelectionMode::None).column_spacing(4).row_spacing(4).max_children_per_line(64).homogeneous(false).build();
-        let widget = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(8).build();
-        widget.append(&top);
-        widget.append(&chips);
-        DetailHeader { widget, chips, actions }
-    }
-
-    /// The button that ignores `item`, or stops ignoring it, with a menu
-    /// that makes a rule for every conflict in its folder its winner wins.
-    pub fn ignore_button(self: &Rc<Self>, item: Item) -> gtk::Widget {
-        let ignored = self.is_ignored(item);
-        let tooltip = match self.hidden_by_rule(item) {
-            Some(line) => tf!("Ignored by rule {line}; click to edit the ignore rules", line = line + 1),
-            None if self.hidden_by_dependencies(item) => t!("Hidden because the later mods depend on the earlier ones, as patches do; click to change this"),
-            None if ignored => t!("Stop ignoring this conflict"),
-            None => t!("Ignore this conflict, so it no longer shows or counts"),
-        };
-        let content = adw::ButtonContent::builder()
-            .icon_name(if ignored { "view-reveal-symbolic" } else { "view-conceal-symbolic" })
-            .label(if ignored { t!("Stop Ignoring") } else { t!("Ignore Conflict") })
-            .build();
-        let weak = Rc::downgrade(self);
-        let toggle = move || {
-            if let Some(page) = weak.upgrade() {
-                page.toggle_ignored(item);
-            }
-        };
-        let Some((folder, winner)) = self.folder_and_winner(item) else {
-            let button = gtk::Button::builder().child(&content).tooltip_text(tooltip).valign(gtk::Align::Center).build();
-            diff_view::append_shortcut_tooltip(&button, "<Alt>i");
-            button.connect_clicked(move |_| toggle());
-            return button.upcast();
-        };
-        let menu = gio::Menu::new();
-        menu.append(Some(&tf!("Ignore All in {folder} Where {mod_name} Wins…", folder = &folder, mod_name = self.analysis.name(winner))), Some("ignore.like-this"));
-        let actions = gio::SimpleActionGroup::new();
-        let action = gio::SimpleAction::new("like-this", None);
-        let weak = Rc::downgrade(self);
-        action.connect_activate(move |_, _| {
-            if let Some(page) = weak.upgrade() {
-                (page.hooks.add_rule)(Some(&folder), Some(winner));
-            }
-        });
-        actions.add_action(&action);
-        let button = adw::SplitButton::builder().child(&content).menu_model(&menu).tooltip_text(tooltip).dropdown_tooltip(t!("More ways to ignore")).valign(gtk::Align::Center).build();
-        diff_view::append_shortcut_tooltip(&button, "<Alt>i");
-        button.insert_action_group("ignore", Some(&actions));
-        button.connect_clicked(move |_| toggle());
-        button.upcast()
-    }
-
-    /// The folder `item` is in and the scanned position of the mod whose
-    /// version the game uses, for a "won by" rule.
-    fn folder_and_winner(&self, item: Item) -> Option<(String, usize)> {
-        let report = &self.analysis.report;
-        match item {
-            Item::Object(i) => {
-                let c = &report.objects[i];
-                Some((c.category.clone(), c.definitions[c.winner()?.0].mod_position))
-            }
-            Item::File(i) => {
-                let c = &report.files[i];
-                let folder = file_folder(&c.path);
-                if folder.is_empty() { None } else { Some((folder.to_owned(), *c.mods.last()?)) }
-            }
-            _ => None,
-        }
-    }
-
-    fn problems_view(self: &Rc<Self>) -> gtk::Widget {
-        let analysis = &self.analysis;
-        let report = &analysis.report;
-        let hooks = &self.hooks;
-        let filter = hooks.filter;
-        let header = self.detail_header(&t!("Problems"), &t!("Files the game will misread, and mods that couldn't be scanned"));
-        let list = boxed_list();
-        for (position, reason) in report.skipped.iter().filter(|(p, _)| filter.is_none_or(|f| *p == f)) {
-            list.append(&row(analysis.name(*position), reason));
-        }
-        for (index, e) in report.errors.iter().enumerate().filter(|(_, e)| filter.is_none_or(|p| e.mod_position == p)) {
-            let message = match e.line {
-                Some(line) => tf!("line {line}: {message}", line = line, message = &e.message),
-                None => e.message.clone(),
-            };
-            let r = row(&e.file, &tf!("{mod_name} · {message}", mod_name = analysis.name(e.mod_position), message = &message));
-            r.add_prefix(&gtk::Image::builder().icon_name("dialog-warning-symbolic").css_classes(["warning"]).build());
-            // Read failures can't be fixed by repairing braces.
-            if e.line.is_some() && analysis.roots[e.mod_position].is_some() {
-                let stale = hooks.stale_file(&e.file);
-                let (fixed, button) = merge_controls((hooks.is_file_merged)(&e.file), stale.as_deref());
-                fixed.set_tooltip_text(Some(&t!("Fixed through the merged patch")));
-                button.set_label(&match (stale, fixed.is_visible()) {
-                    (Some(_), _) => t!("Fix Again…"),
-                    (None, true) => t!("Edit Fix…"),
-                    (None, false) => t!("Fix…"),
-                });
-                let (fixed_ref, button_ref) = (fixed.downgrade(), button.downgrade());
-                let (hooks, page) = (hooks.clone(), Rc::downgrade(self));
-                button.connect_clicked(move |_| {
-                    let (fixed, button, page) = (fixed_ref.clone(), button_ref.clone(), page.clone());
-                    (hooks.open_fix)(
-                        index,
-                        Box::new(move || {
-                            if let (Some(f), Some(b)) = (fixed.upgrade(), button.upgrade()) {
-                                f.set_icon_name(Some("emblem-ok-symbolic"));
-                                f.set_css_classes(&["success"]);
-                                f.set_visible(true);
-                                b.set_label(&t!("Edit Fix…"));
-                            }
-                            // Every fix saved moves Problems to Resolved.
-                            if let Some(page) = page.upgrade() {
-                                page.update_status(Item::Problems);
-                            }
-                        }),
-                    )
-                });
-                r.add_suffix(&fixed);
-                r.add_suffix(&button);
-            }
-            list.append(&r);
-        }
-        let intro = gtk::Label::builder()
-            .label(t!("The game keeps reading after a missing or extra }, but everything after it gets nested inside the broken object and stops working. Fix… repairs the braces, and the fixed copy is saved through the merged patch, so the mod itself is never modified."))
-            .wrap(true)
-            .xalign(0.0)
-            .css_classes(["dim-label"])
-            .build();
-        scrolled_detail(&[header.widget.upcast(), intro.upcast(), list.upcast()])
-    }
-
-    fn stale_view(self: &Rc<Self>, untracked: bool) -> gtk::Widget {
-        let all = self.hooks.stale.borrow();
-        let (title, subtitle, description) = if untracked {
-            (t!("Merges to Check"), t!("Saved by an older version"), t!("These were merged by an older version of DrukhalManager, which didn't record what the mods looked like, so their updates can't be noticed. If one still looks right, keep it to track changes from now on; otherwise re-merge it from the list, or remove it."))
-        } else {
-            let what = if all.iter().any(|s| !s.untracked && s.base_game) { t!("Mods or the base game") } else { t!("Mods") };
-            (t!("Outdated Merges"), outdated_summary(&all), tf!("{what} changed since these were merged or fixed, so the patch may be undoing their updates. Re-merge them from the list, keep one as it is to accept it, or remove it from the patch.", what = &what))
-        };
-        let header = self.detail_header(&title, &subtitle);
-        let picks = all.iter().filter(|s| !untracked && !s.untracked && s.pick.is_some()).count();
-        let description = if picks > 0 {
-            tf!("{description} Where you chose one mod's version and only that mod changed, you can take its new version instead.", description = &description)
-        } else {
-            description
-        };
-        if picks > 1 {
-            let update = gtk::Button::builder().label(tnf!("Use {count} New Version", "Use {count} New Versions", count = picks)).tooltip_text(t!("Replace each picked version with the new one from the same mod. The patch is backed up first")).css_classes(["suggested-action"]).build();
-            let hooks = self.hooks.clone();
-            update.connect_clicked(move |_| (hooks.update_picks)(None));
-            header.actions.append(&update);
-        }
-        let stale: Vec<&Stale> = all.iter().filter(|s| s.untracked == untracked).collect();
-        if stale.len() > 1 {
-            let remove = gtk::Button::builder().label(tnf!("Remove {count} from Patch", "Remove All {count} from Patch", count = stale.len())).tooltip_text(t!("Remove each of these merges from the patch. The patch is backed up first")).css_classes(["destructive-action"]).build();
-            let (hooks, listed) = (self.hooks.clone(), stale.iter().map(|s| (*s).clone()).collect::<Vec<_>>());
-            remove.connect_clicked(move |_| (hooks.remove_merge)(&listed));
-            header.actions.append(&remove);
-        }
-        let intro = gtk::Label::builder().label(&description).wrap(true).xalign(0.0).css_classes(["dim-label"]).build();
-        scrolled_detail(&[header.widget.upcast(), intro.upcast(), self.stale_list(&stale).upcast()])
-    }
-
-    /// Rows for merges that need attention, each with a way to deal with it.
-    fn stale_list(self: &Rc<Self>, stale: &[&Stale]) -> gtk::ListBox {
-        let hooks = &self.hooks;
-        let list = boxed_list();
-        for s in stale {
-            let title = s.object.as_ref().map_or(file_name(&s.path), |(_, key)| key.as_str());
-            let subtitle = match (&s.object, s.untracked) {
-                // The heading already says why.
-                (Some((category, _)), true) => category.clone(),
-                (None, true) => s.path.clone(),
-                (Some((category, _)), false) => tf!("{category} · {reasons}", category = category, reasons = s.reasons.join("; ")),
-                (None, false) => tf!("{path} · {reasons}", path = &s.path, reasons = s.reasons.join("; ")),
-            };
-            let subtitle = match &s.pick {
-                Some(name) => tf!("{subtitle} · you picked {name}'s version", subtitle = &subtitle, name = name),
-                None => subtitle,
-            };
-            let r = row(title, &subtitle);
-            let icon = if s.untracked { "dialog-question-symbolic" } else { "dialog-warning-symbolic" };
-            r.add_prefix(&gtk::Image::builder().icon_name(icon).css_classes(["warning"]).build());
-            // Jump to the conflict, if it's still listed. Prefer the full
-            // object/file page: the game-update page updates one mod's copy,
-            // so re-merging from there would not bring the other mods back.
-            let matches = |i: &Item| match (i, &s.object) {
-                (Item::Object(i), Some((c, k))) => &self.analysis.report.objects[*i].category == c && &self.analysis.report.objects[*i].key == k,
-                (Item::Behind(i), Some((c, k))) => &self.analysis.behind[*i].category == c && &self.analysis.behind[*i].key == k,
-                (Item::File(i), None) => self.analysis.report.files[*i].path.eq_ignore_ascii_case(&s.path),
-                _ => false,
-            };
-            let rows = self.rows.borrow();
-            let listed = rows.iter().flatten().copied();
-            let target = listed.clone().find(|i| !matches!(i, Item::Behind(_)) && matches(i)).or_else(|| listed.clone().find(matches));
-            if let Some(target) = target {
-                let open = gtk::Button::builder().label(t!("Re-merge…")).valign(gtk::Align::Center).css_classes(["flat"]).build();
-                let weak = Rc::downgrade(self);
-                open.connect_clicked(move |_| {
-                    if let Some(page) = weak.upgrade() {
-                        page.show(target);
+                let (Some(versions), Some(Item::Object(i))) = (self.versions.clone(), self.selected) else { return (Task::none(), None) };
+                let Some(analysis) = self.analysis.clone() else { return (Task::none(), None) };
+                let c = &analysis.report.objects[i];
+                let Some(source) = versions.sources.get(n) else { return (Task::none(), None) };
+                match library.save_merge(&c.category, &c.key, &source.text, versions.prints.clone()) {
+                    Ok(message) => {
+                        notice = Some((message, false));
+                        self.next_open(library)
                     }
-                });
-                r.add_suffix(&open);
-            }
-            for button in stale_buttons(hooks, s) {
-                r.add_suffix(&button);
-            }
-            let remove = gtk::Button::builder().label(t!("Remove from Patch")).valign(gtk::Align::Center).css_classes(["flat"]).build();
-            let (hooks, stale, row_ref) = (hooks.clone(), (*s).clone(), r.downgrade());
-            remove.connect_clicked(move |_| {
-                (hooks.remove_merge)(std::slice::from_ref(&stale));
-                if let Some(r) = row_ref.upgrade() {
-                    r.set_visible(false);
+                    Err(e) => {
+                        notice = Some((e, true));
+                        Task::none()
+                    }
                 }
-            });
-            r.add_suffix(&remove);
-            list.append(&r);
-        }
-        list
-    }
-}
-
-/// The buttons that settle one out-of-date merge in place: take a picked
-/// mod's new version, or accept the saved merge as it is.
-pub(crate) fn stale_buttons(hooks: &Rc<MergeHooks>, s: &Stale) -> Vec<gtk::Button> {
-    let mut buttons = Vec::new();
-    if let Some(name) = &s.pick {
-        let update = gtk::Button::builder().label(t!("Use New Version")).tooltip_text(&tf!("Replace the picked version with {name}'s new one. The patch is backed up first", name = name)).valign(gtk::Align::Center).css_classes(["flat"]).build();
-        let (hooks, stale) = (hooks.clone(), s.clone());
-        update.connect_clicked(move |_| (hooks.update_picks)(Some(&stale)));
-        buttons.push(update);
-    }
-    let tooltip = if s.untracked {
-        t!("Track changes to its mods from their current versions")
-    } else if s.content {
-        t!("Accept the saved merge as it is. Changes to its sources will still be noticed")
-    } else {
-        t!("Accept the saved merge as it is, taking its mods' current versions as what it merged. Later changes to them will still be noticed")
-    };
-    let keep = gtk::Button::builder().label(t!("Keep As Is")).tooltip_text(tooltip).valign(gtk::Align::Center).css_classes(["flat"]).build();
-    let (hooks, stale) = (hooks.clone(), s.clone());
-    keep.connect_clicked(move |_| (hooks.keep_merge)(&stale));
-    buttons.push(keep);
-    buttons
-}
-
-/// Why the saved merge of an object is out of date, with the buttons to
-/// settle it and a line on which one to use.
-pub(crate) fn stale_note(hooks: &Rc<MergeHooks>, entry: &Stale, reasons: &[String]) -> gtk::Box {
-    let row = gtk::Box::builder().spacing(12).build();
-    let message = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(2).hexpand(true).build();
-    message.append(&note(&tf!("The saved merge is out of date: {reasons}.", reasons = reasons.join("; ")), Some("warning")));
-    let guidance = if entry.untracked {
-        t!("Keep As Is tracks the versions it was made from, so later changes are noticed. Re-merging rebuilds it from the mods' current files.")
-    } else if entry.content {
-        t!("Keep As Is accepts the saved result as it is. Re-merging rebuilds it from the current sources.")
-    } else if entry.pick.is_some() {
-        t!("Use New Version takes only the picked mod's update. Keep As Is keeps the saved result and records the new versions.")
-    } else if entry.unmerged {
-        t!("If the saved result is still the version you want — for example, because a merged mod already loads after this one — Keep As Is accepts it and records the current versions. Re-merge only to take this mod's changes.")
-    } else {
-        t!("Keep As Is accepts the saved result and records the mods' current versions, which is the simpler choice if it still looks right. Re-merging takes their changes.")
-    };
-    message.append(&note(&guidance, None));
-    row.append(&message);
-    for button in stale_buttons(hooks, entry) {
-        row.append(&button);
-    }
-    row
-}
-
-pub struct DetailHeader {
-    pub widget: gtk::Box,
-    pub chips: gtk::FlowBox,
-    pub actions: gtk::Box,
-}
-
-/// A chip naming one version: a coloured dot and the mod's name. `class`
-/// is `done`, `current` or `later`.
-pub(crate) fn chip(label: &str, color: Option<usize>, class: &str) -> gtk::Box {
-    let b = gtk::Box::builder().spacing(6).css_classes(["chip", class]).valign(gtk::Align::Center).build();
-    if let Some(color) = color {
-        b.append(&gtk::Box::builder().css_classes(["mod-dot", &format!("mod-color-{}", color % 8)]).valign(gtk::Align::Center).build());
-    }
-    b.append(&gtk::Label::builder().label(label).ellipsize(gtk::pango::EllipsizeMode::End).max_width_chars(32).build());
-    b
-}
-
-pub(crate) fn arrow() -> gtk::Image {
-    gtk::Image::builder().icon_name("go-next-symbolic").css_classes(["dim-label"]).build()
-}
-
-/// The row above a pair of cards: how many differences, buttons to step
-/// through them, and room for more controls.
-pub struct DiffBar {
-    pub widget: gtk::Box,
-    pub extra: gtk::Box,
-}
-
-pub(crate) fn diff_bar(pair: &Rc<Pair>) -> DiffBar {
-    let count = gtk::Label::builder().xalign(0.0).css_classes(["dim-label"]).build();
-    let prev = gtk::Button::builder().icon_name("go-up-symbolic").tooltip_text(t!("Previous difference (Alt+Up)")).css_classes(["flat"]).build();
-    let next = gtk::Button::builder().icon_name("go-down-symbolic").tooltip_text(t!("Next difference (Alt+Down)")).css_classes(["flat"]).build();
-    let nav = gtk::Box::builder().css_classes(["linked"]).build();
-    nav.append(&prev);
-    nav.append(&next);
-    let extra = gtk::Box::builder().spacing(6).hexpand(true).halign(gtk::Align::End).build();
-    let widget = gtk::Box::builder().spacing(6).build();
-    widget.append(&nav);
-    widget.append(&count);
-    widget.append(&extra);
-    {
-        let (count, prev, next) = (count.downgrade(), prev.downgrade(), next.downgrade());
-        pair.connect_change(move |n, current, base| {
-            if let (Some(count), Some(prev), Some(next)) = (count.upgrade(), prev.upgrade(), next.upgrade()) {
-                count.set_label(&match (n, current) {
-                    _ if base => t!("Marking each version's changes from the base game"),
-                    (0, _) => t!("No differences"),
-                    (n, Some(i)) => tf!("Difference {number} of {total}", number = i + 1, total = n),
-                    (n, None) => tnf!("{count} difference", "{count} differences", count = n),
-                });
-                prev.set_sensitive(n > 0);
-                next.set_sensitive(n > 0);
             }
-        });
-    }
-    for (button, forward) in [(&prev, false), (&next, true)] {
-        let pair = Rc::downgrade(pair);
-        button.connect_clicked(move |_| {
-            if let Some(pair) = pair.upgrade() {
-                pair.step(forward);
-            }
-        });
-    }
-    // Alt+Up and Alt+Down step through the differences.
-    let keys = gtk::ShortcutController::new();
-    keys.set_scope(gtk::ShortcutScope::Managed);
-    for (key, forward) in [("<Alt>Up", false), ("<Alt>Down", true)] {
-        let pair = Rc::downgrade(pair);
-        keys.add_shortcut(gtk::Shortcut::new(
-            gtk::ShortcutTrigger::parse_string(key),
-            Some(gtk::CallbackAction::new(move |_, _| {
-                if let Some(pair) = pair.upgrade() {
-                    pair.step(forward);
-                }
-                glib::Propagation::Stop
-            })),
-        ));
-    }
-    pair.widget.add_controller(keys);
-    DiffBar { widget, extra }
-}
-
-/// A toggle button for one of the session's view options.
-fn option_toggle(hooks: &Rc<MergeHooks>, label: &str, tooltip: &str, get: fn(&Session) -> bool, set: fn(&mut Session, bool), on_change: impl Fn() + 'static) -> gtk::ToggleButton {
-    let toggle = gtk::ToggleButton::builder().label(label).tooltip_text(tooltip).active(get(&hooks.session.borrow())).css_classes(["flat"]).build();
-    let session = hooks.session.clone();
-    toggle.connect_toggled(move |t| {
-        set(&mut session.borrow_mut(), t.is_active());
-        on_change();
-    });
-    toggle
-}
-
-/// A main pane that scrolls as a whole, for the lists of problems and
-/// merges.
-fn scrolled_detail(children: &[gtk::Widget]) -> gtk::Widget {
-    let b = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(12).build();
-    for c in children {
-        b.append(c);
-    }
-    let clamp = adw::Clamp::builder().maximum_size(1000).child(&b).margin_top(18).margin_bottom(24).margin_start(18).margin_end(18).build();
-    gtk::ScrolledWindow::builder().child(&clamp).hscrollbar_policy(gtk::PolicyType::Never).vexpand(true).build().upcast()
-}
-
-/// The merged-state icon and the merge button for a row. An out-of-date
-/// merge shows a warning with the reasons instead of a check mark.
-/// What changed since the outdated merges were saved.
-/// What the Needs Attention group lists, given the out-of-date merges.
-fn attention_items(stale: &[Stale], has_errors: bool) -> Vec<Item> {
-    let mut items = Vec::new();
-    if stale.iter().any(|s| !s.untracked) {
-        items.push(Item::Outdated);
-    }
-    if stale.iter().any(|s| s.untracked) {
-        items.push(Item::Untracked);
-    }
-    if has_errors {
-        items.push(Item::Problems);
-    }
-    items
-}
-
-/// Whether a search (lowercase) names one of the merges an Outdated or
-/// Untracked entry stands for, so searching for an object finds its entry.
-fn stale_matches(stale: &[Stale], untracked: bool, query: &str) -> bool {
-    stale.iter().filter(|s| s.untracked == untracked).any(|s| {
-        let name = s.object.as_ref().map_or(s.path.as_str(), |(_, key)| key.as_str());
-        name.to_lowercase().contains(query) || s.path.to_lowercase().contains(query)
-    })
-}
-
-fn outdated_summary(stale: &[Stale]) -> String {
-    let outdated = || stale.iter().filter(|s| !s.untracked);
-    match (outdated().any(|s| s.base_game), outdated().all(|s| s.base_game)) {
-        (true, true) => t!("The base game changed since they were merged"),
-        (true, false) => t!("Mods or the base game changed since they were merged"),
-        _ => t!("Mods changed since they were merged"),
-    }
-}
-
-fn merge_controls(is_merged: bool, stale: Option<&[String]>) -> (gtk::Image, gtk::Button) {
-    let merged = gtk::Image::builder().icon_name("emblem-ok-symbolic").tooltip_text(t!("Merged into the patch")).css_classes(["success"]).visible(is_merged).build();
-    let label = match (stale, is_merged) {
-        (Some(reasons), _) => {
-            merged.set_icon_name(Some("dialog-warning-symbolic"));
-            merged.set_css_classes(&["warning"]);
-            merged.set_tooltip_text(Some(&tf!("Out of date: {reasons}", reasons = reasons.join("; "))));
-            merged.set_visible(true);
-            t!("Re-merge…")
-        }
-        (None, true) => t!("Edit Merge…"),
-        (None, false) => t!("Merge…"),
-    };
-    let button = gtk::Button::builder().label(label).valign(gtk::Align::Center).css_classes(["flat"]).build();
-    (merged, button)
-}
-
-fn row(title: &str, subtitle: &str) -> adw::ActionRow {
-    adw::ActionRow::builder().title(title).subtitle(subtitle).use_markup(false).subtitle_lines(2).build()
-}
-
-fn boxed_list() -> gtk::ListBox {
-    gtk::ListBox::builder().selection_mode(gtk::SelectionMode::None).css_classes(["boxed-list"]).build()
-}
-
-/// A note above the cards, e.g. the AI's notes or why a version keeps
-/// every change.
-pub(crate) fn note(text: &str, class: Option<&str>) -> gtk::Label {
-    let label = gtk::Label::builder().label(text).xalign(0.0).wrap(true).selectable(true).build();
-    match class {
-        Some(c) => label.add_css_class(c),
-        None => label.add_css_class("dim-label"),
-    }
-    label
-}
-
-/// The program a merge tool command starts, for messages ("meld").
-pub fn merge_tool_name(command: &str) -> String {
-    glib::shell_parse_argv(command).ok().and_then(|a| a.first().map(|p| std::path::Path::new(p).file_name().unwrap_or_default().to_string_lossy().into_owned())).unwrap_or_default()
-}
-
-/// One version for the merge tool: where it's from, and its text.
-pub struct ToolSide {
-    pub label: String,
-    pub text: String,
-}
-
-/// Runs the external merge tool on `left` and `right` off the main thread.
-/// `button` (a Button or MenuButton) says it's waiting until the tool
-/// exits; then `done` gets what was saved, `None` if nothing was, or why
-/// it failed.
-pub fn run_merge_tool(button: &impl IsA<gtk::Widget>, command: String, left: ToolSide, right: ToolSide, base: Option<String>, done: impl FnOnce(Result<Option<String>, String>) + 'static) {
-    let button = button.clone().upcast::<gtk::Widget>();
-    let label: Option<String> = button.property("label");
-    button.set_sensitive(false);
-    button.set_property("label", tf!("Waiting for {tool}…", tool = merge_tool_name(&command)));
-    glib::spawn_future_local(async move {
-        let result = gio::spawn_blocking(move || {
-            use crate::merge::external::{Side, run};
-            run(&command, Side { label: &left.label, text: &left.text }, Side { label: &right.label, text: &right.text }, base.as_deref())
-        })
-        .await
-        .unwrap_or_else(|_| Err(t!("The merge tool failed")));
-        button.set_property("label", label);
-        button.set_sensitive(true);
-        done(result);
-    });
-}
-
-/// Saves an inline script edited in the comparison dialog.
-pub(crate) type SaveInlineScript =
-    Rc<dyn Fn(&str, &str, Vec<Print>) -> Result<(), String>>;
-
-/// Saves the edited script only if it parses and passes the script checks.
-fn validate_then_save(
-    save: &SaveInlineScript,
-    name: &str,
-    text: &str,
-    prints: Vec<Print>,
-) -> Result<(), String> {
-    file_merge::validate("common/inline_scripts", text)?;
-    save(name, text, prints)
-}
-
-/// Opens a dialog comparing inline scripts that differ or were replaced
-/// between two object versions. The right side is editable; it can also be
-/// merged with AI and saved to the patch.
-pub(crate) fn show_inline_scripts(
-    parent: &impl IsA<gtk::Widget>,
-    comparisons: Vec<crate::merge::inline_scripts::InlineScriptComparison>,
-    fold: bool,
-    ignore_whitespace: bool,
-    provider: Option<Provider>,
-    save: Option<SaveInlineScript>,
-) {
-    if comparisons.is_empty() {
-        return;
-    }
-    let pair = Pair::new(true);
-    pair.set_fold(fold);
-    let bar = diff_bar(&pair);
-    let selected = Rc::new(Cell::new(0usize));
-    let target = adw::EntryRow::builder().title(t!("Save as script name")).build();
-    let banner = gtk::Label::builder()
-        .xalign(0.0)
-        .wrap(true)
-        .visible(false)
-        .css_classes(["dim-label", "caption"])
-        .build();
-    let thinking = ThinkingView::new();
-
-    let default_name = |c: &crate::merge::inline_scripts::InlineScriptComparison| {
-        if c.left.source_label.eq_ignore_ascii_case("Vanilla") {
-            c.right.name.clone()
-        } else {
-            c.left.name.clone()
-        }
-    };
-    target.set_text(&default_name(&comparisons[0]));
-
-    let show = {
-        let pair = Rc::clone(&pair);
-        let comparisons = comparisons.clone();
-        let target = target.clone();
-        let selected = selected.clone();
-        move |index: usize| {
-            let Some(c) = comparisons.get(index) else { return };
-            selected.set(index);
-            target.set_text(&default_name(c));
-            pair.left.set_header(&crate::diff_view::Header {
-                title: c.left.source_label.clone(),
-                subtitle: c.left.path.clone(),
-                color: None,
-                badge: None,
-            });
-            pair.right.set_header(&crate::diff_view::Header {
-                title: c.right.source_label.clone(),
-                subtitle: c.right.path.clone(),
-                color: None,
-                badge: None,
-            });
-            pair.show(
-                &c.left.text,
-                &c.right.text,
-                &crate::diff_view::Compare::Each,
-                ignore_whitespace,
-            );
-        }
-    };
-
-    if comparisons.len() > 1 {
-        let labels: Vec<String> = comparisons
-            .iter()
-            .map(|c| {
-                if c.left.name.eq_ignore_ascii_case(&c.right.name) {
-                    c.left.name.clone()
-                } else {
-                    format!("{} ↔ {}", c.left.name, c.right.name)
-                }
-            })
-            .collect();
-        let picker = gtk::DropDown::from_strings(
-            &labels.iter().map(String::as_str).collect::<Vec<_>>(),
-        );
-        let show_fn = show.clone();
-        picker.connect_selected_notify(move |p| show_fn(p.selected() as usize));
-        bar.extra.append(&picker);
-    }
-    show(0);
-
-    let merge = gtk::Button::builder()
-        .label(t!("Merge with AI"))
-        .tooltip_text(t!("Merge these two versions with AI"))
-        .css_classes(["suggested-action"])
-        .build();
-    let save_button = gtk::Button::builder()
-        .label(t!("Save to Patch"))
-        .tooltip_text(t!("Save to the merged patch"))
-        .build();
-    if provider.is_none() {
-        merge.set_tooltip_text(Some(&t!("Set up an AI provider in Preferences first")));
-        merge.set_sensitive(false);
-    }
-    if save.is_none() {
-        save_button.set_sensitive(false);
-    }
-
-    {
-        let pair = Rc::downgrade(&pair);
-        let target = target.clone();
-        let selected = selected.clone();
-        let comparisons = comparisons.clone();
-        let banner = banner.clone();
-        let thinking = thinking.clone();
-        merge.connect_clicked(move |button| {
-            let (Some(pair), Some(provider)) = (pair.upgrade(), provider.clone()) else {
-                return;
-            };
-            let index = selected.get();
-            let Some(c) = comparisons.get(index) else { return };
-            let name = target.text().trim().to_owned();
-            let Some(path) = crate::merge::inline_scripts::file_path(&name) else {
-                banner.set_label(&t!("That script name is not a safe path"));
-                banner.add_css_class("error");
-                banner.set_visible(true);
-                return;
-            };
-            let sources = vec![
-                Source {
-                    label: c.left.source_label.clone(),
-                    file: c.left.path.clone(),
-                    text: c.left.text.clone(),
-                },
-                Source {
-                    label: c.right.source_label.clone(),
-                    file: c.right.path.clone(),
-                    text: c.right.text.clone(),
-                },
-            ];
-            let prints = vec![print_for(&c.left), print_for(&c.right)];
-            let ctx = ai::MergeContext {
-                category: "common/inline_scripts".into(),
-                key: name.clone(),
-                prints,
-                ..Default::default()
-            };
-            let (pair, banner, button, thinking) =
-                (pair, banner.clone(), button.clone(), thinking.clone());
-            button.set_sensitive(false);
-            banner.set_visible(false);
-            glib::spawn_future_local(async move {
-                let result = thinking_view::run_cancellable(&thinking, None, move |cancel, on| {
-                    ai::merge_file_checked_cancellable(
-                        &provider,
-                        &ctx,
-                        &path,
-                        None,
-                        &sources,
-                        None,
-                        Some(cancel),
-                        on,
-                    )
-                })
-                .await;
-                button.set_sensitive(true);
-                match result {
-                    Some(Ok(checked)) => match checked.script {
-                        Ok(script) => {
-                            pair.right.replace_text(&script);
-                            banner.set_label(&t!("Merged with AI. Edit the result, then save it."));
-                            banner.remove_css_class("error");
-                            banner.set_visible(true);
+            Message::KeepFile(position) => {
+                let (Some(analysis), Some(Item::File(i))) = (self.analysis.clone(), self.selected) else { return (Task::none(), None) };
+                let f = &analysis.report.files[i];
+                let mods: Vec<patch::SourceMod> = f.mods.iter().filter_map(|&m| Some((analysis.ids[m].clone(), analysis.names[m].clone(), analysis.roots[m].clone()?))).collect();
+                let prints = patch::file_prints(&f.path, library.game_dir().as_deref(), &mods);
+                let read = analysis.roots[position].as_ref().map(|root| std::fs::read(root.join(&f.path)));
+                match read {
+                    Some(Ok(bytes)) => match library.save_file_merge(&f.path, &bytes, prints) {
+                        Ok(message) => {
+                            notice = Some((message, false));
+                            self.next_open(library)
                         }
                         Err(e) => {
-                            banner.set_label(&tf!("The merge was rejected: {error}", error = e));
-                            banner.add_css_class("error");
-                            banner.set_visible(true);
+                            notice = Some((e, true));
+                            Task::none()
                         }
                     },
                     Some(Err(e)) => {
-                        banner.set_label(&e);
-                        banner.add_css_class("error");
-                        banner.set_visible(true);
+                        notice = Some((tf!("Could not read {file}: {error}", file = f.path.as_str(), error = e), true));
+                        Task::none()
                     }
-                    None => {
-                        banner.set_label(&t!("The merge was stopped"));
-                        banner.add_css_class("error");
-                        banner.set_visible(true);
-                    }
-                }
-            });
-        });
-    }
-
-    {
-        let pair = Rc::downgrade(&pair);
-        let target = target.clone();
-        let selected = selected.clone();
-        let comparisons = comparisons.clone();
-        let banner = banner.clone();
-        save_button.connect_clicked(move |_| {
-            let Some(pair) = pair.upgrade() else { return };
-            let Some(save) = save.clone() else { return };
-            let index = selected.get();
-            let Some(c) = comparisons.get(index) else { return };
-            let name = target.text().trim().to_owned();
-            let prints = vec![print_for(&c.left), print_for(&c.right)];
-            match validate_then_save(&save, &name, &pair.right.text(), prints) {
-                Ok(()) => {
-                    banner.set_label(&tf!("Saved {name} to the merged patch", name = &name));
-                    banner.remove_css_class("error");
-                    banner.set_visible(true);
-                }
-                Err(e) => {
-                    banner.set_label(&e);
-                    banner.add_css_class("error");
-                    banner.set_visible(true);
+                    None => Task::none(),
                 }
             }
-        });
+            Message::MergeAi => self.merge_ai(library),
+            Message::AiDone(item, result) => {
+                if Some(item) == self.selected {
+                    match result {
+                        Ok((script, notes)) => {
+                            self.undo.push(self.merged.clone());
+                            self.merged = Some(script.lines().map(str::to_owned).collect());
+                            self.refocus();
+                            self.ai = Some(Ai::Notes(notes));
+                        }
+                        Err(e) => self.ai = Some(Ai::Failed(e)),
+                    }
+                }
+                Task::none()
+            }
+            Message::OpenIgnore => {
+                self.open_ignore(library);
+                Task::none()
+            }
+            Message::PickScope(i) => {
+                if let Some(sheet) = &mut self.ignore {
+                    sheet.picked = i;
+                }
+                Task::none()
+            }
+            Message::ConfirmIgnore => {
+                if let Some(sheet) = self.ignore.take() {
+                    let result = match sheet.scopes.into_iter().nth(sheet.picked).map(|s| s.0) {
+                        Some(Scope::Key { key, .. }) => library.ignore(Some(key), None),
+                        Some(Scope::Rule { rule, .. }) => library.ignore(None, Some(rule)),
+                        None => Ok(()),
+                    };
+                    if let Err(e) = result {
+                        notice = Some((e, true));
+                    }
+                    self.rebuild(library);
+                    if self.selected.is_some_and(|s| !self.queue.contains(&s)) {
+                        self.selected = None;
+                        if let Some(next) = self.first_open(library) {
+                            return (self.select(library, next), notice);
+                        }
+                    }
+                }
+                Task::none()
+            }
+            Message::CloseIgnore => {
+                self.ignore = None;
+                Task::none()
+            }
+            Message::UnignoreKey(key) => {
+                if let Err(e) = library.unignore(Some(&key), None) {
+                    notice = Some((e, true));
+                }
+                self.rebuild(library);
+                Task::none()
+            }
+            Message::UnignoreRule(rule) => {
+                if let Err(e) = library.unignore(None, Some(&rule)) {
+                    notice = Some((e, true));
+                }
+                self.rebuild(library);
+                Task::none()
+            }
+            Message::MergeSimple => self.merge_simple(library),
+            Message::Lookup(s) => {
+                self.lookup = s;
+                Task::none()
+            }
+            Message::SimpleReady(resolved) => {
+                let mut saved = 0;
+                for (category, key, script, prints) in resolved.iter() {
+                    match library.save_merge(category, key, script, prints.clone()) {
+                        Ok(_) => saved += 1,
+                        Err(e) => {
+                            notice = Some((e, true));
+                            break;
+                        }
+                    }
+                }
+                if notice.is_none() {
+                    notice = Some((tnf!("Merged {count} simple conflict into the patch", "Merged {count} simple conflicts into the patch", count = saved), false));
+                }
+                self.merging_simple = false;
+                Task::none()
+            }
+            Message::RemoveMerge(object, path) => {
+                notice = Some(match library.remove_merge(object.as_ref(), &path) {
+                    Ok(m) => (m, false),
+                    Err(e) => (e, true),
+                });
+                Task::none()
+            }
+            Message::KeepMerge(at) => {
+                if let Some(stale) = library.stale.get(at).cloned() {
+                    let prints = self.current_prints(library, &stale);
+                    notice = Some(match prints.and_then(|prints| library.keep_merge(&stale, prints)) {
+                        Ok(m) => (m, false),
+                        Err(e) => (e, true),
+                    });
+                }
+                Task::none()
+            }
+            Message::UpdatePick(at) => {
+                if let Some(stale) = library.stale.get(at).cloned() {
+                    notice = Some(match library.update_pick(&stale) {
+                        Ok(m) => (m, false),
+                        Err(e) => (e, true),
+                    });
+                }
+                Task::none()
+            }
+            Message::OpenMerge(object, path) => {
+                let Some(a) = self.analysis.clone() else { return (Task::none(), None) };
+                let item = match &object {
+                    Some((category, key)) => a.report.objects.iter().position(|c| &c.category == category && &c.key == key).map(Item::Object),
+                    None => a.report.files.iter().position(|f| f.path.eq_ignore_ascii_case(&path)).map(Item::File),
+                };
+                match item {
+                    Some(item) => {
+                        self.view = View::Queue;
+                        self.filter = Filter::All;
+                        self.search.clear();
+                        if !self.queue.contains(&item) {
+                            notice = Some((t!("This conflict is ignored; it's shown anyway"), false));
+                        }
+                        self.select(library, item)
+                    }
+                    None => {
+                        notice = Some((t!("Its mods don't conflict over it any more. Remove it from the patch, or enable them and rescan."), true));
+                        Task::none()
+                    }
+                }
+            }
+        };
+        (task, notice)
     }
 
-    let controls = gtk::Box::new(gtk::Orientation::Horizontal, 8);
-    controls.append(&target);
-    controls.append(&merge);
-    controls.append(&save_button);
+    /// Scans the load order in the background.
+    pub fn scan(&mut self, library: &Library) -> Task<Message> {
+        if self.scanning {
+            return Task::none();
+        }
+        self.scanning = true;
+        let mods = library.state.mods.clone();
+        let enabled = library.state.enabled.clone();
+        let revision = library.state.revision;
+        let languages = library.settings.game.languages(&library.user_dir);
+        let game_dir = library.game_dir();
+        let version = library.game_version().map(str::to_owned);
+        Task::perform(
+            async move { tokio::task::spawn_blocking(move || scan::run(&mods, &enabled, revision, &languages, game_dir.as_deref(), version.as_deref())).await },
+            |result| match result {
+                Ok(analysis) => Message::Scanned(Arc::new(analysis)),
+                // A panicking scan is a bug; show an empty result rather than hang.
+                Err(_) => Message::Scanned(Arc::new(Analysis { revision: 0, names: Vec::new(), ids: Vec::new(), roots: Vec::new(), report: Default::default(), simple: Default::default(), depends_on: Vec::new(), seconds: 0.0 })),
+            },
+        )
+    }
 
-    let body = gtk::Box::builder()
-        .orientation(gtk::Orientation::Vertical)
+    /// The conflicts the settings don't hide, again.
+    fn rebuild(&mut self, library: &Library) {
+        let Some(a) = &self.analysis else { return };
+        let rules = Rules::parse(&library.settings.ignore_rules);
+        let ignores = Ignores { keys: &library.settings.ignored, rules: &rules, names: &a.names, dependencies: (!library.settings.show_dependency_conflicts).then_some(&a.depends_on[..]) };
+        self.queue = (0..a.report.objects.len()).filter(|&i| !ignores.object(&a.report.objects[i])).map(Item::Object).chain((0..a.report.files.len()).filter(|&i| !ignores.file(&a.report.files[i])).map(Item::File)).collect();
+    }
+
+    fn status(&self, library: &Library, item: Item) -> Status {
+        let Some(a) = &self.analysis else { return Status::NeedsMerge };
+        match item {
+            Item::Object(i) => {
+                let c = &a.report.objects[i];
+                if library.merged(&c.category, &c.key) {
+                    Status::Done
+                } else if a.simple.contains_key(&i) {
+                    Status::Simple
+                } else {
+                    Status::NeedsMerge
+                }
+            }
+            Item::File(i) => {
+                if library.merged_file(&a.report.files[i].path) {
+                    Status::Done
+                } else {
+                    Status::File
+                }
+            }
+        }
+    }
+
+    /// The queue as filtered and searched.
+    fn shown(&self, library: &Library) -> Vec<Item> {
+        let Some(a) = &self.analysis else { return Vec::new() };
+        let query = self.search.trim().to_lowercase();
+        self.queue
+            .iter()
+            .copied()
+            .filter(|&item| {
+                let status = self.status(library, item);
+                let by_filter = match self.filter {
+                    Filter::All => true,
+                    Filter::NeedsMerge => status == Status::NeedsMerge,
+                    Filter::Simple => status == Status::Simple,
+                    Filter::Files => matches!(item, Item::File(_)),
+                    Filter::Done => status == Status::Done,
+                };
+                by_filter
+                    && (query.is_empty()
+                        || match item {
+                            Item::Object(i) => {
+                                let c = &a.report.objects[i];
+                                c.key.to_lowercase().contains(&query) || c.category.to_lowercase().contains(&query)
+                            }
+                            Item::File(i) => a.report.files[i].path.to_lowercase().contains(&query),
+                        })
+            })
+            .collect()
+    }
+
+    fn first_open(&self, library: &Library) -> Option<Item> {
+        self.queue.iter().copied().find(|&i| self.status(library, i) != Status::Done).or_else(|| self.queue.first().copied())
+    }
+
+    /// After resolving one: the next conflict not done yet.
+    fn next_open(&mut self, library: &Library) -> Task<Message> {
+        let start = self.selected.and_then(|s| self.queue.iter().position(|&i| i == s)).map_or(0, |p| p + 1);
+        let n = self.queue.len();
+        let next = (0..n).map(|k| self.queue[(start + k) % n.max(1)]).find(|&i| self.status(library, i) != Status::Done);
+        match next {
+            Some(item) => self.select(library, item),
+            None => Task::none(),
+        }
+    }
+
+    fn select(&mut self, library: &Library, item: Item) -> Task<Message> {
+        if self.selected == Some(item) && (self.versions.is_some() || self.loading) {
+            return Task::none();
+        }
+        self.selected = Some(item);
+        self.versions = None;
+        self.merged = None;
+        self.undo.clear();
+        self.menu = None;
+        self.focus = None;
+        self.ai = None;
+        let Some(a) = self.analysis.clone() else { return Task::none() };
+        if let Item::File(i) = item
+            && !drukhal_core::merge::file_merge::mergeable(&a.report.files[i].path)
+        {
+            // Not text the editor can merge (images, sounds…): keep one copy.
+            self.loading = false;
+            return Task::none();
+        }
+        self.loading = true;
+        let game_dir = library.game_dir();
+        Task::perform(
+            async move {
+                tokio::task::spawn_blocking(move || match item {
+                    Item::Object(i) => load_versions(&a, i, game_dir),
+                    Item::File(i) => load_file_versions(&a, i, game_dir),
+                })
+                .await
+            },
+            move |r| match r {
+            Ok(v) => Message::Loaded(Arc::new(v)),
+            Err(_) => Message::Loaded(Arc::new(Versions { item, vanilla: None, sources: Vec::new(), positions: Vec::new(), prints: Vec::new(), missing: Vec::new(), winner: None })),
+            },
+        )
+    }
+
+    /// The selected object's merge so far.
+    fn merge_lines(&self) -> Vec<String> {
+        if let Some(m) = &self.merged {
+            return m.clone();
+        }
+        match &self.versions {
+            Some(v) => v.winner.and_then(|(w, _)| v.sources.get(w)).map(|s| s.text.lines().map(str::to_owned).collect()).unwrap_or_default(),
+            None => Vec::new(),
+        }
+    }
+
+    fn winner(&self) -> Option<usize> {
+        self.versions.as_ref()?.winner.map(|(w, _)| w)
+    }
+
+    /// Every block of the other versions that the merge lacks, in reading
+    /// order (version by version).
+    fn blocks(&self) -> Vec<Block> {
+        let Some(v) = &self.versions else { return Vec::new() };
+        let winner = self.winner();
+        let merge = self.merge_lines();
+        (0..v.sources.len())
+            .filter(|&n| Some(n) != winner)
+            .flat_map(|n| {
+                let lines: Vec<&str> = v.sources[n].text.lines().collect();
+                hunks(&lines, &merge).into_iter().enumerate().filter(|(_, h)| !h.src.is_empty()).map(move |(hunk, _)| Block { version: n, hunk })
+            })
+            .collect()
+    }
+
+    fn refocus(&mut self) {
+        let blocks = self.blocks();
+        self.focus = self.focus.and_then(|f| blocks.iter().copied().find(|b| *b == f).or_else(|| blocks.iter().copied().find(|b| b.version == f.version && b.hunk >= f.hunk)).or_else(|| blocks.last().copied()));
+    }
+
+    fn apply(&mut self, op: Op, block: Block) {
+        let Some(v) = &self.versions else { return };
+        let source: Vec<&str> = v.sources[block.version].text.lines().collect();
+        let merge = self.merge_lines();
+        let Some(h) = hunks(&source, &merge).get(block.hunk).cloned() else { return };
+        let theirs: Vec<String> = source[h.src.clone()].iter().map(|l| l.to_string()).collect();
+        let mut next = merge.clone();
+        match op {
+            Op::Above => drop(next.splice(h.dst.start..h.dst.start, theirs)),
+            Op::Below => drop(next.splice(h.dst.end..h.dst.end, theirs)),
+            Op::Replace => drop(next.splice(h.dst.clone(), theirs)),
+        }
+        self.undo.push(self.merged.clone());
+        self.merged = Some(next);
+        self.refocus();
+    }
+
+    /// Works out every simple conflict's resolution off the UI thread; the
+    /// app then saves them (see [`Message::SimpleReady`]).
+    fn merge_simple(&mut self, library: &Library) -> Task<Message> {
+        let Some(a) = self.analysis.clone() else { return Task::none() };
+        if self.merging_simple {
+            return Task::none();
+        }
+        let todo: Vec<usize> = self
+            .queue
+            .iter()
+            .filter_map(|&item| match item {
+                Item::Object(i) if a.simple.contains_key(&i) && !library.merged(&a.report.objects[i].category, &a.report.objects[i].key) => Some(i),
+                _ => None,
+            })
+            .collect();
+        if todo.is_empty() {
+            return Task::none();
+        }
+        self.merging_simple = true;
+        let game_dir = library.game_dir();
+        Task::perform(
+            async move {
+                tokio::task::spawn_blocking(move || {
+                    todo.into_iter()
+                        .filter_map(|i| {
+                            let v = load_versions(&a, i, game_dir.clone());
+                            let resolved = drukhal_core::merge::trivial::resolve(v.vanilla.as_ref(), &v.sources)?;
+                            let c = &a.report.objects[i];
+                            Some((c.category.clone(), c.key.clone(), v.sources[resolved.index].text.clone(), v.prints))
+                        })
+                        .collect::<Vec<_>>()
+                })
+                .await
+                .unwrap_or_default()
+            },
+            |resolved| Message::SimpleReady(Arc::new(resolved)),
+        )
+    }
+
+    /// What a stale merge's sources hold now, from the last scan, for
+    /// keeping it as it is.
+    fn current_prints(&self, library: &Library, stale: &patch::Stale) -> Result<Vec<Print>, String> {
+        let a = self.analysis.as_ref().ok_or_else(|| t!("Scan first, so the mods it comes from are known"))?;
+        let source_mod = |m: usize| -> Option<patch::SourceMod> { Some((a.ids.get(m)?.clone(), a.names.get(m)?.clone(), a.roots.get(m)?.clone()?)) };
+        let game_dir = library.game_dir();
+        let prints = match &stale.object {
+            Some((category, key)) => {
+                let defs = a.report.objects.iter().find(|c| &c.category == category && &c.key == key).map(|c| c.definitions.iter().filter_map(|d| Some((source_mod(d.mod_position)?, d.file.clone()))).collect::<Vec<_>>()).unwrap_or_default();
+                if defs.is_empty() && !(stale.content && !stale.untracked) {
+                    return Err(t!("Its mods don't conflict over it any more. Remove it from the patch, or enable them and rescan."));
+                }
+                patch::object_prints(category, key, game_dir.as_deref(), &defs)
+            }
+            None => {
+                let mods = a.report.files.iter().find(|f| f.path.eq_ignore_ascii_case(&stale.path)).map(|f| f.mods.iter().filter_map(|&m| source_mod(m)).collect::<Vec<_>>()).unwrap_or_default();
+                if mods.is_empty() {
+                    return Err(t!("Its mods don't conflict over it any more. Remove it from the patch, or enable them and rescan."));
+                }
+                patch::file_prints(&stale.path, game_dir.as_deref(), &mods)
+            }
+        };
+        Ok(prints)
+    }
+
+    /// Asks the configured AI provider to merge the object, off the UI thread.
+    fn merge_ai(&mut self, library: &Library) -> Task<Message> {
+        let (Some(versions), Some(item), Some(a)) = (self.versions.clone(), self.selected, self.analysis.clone()) else { return Task::none() };
+        if matches!(self.ai, Some(Ai::Running)) {
+            return Task::none();
+        }
+        self.ai = Some(Ai::Running);
+        let settings = library.settings.clone();
+        let game_version = library.game_version().map(str::to_owned);
+        Task::perform(
+            async move {
+                tokio::task::spawn_blocking(move || {
+                    // The key lives in the system keyring; reading it can block.
+                    let settings = settings.with_keyring().settings;
+                    let provider = settings.ready_provider().ok_or_else(|| t!("Set up an AI provider in the settings first"))?;
+                    ai::set_instructions(&settings.ai_instructions);
+                    let (category, key, path) = match item {
+                        Item::Object(i) => (a.report.objects[i].category.clone(), a.report.objects[i].key.clone(), None),
+                        Item::File(i) => {
+                            let path = a.report.files[i].path.clone();
+                            (drukhal_core::merge::file_merge::category(&path), path.rsplit('/').next().unwrap_or(&path).to_owned(), Some(path))
+                        }
+                    };
+                    let ctx = ai::MergeContext {
+                        is_fios: conflicts::is_fios(&category),
+                        category,
+                        key,
+                        game_version,
+                        winner: versions.winner.map(|(w, reason)| (versions.positions[w], versions.sources[w].label.clone(), reason)),
+                        load_positions: versions.positions.clone(),
+                        prints: versions.prints.clone(),
+                        ..Default::default()
+                    };
+                    let checked = match &path {
+                        Some(path) => ai::merge_file_checked_cancellable(&provider, &ctx, path, versions.vanilla.as_ref(), &versions.sources, None, None, &mut |_| {})?,
+                        None => ai::merge_checked_cancellable(&provider, &ctx, versions.vanilla.as_ref(), &versions.sources, None, None, &mut |_| {})?,
+                    };
+                    checked.script.map(|script| (script, checked.merged.notes)).map_err(|why| tf!("The AI's merge didn't pass the checks: {reason}", reason = why))
+                })
+                .await
+                .unwrap_or_else(|_| Err(t!("The merge failed")))
+            },
+            move |result| Message::AiDone(item, result),
+        )
+    }
+
+    fn open_ignore(&mut self, library: &Library) {
+        let (Some(a), Some(item)) = (&self.analysis, self.selected) else { return };
+        let count = |test: &dyn Fn(Item) -> bool| self.queue.iter().filter(|&&i| test(i)).count();
+        let scopes = match item {
+            Item::Object(i) => {
+                let c = &a.report.objects[i];
+                let mods: Vec<&str> = mods_of_object(c).into_iter().map(|m| a.names[m].as_str()).collect();
+                let same_mods = mods_of_object(c);
+                vec![
+                    (Scope::Key { key: scan::object_key(&c.category, &c.key), label: tf!("Only {key}", key = c.key.as_str()) }, 1, t!("Just this conflict.")),
+                    (
+                        Scope::Key { key: scan::objects_folder_key(&c.category), label: tf!("Everything in {folder}", folder = c.category.as_str()) },
+                        count(&|it| matches!(it, Item::Object(k) if a.report.objects[k].category == c.category)),
+                        t!("Every object conflict in this folder, now and after later scans."),
+                    ),
+                    (
+                        Scope::Rule { rule: scan::mods_rule(&mods), label: tf!("Whenever {mods} conflict", mods = mods.join(" & ")) },
+                        count(&|it| match it {
+                            Item::Object(k) => mods_of_object(&a.report.objects[k]) == same_mods,
+                            Item::File(k) => a.report.files[k].mods.iter().copied().collect::<BTreeSet<_>>() == same_mods,
+                        }),
+                        t!("Any conflict between exactly these mods, wherever it is. Saved as an ignore rule."),
+                    ),
+                ]
+            }
+            Item::File(i) => {
+                let f = &a.report.files[i];
+                let mods: Vec<&str> = f.mods.iter().map(|&m| a.names[m].as_str()).collect();
+                let folder = scan::file_folder(&f.path).to_owned();
+                vec![
+                    (Scope::Key { key: scan::file_key(&f.path), label: tf!("Only {file}", file = f.path.as_str()) }, 1, t!("Just this file.")),
+                    (
+                        Scope::Key { key: scan::files_folder_key(&folder), label: tf!("Every file in {folder}", folder = folder.as_str()) },
+                        count(&|it| matches!(it, Item::File(k) if scan::file_folder(&a.report.files[k].path).eq_ignore_ascii_case(&folder))),
+                        t!("Every file override in this folder."),
+                    ),
+                    (Scope::Rule { rule: scan::mods_rule(&mods), label: tf!("Whenever {mods} conflict", mods = mods.join(" & ")) }, 0, t!("Any conflict between exactly these mods, wherever it is. Saved as an ignore rule.")),
+                ]
+            }
+        };
+        let _ = library;
+        self.ignore = Some(IgnoreSheet { scopes, picked: 0 });
+    }
+
+    pub fn header_actions<'a>(&'a self, p: &'a Palette) -> Element<'a, Message> {
+        let when = match (&self.analysis, self.scanning) {
+            (_, true) => t!("Scanning…"),
+            (Some(a), false) => tf!("Scanned in {seconds} s", seconds = format!("{:.1}", a.seconds)),
+            (None, false) => String::new(),
+        };
+        row![
+            text(when).size(13).color(c(p.muted)),
+            button(text(if self.merging_simple { t!("Merging…") } else { t!("Merge simple ones") }).size(14))
+                .padding([10, 18])
+                .on_press_maybe((!self.scanning && !self.merging_simple && self.analysis.as_ref().is_some_and(|a| !a.simple.is_empty())).then_some(Message::MergeSimple))
+                .style(move |_, s| pill(p.secondary, p.on_window, s)),
+            button(row![icon(icons::REFRESH, 16, p.on_window), text(t!("Rescan")).size(14)].spacing(8).align_y(iced::Center)).padding([10, 18]).on_press_maybe((!self.scanning).then_some(Message::Scan)).style(move |_, s| pill(p.container_high, p.on_window, s)),
+        ]
+        .spacing(12)
+        .align_y(iced::Center)
+        .into()
+    }
+
+    pub fn status_line(&self, library: &Library) -> String {
+        match &self.analysis {
+            Some(a) => {
+                let done = self.queue.iter().filter(|&&i| self.status(library, i) == Status::Done).count();
+                let hidden = a.report.objects.len() + a.report.files.len() - self.queue.len();
+                tf!("{count} conflicts between {mods} mods · {done} done · {hidden} ignored", count = self.queue.len(), mods = a.names.len(), done = done, hidden = hidden)
+            }
+            None => String::new(),
+        }
+    }
+
+    pub fn view<'a>(&'a self, library: &'a Library, p: &'a Palette) -> Element<'a, Message> {
+        let main: Element<'a, Message> = match (self.view, &self.analysis) {
+            (_, None) => placeholder(p, if self.scanning { t!("Scanning your mods…") } else { t!("Not scanned yet") }, if self.scanning { t!("Reading every enabled mod's files. A big load order takes a minute the first time; later scans only read what changed.") } else { t!("Scan the load order to find where mods overwrite each other.") }),
+            (View::Ignored, Some(_)) => self.ignored(library, p),
+            (View::Patches, Some(_)) => self.patches(library, p),
+            (View::Lookup, Some(a)) => self.lookup_view(p, a),
+            (View::Queue, Some(a)) => row![self.queue_pane(library, p, a), self.detail(library, p, a)].spacing(12).into(),
+        };
+        row![self.rail(p), main].spacing(12).height(Fill).into()
+    }
+
+    /// What the app draws over everything: the context menu or the ignore sheet.
+    pub fn overlay<'a>(&'a self, p: &'a Palette) -> Option<Element<'a, Message>> {
+        self.ignore_sheet(p).or_else(|| self.menu(p))
+    }
+
+    pub fn place_menu(&mut self, at: Point) {
+        if let Some((_, place)) = &mut self.menu {
+            *place = at;
+        }
+    }
+
+    fn rail<'a>(&'a self, p: &'a Palette) -> Element<'a, Message> {
+        let item = |v: View, label: String, glyph: &'static [u8]| {
+            let selected = v == self.view;
+            let fg = if selected { p.on_window } else { p.muted };
+            column![
+                button(container(icon(glyph, 20, fg)).center_x(Fill)).width(52).padding([6, 0]).on_press(Message::View(v)).style(move |_, s| if selected { pill(p.secondary, p.on_window, s) } else { ghost(p.on_window, s) }),
+                text(label).size(11).color(c(fg)),
+            ]
+            .spacing(4)
+            .align_x(iced::Center)
+        };
+        container(column![item(View::Queue, t!("Queue"), icons::WARNING), item(View::Lookup, t!("Look up"), icons::SEARCH), item(View::Patches, t!("Patch"), icons::PATCH), item(View::Ignored, t!("Ignored"), icons::HIDE)].spacing(14).align_x(iced::Center))
+            .width(76)
+            .height(Fill)
+            .padding([14, 8])
+            .style(move |_| surface(p.container_low, p.on_window, 24.0))
+            .into()
+    }
+
+    fn queue_pane<'a>(&'a self, library: &'a Library, p: &'a Palette, a: &'a Analysis) -> Element<'a, Message> {
+        let total = self.queue.len();
+        let done = self.queue.iter().filter(|&&i| self.status(library, i) == Status::Done).count();
+        let progress = {
+            let w = 300.0 * done as f32 / total.max(1) as f32;
+            row![container(space()).width(w).height(8).style(move |_| surface(p.success, p.success, 4.0)), container(space()).width(Fill).height(8).style(move |_| surface(p.container_high, p.container_high, 4.0))].spacing(2)
+        };
+        let filters = row(Filter::ALL.iter().map(|&f| {
+            let on = f == self.filter;
+            button(text(f.label()).size(12))
+                .padding([5, 10])
+                .on_press(Message::Filter(f))
+                .style(move |_, s| {
+                    let mut st = if on { pill(p.secondary, p.on_window, s) } else { ghost(p.on_window, s) };
+                    if !on {
+                        st.border = Border { radius: 999.0.into(), width: 1.0, color: alpha(p.outline, 0.5) };
+                    }
+                    st
+                })
+                .into()
+        }))
+        .spacing(4)
+        .wrap();
+        let shown = self.shown(library);
+        let more = shown.len().saturating_sub(QUEUE_LIMIT);
+        let mut list = column(shown.into_iter().take(QUEUE_LIMIT).map(|i| self.queue_row(library, p, a, i))).spacing(4);
+        if more > 0 {
+            list = list.push(container(text(tnf!("{count} more; search to narrow them", "{count} more; search to narrow them", count = more)).size(12).color(c(p.muted))).padding(10));
+        }
+        let mut errors: Element<'a, Message> = space().into();
+        if !a.report.errors.is_empty() || !a.report.skipped.is_empty() {
+            errors = text(tf!("{files} files couldn't be read, {mods} mods were skipped", files = a.report.errors.len(), mods = a.report.skipped.len())).size(11).color(c(p.warning)).into();
+        }
+        container(
+            column![
+                row![text(tnf!("{count} conflict", "{count} conflicts", count = total)).size(20), space().width(Fill), text(tnf!("{count} mod", "{count} mods", count = a.names.len())).size(12).color(c(p.muted))].align_y(iced::Center),
+                progress,
+                text(tf!("{done} done · {left} to go", done = done, left = total - done)).size(11).color(c(p.muted)),
+                errors,
+                text_input(&t!("Search objects and files"), &self.search).on_input(Message::Search).padding([8, 14]).style(move |_, _| field(p, 999.0, false)),
+                filters,
+                scrollable(list).height(Fill),
+            ]
+            .spacing(10),
+        )
+        .width(360)
+        .height(Fill)
+        .padding(14)
+        .style(move |_| surface(p.container_low, p.on_window, 24.0))
+        .into()
+    }
+
+    fn queue_row<'a>(&'a self, library: &'a Library, p: &'a Palette, a: &'a Analysis, item: Item) -> Element<'a, Message> {
+        let selected = self.selected == Some(item);
+        let status = self.status(library, item);
+        let (label, tone) = status_look(p, status);
+        let edited = selected && self.merged.is_some();
+        let (title, subtitle) = match item {
+            Item::Object(i) => {
+                let cf = &a.report.objects[i];
+                let mods = mods_of_object(cf).into_iter().map(|m| initials(&a.names[m])).collect::<Vec<_>>().join(" · ");
+                (cf.key.clone(), format!("{} · {mods}", cf.category))
+            }
+            Item::File(i) => {
+                let f = &a.report.files[i];
+                let mods = f.mods.iter().map(|&m| initials(&a.names[m])).collect::<Vec<_>>().join(" · ");
+                (f.path.rsplit('/').next().unwrap_or(&f.path).to_owned(), format!("{} · {mods}", scan::file_folder(&f.path)))
+            }
+        };
+        let content = row![
+            container(space()).width(4).height(40).style(move |_| surface(tone, tone, 2.0)),
+            column![text(title).font(MONO).size(13).wrapping(text::Wrapping::Glyph), text(subtitle).size(11).color(c(p.muted)).wrapping(text::Wrapping::Glyph)].spacing(4).width(Fill),
+            if edited { chip(t!("Editing"), p.accent) } else { chip(label, tone) },
+        ]
+        .spacing(12)
+        .align_y(iced::Center);
+        button(content)
+            .width(Fill)
+            .padding([10, 12])
+            .on_press(Message::Select(item))
+            .style(move |_, s| {
+                let mut st = if selected { pill(p.secondary, p.on_window, s) } else { ghost(p.on_window, s) };
+                st.border.radius = 16.0.into();
+                st
+            })
+            .into()
+    }
+
+    fn detail<'a>(&'a self, library: &'a Library, p: &'a Palette, a: &'a Analysis) -> Element<'a, Message> {
+        match self.selected {
+            None => placeholder(p, t!("Nothing left to resolve"), t!("Every conflict here is merged or ignored.")),
+            Some(Item::File(i)) if !drukhal_core::merge::file_merge::mergeable(&a.report.files[i].path) => self.file_detail(library, p, a, &a.report.files[i]),
+            Some(item) => self.object_detail(library, p, a, item),
+        }
+    }
+
+    fn file_detail<'a>(&'a self, library: &'a Library, p: &'a Palette, a: &'a Analysis, f: &'a FileConflict) -> Element<'a, Message> {
+        let last = f.mods.last().copied();
+        let rows = column(f.mods.iter().map(|&m| {
+            let wins = Some(m) == last;
+            let badge: Element<'a, Message> = if wins { filled_chip(t!("In game"), p.accent, p.on_accent) } else { space().into() };
+            container(
+                row![
+                    text(format!("#{}", m + 1)).font(MONO).size(12).color(c(p.muted)),
+                    text(a.names[m].as_str()).size(15).width(Fill),
+                    badge,
+                    button(text(tf!("Keep {name}'s", name = short(&a.names[m]))).size(13)).padding([8, 14]).on_press_maybe(a.roots[m].is_some().then_some(Message::KeepFile(m))).style(move |_, s| pill(p.container_high, p.on_window, s)),
+                ]
+                .spacing(12)
+                .align_y(iced::Center),
+            )
+            .padding([12, 16])
+            .style(move |_| container::Style { border: Border { radius: 16.0.into(), width: if wins { 2.0 } else { 0.0 }, color: c(p.accent) }, ..surface(p.container, p.on_window, 16.0) })
+            .into()
+        }))
+        .spacing(8);
+        let done = library.merged_file(&f.path);
+        column![
+            column![text(scan::file_folder(&f.path).to_owned()).size(12).color(c(p.accent)), text(f.path.rsplit('/').next().unwrap_or(&f.path).to_owned()).font(MONO).size(24)].spacing(2).padding([0, 8]),
+            banner(p, if done { t!("The merged patch ships its own copy of this file.") } else { t!("Several mods ship this file; the game loads only the copy from the mod that loads last. Keeping one copies it into the merged patch.") }),
+            scrollable(rows).height(Fill),
+            container(row![space().width(Fill), button(row![icon(icons::HIDE, 16, p.muted), text(t!("Ignore…")).size(13).color(c(p.muted))].spacing(6).align_y(iced::Center)).padding([10, 14]).on_press(Message::OpenIgnore).style(move |_, s| ghost(p.on_window, s))]).padding(14).width(Fill).style(move |_| surface(p.container_high, p.on_window, 24.0)),
+        ]
+        .spacing(12)
+        .width(Fill)
+        .into()
+    }
+
+    /// An object's, or a text file's, versions and the merge being built.
+    fn object_detail<'a>(&'a self, library: &'a Library, p: &'a Palette, a: &'a Analysis, item: Item) -> Element<'a, Message> {
+        let (place, title) = match item {
+            Item::Object(i) => (a.report.objects[i].category.clone(), a.report.objects[i].key.clone()),
+            Item::File(i) => {
+                let path = &a.report.files[i].path;
+                (scan::file_folder(path).to_owned(), path.rsplit('/').next().unwrap_or(path).to_owned())
+            }
+        };
+        let category = match item {
+            Item::Object(i) => a.report.objects[i].category.clone(),
+            Item::File(i) => drukhal_core::merge::file_merge::category(&a.report.files[i].path),
+        };
+        let step = |label: String, glyph: &'static [u8], by: isize| {
+            button(row![icon(glyph, 16, p.on_window), text(label).size(13)].spacing(6).align_y(iced::Center)).padding([8, 14]).on_press(Message::Step(by)).style(move |_, s| pill(p.container_high, p.on_window, s))
+        };
+        let has_vanilla = self.versions.as_ref().is_some_and(|v| v.vanilla.is_some());
+        let segment = |label: String, mode: Compare| {
+            let on = self.compare == mode;
+            let enabled = mode == Compare::Merge || has_vanilla;
+            button(text(label).size(12).color(c(if enabled { if on { p.on_window } else { p.muted } } else { p.outline })))
+                .padding([6, 12])
+                .on_press_maybe(enabled.then_some(Message::Compare(mode)))
+                .style(move |_, s| if on { pill(p.secondary, p.on_window, s) } else { ghost(p.on_window, s) })
+        };
+        let compare = container(row![text(t!("Compare with")).size(12).color(c(p.muted)), segment(t!("the merge"), Compare::Merge), segment(t!("the base game"), Compare::Base)].spacing(4).align_y(iced::Center))
+            .padding([2, 4])
+            .style(move |_| container::Style { border: Border { radius: 999.0.into(), width: 1.0, color: alpha(p.outline, 0.5) }, ..Default::default() });
+        let head = row![
+            column![text(place).size(12).color(c(p.accent)), text(title).font(MONO).size(24)].spacing(2).width(Fill),
+            compare,
+            step(t!("Previous"), icons::PREVIOUS, -1),
+            step(t!("Next"), icons::NEXT, 1),
+        ]
         .spacing(8)
-        .margin_top(12)
-        .margin_bottom(12)
-        .margin_start(12)
-        .margin_end(12)
-        .build();
-    body.append(&bar.widget);
-    body.append(&pair.widget);
-    body.append(&thinking.widget);
-    body.append(&controls);
-    body.append(&banner);
+        .align_y(iced::Center)
+        .padding([0, 8]);
+        let Some(v) = &self.versions else {
+            return column![head, placeholder(p, t!("Reading the versions…"), String::new())].spacing(12).width(Fill).into();
+        };
+        let merged = match item {
+            Item::Object(i) => library.merged(&a.report.objects[i].category, &a.report.objects[i].key),
+            Item::File(i) => library.merged_file(&a.report.files[i].path),
+        };
+        let winner_name = self.winner().map(|w| v.sources[w].label.clone()).unwrap_or_default();
+        let why = match (&self.ai, self.compare, self.merged.is_some()) {
+            (Some(Ai::Running), _, _) => t!("Merging with AI…"),
+            (Some(Ai::Failed(e)), _, _) => e.clone(),
+            (Some(Ai::Notes(notes)), _, _) => tf!("AI merge: {notes} Review it, then save.", notes = notes.as_str()),
+            (None, Compare::Base, _) => t!("Coloured lines are what each mod changed from the base game; green where every mod made the same change. A bar at the left marks what you can still add to the merge."),
+            (None, _, true) => tf!("You're building a merge on {name}'s version, the one the game uses. Right-click a highlighted block in another version, or use [ ] and A B R.", name = winner_name.as_str()),
+            (None, _, false) if merged => t!("The merged patch has a merge of this object. Saving again replaces it."),
+            (None, _, false) => match (item, v.winner) {
+                (Item::Object(i), _) if a.simple.contains_key(&i) => tf!("{reason}. In game now: {name}'s version.", reason = a.simple[&i].as_str(), name = winner_name.as_str()),
+                (Item::File(_), _) => tf!("Several mods ship this file; the game loads {name}'s copy, from the mod that loads last. Build a merge of them, or keep one.", name = winner_name.as_str()),
+                (Item::Object(_), Some((_, reason))) => tf!("In game now: {name}'s version, because {reason}.", name = winner_name.as_str(), reason = reason.explain(conflicts::is_fios(&category))),
+                (Item::Object(_), None) => String::new(),
+            },
+        };
+        let mut panes = row![].spacing(12).height(Fill);
+        if self.compare == Compare::Base
+            && let Some(vanilla) = &v.vanilla
+        {
+            panes = panes.push(base_pane(p, vanilla, library.game_version()));
+        }
+        let merge = self.merge_lines();
+        for n in 0..v.sources.len() {
+            panes = panes.push(self.code_pane(p, v, n, &merge));
+        }
+        if v.sources.is_empty() {
+            panes = panes.push(placeholder(p, t!("No version could be read"), tf!("Missing: {mods}", mods = v.missing.join(", "))));
+        }
+        let ai_ready = library.settings.ready_provider().is_some() || library.settings.key_in_keyring;
+        let actions = if self.merged.is_some() {
+            row![
+                button(row![icon(icons::OK, 18, p.on_accent), text(t!("Save merge")).size(14).color(c(p.on_accent))].spacing(8).align_y(iced::Center)).padding([10, 18]).on_press(Message::SaveMerge).style(move |_, s| pill(p.accent, p.on_accent, s)),
+                text(tf!("{count} lines · Ctrl+S", count = merge.len())).size(12).color(c(p.muted)),
+                space().width(Fill),
+                button(text(t!("Undo")).size(13)).padding([10, 16]).on_press_maybe((!self.undo.is_empty()).then_some(Message::Undo)).style(move |_, s| pill(p.container, p.on_window, s)),
+                button(text(t!("Start over")).size(13).color(c(p.muted))).padding([10, 14]).on_press(Message::Reset).style(move |_, s| ghost(p.on_window, s)),
+            ]
+        } else {
+            let mut keep = row![].spacing(8);
+            for (n, s) in v.sources.iter().enumerate() {
+                keep = keep.push(button(text(tf!("Keep {name}", name = short(&s.label))).size(13)).padding([10, 16]).on_press(Message::Keep(n)).style(move |_, st| pill(p.container, p.on_window, st)));
+            }
+            let running = matches!(self.ai, Some(Ai::Running));
+            row![
+                button(row![icon(icons::AI, 18, p.on_accent), text(if running { t!("Merging…") } else { t!("Merge with AI") }).size(14).color(c(p.on_accent))].spacing(8).align_y(iced::Center))
+                    .padding([10, 18])
+                    .on_press_maybe((!running && ai_ready && v.sources.len() + usize::from(v.vanilla.is_some()) >= 2).then_some(Message::MergeAi))
+                    .style(move |_, s| pill(p.accent, p.on_accent, s)),
+                text(if ai_ready { String::new() } else { t!("Set up AI in the settings") }).size(12).color(c(p.muted)),
+                space().width(Fill),
+                keep,
+                button(row![icon(icons::HIDE, 16, p.muted), text(t!("Ignore…")).size(13).color(c(p.muted))].spacing(6).align_y(iced::Center)).padding([10, 14]).on_press(Message::OpenIgnore).style(move |_, s| ghost(p.on_window, s)),
+            ]
+        };
+        let actions = container(actions.spacing(10).align_y(iced::Center)).padding(14).width(Fill).style(move |_| surface(p.container_high, p.on_window, 24.0));
+        column![head, banner(p, why), panes, actions].spacing(12).width(Fill).into()
+    }
 
-    let toolbar = adw::ToolbarView::new();
-    toolbar.add_top_bar(&adw::HeaderBar::new());
-    toolbar.set_content(Some(&body));
+    /// One version. The game's version shows the merge so far; the others
+    /// mark the blocks it lacks, which a right-click or the keyboard adds.
+    /// Compared with the base game, the colours show what each mod changed
+    /// from vanilla instead.
+    fn code_pane<'a>(&'a self, p: &'a Palette, v: &'a Versions, n: usize, merge: &[String]) -> Element<'a, Message> {
+        let source = &v.sources[n];
+        let wins = Some(n) == self.winner();
+        let lines: Vec<String> = if wins { merge.to_vec() } else { source.text.lines().map(str::to_owned).collect() };
+        let as_str: Vec<&str> = lines.iter().map(String::as_str).collect();
+        let mut block = vec![None; lines.len()];
+        let mut differs = vec![false; lines.len()];
+        if wins {
+            for other in v.sources.iter().enumerate().filter(|(m, _)| *m != n).map(|(_, o)| o) {
+                let theirs: Vec<&str> = other.text.lines().collect();
+                for h in hunks(&theirs, merge) {
+                    h.dst.for_each(|l| differs[l] = true);
+                }
+            }
+        } else {
+            for (k, h) in hunks(&as_str, merge).iter().enumerate() {
+                for line in h.src.clone() {
+                    block[line] = Some(Block { version: n, hunk: k });
+                    differs[line] = true;
+                }
+            }
+        }
+        let mut from_base = vec![false; lines.len()];
+        let mut shared = vec![false; lines.len()];
+        let base_mode = self.compare == Compare::Base && v.vanilla.is_some();
+        if base_mode && let Some(vanilla) = &v.vanilla {
+            let base: Vec<String> = vanilla.text.lines().map(str::to_owned).collect();
+            for h in hunks(&as_str, &base) {
+                h.src.for_each(|l| from_base[l] = true);
+            }
+            // Same change: every version changed a line from the base game
+            // into this one. A lone brace says nothing, so it never counts.
+            let changes: Vec<Vec<String>> = v
+                .sources
+                .iter()
+                .map(|o| {
+                    let theirs: Vec<&str> = o.text.lines().collect();
+                    hunks(&theirs, &base).into_iter().flat_map(|h| theirs[h.src].iter().map(|x| x.trim_end().to_owned()).collect::<Vec<_>>()).collect()
+                })
+                .collect();
+            for (l, line) in lines.iter().enumerate().filter(|(l, _)| from_base[*l]) {
+                let content = line.trim().trim_matches(['{', '}']).trim();
+                shared[l] = !content.is_empty() && changes.iter().all(|c| c.iter().any(|x| x == line.trim_end()));
+            }
+        }
+        let mark = if wins { p.success } else { p.error };
+        let focus = self.focus.filter(|f| f.version == n).map(|f| f.hunk);
+        let open = self.menu.filter(|(b, _)| b.version == n).map(|(b, _)| b.hunk);
+        // Lines don't wrap; the pane scrolls sideways instead. The rows get a
+        // fixed width so their highlight spans the longest line.
+        let longest = lines.iter().map(|l| l.replace('\t', "    ").chars().count()).max().unwrap_or(0);
+        let width = (longest as f32 * 7.6 + 70.0).max(360.0);
+        let rows = column(lines.iter().enumerate().map(|(k, line)| {
+            let b = block[k];
+            let active = b.is_some() && (b.map(|b| b.hunk) == focus || b.map(|b| b.hunk) == open);
+            let (tint, bar) = if base_mode {
+                let tint = if !from_base[k] { None } else if shared[k] { Some(p.success) } else { Some(p.accent) };
+                (tint, b.map(|_| if active { p.accent } else { p.outline }))
+            } else {
+                (differs[k].then_some(mark), differs[k].then_some(if active { p.accent } else { mark }))
+            };
+            let strength = if active { 0.34 } else { 0.16 };
+            let row_el = container(
+                row![
+                    container(space()).width(if active { 5 } else { 3 }).height(20).style(move |_| match bar {
+                        Some(col) => surface(col, col, 0.0),
+                        None => container::Style::default(),
+                    }),
+                    text(format!("{:>3}", k + 1)).font(MONO).size(12).color(alpha(p.muted, 0.6)),
+                    text(line.replace('\t', "    ")).font(MONO).size(12.5).wrapping(text::Wrapping::None),
+                ]
+                .spacing(12)
+                .align_y(iced::Center),
+            )
+            .width(width)
+            .style(move |_| match tint {
+                Some(col) => container::Style { background: Some(Background::Color(alpha(col, strength))), ..Default::default() },
+                None => container::Style::default(),
+            });
+            match b {
+                Some(b) => mouse_area(row_el).on_right_press(Message::OpenMenu(b)).interaction(mouse::Interaction::ContextMenu).into(),
+                None => row_el.into(),
+            }
+        }));
+        let edited = self.merged.is_some();
+        let badge: Element<'a, Message> = match (wins, edited) {
+            (true, true) => filled_chip(t!("In game · your merge"), p.accent, p.on_accent),
+            (true, false) => filled_chip(t!("In game"), p.accent, p.on_accent),
+            _ => text(t!("right-click a block")).size(11).color(c(p.muted)).into(),
+        };
+        let keys: Element<'a, Message> = if wins { space().into() } else { text(t!("[ ]  blocks   A above   B below   R replace")).font(MONO).size(11).color(c(p.muted)).into() };
+        container(
+            column![
+                row![
+                    container(text(format!("#{}", v.positions[n] + 1)).size(11).color(c(p.muted))).padding([5, 8]).style(move |_| surface(p.container_high, p.muted, 999.0)),
+                    column![text(source.label.as_str()).size(15), text(source.file.as_str()).font(MONO).size(11).color(c(p.muted))].spacing(2).width(Fill),
+                    badge,
+                ]
+                .spacing(10)
+                .align_y(iced::Center),
+                container(scrollable(container(rows).padding([8, 0])).direction(scrollable::Direction::Both { vertical: scrollable::Scrollbar::default(), horizontal: scrollable::Scrollbar::default() }).width(Fill).height(Fill))
+                    .width(Fill)
+                    .height(Fill)
+                    .style(move |_| surface(p.window, p.on_window, 12.0)),
+                keys,
+            ]
+            .spacing(10),
+        )
+        .padding(16)
+        .width(Length::FillPortion(2))
+        .height(Fill)
+        .style(move |_| container::Style { border: Border { radius: 20.0.into(), width: if wins { 2.0 } else { 0.0 }, color: c(p.accent) }, ..surface(p.container, p.on_window, 20.0) })
+        .into()
+    }
 
-    let title = tnf!("Inline Script ({count})", "Inline Scripts ({count})", count = comparisons.len());
-    let dialog = adw::Dialog::builder().title(title).content_width(980).content_height(720).child(&toolbar).build();
-    diff_view::bind_button_shortcuts(&dialog, &[("<Alt>m", &merge), ("<Control>s", &save_button)]);
-    object::keep_alive(&dialog, pair);
-    object::keep_alive(&dialog, thinking);
-    dialog.present(Some(parent));
+    fn menu<'a>(&'a self, p: &'a Palette) -> Option<Element<'a, Message>> {
+        let (block, at) = self.menu?;
+        let v = self.versions.as_ref()?;
+        let source: Vec<&str> = v.sources[block.version].text.lines().collect();
+        let merge = self.merge_lines();
+        let h = hunks(&source, &merge).get(block.hunk)?.clone();
+        let into = short(&v.sources[self.winner()?].label);
+        let what = tnf!("{count} line", "{count} lines", count = h.src.len());
+        let lines = |r: &Range<usize>| if r.len() == 1 { tf!("line {n}", n = r.start + 1) } else { tf!("lines {from}–{to}", from = r.start + 1, to = r.end) };
+        let (above, below) = if h.dst.is_empty() {
+            (tf!("Before line {n}", n = h.dst.start + 1), tf!("Before line {n}", n = h.dst.start + 1))
+        } else {
+            (tf!("Before line {n}", n = h.dst.start + 1), tf!("After line {n}", n = h.dst.end))
+        };
+        let item = |glyph: &'static [u8], label: String, key: &'static str, hint: String, op: Op| {
+            button(row![icon(glyph, 18, p.on_window), text(label).size(14).width(Fill), text(hint).size(12).color(c(p.muted)), text(key).size(11).font(MONO).color(c(p.muted)).width(14)].spacing(12).align_y(iced::Center))
+                .width(Fill)
+                .padding([9, 12])
+                .on_press(Message::Apply(op, block))
+                .style(move |_, s| {
+                    let mut st = ghost(p.on_window, s);
+                    st.border.radius = 10.0.into();
+                    st
+                })
+        };
+        let mut items = column![
+            container(text(tf!("{what} from {from} into {into}'s version", what = what, from = short(&v.sources[block.version].label), into = into)).size(12).color(c(p.muted))).padding([6, 12]),
+            item(icons::UP, t!("Add above"), "A", above, Op::Above),
+            item(icons::DOWN_ARROW, t!("Add below"), "B", below, Op::Below),
+        ]
+        .spacing(2);
+        if !h.dst.is_empty() {
+            items = items.push(item(icons::SWAP, t!("Replace"), "R", tf!("{lines} of the merge", lines = lines(&h.dst)), Op::Replace));
+        }
+        let card = container(items).padding(6).width(380).style(move |_| container::Style {
+            shadow: Shadow { color: Color::from_rgba(0.0, 0.0, 0.0, 0.35), offset: Vector::new(0.0, 8.0), blur_radius: 24.0 },
+            ..surface(p.container_high, p.on_window, 16.0)
+        });
+        let away = mouse_area(container(space()).width(Fill).height(Fill)).on_press(Message::CloseMenu).on_right_press(Message::CloseMenu);
+        Some(stack![away, pin(card).x(at.x).y(at.y).width(Fill).height(Fill)].into())
+    }
+
+    fn ignore_sheet<'a>(&'a self, p: &'a Palette) -> Option<Element<'a, Message>> {
+        let sheet = self.ignore.as_ref()?;
+        let options = column(sheet.scopes.iter().enumerate().map(|(i, (scope, hides, detail))| {
+            let picked = i == sheet.picked;
+            let dot = container(if picked { Element::from(container(space()).width(10).height(10).style(move |_| surface(p.accent, p.accent, 5.0))) } else { space().into() })
+                .center(20)
+                .style(move |_| container::Style { border: Border { radius: 10.0.into(), width: 2.0, color: c(if picked { p.accent } else { p.outline }) }, ..Default::default() });
+            let count: Element<'a, Message> = if *hides > 0 { chip(tnf!("hides {count}", "hides {count}", count = *hides), if picked { p.accent } else { p.muted }) } else { space().into() };
+            button(row![dot, column![text(scope.label()).size(14), text(detail.as_str()).size(12).color(c(p.muted))].spacing(2).width(Fill), count].spacing(14).align_y(iced::Center))
+                .width(Fill)
+                .padding([12, 14])
+                .on_press(Message::PickScope(i))
+                .style(move |_, s| {
+                    let mut st = if picked { pill(p.secondary, p.on_window, s) } else { ghost(p.on_window, s) };
+                    st.border.radius = 14.0.into();
+                    st
+                })
+                .into()
+        }))
+        .spacing(4);
+        let card = container(
+            column![
+                text(t!("Ignore conflicts")).size(20),
+                text(t!("Ignored conflicts leave the queue. You can bring them back from Ignored.")).size(13).color(c(p.muted)),
+                options,
+                row![
+                    space().width(Fill),
+                    button(text(t!("Cancel")).size(14)).padding([10, 18]).on_press(Message::CloseIgnore).style(move |_, s| ghost(p.on_window, s)),
+                    button(row![icon(icons::HIDE, 16, p.on_accent), text(t!("Ignore")).size(14).color(c(p.on_accent))].spacing(8).align_y(iced::Center)).padding([10, 18]).on_press(Message::ConfirmIgnore).style(move |_, s| pill(p.accent, p.on_accent, s)),
+                ]
+                .spacing(8),
+            ]
+            .spacing(14),
+        )
+        .padding(22)
+        .width(580)
+        .style(move |_| container::Style { shadow: Shadow { color: Color::from_rgba(0.0, 0.0, 0.0, 0.45), offset: Vector::new(0.0, 12.0), blur_radius: 40.0 }, ..surface(p.container_high, p.on_window, 28.0) });
+        let scrim = mouse_area(container(space()).width(Fill).height(Fill).style(|_| container::Style { background: Some(Background::Color(Color::from_rgba(0.0, 0.0, 0.0, 0.5))), ..Default::default() })).on_press(Message::CloseIgnore);
+        Some(stack![scrim, container(opaque(card)).center(Fill)].into())
+    }
+
+    /// Every object the enabled mods define, searchable: who defines it,
+    /// and which version the game uses.
+    fn lookup_view<'a>(&'a self, p: &'a Palette, a: &'a Analysis) -> Element<'a, Message> {
+        const LIMIT: usize = 100;
+        let found = a.report.look_up(&self.lookup, LIMIT);
+        let mut list = column![].spacing(8);
+        for object in &found {
+            let winner = object.winner();
+            let defs = column(object.definitions.iter().enumerate().map(|(n, d)| {
+                let wins = winner.is_some_and(|(w, _)| w == n);
+                row![
+                    text(format!("#{}", d.mod_position + 1)).font(MONO).size(11).color(c(p.muted)),
+                    text(a.names[d.mod_position].as_str()).size(13).width(Fill),
+                    text(d.file.clone()).font(MONO).size(11).color(c(p.muted)),
+                    if wins { filled_chip(t!("In game"), p.accent, p.on_accent) } else { space().into() },
+                ]
+                .spacing(10)
+                .align_y(iced::Center)
+                .into()
+            }))
+            .spacing(4);
+            let conflict = a.report.objects.iter().position(|c| c.category == object.category && c.key == object.key);
+            let open: Element<'a, Message> = match conflict {
+                Some(i) => button(text(t!("Open conflict")).size(12)).padding([6, 12]).on_press(Message::Select(Item::Object(i))).style(move |_, s| pill(p.container_high, p.on_window, s)).into(),
+                None => space().into(),
+            };
+            list = list.push(
+                container(column![row![column![text(object.key.clone()).font(MONO).size(14), text(object.category.clone()).size(11).color(c(p.muted))].spacing(2).width(Fill), open].align_y(iced::Center), defs].spacing(8))
+                    .padding([12, 16])
+                    .style(move |_| surface(p.container, p.on_window, 16.0)),
+            );
+        }
+        let note = if self.lookup.trim().is_empty() {
+            t!("Type part of a name to search every object your enabled mods define")
+        } else if found.is_empty() {
+            t!("No enabled mod defines an object by that name")
+        } else if found.len() >= LIMIT {
+            tf!("Only the first {count} are shown. Type more of the name to narrow them.", count = LIMIT)
+        } else {
+            String::new()
+        };
+        container(
+            column![
+                text(t!("Look up objects")).size(20),
+                text_input(&t!("building_research_lab_1, tech_lasers, l_english:…"), &self.lookup).on_input(Message::Lookup).padding([10, 16]).style(move |_, _| field(p, 999.0, false)),
+                text(note).size(12).color(c(p.muted)),
+                scrollable(list).height(Fill),
+            ]
+            .spacing(12)
+            .max_width(900),
+        )
+        .padding(20)
+        .width(Fill)
+        .height(Fill)
+        .style(move |_| surface(p.container_low, p.on_window, 24.0))
+        .into()
+    }
+
+    /// What the merged patch holds, which merges went stale since their
+    /// mods (or the game) changed, and what to do about those.
+    fn patches<'a>(&'a self, library: &'a Library, p: &'a Palette) -> Element<'a, Message> {
+        let Some(patch) = &library.patch else {
+            return placeholder(p, t!("No merged patch yet"), t!("Saving a merge or keeping a version creates the collection's merged patch, a mod that loads last."));
+        };
+        let stale_of = |object: Option<&(String, String)>, path: &str| library.stale.iter().position(|s| s.object.as_ref() == object && (object.is_some() || s.path.eq_ignore_ascii_case(path)));
+        let entry = |title: String, subtitle: String, object: Option<(String, String)>, path: String| -> Element<'a, Message> {
+            let stale = stale_of(object.as_ref(), &path);
+            let mut actions = row![].spacing(6).align_y(iced::Center);
+            let mut reasons: Element<'a, Message> = space().into();
+            if let Some(at) = stale {
+                let s = &library.stale[at];
+                reasons = text(s.reasons.join(" ")).size(12).color(c(p.warning)).into();
+                if s.pick.is_some() {
+                    actions = actions.push(button(text(t!("Take the new version")).size(12)).padding([6, 12]).on_press(Message::UpdatePick(at)).style(move |_, st| pill(p.accent, p.on_accent, st)));
+                }
+                actions = actions.push(button(text(t!("Keep as is")).size(12)).padding([6, 12]).on_press(Message::KeepMerge(at)).style(move |_, st| pill(p.container_high, p.on_window, st)));
+            }
+            actions = actions.push(button(text(t!("Open")).size(12)).padding([6, 12]).on_press(Message::OpenMerge(object.clone(), path.clone())).style(move |_, st| pill(p.container_high, p.on_window, st)));
+            actions = actions.push(button(text(t!("Remove")).size(12).color(c(p.error))).padding([6, 12]).on_press(Message::RemoveMerge(object, path)).style(move |_, st| ghost(p.error, st)));
+            let mark: Element<'a, Message> = if stale.is_some() { chip(t!("changed since"), p.warning) } else { chip(t!("up to date"), p.success) };
+            container(column![row![column![text(title).font(MONO).size(13), text(subtitle).size(11).color(c(p.muted))].spacing(3).width(Fill), mark, actions].spacing(12).align_y(iced::Center), reasons].spacing(6))
+                .padding([12, 16])
+                .style(move |_| surface(p.container, p.on_window, 16.0))
+                .into()
+        };
+        let mut list = column![].spacing(8);
+        let stale_count = library.stale.iter().filter(|s| !s.untracked).count();
+        for m in patch.merges() {
+            list = list.push(entry(m.key.clone(), format!("{} · {}", m.category, m.sources.join(", ")), Some((m.category.clone(), m.key.clone())), m.file.clone()));
+        }
+        for f in patch.files() {
+            list = list.push(entry(f.path.clone(), f.sources.join(", "), None, f.path.clone()));
+        }
+        if patch.merges().is_empty() && patch.files().is_empty() {
+            list = list.push(text(t!("Nothing merged yet.")).size(13).color(c(p.muted)));
+        }
+        let target = patch.target();
+        container(
+            column![
+                row![text(target.name.as_str()).size(20), space().width(Fill), text(tnf!("{count} changed since merged", "{count} changed since merged", count = stale_count)).size(12).color(c(if stale_count > 0 { p.warning } else { p.muted }))].align_y(iced::Center),
+                text(t!("The mod that holds your merges, loading last. A merge goes stale when a mod it came from, or the game, changes it; keep it, take the new version, or open it to merge again.")).size(13).color(c(p.muted)),
+                scrollable(list).height(Fill),
+            ]
+            .spacing(12)
+            .max_width(900),
+        )
+        .padding(20)
+        .width(Fill)
+        .height(Fill)
+        .style(move |_| surface(p.container_low, p.on_window, 24.0))
+        .into()
+    }
+
+    fn ignored<'a>(&'a self, library: &'a Library, p: &'a Palette) -> Element<'a, Message> {
+        let card = |label: String, detail: String, msg: Message| -> Element<'a, Message> {
+            container(
+                row![
+                    icon(icons::HIDE, 18, p.muted),
+                    column![text(label).size(14), text(detail).size(12).color(c(p.muted))].spacing(2).width(Fill),
+                    button(text(t!("Show again")).size(13)).padding([8, 14]).on_press(msg).style(move |_, s| pill(p.container_high, p.on_window, s)),
+                ]
+                .spacing(14)
+                .align_y(iced::Center),
+            )
+            .padding([12, 16])
+            .style(move |_| surface(p.container, p.on_window, 16.0))
+            .into()
+        };
+        let mut list = column![].spacing(8);
+        for key in &library.settings.ignored {
+            let (label, detail) = describe_key(key);
+            list = list.push(card(label, detail, Message::UnignoreKey(key.clone())));
+        }
+        for rule in library.settings.ignore_rules.lines().map(str::trim).filter(|l| !l.is_empty() && !l.starts_with('#')) {
+            list = list.push(card(rule.to_owned(), t!("Ignore rule"), Message::UnignoreRule(rule.to_owned())));
+        }
+        if library.settings.ignored.is_empty() && library.settings.ignore_rules.trim().is_empty() {
+            list = list.push(text(t!("Nothing ignored yet. Ignore a conflict from its action bar.")).size(13).color(c(p.muted)));
+        }
+        container(column![text(t!("Ignored")).size(20), text(t!("What keeps conflicts out of the queue: single conflicts, whole folders, and ignore rules.")).size(13).color(c(p.muted)), scrollable(list).height(Fill)].spacing(12).max_width(760))
+            .padding(20)
+            .width(Fill)
+            .height(Fill)
+            .style(move |_| surface(p.container_low, p.on_window, 24.0))
+            .into()
+    }
 }
 
-fn print_for(file: &crate::merge::inline_scripts::InlineScriptFile) -> Print {
-    let id = if file.source_label.eq_ignore_ascii_case("Vanilla") {
-        VANILLA
+/// Reads every version of object `i`, and the base game's. Blocking.
+fn load_versions(a: &Analysis, i: usize, game_dir: Option<PathBuf>) -> Versions {
+    let c = &a.report.objects[i];
+    let origins: Vec<(usize, (String, String, PathBuf, String))> =
+        c.definitions.iter().filter_map(|d| Some((d.mod_position, (a.ids[d.mod_position].clone(), a.names[d.mod_position].clone(), a.roots[d.mod_position].clone()?, d.file.clone())))).collect();
+    let loaded = merge_dialog_load(&c.category, &c.key, game_dir.as_deref(), origins.iter().map(|(_, o)| o.clone()).collect());
+    // Which source each read version is, to place the winner and positions.
+    let positions: Vec<usize> = loaded.sources.iter().map(|s| origins.iter().find(|(_, o)| o.1 == s.label && o.3 == s.file).map_or(0, |(p, _)| *p)).collect();
+    let winner = c.winner().and_then(|(w, reason)| {
+        let d = &c.definitions[w];
+        loaded.sources.iter().position(|s| s.file == d.file && s.label == a.names[d.mod_position]).map(|at| (at, reason))
+    });
+    Versions { item: Item::Object(i), vanilla: loaded.vanilla, sources: loaded.sources, positions, prints: loaded.prints, missing: loaded.missing, winner }
+}
+
+/// Reads every mod's copy of overridden file `i`, and the base game's.
+/// The last mod's copy is the one the game loads. Blocking.
+fn load_file_versions(a: &Analysis, i: usize, game_dir: Option<PathBuf>) -> Versions {
+    let f = &a.report.files[i];
+    let read = |root: &std::path::Path| std::fs::read(root.join(&f.path)).ok().map(|b| String::from_utf8_lossy(&b).trim_start_matches('\u{feff}').to_owned());
+    let mut sources = Vec::new();
+    let mut positions = Vec::new();
+    let mut missing = Vec::new();
+    for &m in &f.mods {
+        match a.roots[m].as_deref().and_then(read) {
+            Some(text) => {
+                sources.push(Source { label: a.names[m].clone(), file: f.path.clone(), text });
+                positions.push(m);
+            }
+            None => missing.push(a.names[m].clone()),
+        }
+    }
+    let vanilla = game_dir.as_deref().and_then(read).map(|text| Source { label: "Vanilla".into(), file: f.path.clone(), text });
+    let mods: Vec<patch::SourceMod> = f.mods.iter().filter_map(|&m| Some((a.ids[m].clone(), a.names[m].clone(), a.roots[m].clone()?))).collect();
+    let prints = patch::file_prints(&f.path, game_dir.as_deref(), &mods);
+    let winner = (!sources.is_empty()).then(|| (sources.len() - 1, conflicts::Reason::LoadOrder));
+    Versions { item: Item::File(i), vanilla, sources, positions, prints, missing, winner }
+}
+
+fn mods_of_object(c: &ObjectConflict) -> BTreeSet<usize> {
+    c.definitions.iter().map(|d| d.mod_position).collect()
+}
+
+/// What an ignored key covers, for the Ignored list.
+fn describe_key(key: &str) -> (String, String) {
+    if let Some(rest) = key.strip_prefix("object:") {
+        (rest.replacen(':', "/", 1), t!("Object"))
+    } else if let Some(rest) = key.strip_prefix("objects-in:") {
+        (rest.to_owned(), t!("Every object in this folder"))
+    } else if let Some(rest) = key.strip_prefix("files-in:") {
+        (rest.to_owned(), t!("Every file in this folder"))
+    } else if let Some(rest) = key.strip_prefix("file:") {
+        (rest.to_owned(), t!("File"))
     } else {
-        &file.source_label
-    };
-    Print::new(id, &file.source_label, &file.path, &file.text)
+        (key.to_owned(), String::new())
+    }
+}
+
+fn banner<'a>(p: &'a Palette, message: String) -> Element<'a, Message> {
+    container(row![icon(icons::INFO, 20, p.accent), text(message).size(13)].spacing(12).align_y(iced::Center))
+        .padding([14, 16])
+        .width(Fill)
+        .style(move |_| container::Style { background: Some(Background::Color(alpha(p.accent, 0.14))), ..surface(p.container, p.on_window, 16.0) })
+        .into()
+}
+
+/// The base game's version, for reference: read-only and narrower.
+fn base_pane<'a>(p: &'a Palette, vanilla: &'a Source, version: Option<&'a str>) -> Element<'a, Message> {
+    let rows = column(vanilla.text.lines().enumerate().map(|(k, line)| {
+        row![text(format!("{:>3}", k + 1)).font(MONO).size(12).color(alpha(p.muted, 0.6)), text(line.replace('\t', "    ")).font(MONO).size(12.5).color(c(p.muted)).wrapping(text::Wrapping::None)].spacing(12).height(20).align_y(iced::Center).into()
+    }));
+    container(
+        column![
+            row![
+                container(icon(icons::GAMES, 14, p.muted)).padding([5, 7]).style(move |_| surface(p.container_high, p.muted, 999.0)),
+                column![text(t!("Base game")).size(15), text(version.map_or_else(|| vanilla.file.clone(), |v| format!("Stellaris {v}"))).font(MONO).size(11).color(c(p.muted))].spacing(2).width(Fill),
+            ]
+            .spacing(10)
+            .align_y(iced::Center),
+            container(scrollable(container(rows).padding([8, 12])).direction(scrollable::Direction::Both { vertical: scrollable::Scrollbar::default(), horizontal: scrollable::Scrollbar::default() }).width(Fill).height(Fill))
+                .width(Fill)
+                .height(Fill)
+                .style(move |_| surface(p.window, p.on_window, 12.0)),
+        ]
+        .spacing(12),
+    )
+    .padding(16)
+    .width(Length::FillPortion(1))
+    .height(Fill)
+    .style(move |_| surface(p.container_low, p.on_window, 20.0))
+    .into()
+}
+
+/// The blocks where `src` and `dst` differ, in order, by the longest
+/// common run of lines. Trailing spaces don't count; indentation does, or
+/// a nested `}` would match the object's closing one.
+pub fn hunks<S: AsRef<str>>(src: &[&str], dst: &[S]) -> Vec<Hunk> {
+    let (n, m) = (src.len(), dst.len());
+    let same = |i: usize, j: usize| src[i].trim_end() == dst[j].as_ref().trim_end();
+    // lcs[i][j]: the longest common run of src[i..] and dst[j..].
+    let mut lcs = vec![vec![0u32; m + 1]; n + 1];
+    for i in (0..n).rev() {
+        for j in (0..m).rev() {
+            lcs[i][j] = if same(i, j) { lcs[i + 1][j + 1] + 1 } else { lcs[i + 1][j].max(lcs[i][j + 1]) };
+        }
+    }
+    let (mut i, mut j) = (0, 0);
+    let mut out = Vec::new();
+    let mut open: Option<(usize, usize)> = None;
+    while i < n || j < m {
+        if i < n && j < m && same(i, j) {
+            if let Some((si, sj)) = open.take() {
+                out.push(Hunk { src: si..i, dst: sj..j });
+            }
+            i += 1;
+            j += 1;
+            continue;
+        }
+        open.get_or_insert((i, j));
+        if j < m && (i == n || lcs[i][j + 1] >= lcs[i + 1][j]) {
+            j += 1;
+        } else {
+            i += 1;
+        }
+    }
+    if let Some((si, sj)) = open {
+        out.push(Hunk { src: si..n, dst: sj..m });
+    }
+    balance(out, src, dst)
+}
+
+/// Widens each block until its braces balance on both sides, so a block
+/// is whole objects: the diff alone would leave a block's closing `}`
+/// out, since another block's `}` matches it, and adding the block would
+/// then land inside the merge's next object. Blocks that come to touch
+/// are joined.
+fn balance<S: AsRef<str>>(hunks: Vec<Hunk>, src: &[&str], dst: &[S]) -> Vec<Hunk> {
+    let depth = |lines: &mut dyn Iterator<Item = &str>| -> i32 { lines.map(|l| l.split('#').next().unwrap_or("")).map(|l| l.matches('{').count() as i32 - l.matches('}').count() as i32).sum() };
+    let same = |i: usize, j: usize| src[i].trim_end() == dst[j].as_ref().trim_end();
+    let mut out: Vec<Hunk> = Vec::new();
+    for (k, mut h) in hunks.iter().cloned().enumerate() {
+        let (next_src, next_dst) = hunks.get(k + 1).map_or((src.len(), dst.len()), |n| (n.src.start, n.dst.start));
+        let (prev_src, prev_dst) = out.last().map_or((0, 0), |p| (p.src.end, p.dst.end));
+        loop {
+            let ds = depth(&mut src[h.src.clone()].iter().copied());
+            let dd = depth(&mut dst[h.dst.clone()].iter().map(|l| l.as_ref()));
+            if (ds > 0 || dd > 0) && h.src.end < next_src && h.dst.end < next_dst && same(h.src.end, h.dst.end) {
+                h.src.end += 1;
+                h.dst.end += 1;
+            } else if (ds < 0 || dd < 0) && h.src.start > prev_src && h.dst.start > prev_dst && same(h.src.start - 1, h.dst.start - 1) {
+                h.src.start -= 1;
+                h.dst.start -= 1;
+            } else {
+                break;
+            }
+        }
+        match out.last_mut() {
+            Some(last) if last.src.end >= h.src.start && last.dst.end >= h.dst.start => {
+                last.src.end = last.src.end.max(h.src.end);
+                last.dst.end = last.dst.end.max(h.dst.end);
+            }
+            _ => out.push(h),
+        }
+    }
+    out
+}
+
+fn status_look(p: &Palette, s: Status) -> (String, Rgb) {
+    match s {
+        Status::NeedsMerge => (t!("Needs merge"), p.error),
+        Status::Simple => (t!("Simple"), p.warning),
+        Status::File => (t!("File"), p.accent),
+        Status::Done => (t!("Done"), p.success),
+    }
+}
+
+fn placeholder<'a>(p: &'a Palette, title: String, about: String) -> Element<'a, Message> {
+    container(column![text(title).size(20), text(about).size(13).color(c(p.muted))].spacing(8).max_width(640)).padding(20).width(Fill).height(Fill).style(move |_| surface(p.container_low, p.on_window, 24.0)).into()
+}
+
+fn initials(name: &str) -> String {
+    name.split_whitespace().filter_map(|w| w.chars().next()).filter(|c| c.is_alphanumeric()).take(3).collect()
+}
+
+/// A mod's name short enough for a button.
+fn short(name: &str) -> String {
+    let first: Vec<&str> = name.split_whitespace().take(2).collect();
+    let s = first.join(" ");
+    if s.len() < name.len() { format!("{}…", s.trim_end_matches(['\'', 's'])) } else { s }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::merge::conflicts::{Definition, FileConflict, ObjectConflict};
 
-    fn stale(object: Option<(&str, &str)>, path: &str, reason: &str, untracked: bool) -> Stale {
-        Stale {
-            object: object.map(|(c, k)| (c.to_owned(), k.to_owned())),
-            path: path.to_owned(),
-            reasons: vec![reason.to_owned()],
-            untracked,
-            base_game: false,
-            content: false,
-            unmerged: false,
-            pick: None,
-        }
+    #[test]
+    fn finds_changed_added_and_removed_blocks() {
+        let src = ["a", "b", "x", "c", "y", "z"];
+        let dst = ["a", "b", "c", "w", "d"];
+        assert_eq!(hunks(&src, &dst), vec![Hunk { src: 2..3, dst: 2..2 }, Hunk { src: 4..6, dst: 3..5 }]);
+        assert_eq!(hunks(&["a"], &["a"]), vec![]);
     }
 
     #[test]
-    fn stale_set_finds_objects_and_files_but_skips_untracked() {
-        let set = StaleSet::new(vec![
-            stale(Some(("common/buildings", "b1")), "common/buildings/x.txt", "mod changed", false),
-            stale(Some(("common/buildings", "b2")), "common/buildings/x.txt", "untracked one", true),
-            stale(None, "Common/Edicts/E.txt", "file changed", false),
-            stale(None, "common/other.txt", "untracked file", true),
-        ]);
-
-        assert_eq!(set.object("common/buildings", "b1"), Some(vec!["mod changed".to_owned()]));
-        assert_eq!(set.object("common/buildings", "b2"), None);
-        assert_eq!(set.object("common/edicts", "b1"), None);
-        assert_eq!(set.file("common/edicts/e.TXT"), Some(vec!["file changed".to_owned()]));
-        assert_eq!(set.file("common/other.txt"), None);
-        assert_eq!(set.file("common/buildings/x.txt"), None, "an object's generated file is not a file merge");
-    }
-
-    #[test]
-    fn inline_script_with_syntax_error_is_rejected_without_saving() {
-        let saved = Rc::new(RefCell::new(Vec::new()));
-        let log = saved.clone();
-        let save: SaveInlineScript = Rc::new(move |name, text, _| {
-            log.borrow_mut().push((name.to_owned(), text.to_owned()));
-            Ok(())
-        });
-
-        let result = validate_then_save(&save, "my_script", "effect = {\n  add_resource = { energy = 1 }\n", Vec::new());
-
-        assert!(result.is_err_and(|e| e.contains("syntax error")));
-        assert!(saved.borrow().is_empty(), "nothing is saved");
-    }
-
-    #[test]
-    fn valid_inline_script_is_saved() {
-        let saved = Rc::new(RefCell::new(Vec::new()));
-        let log = saved.clone();
-        let save: SaveInlineScript = Rc::new(move |name, text, _| {
-            log.borrow_mut().push((name.to_owned(), text.to_owned()));
-            Ok(())
-        });
-
-        let result = validate_then_save(&save, "my_script", "add_resource = { energy = 1 }\n", Vec::new());
-
-        assert_eq!(result, Ok(()));
-        assert_eq!(*saved.borrow(), vec![("my_script".to_owned(), "add_resource = { energy = 1 }\n".to_owned())]);
-    }
-
-    #[test]
-    fn attention_group_follows_the_current_out_of_date_merges() {
-        let outdated = stale(Some(("c", "k")), "p", "mod changed", false);
-        let untracked = stale(Some(("c", "u")), "p", "", true);
-        assert_eq!(attention_items(&[outdated.clone(), untracked.clone()], true), vec![Item::Outdated, Item::Untracked, Item::Problems]);
-        assert_eq!(attention_items(&[untracked], false), vec![Item::Untracked]);
-        assert_eq!(attention_items(&[], false), Vec::<Item>::new());
-    }
-
-    #[test]
-    fn searching_an_object_finds_the_outdated_entry_listing_it() {
-        let list = [stale(Some(("common/traits", "trait_machine_unit")), "common/traits/x.txt", "mod changed", false)];
-        assert!(stale_matches(&list, false, "machine_unit"));
-        assert!(!stale_matches(&list, true, "machine_unit"));
-        assert!(!stale_matches(&list, false, "edict"));
-    }
-
-    #[test]
-    fn stale_set_returns_the_whole_entry_for_an_object() {
-        let mut entry = stale(Some(("c", "k")), "p", "mod changed", false);
-        entry.pick = Some("Mod A".to_owned());
-        let set = StaleSet::new(vec![stale(Some(("c", "other")), "p", "x", false), entry]);
-        let found = set.object_entry("c", "k").unwrap();
-        assert_eq!(found.pick.as_deref(), Some("Mod A"));
-        assert!(set.object_entry("c", "missing").is_none());
-    }
-
-    #[test]
-    fn stale_set_replace_drops_old_entries() {
-        let set = StaleSet::new(vec![stale(Some(("c", "k")), "p", "old", false)]);
-        set.replace(vec![stale(None, "q", "new", false)]);
-
-        assert_eq!(set.object("c", "k"), None);
-        assert_eq!(set.file("q"), Some(vec!["new".to_owned()]));
-        assert_eq!(set.borrow().len(), 1);
-    }
-
-    #[test]
-    fn stale_set_lookups_scale_to_thousands_of_entries() {
-        let list: Vec<Stale> = (0..5000).map(|i| stale(Some(("c", &format!("k{i}"))), "p", "r", false)).collect();
-        let set = StaleSet::new(list);
-
-        assert_eq!(set.object("c", "k4999"), Some(vec!["r".to_owned()]));
-        assert_eq!(set.object("c", "k5000"), None);
-    }
-
-    #[test]
-    fn ignores_directly_by_folder_or_by_rule() {
-        let ignored: std::collections::BTreeSet<String> = [file_key("common/Buildings/A.txt"), objects_folder_key("common/portrait_sets")].into();
-        let is = |k: &str| ignored.contains(k);
-        let (none, names) = (Rules::default(), vec!["A".to_owned(), "B".to_owned()]);
-        let ignores = Ignores { keys: &is, rules: &none, names: &names, dependencies: None };
-        let file = |p: &str| FileConflict { path: p.into(), mods: vec![0, 1] };
-        let object = |c: &str| ObjectConflict { category: c.into(), key: "x".into(), definitions: vec![Definition { mod_position: 0, file: "f".into() }] };
-        assert!(file_ignored(&ignores, &file("common/buildings/a.txt")), "paths match case-insensitively");
-        assert!(!file_ignored(&ignores, &file("common/buildings/b.txt")));
-        assert!(object_ignored(&ignores, &object("common/portrait_sets")));
-        assert!(!object_ignored(&ignores, &object("common/buildings")));
-        let folder: std::collections::BTreeSet<String> = [files_folder_key("gfx/models")].into();
-        let in_folder = |k: &str| folder.contains(k);
-        assert!(file_ignored(&Ignores { keys: &in_folder, rules: &none, names: &names, dependencies: None }, &file("gfx/models/ship.mesh")));
-        let rules = Rules::parse("common/buildings/b.txt | a | b");
-        assert!(file_ignored(&Ignores { keys: &is, rules: &rules, names: &names, dependencies: None }, &file("common/buildings/b.txt")));
-        let depends = [BTreeSet::new(), BTreeSet::from([0])];
-        assert!(file_ignored(&Ignores { keys: &is, rules: &none, names: &names, dependencies: Some(&depends) }, &file("common/x.txt")), "B depends on A");
+    fn blocks_are_whole_objects() {
+        let theirs = ["x = {", "\tcost = 300", "\tgpm = {", "\t\ta = 1", "\t}", "}"];
+        let ours = ["x = {", "\tcost = 250", "\tecc = {", "\t\tb = 2", "\t}", "}"];
+        let h = hunks(&theirs, &ours);
+        // The `gpm` block takes its own closing brace with it.
+        assert!(h.iter().any(|h| h.src.contains(&2) && h.src.contains(&4)), "{h:?}");
     }
 }

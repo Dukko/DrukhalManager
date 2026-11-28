@@ -46,7 +46,7 @@ LicenseFile={#BundleDir}\LICENSE
 Name: desktopicon; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
 
 [InstallDelete]
-; GTK's files from the version before, so none it no longer ships is left
+; The files of the version before (GTK's, up to 2.x), so none it no longer ships is left
 ; behind to load. Settings and data live elsewhere and stay.
 Type: filesandordirs; Name: "{app}\bin"
 Type: filesandordirs; Name: "{app}\lib"

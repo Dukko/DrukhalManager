@@ -1,0 +1,10 @@
+[package]
+name = "drukhal-palette"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+publish = false
+description = "The desktop's colours for a GTK-free DrukhalManager: Omarchy's theme and matugen's gtk.css"
+
+[dependencies]
+notify = "9.0.0"

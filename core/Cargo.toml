@@ -1,0 +1,33 @@
+[package]
+name = "drukhal-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "DrukhalManager without a UI: mods, load orders, the game, conflicts and merging"
+publish = false
+
+[dependencies]
+dirs = "7.0.0"
+formatx = "0.4.2"
+fs4 = "1.1.0"
+gettext-rs = { version = "0.8.0", features = ["gettext-system"] }
+rusqlite = { version = "0.42", features = ["bundled"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+sha2 = "0.11.1"
+shlex = "2.0.1"
+ureq = { version = "3", features = ["json"] }
+uuid = { version = "1.29.2", features = ["v4"] }
+zip = { version = "9.5.0", default-features = false, features = ["deflate-flate2-zlib-rs"] }
+flate2 = { version = "1.1", default-features = false, features = ["zlib-rs"] }
+
+# The system keyring: the Secret Service (or the Secret portal in the
+# Flatpak) on Linux, Credential Manager on Windows.
+[target.'cfg(unix)'.dependencies]
+futures-lite = "2.6.1"
+oo7 = { version = "0.7.0", default-features = false, features = ["async-std", "native_crypto"] }
+
+[target.'cfg(windows)'.dependencies]
+keyring-core = "1.0.1"
+windows-native-keyring-store = "1.1.0"
+windows-registry = "0.100.0"
