@@ -50,8 +50,6 @@ jobs:
             mingw-w64-ucrt-x86_64-rust
       - name: Bundle
         run: packaging/windows/bundle.sh target/windows-bundle/DrukhalManager
-      - name: Show the loader cache
-        run: grep '^"' target/windows-bundle/DrukhalManager/lib/gdk-pixbuf-2.0/2.10.0/loaders.cache
       # Without MSYS2 on PATH, a missing DLL stops the app at once. Still
       # running after a while means it got as far as its window.
       - name: Starts outside MSYS2
