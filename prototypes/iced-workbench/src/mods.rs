@@ -4,8 +4,8 @@
 
 use drukhal_palette::{Palette, Rgb};
 use drukhal_sample_data::{self as sample, Category, Mod};
-use iced::widget::{button, column, container, row, rule, scrollable, space, text, text_input, toggler};
-use iced::{Element, Fill, Length};
+use iced::widget::{button, column, container, mouse_area, row, rule, scrollable, space, text, text_input, toggler};
+use iced::{Element, Fill, Length, mouse};
 
 use crate::style::{DISPLAY, MONO, c, chip, field, ghost, icon, icons, pill, surface};
 
@@ -36,11 +36,23 @@ impl View {
     }
 }
 
+/// A mod being dragged in the load order.
+#[derive(Debug, Clone, Copy)]
+struct Drag {
+    from: usize,
+    /// The row under the cursor, and whether the drop goes below it.
+    over: Option<(usize, bool)>,
+}
+
+/// About how tall a load order row is, to tell its top half from its bottom.
+const ROW_HEIGHT: f32 = 58.0;
+
 pub struct State {
     mods: Vec<Mod>,
     selected: usize,
     view: View,
     search: String,
+    drag: Option<Drag>,
 }
 
 #[derive(Debug, Clone)]
@@ -50,11 +62,18 @@ pub enum Message {
     Toggle(usize, bool),
     Move(usize, isize),
     Search(String),
+    /// Pressed on a row's handle.
+    DragStart(usize),
+    /// The cursor moved over a row while dragging, `y` from its top.
+    DragOver(usize, f32),
+    /// The mouse button came up anywhere; the app sends this.
+    DragEnd,
+    DragCancel,
 }
 
 impl State {
     pub fn new() -> Self {
-        Self { mods: sample::mods(), selected: 3, view: View::LoadOrder, search: String::new() }
+        Self { mods: sample::mods(), selected: 3, view: View::LoadOrder, search: String::new(), drag: None }
     }
 
     pub fn update(&mut self, message: Message) {
@@ -70,7 +89,47 @@ impl State {
                 }
             }
             Message::Search(s) => self.search = s,
+            Message::DragStart(i) => {
+                self.selected = i;
+                self.drag = Some(Drag { from: i, over: None });
+            }
+            Message::DragOver(i, y) => {
+                if let Some(drag) = &mut self.drag {
+                    drag.over = Some((i, y > ROW_HEIGHT / 2.0));
+                }
+            }
+            Message::DragEnd => {
+                if let Some(Drag { from, over: Some((target, below)) }) = self.drag.take() {
+                    self.drop_at(from, target, below);
+                }
+            }
+            Message::DragCancel => self.drag = None,
         }
+    }
+
+    /// Moves mod `from` next to `target`. It joins the target's category,
+    /// so the list stays grouped.
+    fn drop_at(&mut self, from: usize, target: usize, below: bool) {
+        let category = self.mods[target].category;
+        let mut to = if below { target + 1 } else { target };
+        let mut moved = self.mods.remove(from);
+        if from < to {
+            to -= 1;
+        }
+        moved.category = category;
+        println!("mockup: moved {} to #{}", moved.name, to + 1);
+        self.mods.insert(to, moved);
+        self.selected = to;
+    }
+
+    /// The name of the mod being dragged, for the app to draw by the cursor.
+    pub fn dragging(&self) -> Option<&str> {
+        self.drag.map(|d| self.mods[d.from].name)
+    }
+
+    /// For screenshots: a drag under way.
+    pub fn demo_drag(&mut self) {
+        self.drag = Some(Drag { from: 6, over: Some((1, true)) });
     }
 
     pub fn header_actions<'a>(&'a self, p: &'a Palette) -> Element<'a, Message> {
@@ -148,7 +207,13 @@ impl State {
             }
             list = list.push(container(text(category.label().to_uppercase()).size(11).color(c(p.accent))).padding([12, 16]));
             for i in in_category {
+                let line = |at: bool| -> Element<'a, Message> {
+                    if at { container(space()).width(Fill).height(3).style(move |_| surface(p.accent, p.accent, 2.0)).into() } else { space().height(0).into() }
+                };
+                let over = self.drag.and_then(|d| d.over).filter(|(t, _)| *t == i);
+                list = list.push(line(over.is_some_and(|(_, below)| !below)));
                 list = list.push(self.mod_row(p, i));
+                list = list.push(line(over.is_some_and(|(_, below)| below)));
             }
         }
         let on = self.mods.iter().filter(|m| m.enabled).count();
@@ -175,8 +240,12 @@ impl State {
         if !missing.is_empty() {
             flags = flags.push(chip("needs a mod", p.error));
         }
+        // The handle starts a drag; the button around the row only selects.
+        // Not while searching: hidden rows would make a drop land unseen.
+        let handle = mouse_area(container(icon(icons::DRAG, 18, if self.search.is_empty() { p.muted } else { p.outline })).padding([8, 4]));
+        let handle = if self.search.is_empty() { handle.on_press(Message::DragStart(i)).interaction(mouse::Interaction::Grab) } else { handle };
         let content = row![
-            icon(icons::DRAG, 18, p.muted),
+            handle,
             text(format!("{:>2}", i + 1)).font(MONO).size(13).color(c(p.muted)),
             column![text(m.name).size(15).color(c(fg)), text(m.author).size(12).color(c(p.muted))].width(Fill),
             flags,
@@ -185,16 +254,27 @@ impl State {
         ]
         .spacing(14)
         .align_y(iced::Center);
-        button(content)
+        let dragged = self.drag.is_some_and(|d| d.from == i);
+        let row_button = button(content)
             .width(Fill)
             .padding([10, 16])
             .on_press(Message::Select(i))
             .style(move |_, s| {
                 let mut st = if selected { pill(p.secondary, p.on_window, s) } else { ghost(p.on_window, s) };
                 st.border.radius = 16.0.into();
+                if dragged {
+                    // Where it was: an outline, so the gap reads as its old place.
+                    st.background = None;
+                    st.text_color = crate::style::alpha(p.on_window, 0.4);
+                    st.border = iced::Border { radius: 16.0.into(), width: 1.5, color: c(p.outline) };
+                }
                 st
-            })
-            .into()
+            });
+        if self.drag.is_some() {
+            mouse_area(row_button).on_move(move |pt| Message::DragOver(i, pt.y)).interaction(mouse::Interaction::Grabbing).into()
+        } else {
+            row_button.into()
+        }
     }
 
     fn inspector<'a>(&'a self, p: &'a Palette) -> Element<'a, Message> {

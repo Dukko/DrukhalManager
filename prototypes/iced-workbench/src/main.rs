@@ -35,16 +35,19 @@ fn main() -> iced::Result {
 }
 
 /// `--palette <file>`, `--screenshot <out.png>`, `--mode mods|conflicts`,
-/// `--commands` (opens the command palette).
+/// `--commands` (opens the command palette), and for screenshots
+/// `--show menu|added|drag` (a context menu open, a block added, a drag
+/// under way).
 struct Args {
     palette: Option<PathBuf>,
     screenshot: Option<PathBuf>,
     mode: Mode,
     commands: bool,
+    show: Option<String>,
 }
 
 fn args() -> Args {
-    let mut args = Args { palette: None, screenshot: None, mode: Mode::Mods, commands: false };
+    let mut args = Args { palette: None, screenshot: None, mode: Mode::Mods, commands: false, show: None };
     let mut it = std::env::args().skip(1);
     while let Some(a) = it.next() {
         match a.as_str() {
@@ -52,6 +55,7 @@ fn args() -> Args {
             "--screenshot" => args.screenshot = it.next().map(PathBuf::from),
             "--mode" => args.mode = if it.next().as_deref() == Some("conflicts") { Mode::Conflicts } else { Mode::Mods },
             "--commands" => args.commands = true,
+            "--show" => args.show = it.next(),
             _ => eprintln!("unknown argument {a}"),
         }
     }
@@ -73,10 +77,16 @@ struct App {
     mods: mods::State,
     conflicts: conflicts::State,
     command: Option<String>,
+    /// Where the mouse is, for the context menu and the dragged row.
+    cursor: iced::Point,
 }
 
 #[derive(Debug, Clone)]
 enum Message {
+    Cursor(iced::Point),
+    /// The left button came up, wherever it was.
+    Released,
+    Escape,
     Palette(Palette),
     Mode(Mode),
     Mods(mods::Message),
@@ -130,7 +140,7 @@ impl App {
             Some(_) => Task::future(async { std::thread::sleep(std::time::Duration::from_millis(1200)) }).then(|_| window::latest()).and_then(window::screenshot).map(Message::Shot),
             None => Task::none(),
         };
-        let app = Self {
+        let mut app = Self {
             palette,
             fixed_palette: args.palette,
             screenshot: args.screenshot,
@@ -138,19 +148,45 @@ impl App {
             mods: mods::State::new(),
             conflicts: conflicts::State::new(),
             command: args.commands.then(String::new),
+            cursor: iced::Point::ORIGIN,
         };
+        match args.show.as_deref() {
+            Some("menu") => app.conflicts.demo_menu(iced::Point::new(330.0, 370.0)),
+            Some("added") => app.conflicts.demo_added(),
+            Some("drag") => {
+                app.mods.demo_drag();
+                app.cursor = iced::Point::new(560.0, 300.0);
+            }
+            _ => {}
+        }
         (app, shot)
     }
 
     fn update(&mut self, message: Message) -> Task<Message> {
         match message {
+            Message::Cursor(at) => self.cursor = at,
+            Message::Released => self.mods.update(mods::Message::DragEnd),
+            Message::Escape => {
+                if self.command.is_some() {
+                    self.command = None;
+                } else {
+                    self.mods.update(mods::Message::DragCancel);
+                    self.conflicts.update(conflicts::Message::CloseMenu);
+                }
+            }
             Message::Palette(p) => self.palette = p,
             Message::Mode(m) => {
                 self.mode = m;
                 self.command = None;
             }
             Message::Mods(m) => self.mods.update(m),
-            Message::Conflicts(m) => self.conflicts.update(m),
+            Message::Conflicts(m) => {
+                let opens_menu = matches!(m, conflicts::Message::OpenMenu { .. });
+                self.conflicts.update(m);
+                if opens_menu {
+                    self.conflicts.place_menu(self.cursor);
+                }
+            }
             Message::OpenCommands => self.command = Some(String::new()),
             Message::Command(s) => self.command = Some(s),
             Message::RunCommand(cmd) => {
@@ -196,11 +232,16 @@ impl App {
                 keyboard::Key::Character("k") if modifiers.command() => Some(Message::OpenCommands),
                 keyboard::Key::Character("1") if modifiers.command() => Some(Message::Mode(Mode::Mods)),
                 keyboard::Key::Character("2") if modifiers.command() => Some(Message::Mode(Mode::Conflicts)),
-                keyboard::Key::Named(keyboard::key::Named::Escape) => Some(Message::CloseCommands),
+                keyboard::Key::Named(keyboard::key::Named::Escape) => Some(Message::Escape),
                 _ => None,
             }
         });
-        Subscription::batch([palette, keys])
+        let mouse = iced::event::listen_with(|event, _, _| match event {
+            iced::Event::Mouse(iced::mouse::Event::CursorMoved { position }) => Some(Message::Cursor(position)),
+            iced::Event::Mouse(iced::mouse::Event::ButtonReleased(iced::mouse::Button::Left)) => Some(Message::Released),
+            _ => None,
+        });
+        Subscription::batch([palette, keys, mouse])
     }
 
     fn theme(&self) -> Theme {
@@ -225,10 +266,27 @@ impl App {
             .width(Fill)
             .height(Fill)
             .style(move |_| surface(p.window, p.on_window, 0.0));
-        match &self.command {
-            Some(query) => stack![main, self.commands(query)].into(),
-            None => main.into(),
+        let mut layers = stack![main];
+        if self.mode == Mode::Conflicts
+            && let Some(menu) = self.conflicts.menu(p)
+        {
+            layers = layers.push(menu.map(Message::Conflicts));
         }
+        if self.mode == Mode::Mods
+            && let Some(name) = self.mods.dragging()
+        {
+            // The dragged mod follows the cursor.
+            let ghost = container(row![icon(icons::DRAG, 16, p.on_window), text(name).size(14)].spacing(8).align_y(iced::Center))
+                .padding([8, 14])
+                // An outline, not a shadow: the software renderer leaves a
+                // shadow's trail behind a moving widget.
+                .style(move |_| container::Style { border: iced::Border { radius: 14.0.into(), width: 1.5, color: c(p.accent) }, ..surface(p.secondary, p.on_window, 14.0) });
+            layers = layers.push(iced::widget::pin(ghost).x(self.cursor.x + 12.0).y(self.cursor.y - 18.0).width(Fill).height(Fill));
+        }
+        if let Some(query) = &self.command {
+            layers = layers.push(self.commands(query));
+        }
+        layers.into()
     }
 
     fn header(&self) -> Element<'_, Message> {
