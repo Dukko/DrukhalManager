@@ -1,0 +1,7 @@
+[package]
+name = "drukhal-sample-data"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+publish = false
+description = "Made-up mods and conflicts for the UI mockups"

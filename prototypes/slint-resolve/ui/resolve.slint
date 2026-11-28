@@ -1,0 +1,381 @@
+// Mockup: DrukhalManager's conflicts, first. The queue of conflicts on
+// the left; the selected one's versions side by side, the one the game
+// uses marked; what to do about it along the bottom.
+//
+// Every colour comes from the `Colours` global, which the Rust side fills
+// from matugen's gtk.css or Omarchy's theme and refills when it changes.
+
+import { ScrollView } from "std-widgets.slint";
+import "../../../data/fonts/GoogleSansFlex.ttf";
+import "../../../data/fonts/FiraCode.ttf";
+import "../../../data/fonts/DMSerifDisplay.ttf";
+
+export global Colours {
+    in property <bool> light;
+    in property <color> window: #141218;
+    in property <color> on-window: #e6e0e9;
+    in property <color> accent: #d0bcff;
+    in property <color> on-accent: #381e72;
+    in property <color> error: #ffb4ab;
+    in property <color> success: #a6d388;
+    in property <color> warning: #e8c26e;
+    in property <color> container-low: #1d1b20;
+    in property <color> container: #211f26;
+    in property <color> container-high: #2b2930;
+    in property <color> secondary: #4a4458;
+    in property <color> outline: #938f99;
+    in property <color> muted: #cac4d0;
+    in property <string> source-name: "Built-in";
+}
+
+export struct ConflictItem {
+    key: string,
+    category: string,
+    mods: [string],
+    status: string,   // "merge", "simple", "merged"
+    winner: string,
+}
+
+export struct Line {
+    number: int,
+    text: string,
+    changed: bool,
+}
+
+export struct Version {
+    mod-name: string,
+    file: string,
+    position: int,
+    wins: bool,
+    lines: [Line],
+}
+
+component Icon inherits Image {
+    in property <length> size: 20px;
+    width: size;
+    height: size;
+    colorize: Colours.on-window;
+}
+
+component Chip inherits Rectangle {
+    in property <string> label;
+    in property <color> tone: Colours.muted;
+    in property <bool> filled;
+    height: 24px;
+    width: lbl.preferred-width + 20px;
+    horizontal-stretch: 0;
+    border-radius: 12px;
+    border-width: filled ? 0 : 1px;
+    border-color: tone;
+    background: filled ? tone : transparent;
+    HorizontalLayout {
+        padding-left: 10px;
+        padding-right: 10px;
+        lbl := Text {
+            text: label;
+            font-size: 11px;
+            font-weight: 600;
+            color: filled ? Colours.window : tone;
+            vertical-alignment: center;
+        }
+    }
+}
+
+component Pill inherits Rectangle {
+    in property <string> label;
+    in property <image> icon;
+    in property <bool> has-icon;
+    in property <color> fill: Colours.container-high;
+    in property <color> ink: Colours.on-window;
+    callback clicked;
+    height: 40px;
+    border-radius: 20px;
+    background: touch.pressed ? fill.mix(ink, 88%) : touch.has-hover ? fill.mix(ink, 92%) : fill;
+    touch := TouchArea { clicked => { root.clicked(); } }
+    HorizontalLayout {
+        padding-left: 18px;
+        padding-right: 18px;
+        spacing: 8px;
+        alignment: center;
+        if has-icon: Icon { source: icon; colorize: ink; size: 18px; y: (parent.height - self.height) / 2; }
+        Text { text: label; color: ink; font-size: 14px; font-weight: 600; vertical-alignment: center; }
+    }
+}
+
+component Tab inherits Rectangle {
+    in property <string> label;
+    in property <string> count;
+    in property <bool> active;
+    callback clicked;
+    height: 40px;
+    border-radius: 20px;
+    background: active ? Colours.secondary : touch.has-hover ? Colours.container : transparent;
+    touch := TouchArea { clicked => { root.clicked(); } }
+    HorizontalLayout {
+        padding-left: 16px;
+        padding-right: 16px;
+        spacing: 8px;
+        Text { text: label; color: active ? Colours.on-window : Colours.muted; font-size: 14px; font-weight: active ? 650 : 500; vertical-alignment: center; }
+        if count != "": Rectangle {
+            y: (parent.height - 20px) / 2;
+            height: 20px;
+            width: max(20px, num.preferred-width + 12px);
+            border-radius: 10px;
+            background: Colours.accent;
+            num := Text { text: count; color: Colours.on-accent; font-size: 11px; font-weight: 700; }
+        }
+    }
+}
+
+component Avatar inherits Rectangle {
+    in property <string> name;
+    in property <color> tint;
+    width: 22px;
+    height: 22px;
+    border-radius: 11px;
+    border-width: 2px;
+    border-color: Colours.container-low;
+    background: tint;
+    Text { text: name; color: Colours.window; font-size: 10px; font-weight: 800; }
+}
+
+component QueueRow inherits Rectangle {
+    in property <ConflictItem> item;
+    in property <bool> selected;
+    callback clicked;
+    height: 72px;
+    border-radius: 16px;
+    background: selected ? Colours.secondary : touch.has-hover ? Colours.container : transparent;
+    touch := TouchArea { clicked => { root.clicked(); } }
+    HorizontalLayout {
+        padding: 12px;
+        padding-left: 14px;
+        spacing: 12px;
+        Rectangle {
+            width: 4px;
+            border-radius: 2px;
+            background: item.status == "merge" ? Colours.error : item.status == "simple" ? Colours.warning : Colours.success;
+        }
+        VerticalLayout {
+            spacing: 4px;
+            alignment: center;
+            Text { text: item.key; font-family: "Fira Code"; font-size: 13px; color: Colours.on-window; overflow: elide; }
+            HorizontalLayout {
+                spacing: 6px;
+                Text { text: item.category; font-size: 11px; color: Colours.muted; vertical-alignment: center; horizontal-stretch: 1; overflow: elide; }
+                HorizontalLayout {
+                    spacing: -6px;
+                    for m[i] in item.mods: Avatar {
+                        name: m;
+                        tint: i == 0 ? Colours.accent : i == 1 ? Colours.success : Colours.warning;
+                    }
+                }
+            }
+        }
+        VerticalLayout {
+            alignment: center;
+            Chip {
+            label: item.status == "merge" ? "Needs merge" : item.status == "simple" ? "Simple" : "Merged";
+            tone: item.status == "merge" ? Colours.error : item.status == "simple" ? Colours.warning : Colours.success;
+            }
+        }
+    }
+}
+
+component CodePane inherits Rectangle {
+    in property <Version> version;
+    border-radius: 20px;
+    background: Colours.container;
+    border-width: version.wins ? 2px : 0;
+    border-color: Colours.accent;
+    VerticalLayout {
+        padding: 16px;
+        spacing: 12px;
+        HorizontalLayout {
+            spacing: 10px;
+            Rectangle {
+                width: 28px;
+                height: 28px;
+                border-radius: 14px;
+                background: Colours.container-high;
+                Text { text: "#" + version.position; font-size: 11px; font-weight: 700; color: Colours.muted; }
+            }
+            VerticalLayout {
+                spacing: 2px;
+                Text { text: version.mod-name; font-size: 15px; font-weight: 650; color: Colours.on-window; overflow: elide; }
+                Text { text: version.file; font-size: 11px; font-family: "Fira Code"; color: Colours.muted; overflow: elide; }
+            }
+            if version.wins: VerticalLayout { alignment: center; Chip { label: "In game"; tone: Colours.accent; filled: true; } }
+        }
+        Rectangle {
+            border-radius: 12px;
+            background: Colours.window;
+            clip: true;
+            ScrollView {
+                VerticalLayout {
+                    padding-top: 8px;
+                    padding-bottom: 8px;
+                    for line in version.lines: Rectangle {
+                        height: 22px;
+                        background: line.changed ? (version.wins ? Colours.success : Colours.error).with-alpha(16%) : transparent;
+                        HorizontalLayout {
+                            spacing: 12px;
+                            padding-left: 6px;
+                            Rectangle {
+                                width: 3px;
+                                background: line.changed ? (version.wins ? Colours.success : Colours.error) : transparent;
+                            }
+                            Text { width: 22px; text: line.number; font-family: "Fira Code"; font-size: 12px; color: Colours.muted.with-alpha(60%); horizontal-alignment: right; vertical-alignment: center; }
+                            Text { text: line.text; font-family: "Fira Code"; font-size: 12.5px; color: Colours.on-window; vertical-alignment: center; }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+export component AppWindow inherits Window {
+    title: "DrukhalManager — Slint conflicts mockup";
+    preferred-width: 1320px;
+    preferred-height: 820px;
+    background: Colours.window;
+    default-font-family: "Google Sans Flex";
+
+    in property <[ConflictItem]> queue;
+    in-out property <int> selected: 0;
+    in property <[Version]> versions;
+    in property <string> why;
+    in property <string> key;
+    in property <string> category;
+    in-out property <int> filter: 0;
+    callback select(int);
+    callback act(string);
+
+    VerticalLayout {
+        padding: 12px;
+        spacing: 12px;
+
+        // App bar: tabs across the top instead of a side rail.
+        HorizontalLayout {
+            spacing: 6px;
+            height: 48px;
+            Text { text: "Drukhal"; font-family: "DM Serif Display"; font-size: 30px; color: Colours.on-window; vertical-alignment: center; }
+            Rectangle { width: 18px; }
+            Tab { y: 4px; label: "Mods"; }
+            Tab { y: 4px; label: "Conflicts"; count: "31"; active: true; }
+            Tab { y: 4px; label: "Collections"; }
+            Tab { y: 4px; label: "Patches"; }
+            Tab { y: 4px; label: "Launch"; }
+            Rectangle { horizontal-stretch: 1; }
+            Text { text: "Colours · " + Colours.source-name; color: Colours.muted; font-size: 12px; vertical-alignment: center; }
+            Rectangle { width: 12px; }
+            Pill { y: 4px; label: "Rescan"; }
+            Pill { y: 4px; label: "Launch Stellaris"; fill: Colours.accent; ink: Colours.on-accent; has-icon: true; icon: @image-url("../../../data/icons/material/media-playback-start-symbolic.svg"); }
+        }
+
+        HorizontalLayout {
+            spacing: 12px;
+            vertical-stretch: 1;
+
+            // The queue.
+            Rectangle {
+                width: 380px;
+                border-radius: 24px;
+                background: Colours.container-low;
+                VerticalLayout {
+                    padding: 14px;
+                    spacing: 10px;
+                    HorizontalLayout {
+                        Text { text: "48 conflicts"; font-size: 20px; color: Colours.on-window; vertical-alignment: center; horizontal-stretch: 1; }
+                        Text { text: "12 mods"; font-size: 12px; color: Colours.muted; vertical-alignment: center; }
+                    }
+                    // Progress through the queue.
+                    Rectangle {
+                        height: 8px;
+                        border-radius: 4px;
+                        background: Colours.container-high;
+                        Rectangle { x: 0; width: parent.width * 17 / 48; border-radius: 4px; background: Colours.success; }
+                    }
+                    Text { text: "17 handled · 31 to go"; font-size: 11px; color: Colours.muted; }
+                    HorizontalLayout {
+                        spacing: 6px;
+                        alignment: start;
+                        for f[i] in ["All", "Needs merge", "Simple", "Merged"]: Rectangle {
+                            height: 30px;
+                            width: lbl.preferred-width + 24px;
+                            border-radius: 15px;
+                            background: root.filter == i ? Colours.secondary : transparent;
+                            border-width: root.filter == i ? 0 : 1px;
+                            border-color: Colours.outline.with-alpha(50%);
+                            lbl := Text { text: f; font-size: 12px; color: Colours.on-window; }
+                            TouchArea { clicked => { root.filter = i; } }
+                        }
+                    }
+                    ScrollView {
+                        vertical-stretch: 1;
+                        VerticalLayout {
+                            spacing: 4px;
+                            for item[i] in root.queue: QueueRow {
+                                item: item;
+                                selected: i == root.selected;
+                                clicked => { root.select(i); }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // The selected conflict.
+            VerticalLayout {
+                spacing: 12px;
+                horizontal-stretch: 1;
+                HorizontalLayout {
+                    spacing: 12px;
+                    padding-left: 8px;
+                    VerticalLayout {
+                        spacing: 2px;
+                        horizontal-stretch: 1;
+                        Text { text: root.category; font-size: 12px; color: Colours.accent; font-weight: 600; }
+                        Text { text: root.key; font-family: "Fira Code"; font-size: 24px; color: Colours.on-window; }
+                    }
+                    Pill { y: 8px; label: "Previous"; }
+                    Pill { y: 8px; label: "Next"; }
+                }
+                // Why the game uses what it uses.
+                Rectangle {
+                    border-radius: 16px;
+                    background: Colours.accent.with-alpha(14%);
+                    height: 52px;
+                    HorizontalLayout {
+                        padding-left: 16px;
+                        padding-right: 16px;
+                        spacing: 12px;
+                        Icon { y: (parent.height - self.height) / 2; source: @image-url("../../../data/icons/material/dialog-information-symbolic.svg"); colorize: Colours.accent; }
+                        Text { text: root.why; color: Colours.on-window; font-size: 13px; vertical-alignment: center; wrap: word-wrap; horizontal-stretch: 1; }
+                    }
+                }
+                HorizontalLayout {
+                    spacing: 12px;
+                    vertical-stretch: 1;
+                    for v in root.versions: CodePane { version: v; }
+                }
+                // What to do.
+                Rectangle {
+                    height: 72px;
+                    border-radius: 24px;
+                    background: Colours.container-high;
+                    HorizontalLayout {
+                        padding: 16px;
+                        spacing: 10px;
+                        Pill { label: "Merge with AI"; fill: Colours.accent; ink: Colours.on-accent; has-icon: true; icon: @image-url("../../../data/icons/material/io.github.dukko.DrukhalManager-ai-symbolic.svg"); clicked => { root.act("ai"); } }
+                        Text { text: "≈ $0.004 · Claude"; color: Colours.muted; font-size: 12px; vertical-alignment: center; }
+                        Rectangle { horizontal-stretch: 1; }
+                        for v in root.versions: Pill { label: "Keep " + v.mod-name; fill: Colours.container; clicked => { root.act(v.mod-name); } }
+                        Pill { label: "Ignore"; fill: transparent; ink: Colours.muted; clicked => { root.act("ignore"); } }
+                    }
+                }
+            }
+        }
+    }
+}

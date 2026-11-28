@@ -1,0 +1,17 @@
+[package]
+name = "drukhal-iced-workbench"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+publish = false
+description = "Mockup: DrukhalManager's main window in iced"
+
+[dependencies]
+drukhal-palette = { path = "../palette" }
+drukhal-sample-data = { path = "../sample-data" }
+tokio = { version = "1", features = ["time"] }
+iced = { version = "0.14.0", features = ["svg", "tokio"] }
+image = { version = "0.25", default-features = false, features = ["png"] }
+
+[profile.release]
+opt-level = 3
