@@ -1,0 +1,74 @@
+name: Windows CI
+
+# The Windows build is slow (MSYS2 + Rust), so it runs only when asked:
+# Actions → Windows CI → Run workflow. Linux CI stays in ci.yml, and releases
+# still build the Windows bundle in windows-bundle.yml.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    name: build, test, clippy (Windows)
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - uses: actions/checkout@v7
+      # gettext and a GNU-target Rust from MSYS2's UCRT64 environment.
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: >-
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-pkgconf
+            mingw-w64-ucrt-x86_64-gettext
+            mingw-w64-ucrt-x86_64-rust
+            diffutils
+      # Swatinem/rust-cache assumes rustup, so cache by hand: MSYS2's cargo
+      # keeps its registry in the MSYS2 home, which actions/cache needs as a
+      # Windows path.
+      - name: Locate the cargo home and the Rust version
+        id: rust
+        run: |
+          echo "home=$(cygpath -w "$HOME/.cargo")" >> "$GITHUB_OUTPUT"
+          echo "version=$(rustc -V | sha256sum | cut -c1-16)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ${{ steps.rust.outputs.home }}\registry
+            ${{ steps.rust.outputs.home }}\git
+            target
+          key: windows-cargo-${{ steps.rust.outputs.version }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            windows-cargo-${{ steps.rust.outputs.version }}-
+      - name: cargo build
+        run: cargo build --locked
+      - name: cargo test
+        run: cargo test --locked
+      - name: cargo clippy
+        # Use MSYS2's cargo and clippy through their absolute paths, and name
+        # the GNU target: the runner image also has rustup's MSVC shims on
+        # PATH, and `cargo clippy` otherwise lints the MSVC target, where
+        # gettext-sys cannot use the system library.
+        env:
+          # Naming the target makes pkg-config treat the build as a cross
+          # build, even though the target is the environment's own.
+          PKG_CONFIG_ALLOW_CROSS: 1
+          PKG_CONFIG_PATH: /ucrt64/lib/pkgconfig:/ucrt64/share/pkgconfig
+        run: |
+          export PATH="/ucrt64/bin:$PATH"
+          /ucrt64/bin/cargo clippy --all-targets --locked --target x86_64-pc-windows-gnu -- -D warnings
+      - name: Translation template is current
+        run: |
+          # Install xtr under the workspace: MSYS2's PATH does not include
+          # cargo's Windows bin folder, so the script would not find it.
+          cargo install xtr --version 0.1.11 --locked --root target/xtr
+          export PATH="$PWD/target/xtr/bin:$PATH"
+          po/check-pot.sh
+          po/check-placeholders.sh
