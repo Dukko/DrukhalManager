@@ -36,6 +36,15 @@
     <control>keyboard</control>
   </supports>
   <releases>
+    <release version="2.7.46" date="2026-11-27">
+      <description>
+        <ul>
+          <li>Defines now conflict and merge key by key, so two mods setting different keys in the same <code>NGameplay</code> block no longer conflict</li>
+          <li>Scripted localisation and ambient objects now use the first definition read, as the game does</li>
+          <li>Diplomatic phrases, name lists, terraform links, colours, species names, ownership limits, observation station missions and strategic resources are no longer offered as object merges, because the game keeps or appends every definition</li>
+        </ul>
+      </description>
+    </release>
     <release version="2.7.45" date="2026-11-27">
       <description>
         <ul>
