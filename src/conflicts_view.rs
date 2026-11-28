@@ -34,6 +34,7 @@ const QUEUE_LIMIT: usize = 300;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum View {
     Queue,
+    Lookup,
     Patches,
     Ignored,
 }
@@ -184,6 +185,7 @@ pub struct State {
     ignore: Option<IgnoreSheet>,
     ai: Option<Ai>,
     merging_simple: bool,
+    lookup: String,
 }
 
 #[derive(Debug, Clone)]
@@ -227,6 +229,7 @@ pub enum Message {
     UpdatePick(usize),
     /// Open a merge from the patch in the queue.
     OpenMerge(Option<(String, String)>, String),
+    Lookup(String),
 }
 
 /// A resolution worked out off the UI thread: category, key, the script
@@ -256,6 +259,7 @@ impl State {
             ignore: None,
             ai: None,
             merging_simple: false,
+            lookup: String::new(),
         }
     }
 
@@ -297,7 +301,10 @@ impl State {
                     None => Task::none(),
                 }
             }
-            Message::Select(item) => self.select(library, item),
+            Message::Select(item) => {
+                self.view = View::Queue;
+                self.select(library, item)
+            }
             Message::Step(by) => {
                 let shown = self.shown(library);
                 match self.selected.and_then(|s| shown.iter().position(|&i| i == s)) {
@@ -309,9 +316,16 @@ impl State {
                 if Some(versions.item) == self.selected {
                     self.loading = false;
                     // A merge already in the patch is what's edited.
-                    if let (Item::Object(i), Some(a)) = (versions.item, &self.analysis) {
-                        let c = &a.report.objects[i];
-                        self.merged = library.patch.as_ref().and_then(|p| p.get(&c.category, &c.key)).map(|m| m.script.lines().map(str::to_owned).collect());
+                    match (versions.item, &self.analysis) {
+                        (Item::Object(i), Some(a)) => {
+                            let c = &a.report.objects[i];
+                            self.merged = library.patch.as_ref().and_then(|p| p.get(&c.category, &c.key)).map(|m| m.script.lines().map(str::to_owned).collect());
+                        }
+                        (Item::File(i), Some(a)) => {
+                            let path = &a.report.files[i].path;
+                            self.merged = library.patch.as_ref().filter(|p| p.get_file(path).is_some()).and_then(|p| p.read_file(path).ok()).map(|t| t.lines().map(str::to_owned).collect());
+                        }
+                        _ => {}
                     }
                     self.versions = Some(versions);
                     self.refocus();
@@ -369,11 +383,24 @@ impl State {
                 Task::none()
             }
             Message::SaveMerge => {
-                let (Some(versions), Some(Item::Object(i))) = (self.versions.clone(), self.selected) else { return (Task::none(), None) };
+                let (Some(versions), Some(item)) = (self.versions.clone(), self.selected) else { return (Task::none(), None) };
                 let Some(analysis) = self.analysis.clone() else { return (Task::none(), None) };
-                let c = &analysis.report.objects[i];
                 let text = self.merge_lines().join("\n");
-                match drukhal_core::merge_dialog::validate(&c.category, &c.key, &text).and_then(|script| library.save_merge(&c.category, &c.key, &script, versions.prints.clone())) {
+                let saved = match item {
+                    Item::Object(i) => {
+                        let c = &analysis.report.objects[i];
+                        drukhal_core::merge_dialog::validate(&c.category, &c.key, &text).and_then(|script| library.save_merge(&c.category, &c.key, &script, versions.prints.clone()))
+                    }
+                    Item::File(i) => {
+                        let path = &analysis.report.files[i].path;
+                        let checked = drukhal_core::merge::validate::validate_file(path, &text, versions.vanilla.as_ref(), &versions.sources, None);
+                        match checked.error_summary() {
+                            Some(problems) => Err(problems),
+                            None => library.save_file_merge(path, format!("{}\n", text.trim_end()).as_bytes(), versions.prints.clone()),
+                        }
+                    }
+                };
+                match saved {
                     Ok(message) => {
                         notice = Some((message, false));
                         self.next_open(library)
@@ -385,6 +412,11 @@ impl State {
                 }
             }
             Message::Keep(n) => {
+                if let (Some(versions), Some(Item::File(_))) = (&self.versions, self.selected)
+                    && let Some(&position) = versions.positions.get(n)
+                {
+                    return self.update(library, Message::KeepFile(position));
+                }
                 let (Some(versions), Some(Item::Object(i))) = (self.versions.clone(), self.selected) else { return (Task::none(), None) };
                 let Some(analysis) = self.analysis.clone() else { return (Task::none(), None) };
                 let c = &analysis.report.objects[i];
@@ -488,6 +520,10 @@ impl State {
                 Task::none()
             }
             Message::MergeSimple => self.merge_simple(library),
+            Message::Lookup(s) => {
+                self.lookup = s;
+                Task::none()
+            }
             Message::SimpleReady(resolved) => {
                 let mut saved = 0;
                 for (category, key, script, prints) in resolved.iter() {
@@ -665,17 +701,29 @@ impl State {
         self.menu = None;
         self.focus = None;
         self.ai = None;
-        let Item::Object(i) = item else {
+        let Some(a) = self.analysis.clone() else { return Task::none() };
+        if let Item::File(i) = item
+            && !drukhal_core::merge::file_merge::mergeable(&a.report.files[i].path)
+        {
+            // Not text the editor can merge (images, sounds…): keep one copy.
             self.loading = false;
             return Task::none();
-        };
-        let Some(a) = self.analysis.clone() else { return Task::none() };
+        }
         self.loading = true;
         let game_dir = library.game_dir();
-        Task::perform(async move { tokio::task::spawn_blocking(move || load_versions(&a, i, game_dir)).await }, move |r| match r {
+        Task::perform(
+            async move {
+                tokio::task::spawn_blocking(move || match item {
+                    Item::Object(i) => load_versions(&a, i, game_dir),
+                    Item::File(i) => load_file_versions(&a, i, game_dir),
+                })
+                .await
+            },
+            move |r| match r {
             Ok(v) => Message::Loaded(Arc::new(v)),
             Err(_) => Message::Loaded(Arc::new(Versions { item, vanilla: None, sources: Vec::new(), positions: Vec::new(), prints: Vec::new(), missing: Vec::new(), winner: None })),
-        })
+            },
+        )
     }
 
     /// The selected object's merge so far.
@@ -796,7 +844,7 @@ impl State {
 
     /// Asks the configured AI provider to merge the object, off the UI thread.
     fn merge_ai(&mut self, library: &Library) -> Task<Message> {
-        let (Some(versions), Some(item @ Item::Object(i)), Some(a)) = (self.versions.clone(), self.selected, self.analysis.clone()) else { return Task::none() };
+        let (Some(versions), Some(item), Some(a)) = (self.versions.clone(), self.selected, self.analysis.clone()) else { return Task::none() };
         if matches!(self.ai, Some(Ai::Running)) {
             return Task::none();
         }
@@ -810,18 +858,27 @@ impl State {
                     let settings = settings.with_keyring().settings;
                     let provider = settings.ready_provider().ok_or_else(|| t!("Set up an AI provider in the settings first"))?;
                     ai::set_instructions(&settings.ai_instructions);
-                    let c = &a.report.objects[i];
+                    let (category, key, path) = match item {
+                        Item::Object(i) => (a.report.objects[i].category.clone(), a.report.objects[i].key.clone(), None),
+                        Item::File(i) => {
+                            let path = a.report.files[i].path.clone();
+                            (drukhal_core::merge::file_merge::category(&path), path.rsplit('/').next().unwrap_or(&path).to_owned(), Some(path))
+                        }
+                    };
                     let ctx = ai::MergeContext {
-                        category: c.category.clone(),
-                        key: c.key.clone(),
+                        is_fios: conflicts::is_fios(&category),
+                        category,
+                        key,
                         game_version,
-                        is_fios: conflicts::is_fios(&c.category),
                         winner: versions.winner.map(|(w, reason)| (versions.positions[w], versions.sources[w].label.clone(), reason)),
                         load_positions: versions.positions.clone(),
                         prints: versions.prints.clone(),
                         ..Default::default()
                     };
-                    let checked = ai::merge_checked_cancellable(&provider, &ctx, versions.vanilla.as_ref(), &versions.sources, None, None, &mut |_| {})?;
+                    let checked = match &path {
+                        Some(path) => ai::merge_file_checked_cancellable(&provider, &ctx, path, versions.vanilla.as_ref(), &versions.sources, None, None, &mut |_| {})?,
+                        None => ai::merge_checked_cancellable(&provider, &ctx, versions.vanilla.as_ref(), &versions.sources, None, None, &mut |_| {})?,
+                    };
                     checked.script.map(|script| (script, checked.merged.notes)).map_err(|why| tf!("The AI's merge didn't pass the checks: {reason}", reason = why))
                 })
                 .await
@@ -910,6 +967,7 @@ impl State {
             (_, None) => placeholder(p, if self.scanning { t!("Scanning your mods…") } else { t!("Not scanned yet") }, if self.scanning { t!("Reading every enabled mod's files. A big load order takes a minute the first time; later scans only read what changed.") } else { t!("Scan the load order to find where mods overwrite each other.") }),
             (View::Ignored, Some(_)) => self.ignored(library, p),
             (View::Patches, Some(_)) => self.patches(library, p),
+            (View::Lookup, Some(a)) => self.lookup_view(p, a),
             (View::Queue, Some(a)) => row![self.queue_pane(library, p, a), self.detail(library, p, a)].spacing(12).into(),
         };
         row![self.rail(p), main].spacing(12).height(Fill).into()
@@ -937,7 +995,7 @@ impl State {
             .spacing(4)
             .align_x(iced::Center)
         };
-        container(column![item(View::Queue, t!("Queue"), icons::WARNING), item(View::Patches, t!("Patch"), icons::PATCH), item(View::Ignored, t!("Ignored"), icons::HIDE)].spacing(14).align_x(iced::Center))
+        container(column![item(View::Queue, t!("Queue"), icons::WARNING), item(View::Lookup, t!("Look up"), icons::SEARCH), item(View::Patches, t!("Patch"), icons::PATCH), item(View::Ignored, t!("Ignored"), icons::HIDE)].spacing(14).align_x(iced::Center))
             .width(76)
             .height(Fill)
             .padding([14, 8])
@@ -1036,8 +1094,8 @@ impl State {
     fn detail<'a>(&'a self, library: &'a Library, p: &'a Palette, a: &'a Analysis) -> Element<'a, Message> {
         match self.selected {
             None => placeholder(p, t!("Nothing left to resolve"), t!("Every conflict here is merged or ignored.")),
-            Some(Item::File(i)) => self.file_detail(library, p, a, &a.report.files[i]),
-            Some(Item::Object(i)) => self.object_detail(library, p, a, i),
+            Some(Item::File(i)) if !drukhal_core::merge::file_merge::mergeable(&a.report.files[i].path) => self.file_detail(library, p, a, &a.report.files[i]),
+            Some(item) => self.object_detail(library, p, a, item),
         }
     }
 
@@ -1073,8 +1131,19 @@ impl State {
         .into()
     }
 
-    fn object_detail<'a>(&'a self, library: &'a Library, p: &'a Palette, a: &'a Analysis, i: usize) -> Element<'a, Message> {
-        let cf = &a.report.objects[i];
+    /// An object's, or a text file's, versions and the merge being built.
+    fn object_detail<'a>(&'a self, library: &'a Library, p: &'a Palette, a: &'a Analysis, item: Item) -> Element<'a, Message> {
+        let (place, title) = match item {
+            Item::Object(i) => (a.report.objects[i].category.clone(), a.report.objects[i].key.clone()),
+            Item::File(i) => {
+                let path = &a.report.files[i].path;
+                (scan::file_folder(path).to_owned(), path.rsplit('/').next().unwrap_or(path).to_owned())
+            }
+        };
+        let category = match item {
+            Item::Object(i) => a.report.objects[i].category.clone(),
+            Item::File(i) => drukhal_core::merge::file_merge::category(&a.report.files[i].path),
+        };
         let step = |label: String, glyph: &'static [u8], by: isize| {
             button(row![icon(glyph, 16, p.on_window), text(label).size(13)].spacing(6).align_y(iced::Center)).padding([8, 14]).on_press(Message::Step(by)).style(move |_, s| pill(p.container_high, p.on_window, s))
         };
@@ -1091,7 +1160,7 @@ impl State {
             .padding([2, 4])
             .style(move |_| container::Style { border: Border { radius: 999.0.into(), width: 1.0, color: alpha(p.outline, 0.5) }, ..Default::default() });
         let head = row![
-            column![text(cf.category.as_str()).size(12).color(c(p.accent)), text(cf.key.as_str()).font(MONO).size(24)].spacing(2).width(Fill),
+            column![text(place).size(12).color(c(p.accent)), text(title).font(MONO).size(24)].spacing(2).width(Fill),
             compare,
             step(t!("Previous"), icons::PREVIOUS, -1),
             step(t!("Next"), icons::NEXT, 1),
@@ -1102,7 +1171,10 @@ impl State {
         let Some(v) = &self.versions else {
             return column![head, placeholder(p, t!("Reading the versions…"), String::new())].spacing(12).width(Fill).into();
         };
-        let merged = library.merged(&cf.category, &cf.key);
+        let merged = match item {
+            Item::Object(i) => library.merged(&a.report.objects[i].category, &a.report.objects[i].key),
+            Item::File(i) => library.merged_file(&a.report.files[i].path),
+        };
         let winner_name = self.winner().map(|w| v.sources[w].label.clone()).unwrap_or_default();
         let why = match (&self.ai, self.compare, self.merged.is_some()) {
             (Some(Ai::Running), _, _) => t!("Merging with AI…"),
@@ -1111,10 +1183,11 @@ impl State {
             (None, Compare::Base, _) => t!("Coloured lines are what each mod changed from the base game; green where every mod made the same change. A bar at the left marks what you can still add to the merge."),
             (None, _, true) => tf!("You're building a merge on {name}'s version, the one the game uses. Right-click a highlighted block in another version, or use [ ] and A B R.", name = winner_name.as_str()),
             (None, _, false) if merged => t!("The merged patch has a merge of this object. Saving again replaces it."),
-            (None, _, false) => match (a.simple.get(&i), v.winner) {
-                (Some(simple), _) => tf!("{reason}. In game now: {name}'s version.", reason = simple.as_str(), name = winner_name.as_str()),
-                (None, Some((_, reason))) => tf!("In game now: {name}'s version, because {reason}.", name = winner_name.as_str(), reason = reason.explain(conflicts::is_fios(&cf.category))),
-                (None, None) => String::new(),
+            (None, _, false) => match (item, v.winner) {
+                (Item::Object(i), _) if a.simple.contains_key(&i) => tf!("{reason}. In game now: {name}'s version.", reason = a.simple[&i].as_str(), name = winner_name.as_str()),
+                (Item::File(_), _) => tf!("Several mods ship this file; the game loads {name}'s copy, from the mod that loads last. Build a merge of them, or keep one.", name = winner_name.as_str()),
+                (Item::Object(_), Some((_, reason))) => tf!("In game now: {name}'s version, because {reason}.", name = winner_name.as_str(), reason = reason.explain(conflicts::is_fios(&category))),
+                (Item::Object(_), None) => String::new(),
             },
         };
         let mut panes = row![].spacing(12).height(Fill);
@@ -1362,6 +1435,64 @@ impl State {
         Some(stack![scrim, container(opaque(card)).center(Fill)].into())
     }
 
+    /// Every object the enabled mods define, searchable: who defines it,
+    /// and which version the game uses.
+    fn lookup_view<'a>(&'a self, p: &'a Palette, a: &'a Analysis) -> Element<'a, Message> {
+        const LIMIT: usize = 100;
+        let found = a.report.look_up(&self.lookup, LIMIT);
+        let mut list = column![].spacing(8);
+        for object in &found {
+            let winner = object.winner();
+            let defs = column(object.definitions.iter().enumerate().map(|(n, d)| {
+                let wins = winner.is_some_and(|(w, _)| w == n);
+                row![
+                    text(format!("#{}", d.mod_position + 1)).font(MONO).size(11).color(c(p.muted)),
+                    text(a.names[d.mod_position].as_str()).size(13).width(Fill),
+                    text(d.file.clone()).font(MONO).size(11).color(c(p.muted)),
+                    if wins { filled_chip(t!("In game"), p.accent, p.on_accent) } else { space().into() },
+                ]
+                .spacing(10)
+                .align_y(iced::Center)
+                .into()
+            }))
+            .spacing(4);
+            let conflict = a.report.objects.iter().position(|c| c.category == object.category && c.key == object.key);
+            let open: Element<'a, Message> = match conflict {
+                Some(i) => button(text(t!("Open conflict")).size(12)).padding([6, 12]).on_press(Message::Select(Item::Object(i))).style(move |_, s| pill(p.container_high, p.on_window, s)).into(),
+                None => space().into(),
+            };
+            list = list.push(
+                container(column![row![column![text(object.key.clone()).font(MONO).size(14), text(object.category.clone()).size(11).color(c(p.muted))].spacing(2).width(Fill), open].align_y(iced::Center), defs].spacing(8))
+                    .padding([12, 16])
+                    .style(move |_| surface(p.container, p.on_window, 16.0)),
+            );
+        }
+        let note = if self.lookup.trim().is_empty() {
+            t!("Type part of a name to search every object your enabled mods define")
+        } else if found.is_empty() {
+            t!("No enabled mod defines an object by that name")
+        } else if found.len() >= LIMIT {
+            tf!("Only the first {count} are shown. Type more of the name to narrow them.", count = LIMIT)
+        } else {
+            String::new()
+        };
+        container(
+            column![
+                text(t!("Look up objects")).size(20),
+                text_input(&t!("building_research_lab_1, tech_lasers, l_english:…"), &self.lookup).on_input(Message::Lookup).padding([10, 16]).style(move |_, _| field(p, 999.0, false)),
+                text(note).size(12).color(c(p.muted)),
+                scrollable(list).height(Fill),
+            ]
+            .spacing(12)
+            .max_width(900),
+        )
+        .padding(20)
+        .width(Fill)
+        .height(Fill)
+        .style(move |_| surface(p.container_low, p.on_window, 24.0))
+        .into()
+    }
+
     /// What the merged patch holds, which merges went stale since their
     /// mods (or the game) changed, and what to do about those.
     fn patches<'a>(&'a self, library: &'a Library, p: &'a Palette) -> Element<'a, Message> {
@@ -1465,6 +1596,30 @@ fn load_versions(a: &Analysis, i: usize, game_dir: Option<PathBuf>) -> Versions 
         loaded.sources.iter().position(|s| s.file == d.file && s.label == a.names[d.mod_position]).map(|at| (at, reason))
     });
     Versions { item: Item::Object(i), vanilla: loaded.vanilla, sources: loaded.sources, positions, prints: loaded.prints, missing: loaded.missing, winner }
+}
+
+/// Reads every mod's copy of overridden file `i`, and the base game's.
+/// The last mod's copy is the one the game loads. Blocking.
+fn load_file_versions(a: &Analysis, i: usize, game_dir: Option<PathBuf>) -> Versions {
+    let f = &a.report.files[i];
+    let read = |root: &std::path::Path| std::fs::read(root.join(&f.path)).ok().map(|b| String::from_utf8_lossy(&b).trim_start_matches('\u{feff}').to_owned());
+    let mut sources = Vec::new();
+    let mut positions = Vec::new();
+    let mut missing = Vec::new();
+    for &m in &f.mods {
+        match a.roots[m].as_deref().and_then(read) {
+            Some(text) => {
+                sources.push(Source { label: a.names[m].clone(), file: f.path.clone(), text });
+                positions.push(m);
+            }
+            None => missing.push(a.names[m].clone()),
+        }
+    }
+    let vanilla = game_dir.as_deref().and_then(read).map(|text| Source { label: "Vanilla".into(), file: f.path.clone(), text });
+    let mods: Vec<patch::SourceMod> = f.mods.iter().filter_map(|&m| Some((a.ids[m].clone(), a.names[m].clone(), a.roots[m].clone()?))).collect();
+    let prints = patch::file_prints(&f.path, game_dir.as_deref(), &mods);
+    let winner = (!sources.is_empty()).then(|| (sources.len() - 1, conflicts::Reason::LoadOrder));
+    Versions { item: Item::File(i), vanilla, sources, positions, prints, missing, winner }
 }
 
 fn mods_of_object(c: &ObjectConflict) -> BTreeSet<usize> {
