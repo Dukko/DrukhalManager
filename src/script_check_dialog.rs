@@ -4,14 +4,15 @@
 //! the merged patch.
 
 use std::collections::BTreeMap;
+use std::path::PathBuf;
 use std::rc::Rc;
 
 use adw::prelude::*;
 use gtk::glib;
 
-use crate::conflicts_view::{Analysis, MergeHooks};
+use crate::conflicts_view::{AI_ICON, Analysis, MergeHooks};
 use crate::diff_view::{Compare, Header, Pair};
-use crate::merge::ai::{self, Checked};
+use crate::merge::ai::{self, Checked, Provider, ReportProblem};
 use crate::merge::patch::{Print, VANILLA};
 use crate::merge::script_check::{self, Ctx, Finding, Problem};
 use crate::merge::source::{self, Source};
@@ -77,6 +78,10 @@ pub fn present(parent: &impl IsA<gtk::Widget>, analysis: Rc<Analysis>, hooks: Rc
     positions.sort_by_key(|&position| !live(position));
     for position in positions {
         let group = adw::PreferencesGroup::builder().title(glib_escape(analysis.name(position))).build();
+        let reportable = reportable_findings(&objects, &loose, &boms, position);
+        if !reportable.is_empty() {
+            group.set_header_suffix(Some(&report_button(&analysis, &hooks, position, reportable)));
+        }
         for object in objects.values().filter(|o| o.position == position && !unused(o)) {
             group.add(&object_row(&navigation, &analysis, &hooks, object));
         }
@@ -118,6 +123,241 @@ pub fn present(parent: &impl IsA<gtk::Widget>, analysis: Rc<Analysis>, hooks: Rc
 
     navigation.add(&wrap(&t!("Script Problems"), None, &page));
     adw::Dialog::builder().content_width(900).content_height(720).child(&navigation).build().present(Some(parent));
+}
+
+/// The findings worth telling a mod's author about: the ones in objects that
+/// are used, and the file-level ones, without the uncertain or other-mod ones.
+fn reportable_findings(
+    objects: &BTreeMap<(usize, String, String, String), Object>,
+    loose: &BTreeMap<usize, Vec<&Finding>>,
+    boms: &BTreeMap<usize, Vec<Finding>>,
+    position: usize,
+) -> Vec<Finding> {
+    let mut findings = Vec::new();
+    for object in objects.values().filter(|o| o.position == position) {
+        // Objects nothing calls have no effect in game.
+        if object.findings.iter().all(|f| f.unused) {
+            continue;
+        }
+        for finding in &object.findings {
+            if !finding.unused && !matches!(finding.problem, Problem::Unsure | Problem::Elsewhere) {
+                findings.push(finding.clone());
+            }
+        }
+    }
+    findings.extend(boms.get(&position).into_iter().flatten().cloned());
+    for finding in loose.get(&position).into_iter().flatten() {
+        if !matches!(finding.problem, Problem::Unsure | Problem::Elsewhere) {
+            findings.push((*finding).clone());
+        }
+    }
+    findings
+}
+
+/// The button on a mod's group that has the AI write a bug report for its
+/// author.
+fn report_button(analysis: &Rc<Analysis>, hooks: &Rc<MergeHooks>, position: usize, findings: Vec<Finding>) -> gtk::Button {
+    let button = gtk::Button::builder()
+        .child(&adw::ButtonContent::builder().icon_name(AI_ICON).label(t!("Write Bug Report")).build())
+        .tooltip_text(t!("Ask the AI to write a bug report you can paste for the mod author"))
+        .valign(gtk::Align::Center)
+        .build();
+    let (analysis, hooks) = (analysis.clone(), hooks.clone());
+    button.connect_clicked(move |button| {
+        let Some(provider) = (hooks.provider)() else {
+            (hooks.toast)(&t!("Set up an AI provider in Preferences first"));
+            (hooks.open_preferences)();
+            return;
+        };
+        present_report(button, &analysis, &hooks, position, findings.clone(), provider);
+    });
+    button
+}
+
+/// Asks the AI for a report the player can send to the mod's author, writes it
+/// on screen as it arrives, and copies it on request.
+fn present_report(parent: &impl IsA<gtk::Widget>, analysis: &Rc<Analysis>, hooks: &Rc<MergeHooks>, position: usize, findings: Vec<Finding>, provider: Provider) {
+    let mod_name = analysis.name(position).to_owned();
+    let (mod_version, supported_version) = descriptor_versions(&analysis.roots, position);
+    let game_version = analysis.game_version.clone();
+    let roots = analysis.roots.clone();
+
+    let intro = gtk::Label::builder()
+        .label(t!("The AI writes a report you can copy and send to the mod's author. Check it before posting."))
+        .css_classes(["dim-label"])
+        .wrap(true)
+        .xalign(0.0)
+        .build();
+    let thinking = ThinkingView::new();
+    let error = error_label();
+    error.set_margin_start(0);
+    error.set_margin_end(0);
+    let report = gtk::TextView::builder().editable(false).cursor_visible(false).wrap_mode(gtk::WrapMode::WordChar).top_margin(10).bottom_margin(10).left_margin(12).right_margin(12).build();
+    let scrolled = gtk::ScrolledWindow::builder().child(&report).vexpand(true).hscrollbar_policy(gtk::PolicyType::Never).css_classes(["card"]).build();
+    let copy = gtk::Button::builder().label(t!("Copy Report")).sensitive(false).build();
+    let actions = gtk::Box::builder().halign(gtk::Align::End).build();
+    actions.append(&copy);
+
+    let body = gtk::Box::new(gtk::Orientation::Vertical, 12);
+    body.set_margin_top(12);
+    body.set_margin_bottom(12);
+    body.set_margin_start(12);
+    body.set_margin_end(12);
+    body.append(&intro);
+    body.append(&thinking.widget);
+    body.append(&error);
+    body.append(&scrolled);
+    body.append(&actions);
+
+    let toolbar = adw::ToolbarView::new();
+    let header = adw::HeaderBar::new();
+    let stop = gtk::Button::builder().label(t!("Stop")).build();
+    header.pack_end(&stop);
+    toolbar.add_top_bar(&header);
+    toolbar.set_content(Some(&body));
+    let dialog = adw::Dialog::builder().title(tf!("Bug Report for {name}", name = &mod_name)).content_width(760).content_height(640).child(&toolbar).build();
+    dialog.present(Some(parent));
+
+    let thinking_stop = thinking.clone();
+    stop.connect_clicked(move |_| thinking_stop.stop());
+    let thinking_close = thinking.clone();
+    dialog.connect_closed(move |_| thinking_close.stop());
+
+    let buffer = report.buffer();
+    let copy_hooks = hooks.clone();
+    copy.connect_clicked(move |button| {
+        let text = buffer.text(&buffer.start_iter(), &buffer.end_iter(), false);
+        if !text.trim().is_empty() {
+            button.clipboard().set_text(&text);
+            (copy_hooks.toast)(&t!("Copied the bug report to the clipboard"));
+        }
+    });
+
+    let manager_version = env!("CARGO_PKG_VERSION");
+    glib::spawn_future_local(async move {
+        let result = thinking_view::run(&thinking, None, move |on| {
+            let (problems, more) = report_problems(&roots, &findings);
+            let question = ai::ReportQuestion {
+                mod_name: &mod_name,
+                mod_version: mod_version.as_deref(),
+                supported_version: supported_version.as_deref(),
+                game_version: game_version.as_deref(),
+                manager_version,
+                problems: &problems,
+                more,
+            };
+            ai::report(&provider, &question, on)
+        })
+        .await;
+        stop.set_visible(false);
+        match result {
+            Some(Ok(merged)) => {
+                report.buffer().set_text(&merged.notes);
+                copy.set_sensitive(true);
+            }
+            Some(Err(message)) => show_error(&error, &tf!("Couldn't write the report: {error}", error = message)),
+            None => {
+                if thinking.is_stopped() {
+                    show_error(&error, &t!("Report stopped"));
+                } else {
+                    show_error(&error, &t!("The report failed unexpectedly"));
+                }
+            }
+        }
+    });
+}
+
+/// What the model gets for each problem: one entry per distinct problem in a
+/// file and object, with every line it occurs on. Returns the problems and how
+/// many were left out because the list was too long.
+fn report_problems(roots: &[Option<PathBuf>], findings: &[Finding]) -> (Vec<ReportProblem>, usize) {
+    struct Group {
+        file: String,
+        object: Option<String>,
+        problem: String,
+        lines: Vec<usize>,
+        code: Option<String>,
+    }
+    let mut groups: Vec<Group> = Vec::new();
+    let mut cache: std::collections::HashMap<(usize, String), Option<Vec<String>>> = std::collections::HashMap::new();
+    for finding in findings {
+        let object = finding.object.as_ref().map(|(category, key)| format!("{key} ({category})"));
+        let problem = problem_text(finding);
+        let index = match groups.iter().position(|g| g.file == finding.file && g.object == object && g.problem == problem) {
+            Some(index) => index,
+            None => {
+                let code = line_of(roots, finding, &mut cache);
+                groups.push(Group { file: finding.file.clone(), object, problem, lines: Vec::new(), code });
+                groups.len() - 1
+            }
+        };
+        let group = &mut groups[index];
+        if !group.lines.contains(&finding.line) {
+            // The line of script only applies when there is just one.
+            if !group.lines.is_empty() {
+                group.code = None;
+            }
+            group.lines.push(finding.line);
+        }
+    }
+    // A report with hundreds of entries is of no use to anyone, and costs a
+    // lot of tokens; keep the first ones and say how many were left out.
+    const MOST: usize = 60;
+    let more = groups.len().saturating_sub(MOST);
+    groups.truncate(MOST);
+    let mut problems: Vec<ReportProblem> = groups
+        .into_iter()
+        .map(|g| {
+            let mut lines = g.lines;
+            lines.sort_unstable();
+            ReportProblem { file: g.file, lines, object: g.object, problem: g.problem, code: g.code }
+        })
+        .collect();
+    problems.sort_by(|a, b| a.file.cmp(&b.file).then_with(|| a.lines.first().cmp(&b.lines.first())));
+    (problems, more)
+}
+
+/// What's wrong with a finding, in one sentence for the model. Not translated:
+/// it's part of the prompt.
+fn problem_text(f: &Finding) -> String {
+    match f.problem {
+        Problem::Unknown => match f.ctx {
+            Ctx::Effect => format!("`{}` isn't an effect this version of the game has", f.name),
+            Ctx::Trigger => format!("`{}` isn't a trigger this version of the game has", f.name),
+        },
+        Problem::WrongKind => match f.ctx {
+            Ctx::Effect => format!("`{}` is a trigger, used where an effect belongs", f.name),
+            Ctx::Trigger => format!("`{}` is an effect, used where a trigger belongs", f.name),
+        },
+        Problem::Elsewhere => format!("`{}` looks like it comes from another mod, and no installed mod defines it", f.name),
+        Problem::Unsure => format!("`{}` isn't a setting this kind of block takes in the base game, which may be fine", f.name),
+        Problem::Capitalisation => format!("`{}` has the wrong capitalisation; the game's names are lowercase", f.name),
+        Problem::Bom => "the file starts with a byte-order mark, which the game can't read".to_owned(),
+        Problem::NoEvent => format!("it fires the event `{}`, which neither the game nor an enabled mod defines, so nothing happens", f.name),
+    }
+}
+
+/// The line of the mod's file a finding is on, read once per file.
+fn line_of(roots: &[Option<PathBuf>], finding: &Finding, cache: &mut std::collections::HashMap<(usize, String), Option<Vec<String>>>) -> Option<String> {
+    let lines = cache.entry((finding.mod_position, finding.file.clone())).or_insert_with(|| {
+        let root = roots.get(finding.mod_position)?.as_ref()?;
+        let text = std::fs::read(root.join(&finding.file)).ok()?;
+        let text = String::from_utf8_lossy(&text);
+        Some(text.trim_start_matches('\u{feff}').lines().map(str::to_owned).collect())
+    });
+    let line = lines.as_ref()?.get(finding.line.saturating_sub(1))?.trim();
+    (!line.is_empty()).then(|| line.chars().take(200).collect())
+}
+
+/// The mod's declared version and the game version it supports, when its
+/// descriptor is next to its files.
+fn descriptor_versions(roots: &[Option<PathBuf>], position: usize) -> (Option<String>, Option<String>) {
+    let text = roots.get(position).and_then(Option::as_ref).and_then(|root| std::fs::read_to_string(root.join("descriptor.mod")).ok());
+    let Some(descriptor) = text.and_then(|text| crate::mods::Descriptor::parse(&text).ok()) else {
+        return (None, None);
+    };
+    let non_empty = |value: String| (!value.trim().is_empty()).then_some(value);
+    (non_empty(descriptor.version), non_empty(descriptor.supported_version))
 }
 
 /// A row for a script file that starts with a byte-order mark, with a button
