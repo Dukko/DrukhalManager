@@ -556,6 +556,16 @@ mod tests {
             Some("ship_design = { name = \"ship_x\" }")
         );
 
+        let loc = "defined_text = {\n\tname = pf_planet_type\n\ttext = { localization_key = pf_moon_name }\n}\n";
+        assert_eq!(
+            extract("common/scripted_loc", "pf_planet_type", loc).as_deref(),
+            Some(loc.trim_end())
+        );
+        assert_eq!(
+            object_at("common/scripted_loc", loc, 2).unwrap().0,
+            "pf_planet_type"
+        );
+
         let proj = "special_project = { key = \"SYNTHETIC_EVOLUTION_PROJECT\" cost = 100 }\n";
         assert_eq!(
             extract(

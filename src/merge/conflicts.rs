@@ -696,6 +696,14 @@ pub fn object_key_for_entry(category: &str, entry: &Entry) -> Option<String> {
     {
         return block.and_then(|b| b.scalar("name")).map(str::to_owned);
     }
+    // Scripted localisation blocks are named by their inner `name`, not by
+    // the `defined_text` wrapper every one of them shares.
+    if category.eq_ignore_ascii_case("common/scripted_loc")
+        || is_under(category, "common/scripted_loc")
+        || key.eq_ignore_ascii_case("defined_text")
+    {
+        return block.and_then(|b| b.scalar("name")).map(str::to_owned);
+    }
     if category.eq_ignore_ascii_case("common/global_ship_designs")
         || is_under(category, "common/global_ship_designs")
         || key.eq_ignore_ascii_case("ship_design")
@@ -1874,6 +1882,61 @@ mod tests {
                 "rl_habitable_normal"
             ]
         );
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn scripted_loc_blocks_are_keyed_by_their_name() {
+        let a = "defined_text = {\n\tname = pf_planet_type\n\ttext = {\n\t\ttrigger = { is_moon = yes }\n\t\tlocalization_key = pf_moon_name\n\t}\n}\n\ndefined_text = {\n\tname = pf_ring_name\n\ttext = { localization_key = pf_ring_name }\n}\n";
+        let b = "defined_text = {\n\tname = rwf_expedition_counter_loc\n\ttext = { localization_key = rwf_expedition_counter_variable }\n}\n";
+        assert_eq!(
+            object_keys("common/scripted_loc", a).unwrap(),
+            ["pf_planet_type", "pf_ring_name"]
+        );
+        assert_eq!(
+            object_keys("common/scripted_loc", b).unwrap(),
+            ["rwf_expedition_counter_loc"]
+        );
+
+        let root = std::env::temp_dir().join(format!("dm-scripted-loc-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        write(
+            &root.join("mod1"),
+            &[("common/scripted_loc/pf_scripted_loc.txt", a)],
+        );
+        write(
+            &root.join("mod2"),
+            &[("common/scripted_loc/rwf_scripted_loc.txt", b)],
+        );
+        let report = analyze(
+            &[input(&root, "mod1", &[]), input(&root, "mod2", &[])],
+            None,
+        );
+        assert!(
+            report.objects.is_empty(),
+            "different defined_text names do not conflict: {:?}",
+            report.objects
+        );
+        assert!(
+            report
+                .defined
+                .contains_key(&("common/scripted_loc".to_owned(), "pf_ring_name".to_owned()))
+        );
+
+        // The same name in another file is the same object, and conflicts.
+        let same = b.replace("rwf_expedition_counter_loc", "pf_ring_name");
+        write(
+            &root.join("mod2"),
+            &[("common/scripted_loc/rwf_scripted_loc.txt", &same)],
+        );
+        let report = analyze(
+            &[input(&root, "mod1", &[]), input(&root, "mod2", &[])],
+            None,
+        );
+        assert_eq!(report.objects.len(), 1, "{:?}", report.objects);
+        assert_eq!(report.objects[0].category, "common/scripted_loc");
+        assert_eq!(report.objects[0].key, "pf_ring_name");
 
         std::fs::remove_dir_all(root).unwrap();
     }
