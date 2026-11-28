@@ -36,6 +36,14 @@
     <control>keyboard</control>
   </supports>
   <releases>
+    <release version="2.7.45" date="2026-11-27">
+      <description>
+        <ul>
+          <li>Script Problems can ask the AI to write a ready-to-paste bug report for a mod's author, listing the problems, files and line numbers it found</li>
+          <li>Scripted localisation blocks are told apart by their name, so unrelated <code>defined_text</code> blocks from different mods no longer show as conflicts</li>
+        </ul>
+      </description>
+    </release>
     <release version="2.7.44" date="2026-11-27">
       <description>
         <ul>
